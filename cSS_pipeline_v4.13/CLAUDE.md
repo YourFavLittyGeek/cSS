@@ -479,6 +479,10 @@ v5.1") but are not ranker features; Stage A only, then stop for the user's real-
   ruler, sequence drop-down, help, summary + score. Writes ID_calls.csv in the old format plus ID_calls_<reviewer>.csv
   and an append-only ID_review_log.csv. Meter = css_evidence / (css + vein evidence) x tier factors: NOT a probability,
   not validated; user chose to keep it visible (K hides; log records it). review_css.py kept. Phantom-tested only.
+- v5.4.1: reviewer menu bar + right-click menu (right-click = menu, right-drag = window/level), magnifier (B), tabs
+  Viewer / Candidates / Calls summary (AI meter vs reviewer, CSV export), one-line comment, missed cSS drawn as
+  rectangle or pen (ID_missed.csv: plane, slice, points, detector_fate; not in the 0-4 score). redetect.py re-runs
+  only detect_css (optionally CSS_V53=1) with a backup of lists + calls. docs/HOW_TO_TEST_v5.4.md = cohort steps.
 
 ## Known issues / decisions
 - SWI-only route (SynthSeg on SWI) gives a coarse pial surface → pial features less reliable.

@@ -41,3 +41,21 @@ reads used to test the detector (M12–M15), hiding it is the safer protocol.
 old calls format kept) and a headless-browser run on the phantom (keys, wheel, zoom, probe, ruler, missed mark,
 sequence switch, themes, help, summary; no page errors). Not yet used on a patient: large 3 T volumes (tens of MB
 per sequence) load once per sequence and have not been timed on the Mac.
+
+## v5.4.1 — reviewer additions
+- Menu bar (File, Edit, View, Candidate, Tools, Help) and a right-click menu on the image with ticks; hovering
+  "Sequence" opens the available sequences (the others are greyed out). Right-click without moving = menu,
+  right-drag (or Shift+drag) = contrast / brightness; on a Mac, Ctrl+click works as right-click.
+- Magnifier lens (B), 2.5x, follows the mouse.
+- Zoom: + = - keys, numeric keypad, Cmd+wheel (Mac) / Ctrl+wheel (Windows), trackpad pinch.
+- Right panel in three tabs: Viewer (F1), Candidates (F2: list + missed marks), Calls summary (F3: AI meter vs the
+  reviewer's call per candidate, a 4 x 3 table, "only differ", CSV export with E).
+- Comment: one rounded line, grey "Add a comment…" placeholder, C to type, Enter saves.
+- Missed cSS (X): rectangle (default) or pen (W switches, several strokes, Backspace removes the last), optional
+  note, Save (Enter) / Cancel (Esc). One slice per mark. Stored in `review/ID_missed.csv` with plane, slice, outline
+  points and what the detector did there (overlaps a shown candidate / excluded by a rule / below a gate / not
+  generated). Reported with the score; not counted in the 0–4 score.
+- `scripts/redetect.py`: re-runs only the detection (optionally `--v53`) on prepared studies, with a backup of the
+  previous lists and calls. No skull-stripping, FreeSurfer or registration is repeated.
+"Agree" in the calls summary = cSS + green, or another call + red; yellow and "Unsure" count as neither. The meter is
+still rule-based and not validated.

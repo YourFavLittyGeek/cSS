@@ -5,92 +5,118 @@
 :root[data-theme=light]{--bg:#f3f4f6;--panel:#fff;--line:#d5d9df;--text:#1c2026;--mut:#5d6672;--acc:#1f6feb;--vp:#000}
 :root[data-theme=blue]{--bg:#0f2233;--panel:#17324a;--line:#28506f;--text:#d7e6f2;--mut:#8fb0c8;--acc:#7cc4ff;--vp:#03101a}
 *{box-sizing:border-box}html,body{height:100%;margin:0}
-body{background:var(--bg);color:var(--text);font:14px/1.35 -apple-system,"Segoe UI",Helvetica,Arial,sans-serif;display:flex;flex-direction:column;overflow:hidden}
-button,select,input,textarea{font:inherit;color:var(--text)}
-.top{display:flex;align-items:center;gap:12px;padding:8px 14px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:nowrap}
+body{background:var(--bg);color:var(--text);font:14px/1.35 -apple-system,"Segoe UI",Helvetica,Arial,sans-serif;display:flex;flex-direction:column;overflow:hidden;user-select:none}
+button,select,input{font:inherit;color:var(--text)}
+.top{display:flex;align-items:center;gap:12px;padding:7px 14px;background:var(--panel);border-bottom:1px solid var(--line)}
 .top b{font-size:17px;white-space:nowrap}.mut{color:var(--mut)}.sm{font-size:12px}.sp{flex:1}
-select,input[type=text],textarea{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:5px 8px}
+select,input[type=text]{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:5px 8px;user-select:text}
 .prog{width:140px;height:6px;background:var(--line);border-radius:3px;flex:none}.prog div{height:100%;background:var(--acc);border-radius:3px;width:0}
 .seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}.seg button{border:0;background:none;padding:5px 11px;color:var(--mut);cursor:pointer}.seg button.on{background:var(--acc);color:#fff}
 .btn{border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:5px 11px;cursor:pointer;white-space:nowrap}.btn:hover{border-color:var(--acc)}.btn.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+.mbar{display:flex;gap:2px;padding:2px 10px;background:var(--panel);border-bottom:1px solid var(--line);font-size:13.5px}
+.mbar span{padding:4px 10px;border-radius:6px;cursor:default}.mbar span:hover,.mbar span.on{background:var(--acc);color:#fff}
+.menu{position:fixed;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:5px;box-shadow:0 10px 30px rgba(0,0,0,.5);font-size:13.5px;z-index:50;min-width:215px}
+.menu div{padding:6px 10px;border-radius:6px;display:flex;gap:8px;align-items:center;cursor:default;white-space:nowrap}.menu div:hover,.menu div.hi{background:var(--acc);color:#fff}
+.menu div.dis{opacity:.45;pointer-events:none}.menu hr{border:0;border-top:1px solid var(--line);margin:4px 2px}
+.menu .k{margin-left:auto;padding-left:18px;color:var(--mut);font:12px Menlo,Consolas,monospace}.menu div:hover .k,.menu .hi .k{color:#fff}.menu .ck{width:14px;text-align:center;flex:none}
 .main{flex:1;display:flex;gap:10px;padding:10px;min-height:0}
-.views{flex:1;display:flex;gap:10px;min-width:0}.side{display:flex;flex-direction:column;gap:10px;width:34%}
+.views{flex:1;display:flex;gap:10px;min-width:0;position:relative}.side{display:flex;flex-direction:column;gap:10px;width:34%}
 .vp{position:relative;background:var(--vp);border:1px solid var(--line);border-radius:6px;overflow:hidden;flex:1;min-height:0}
-.vp.act{border-color:var(--acc)}.vp canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.vp.act{border-color:var(--acc)}.vp canvas.img{position:absolute;inset:0;width:100%;height:100%;display:block}
 .vp .o{position:absolute;color:#ffd866;font:12px Menlo,Consolas,monospace;text-shadow:0 0 3px #000,0 0 3px #000;pointer-events:none}
 .tl{left:8px;top:6px}.tr{right:8px;top:6px}.bl{left:8px;bottom:6px}.br{right:8px;bottom:6px}
 .ol{left:6px;top:50%}.or{right:6px;top:50%}.ot{top:22px;left:50%}.ob{bottom:22px;left:50%}
-.panel{width:372px;display:flex;flex-direction:column;gap:10px;overflow-y:auto;padding-right:2px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 11px}#gauge{display:block;width:176px;margin:0 auto}.panel .btn,.panel .b{font-size:13px;padding:6px 7px}.h{font-weight:700;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center}
+#lens{position:fixed;width:200px;height:200px;border-radius:50%;border:2px solid #ffd866;box-shadow:0 4px 18px rgba(0,0,0,.7);pointer-events:none;display:none;z-index:30}
+.drawbar{position:absolute;left:12px;top:30px;display:none;gap:6px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px 8px;font-size:13px;align-items:center;z-index:6;box-shadow:0 6px 20px rgba(0,0,0,.4)}
+.drawbar.show{display:flex}.drawbar .btn{padding:4px 9px}.drawbar .btn.on{background:#35d0ff;color:#002;border-color:#35d0ff;font-weight:700}.drawbar .save{background:#2e9d4a;color:#fff;border-color:#2e9d4a}
+.drawbar input{width:170px;font-size:12.5px;border-radius:13px;padding:4px 10px}
+.panel{width:372px;display:flex;flex-direction:column;gap:8px;min-height:0}
+.tabs{display:flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;flex:none}.tabs button{flex:1;border:0;background:none;padding:6px 4px;color:var(--mut);font-weight:600;font-size:13px;cursor:pointer}.tabs button.on{background:var(--acc);color:#fff}
+.tab{display:none;flex-direction:column;gap:8px;overflow-y:auto;min-height:0;flex:1}.tab.on{display:flex}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 11px}.h{font-weight:700;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center}
+#gauge{display:block;width:176px;margin:0 auto}.panel .btn,.panel .b{font-size:13px;padding:6px 7px}
 .band{display:flex;justify-content:space-between;font-size:12px;font-weight:600;margin-top:-4px}
-.say{margin:8px 0 5px;padding:7px 9px;border-left:3px solid var(--mut);background:var(--bg);border-radius:4px}
-.dec{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}.b{border:1px solid var(--line);border-radius:8px;padding:8px 9px;display:flex;gap:8px;align-items:center;background:var(--bg);cursor:pointer;text-align:left}
+.say{margin:8px 0 5px;padding:7px 9px;border-left:3px solid var(--mut);background:var(--bg);border-radius:4px;user-select:text}
+.dec{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}.b{border:1px solid var(--line);border-radius:8px;display:flex;gap:8px;align-items:center;background:var(--bg);cursor:pointer;text-align:left}
 .b:hover{border-color:var(--acc)}.b.on{font-weight:700}
 kbd{font:600 12px Menlo,Consolas,monospace;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:1px 6px;background:var(--panel);color:var(--text);white-space:nowrap}
-.saved{margin-top:8px;font-size:13px;min-height:18px}.ok{color:#3aa655}.err{color:#e05555}
+#comment{width:100%;margin-top:8px;height:30px;border-radius:15px;padding:4px 14px;font-size:12.5px}#comment::placeholder{color:var(--mut);opacity:.8}
+.saved{margin-top:6px;font-size:13px;min-height:18px}.ok{color:#3aa655}.err{color:#e05555}
 .row{display:flex;align-items:center;gap:8px;margin:7px 0}.row>span:first-child{width:104px;flex:none;white-space:nowrap}.row input[type=range]{flex:1;min-width:0;accent-color:var(--acc)}
-.tools{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}.tools.t4{grid-template-columns:repeat(4,1fr)}.tools.t4 .btn{display:flex;flex-direction:column;align-items:center;gap:3px;white-space:normal}
-textarea{width:100%;resize:vertical;min-height:40px;height:40px;margin-top:7px}
-.miss{display:flex;gap:6px;align-items:center;margin:5px 0}.miss input{flex:1;min-width:0}
+.tools{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}.tools.t4{grid-template-columns:repeat(5,1fr)}.tools.t4 .btn{display:flex;flex-direction:column;align-items:center;gap:3px;white-space:normal;padding:5px 2px;font-size:12.5px}
+#readout{font:12.5px Menlo,Consolas,monospace;min-height:18px;white-space:pre-wrap;margin-top:6px}
+table.cmp{width:100%;border-collapse:collapse;font-size:13px}table.cmp td,table.cmp th{padding:5px 5px;border-bottom:1px solid var(--line);text-align:left}table.cmp th{color:var(--mut);font-weight:600}
+table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cmp tr.cur td{background:var(--bg)}
+.pill{padding:1px 8px;border-radius:9px;color:#fff;font-size:12px;font-weight:600;white-space:nowrap}
+.miss{display:flex;gap:6px;align-items:center;margin:5px 0}.miss input{flex:1;min-width:0;font-size:12.5px}
 .strip{display:flex;gap:5px;padding:6px 14px;background:var(--panel);border-top:1px solid var(--line);overflow-x:auto;flex:none}
 .chip{min-width:30px;text-align:center;padding:3px 6px;border-radius:6px;border:1px solid var(--line);cursor:pointer;font:600 12px Menlo,monospace;flex:none;background:var(--bg)}
 .chip.cur{outline:2px solid var(--acc);outline-offset:1px}
 .keys{display:flex;gap:16px;align-items:center;padding:6px 14px;background:var(--panel);border-top:1px solid var(--line);font-size:12.5px;white-space:nowrap;overflow:hidden;flex:none}
-.modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:10}.modal.show{display:flex}
-.dlg{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 22px;max-width:920px;max-height:88vh;overflow:auto}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:40}.modal.show{display:flex}
+.dlg{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 22px;max-width:940px;max-height:88vh;overflow:auto;user-select:text}
 .dlg h2{margin:0 0 8px}.dlg h3{margin:14px 0 4px}.dlg td{padding:3px 14px 3px 0;vertical-align:top}.dlg pre{background:var(--bg);padding:10px;border-radius:8px;white-space:pre-wrap;font-size:12.5px}
 .banner{background:#7a5b00;color:#fff;padding:5px 14px;font-size:13px;display:none}
-#readout{font:12.5px Menlo,Consolas,monospace;min-height:34px;white-space:pre-wrap}
 </style></head><body>
 <div class="top"><b>cSS Reviewer</b>
  <select id="study" title="Study"></select>
  <span class="mut" id="candinfo"></span><div class="prog"><div id="progbar"></div></div><span class="mut" id="progtxt"></span><span class="sp"></span>
- <button class="btn" id="bSummary" title="Summary and score (Q)">Summary <kbd>Q</kbd></button>
- <button class="btn" id="bHelp" title="Help (?)">Help <kbd>?</kbd></button>
  <div class="seg" id="themes" title="Theme (T)"><button data-t="light">Light</button><button data-t="dark">Dark</button><button data-t="blue">Blue</button></div>
  <span class="mut">Reviewer</span><input type="text" id="reviewer" list="revlist" placeholder="your name" style="width:150px" autocomplete="off"><datalist id="revlist"></datalist>
 </div>
+<div class="mbar" id="mbar"><span data-m="file">File</span><span data-m="edit">Edit</span><span data-m="view">View</span><span data-m="cand">Candidate</span><span data-m="tools">Tools</span><span data-m="help">Help</span></div>
 <div class="banner" id="banner"></div>
 <div class="main">
- <div class="views">
-  <div class="vp" id="vp0"><canvas></canvas><div class="o tl"></div><div class="o tr"></div><div class="o bl"></div><div class="o br"></div><div class="o ol">R</div><div class="o or">L</div><div class="o ot">A</div><div class="o ob">P</div></div>
+ <div class="views" id="views">
+  <div class="drawbar" id="drawbar"><b style="color:#35d0ff">Mark missed cSS</b><button class="btn" id="dRect" title="rectangle (W switches)">&#9645; Rectangle</button><button class="btn" id="dPen" title="free-hand pen (W switches)">&#9998; Pen</button>
+   <button class="btn" id="dUndo" title="remove the last stroke (Backspace)">Undo stroke</button><input type="text" id="dNote" placeholder="note (optional)" maxlength="300"><button class="btn save" id="dSave">Save <kbd>&crarr;</kbd></button><button class="btn" id="dCancel">Cancel <kbd>Esc</kbd></button></div>
+  <div class="vp" id="vp0"><canvas class="img"></canvas><div class="o tl"></div><div class="o tr"></div><div class="o bl"></div><div class="o br"></div><div class="o ol">R</div><div class="o or">L</div><div class="o ot">A</div><div class="o ob">P</div></div>
   <div class="side">
-   <div class="vp" id="vp1"><canvas></canvas><div class="o tl"></div><div class="o tr"></div><div class="o bl"></div><div class="o br"></div><div class="o ol">R</div><div class="o or">L</div><div class="o ot">S</div><div class="o ob">I</div></div>
-   <div class="vp" id="vp2"><canvas></canvas><div class="o tl"></div><div class="o tr"></div><div class="o bl"></div><div class="o br"></div><div class="o ol">A</div><div class="o or">P</div><div class="o ot">S</div><div class="o ob">I</div></div>
+   <div class="vp" id="vp1"><canvas class="img"></canvas><div class="o tl"></div><div class="o tr"></div><div class="o bl"></div><div class="o br"></div><div class="o ol">R</div><div class="o or">L</div><div class="o ot">S</div><div class="o ob">I</div></div>
+   <div class="vp" id="vp2"><canvas class="img"></canvas><div class="o tl"></div><div class="o tr"></div><div class="o bl"></div><div class="o br"></div><div class="o ol">A</div><div class="o or">P</div><div class="o ot">S</div><div class="o ob">I</div></div>
   </div>
  </div>
  <div class="panel">
-  <div class="card" id="aicard"><div class="h"><span>AI evidence for cSS</span><span class="mut sm">hide <kbd>K</kbd></span></div>
-   <div id="aibody"><svg id="gauge" viewBox="0 0 220 122"></svg>
-   <div class="band"><span style="color:#d64545">not cSS</span><span style="color:#c99a1c">uncertain</span><span style="color:#3aa655">cSS likely</span></div>
-   <div class="say" id="aisay"></div><div class="mut sm" id="aisrc"></div></div></div>
-  <div class="card"><div class="h"><span>Your decision</span><span class="mut sm" id="curcall"></span></div>
-   <div class="dec" id="dec"></div>
-   <textarea id="comment" placeholder="Comment (optional) - press C to type, Esc to leave" maxlength="500"></textarea>
-   <div class="saved" id="saved"></div></div>
-  <div class="card"><div class="h">Image</div>
-   <div class="row"><span>Sequence <kbd>S</kbd></span><select id="seq" style="flex:1"></select></div>
-   <div class="row"><span>Zoom</span><input type="range" id="zoom" min="0" max="100" value="0"><span class="mut" id="zoomv" style="width:38px"></span></div>
-   <div class="row"><span>Contrast</span><input type="range" id="win" min="1" max="100"><span class="mut" id="winv" style="width:38px"></span></div>
-   <div class="row"><span>Brightness</span><input type="range" id="lev" min="0" max="100"><span class="mut" id="levv" style="width:38px"></span></div>
-   <div class="tools">
-    <button class="btn" id="tMark" title="show / hide the marking of this candidate">Marking <kbd>M</kbd></button><button class="btn" id="tOther" title="show / hide the other candidates' markings">Others <kbd>O</kbd></button>
-    <button class="btn" id="tMip" title="minimum-intensity slab, axial view">minIP <kbd>I</kbd></button><button class="btn" id="tAuto" title="open the next unread candidate after a decision">Auto-next <kbd>G</kbd></button>
-    <button class="btn" id="bReset">Reset <kbd>R</kbd></button><button class="btn" id="bCentre">Centre <kbd>F</kbd></button></div>
-   <div class="mut sm" id="seqnote" style="margin-top:6px"></div></div>
-  <div class="card">
-   <div class="tools t4"><button class="btn tool" data-tool="nav" title="pan / crosshair">Navigate <kbd>Esc</kbd></button><button class="btn tool" data-tool="dark" title="darkness probe: click a point">Darkness <kbd>D</kbd></button>
-    <button class="btn tool" data-tool="ruler" title="measure a distance: drag">Ruler <kbd>L</kbd></button><button class="btn tool" data-tool="miss" title="mark a cSS the detector missed: click it">Missed <kbd>X</kbd></button></div>
-   <div id="readout" class="mut" style="margin-top:8px"></div>
-   <div id="misslist"></div></div>
+  <div class="tabs" id="tabs"><button data-tab="viewer" title="F1">Viewer</button><button data-tab="cands" title="F2">Candidates</button><button data-tab="calls" title="F3">Calls summary</button></div>
+  <div class="tab" id="tab-viewer">
+   <div class="card" id="aicard"><div class="h"><span>AI evidence for cSS</span><span class="mut sm">hide <kbd>K</kbd></span></div>
+    <div id="aibody"><svg id="gauge" viewBox="0 0 220 122"></svg>
+    <div class="band"><span style="color:#d64545">not cSS</span><span style="color:#c99a1c">uncertain</span><span style="color:#3aa655">cSS likely</span></div>
+    <div class="say" id="aisay"></div><div class="mut sm" id="aisrc"></div></div></div>
+   <div class="card"><div class="h"><span>Your decision</span><span class="mut sm" id="curcall"></span></div>
+    <div class="dec" id="dec"></div>
+    <input type="text" id="comment" placeholder="Add a comment…  (C)" maxlength="500" autocomplete="off">
+    <div class="saved" id="saved"></div></div>
+   <div class="card"><div class="h">Image</div>
+    <div class="row"><span>Sequence <kbd>S</kbd></span><select id="seq" style="flex:1"></select></div>
+    <div class="row"><span>Zoom <kbd>+</kbd> <kbd>-</kbd></span><input type="range" id="zoom" min="0" max="100" value="0"><span class="mut" id="zoomv" style="width:38px"></span></div>
+    <div class="row"><span>Contrast</span><input type="range" id="win" min="1" max="100"><span class="mut" id="winv" style="width:38px"></span></div>
+    <div class="row"><span>Brightness</span><input type="range" id="lev" min="0" max="100"><span class="mut" id="levv" style="width:38px"></span></div>
+    <div class="tools">
+     <button class="btn" id="tMark" title="show / hide the marking of this candidate">Marking <kbd>M</kbd></button><button class="btn" id="tOther" title="show / hide the other candidates' markings">Others <kbd>O</kbd></button>
+     <button class="btn" id="tMip" title="minimum-intensity slab, axial view">minIP <kbd>I</kbd></button><button class="btn" id="tAuto" title="open the next unread candidate after a decision">Auto-next <kbd>G</kbd></button>
+     <button class="btn" id="bReset">Reset <kbd>R</kbd></button><button class="btn" id="bCentre">Centre <kbd>F</kbd></button></div>
+    <div class="mut sm" id="seqnote" style="margin-top:6px"></div></div>
+   <div class="card">
+    <div class="tools t4"><button class="btn tool" data-tool="nav" title="pan / crosshair">Navigate <kbd>Esc</kbd></button><button class="btn" id="tMag" title="magnifier lens under the mouse">Magnifier <kbd>B</kbd></button><button class="btn tool" data-tool="dark" title="darkness probe: click a point">Darkness <kbd>D</kbd></button>
+     <button class="btn tool" data-tool="ruler" title="measure a distance: drag">Ruler <kbd>L</kbd></button><button class="btn tool" data-tool="miss" title="mark a cSS the detector missed">Missed <kbd>X</kbd></button></div>
+    <div id="readout" class="mut"></div></div>
+  </div>
+  <div class="tab" id="tab-cands"><div class="card"><div class="h"><span>Candidates</span><span class="mut sm">click to open</span></div><table class="cmp" id="candtable"></table></div>
+   <div class="card"><div class="h"><span>Missed cSS marks</span><span class="mut sm">add with <kbd>X</kbd></span></div><div id="misslist"></div></div></div>
+  <div class="tab" id="tab-calls"><div class="card"><div class="h"><span id="cmptitle">AI vs reviewer</span><button class="btn" id="bDiffer" title="show only the candidates where you and the meter differ">Only differ</button></div><table class="cmp" id="cmptable"></table></div>
+   <div class="card"><div class="h">Summary</div><div id="cmpsum"></div>
+    <div class="tools" style="margin-top:8px"><button class="btn" id="bScore">Score <kbd>Q</kbd></button><button class="btn" id="bExport">Export CSV <kbd>E</kbd></button><button class="btn" id="bUnread">Next unread <kbd>J</kbd></button></div>
+    <div class="mut sm" style="margin-top:6px">The meter is rule-based and not validated: "differ" shows where you and it disagree, not who is right.</div></div></div>
  </div>
 </div>
 <div class="strip" id="strip"></div>
-<div class="keys"><span><kbd>wheel</kbd> slices</span><span><kbd>Ctrl</kbd>+<kbd>wheel</kbd> / <kbd>=</kbd> <kbd>-</kbd> zoom</span><span><kbd>right-drag</kbd> contrast / brightness</span><span><kbd>drag</kbd> pan</span><span><kbd>click</kbd> crosshair</span><span><kbd>&larr;</kbd> <kbd>&rarr;</kbd> candidate</span><span><kbd>Z</kbd> undo</span><span><kbd>?</kbd> all keys</span><span class="sp"></span><span class="mut">Research software &middot; expert review required</span></div>
+<div class="keys"><span><kbd>wheel</kbd> <kbd>&uarr;</kbd> <kbd>&darr;</kbd> slices</span><span><kbd class="modk">Ctrl</kbd>+<kbd>wheel</kbd> / <kbd>+</kbd> <kbd>-</kbd> zoom</span><span><kbd>right-drag</kbd> contrast / brightness</span><span><kbd>right-click</kbd> menu</span><span><kbd>drag</kbd> pan</span><span><kbd>&larr;</kbd> <kbd>&rarr;</kbd> candidate</span><span><kbd>Z</kbd> undo</span><span><kbd>?</kbd> all keys</span><span class="sp"></span><span class="mut">Research software &middot; expert review required</span></div>
+<canvas id="lens"></canvas>
 
 <div class="modal" id="help"><div class="dlg">
  <h2>How to use the reviewer</h2>
- <p><b>The reading.</b> Each candidate is a dark structure the detector found near the cortex. Scroll through it in the three planes, compare with the other sequences, then give one decision. The decision is saved at once; the next unread candidate opens (Auto-next, <kbd>G</kbd>). When all are read, press <kbd>Q</kbd> for the summary and the 0&ndash;4 score.</p>
+ <p><b>The reading.</b> Each candidate is a dark structure the detector found near the cortex. Scroll through it in the three planes, compare with the other sequences, then give one decision. The decision is saved at once; the next unread candidate opens (Auto-next, <kbd>G</kbd>). When all are read, press <kbd>Q</kbd> for the summary and the 0&ndash;4 score. Everything is also in the menu bar and in the right-click menu on the image.</p>
  <table><tr><td><kbd>Y</kbd> cSS</td><td>curvilinear dark lining of the cortical surface / sulcus</td></tr>
  <tr><td><kbd>V</kbd> Vein</td><td>tube that continues beyond the candidate, branches, or runs into the white matter or a sinus</td></tr>
  <tr><td><kbd>N</kbd> Normal cortex</td><td>naturally dark cortex or sulcus, nothing abnormal</td></tr>
@@ -99,26 +125,26 @@ textarea{width:100%;resize:vertical;min-height:40px;height:40px;margin-top:7px}
  <tr><td><kbd>H</kbd> Near ICH</td><td>siderosis connected to a lobar haemorrhage; reported but not scored</td></tr></table>
  <h3>The AI meter</h3>
  <p>The needle shows a number from 0 to 1: <span style="color:#d64545"><b>red</b> below 0.33</span> (the detector suspects a vein, artifact or normal cortex), <span style="color:#c99a1c"><b>yellow</b> 0.33&ndash;0.66</span> (uncertain), <span style="color:#3aa655"><b>green</b> 0.66 and above</span> (suspects cSS). The line under it says what it suspects and why.<br>
- <b>It is not a probability and has not been validated.</b> It is the detector's rule-based evidence (shape, position on the cortex, both banks, vessel continuation), lowered when its vein / artifact rules fire. Use it as a second opinion only: the decision is yours. Seeing it before you decide can bias you &mdash; hide it with <kbd>K</kbd> for any reading that is used to test the detector.</p>
+ <b>It is not a probability and has not been validated.</b> It is the detector's rule-based evidence (shape, position on the cortex, both banks, vessel continuation), lowered when its vein / artifact rules fire. Use it as a second opinion only: the decision is yours. Seeing it before you decide can bias you &mdash; hide it with <kbd>K</kbd> for any reading that is used to test the detector. The <b>Calls summary</b> tab (<kbd>F3</kbd>) lists the meter next to your calls: "agree" = you called cSS and it is green, or you called something else and it is red; yellow counts as neither.</p>
  <h3>Keys</h3>
  <table>
  <tr><td><kbd>wheel</kbd> or <kbd>&uarr;</kbd> <kbd>&darr;</kbd></td><td>scroll slices in the view under the mouse (<kbd>PgUp</kbd> <kbd>PgDn</kbd> = 5 slices)</td><td><kbd>&larr;</kbd> <kbd>&rarr;</kbd></td><td>previous / next candidate</td></tr>
- <tr><td><kbd>Ctrl</kbd>+<kbd>wheel</kbd>, <kbd>=</kbd> <kbd>-</kbd></td><td>zoom in / out</td><td><kbd>J</kbd></td><td>next unread candidate</td></tr>
+ <tr><td><kbd class="modk">Ctrl</kbd>+<kbd>wheel</kbd>, pinch, <kbd>+</kbd> <kbd>=</kbd> <kbd>-</kbd></td><td>zoom in / out (the same keys on Mac and Windows)</td><td><kbd>J</kbd></td><td>next unread candidate</td></tr>
  <tr><td><kbd>drag</kbd></td><td>pan &nbsp; (<kbd>click</kbd> = move the crosshair, all views follow)</td><td><kbd>Z</kbd></td><td>undo the last decision</td></tr>
- <tr><td><kbd>right-drag</kbd></td><td>contrast (left&ndash;right) and brightness (up&ndash;down)</td><td><kbd>Backspace</kbd></td><td>clear this candidate's decision</td></tr>
- <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>brightness down / up</td><td><kbd>C</kbd></td><td>write a comment (<kbd>Esc</kbd> to leave the box)</td></tr>
- <tr><td><kbd>;</kbd> <kbd>'</kbd></td><td>contrast lower / higher</td><td><kbd>Q</kbd></td><td>summary and score</td></tr>
- <tr><td><kbd>R</kbd></td><td>reset zoom, contrast, brightness</td><td><kbd>T</kbd></td><td>next theme (light / dark / blue)</td></tr>
- <tr><td><kbd>F</kbd></td><td>centre on the candidate again</td><td><kbd>?</kbd></td><td>this help</td></tr>
- <tr><td><kbd>M</kbd></td><td>show / hide the marking of this candidate</td><td><kbd>K</kbd></td><td>show / hide the AI meter</td></tr>
- <tr><td><kbd>O</kbd></td><td>show / hide the other candidates' markings</td><td><kbd>G</kbd></td><td>auto-next after a decision on / off</td></tr>
- <tr><td><kbd>I</kbd></td><td>minIP slab (about 8 mm) in the axial view: veins become continuous tubes</td><td><kbd>S</kbd></td><td>next sequence (also <kbd>1</kbd>&ndash;<kbd>5</kbd>)</td></tr>
- <tr><td><kbd>D</kbd></td><td>darkness probe: click a point</td><td><kbd>L</kbd></td><td>ruler: drag a line (mm)</td></tr>
- <tr><td><kbd>X</kbd></td><td>mark a cSS the detector missed: click it</td><td><kbd>Esc</kbd></td><td>back to navigation / close a window</td></tr></table>
- <h3>Tools</h3>
- <p><b>Darkness probe</b> gives the mean signal of the 3 &times; 3 voxels under the click, as a percentage of the normal cortex and in standard deviations below it (the detector's own measure: candidates start at about &minus;2.5 SD).<br>
- <b>Missed cSS</b>: click on a cSS that has no outline. The point is stored with your name; add a short note in the list. Delete a point with the &times; next to it.<br>
- Sequences that are not listed were not imported for this patient.</p>
+ <tr><td><kbd>right-drag</kbd> or <kbd>Shift</kbd>+<kbd>drag</kbd></td><td>contrast (left&ndash;right) and brightness (up&ndash;down)</td><td><kbd>Backspace</kbd></td><td>clear this candidate's decision</td></tr>
+ <tr><td><kbd>right-click</kbd></td><td>menu on the image</td><td><kbd>C</kbd></td><td>write a comment (<kbd>Enter</kbd> saves, <kbd>Esc</kbd> leaves)</td></tr>
+ <tr><td><kbd>[</kbd> <kbd>]</kbd> &nbsp; <kbd>;</kbd> <kbd>'</kbd></td><td>brightness down / up &nbsp; contrast lower / higher</td><td><kbd>Q</kbd></td><td>summary and score</td></tr>
+ <tr><td><kbd>R</kbd> &nbsp; <kbd>F</kbd></td><td>reset the view &nbsp; centre on the candidate</td><td><kbd>E</kbd></td><td>export the AI vs reviewer table (CSV)</td></tr>
+ <tr><td><kbd>M</kbd> &nbsp; <kbd>O</kbd></td><td>show / hide this candidate's marking &nbsp; the other markings</td><td><kbd>F1</kbd> <kbd>F2</kbd> <kbd>F3</kbd></td><td>right panel: viewer / candidates / calls summary</td></tr>
+ <tr><td><kbd>B</kbd></td><td>magnifier lens (2.5&times;) under the mouse</td><td><kbd>T</kbd></td><td>next theme (light / dark / blue)</td></tr>
+ <tr><td><kbd>I</kbd></td><td>minIP slab (about 8 mm), axial view: veins become continuous tubes</td><td><kbd>K</kbd></td><td>show / hide the AI meter</td></tr>
+ <tr><td><kbd>S</kbd>, <kbd>1</kbd>&ndash;<kbd>5</kbd></td><td>next sequence / choose a sequence</td><td><kbd>G</kbd></td><td>auto-next after a decision on / off</td></tr>
+ <tr><td><kbd>D</kbd> &nbsp; <kbd>L</kbd></td><td>darkness probe: click &nbsp; ruler: drag (mm)</td><td><kbd>?</kbd></td><td>this help</td></tr>
+ <tr><td><kbd>X</kbd></td><td>mark a missed cSS (see below)</td><td><kbd>Esc</kbd></td><td>back to navigation / close a menu or window</td></tr></table>
+ <h3>Marking a cSS the detector missed</h3>
+ <p>Press <kbd>X</kbd> (or right-click &rarr; <i>Mark a missed cSS here</i>). A small bar appears: draw a <b>rectangle</b> around the lesion (default) or trace it with the <b>pen</b> (<kbd>W</kbd> switches; several pen strokes are allowed, <kbd>Backspace</kbd> removes the last one). Type a note if you wish, then <b>Save</b> (<kbd>Enter</kbd>); <kbd>Esc</kbd> cancels. Mark the one slice where the lesion is clearest. Saved marks are listed in the <b>Candidates</b> tab with what the detector did at that place (shown, excluded by a rule, below a size gate, or not generated). They are reported next to the score but are <b>not counted</b> in the 0&ndash;4 score.</p>
+ <h3>Other tools</h3>
+ <p><b>Darkness probe</b>: mean signal of the 3 &times; 3 voxels under the click, as a percentage of the normal cortex and in standard deviations below it (candidates start at about &minus;2.5 SD). <b>Ruler</b>: drag a line, length in mm. <b>Magnifier</b>: a lens follows the mouse. Sequences that are not listed were not imported for this patient.</p>
  <p class="mut">Everything is stored on this computer in the project's <code>review</code> folder, with the reviewer name and time. Close with <kbd>Esc</kbd>.</p>
 </div></div>
 <div class="modal" id="summary"><div class="dlg" style="min-width:560px"><h2>Summary</h2><div id="sumbody"></div><p class="mut">Close with <kbd>Esc</kbd>.</p></div></div>
@@ -126,33 +152,45 @@ textarea{width:100%;resize:vertical;min-height:40px;height:40px;margin-top:7px}
 <script>
 "use strict";
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const MAC=/Mac|iPhone|iPad/.test(navigator.platform||navigator.userAgent), MOD=MAC?"⌘":"Ctrl";
+$$(".modk").forEach(e=>e.textContent=MOD);
 const CALLKEYS={y:"cSS",v:"Vein",n:"Normal",a:"Artifact",u:"Unsure",h:"Near ICH"};
 const CALLLBL={cSS:"cSS",Vein:"Vein",Normal:"Normal cortex",Artifact:"Artifact",Unsure:"Unsure","Near ICH":"Near ICH"};
 const CALLCOL={cSS:"#2e9d4a",Vein:"#3b82e0",Normal:"#8a8f98",Artifact:"#e07a1f",Unsure:"#c9a400","Near ICH":"#9b4fc0"};
+const BANDCOL={green:"#3aa655",yellow:"#c99a1c",red:"#d64545"};
 const LS=(k,d)=>{try{const v=localStorage.getItem("css_"+k);return v===null?d:JSON.parse(v)}catch(e){return d}};
 const LSS=(k,v)=>{try{localStorage.setItem("css_"+k,JSON.stringify(v))}catch(e){}};
+const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 let M=null, VOL=null, LAB=null, seq="swi", vols={}, seqmeta={};
 let nx,ny,nz,vox, cur=[0,0,0], ctr=[0,0,0], zoom=1, wl=[0,65535], lut=new Uint8Array(65536);
-let ci=0, calls={}, undo=[], tool="nav", ruler=null, probe=null, missed=[];
-let showMark=LS("mark",true), showOther=LS("other",true), mip=false, autoNext=LS("auto",true), showAI=LS("ai",true), hover=0;
-// views: h = horizontal source axis, v = vertical, s = slice axis; all displayed flipped (radiological: patient right on screen left)
+let ci=0, calls={}, undo=[], tool="nav", ruler=null, probe=null, missed=[], draft=null, shape="rect", onlyDiffer=false;
+let showMark=LS("mark",true), showOther=LS("other",true), mip=false, autoNext=LS("auto",true), showAI=LS("ai",true), mag=false, hover=0, mouse=null;
+const MAGF=2.5;
+// views: h = horizontal source axis, v = vertical, s = slice axis; displayed flipped (radiological: patient right on screen left)
 const VIEWS=[{h:0,v:1,s:2,name:"Axial"},{h:0,v:2,s:1,name:"Coronal"},{h:1,v:2,s:0,name:"Sagittal"}];
-const vps=[0,1,2].map(i=>{const el=$("#vp"+i);return {el,cv:el.querySelector("canvas"),off:document.createElement("canvas")}});
+const vps=[0,1,2].map(i=>{const el=$("#vp"+i);return {el,cv:el.querySelector("canvas"),off:document.createElement("canvas"),E:[[],[]]}});
 
 function theme(t){document.documentElement.dataset.theme=t;LSS("theme",t);$$("#themes button").forEach(b=>b.classList.toggle("on",b.dataset.t===t))}
 function setLut(){const lo=wl[0],hi=Math.max(wl[1],lo+1);for(let i=0;i<65536;i++){const v=(i-lo)/(hi-lo);lut[i]=v<=0?0:v>=1?255:(v*255)|0}}
 function geom(k){const V=VIEWS[k],c=vps[k].cv,W=c.clientWidth,H=c.clientHeight,d=[nx,ny,nz];
   const fit=Math.min(W/(d[V.h]*vox[V.h]),H/(d[V.v]*vox[V.v]))*zoom,sx=fit*vox[V.h],sy=fit*vox[V.v];
-  // screen position of flipped voxel index f = n-1-idx
   const ox=W/2-(d[V.h]-1-ctr[V.h]+0.5)*sx, oy=H/2-(d[V.v]-1-ctr[V.v]+0.5)*sy;return {V,W,H,sx,sy,ox,oy,nh:d[V.h],nv:d[V.v]}}
-function toVox(k,mx,my){const g=geom(k);const p=cur.slice();p[g.V.h]=g.nh-1-Math.floor((mx-g.ox)/g.sx);p[g.V.v]=g.nv-1-Math.floor((my-g.oy)/g.sy);
+function toVoxF(k,mx,my){const g=geom(k);const p=cur.slice();p[g.V.h]=g.nh-0.5-(mx-g.ox)/g.sx;p[g.V.v]=g.nv-0.5-(my-g.oy)/g.sy;
   const d=[nx,ny,nz];for(let a=0;a<3;a++)p[a]=Math.max(0,Math.min(d[a]-1,p[a]));return p}
+function toVox(k,mx,my){return toVoxF(k,mx,my).map(Math.round)}
 function toScr(k,p){const g=geom(k);return [g.ox+(g.nh-1-p[g.V.h]+0.5)*g.sx, g.oy+(g.nv-1-p[g.V.v]+0.5)*g.sy]}
 const IDX=(i,j,k)=>i+nx*(j+ny*k);
+function strokeEdges(x,g,E,scale){ for(const [q,L] of E.entries()){ if(!L.length)continue; x.strokeStyle=q?"rgba(255,200,60,.85)":"#ff4646"; x.lineWidth=(q?1.2:1.8)/scale; x.lineJoin="round"; x.beginPath();
+    for(let n=0;n<L.length;n+=4){x.moveTo(g.ox+L[n]*g.sx,g.oy+L[n+1]*g.sy);x.lineTo(g.ox+L[n+2]*g.sx,g.oy+L[n+3]*g.sy)} x.stroke() } }
+function drawShape(x,k,type,strokes,label,dash){ x.strokeStyle="#35d0ff"; x.fillStyle="rgba(53,208,255,.12)"; x.lineWidth=2.2; x.setLineDash(dash?[7,4]:[]);
+  let lx=null,ly=0;
+  if(type==="rect"&&strokes[0]&&strokes[0].length===2){const [a,b]=toScr(k,strokes[0][0]),[c,d]=toScr(k,strokes[0][1]); x.fillRect(a,b,c-a,d-b); x.strokeRect(a,b,c-a,d-b); lx=Math.min(a,c); ly=Math.min(b,d)-6}
+  else for(const st of strokes){ if(!st.length)continue; x.beginPath(); st.forEach((p,i)=>{const [a,b]=toScr(k,p); if(i)x.lineTo(a,b); else {x.moveTo(a,b); if(lx===null){lx=a+8;ly=b-8}}}); if(st.length===1){const [a,b]=toScr(k,st[0]);x.arc(a,b,8,0,6.3)} x.stroke() }
+  x.setLineDash([]); if(label&&lx!==null){x.fillStyle="#35d0ff";x.font="12px Menlo,monospace";x.fillText(label,lx,ly)} }
 function render(k){ if(!VOL)return; const g=geom(k),V=g.V,vp=vps[k],nh=g.nh,nv=g.nv;
   const off=vp.off; if(off.width!==nh||off.height!==nv){off.width=nh;off.height=nv}
   const octx=off.getContext("2d"),img=octx.createImageData(nh,nv),D=new Uint32Array(img.data.buffer);
-  const E=[[],[]];   // outline segments on voxel edges: [this candidate, the others]
+  const E=[[],[]]; vp.E=E;
   const st=[1,nx,nx*ny],sh=st[V.h],sv=st[V.v],ss=st[V.s],s0=cur[V.s]*ss;
   const curId=M.cands.length?M.cands[ci].id:-1, slab=(mip&&k===0&&seq!=="phase")?Math.max(1,Math.round(4/vox[2])):0;
   for(let y=0;y<nv;y++){const vv=(nv-1-y)*sv; for(let x=0;x<nh;x++){const b=(nh-1-x)*sh+vv, p=b+s0; let val=VOL[p];
@@ -166,151 +204,237 @@ function render(k){ if(!VOL)return; const g=geom(k),V=g.V,vp=vps[k],nh=g.nh,nv=g
   const c=vp.cv,dpr=window.devicePixelRatio||1; if(c.width!==Math.round(g.W*dpr)||c.height!==Math.round(g.H*dpr)){c.width=Math.round(g.W*dpr);c.height=Math.round(g.H*dpr)}
   const x=c.getContext("2d"); x.setTransform(dpr,0,0,dpr,0,0); x.fillStyle="#000"; x.fillRect(0,0,g.W,g.H);
   x.imageSmoothingEnabled=true; x.imageSmoothingQuality="high"; x.drawImage(off,g.ox,g.oy,nh*g.sx,nv*g.sy);
-  for(const [q,L] of E.entries()){ if(!L.length)continue; x.strokeStyle=q?"rgba(255,200,60,.85)":"#ff4646"; x.lineWidth=q?1.2:1.8; x.lineJoin="round"; x.beginPath();
-    for(let n=0;n<L.length;n+=4){x.moveTo(g.ox+L[n]*g.sx,g.oy+L[n+1]*g.sy);x.lineTo(g.ox+L[n+2]*g.sx,g.oy+L[n+3]*g.sy)} x.stroke() }
-  // crosshair
+  strokeEdges(x,g,E,1);
   const [cx,cy]=toScr(k,cur); x.strokeStyle="rgba(120,200,255,.35)"; x.lineWidth=1; x.beginPath(); x.moveTo(0,cy);x.lineTo(g.W,cy);x.moveTo(cx,0);x.lineTo(cx,g.H);x.stroke();
-  // missed marks near this slice
-  for(const m of missed){const p=[m.can_i,m.can_j,m.can_k]; if(Math.abs(p[V.s]-cur[V.s])*vox[V.s]<=2.5){const [a,b]=toScr(k,p);x.strokeStyle="#35d0ff";x.lineWidth=2;x.beginPath();x.arc(a,b,9,0,6.3);x.stroke();
-      x.fillStyle="#35d0ff";x.font="12px Menlo,monospace";x.fillText("missed "+m.missed_id,a+12,b+4)}}
+  for(const m of missed){ const p=[m.can_i,m.can_j,m.can_k];
+    if(m.pts&&+m.plane===k){ if(+m.slice===cur[V.s]) drawShape(x,k,m.shape,m.pts,"missed "+m.missed_id,false) }
+    else if(Math.abs(p[V.s]-cur[V.s])*vox[V.s]<=2.5){const [a,b]=toScr(k,p);x.strokeStyle="#35d0ff";x.lineWidth=2;x.beginPath();x.arc(a,b,9,0,6.3);x.stroke();
+      x.fillStyle="#35d0ff";x.font="12px Menlo,monospace";x.fillText("missed "+m.missed_id,a+12,b+4)} }
+  if(draft&&draft.k===k&&draft.s===cur[V.s]) drawShape(x,k,draft.type,draft.strokes,"new mark · not saved",true);
   if(ruler&&ruler.k===k&&ruler.s===cur[V.s]){const [a,b]=toScr(k,ruler.a),[e,f]=toScr(k,ruler.b);x.strokeStyle="#7CFC9A";x.lineWidth=2;x.beginPath();x.moveTo(a,b);x.lineTo(e,f);x.stroke();
       x.fillStyle="#7CFC9A";x.font="13px Menlo,monospace";x.fillText(ruler.mm.toFixed(1)+" mm",e+8,f-6)}
   if(probe&&probe.k===k&&probe.p[V.s]===cur[V.s]){const [a,b]=toScr(k,probe.p);x.strokeStyle="#ffb000";x.lineWidth=2;x.strokeRect(a-1.5*g.sx,b-1.5*g.sy,3*g.sx,3*g.sy)}
   const o=vp.el.querySelectorAll(".o"); const sm=seqmeta[seq]||{};
   o[0].textContent=V.name+" · "+(sm.label||seq)+(slab?" · minIP "+Math.round((2*slab+1)*vox[2])+" mm":"");
   o[1].textContent="Slice "+(cur[V.s]+1)+" / "+[nx,ny,nz][V.s];
-  o[2].textContent="C "+Math.round((wl[1]-wl[0])/655.35)+" · B "+Math.round(100-(wl[0]+wl[1])/2/655.35);
+  o[2].textContent="C "+Math.round(101-(wl[1]-wl[0])/655.35)+" · B "+Math.round(100-(wl[0]+wl[1])/2/655.35);
   o[3].textContent="Zoom "+zoom.toFixed(1)+"×";
 }
-let raf=0; function draw(){ if(raf)return; raf=requestAnimationFrame(()=>{raf=0;for(let k=0;k<3;k++)render(k);syncSliders()}) }
+function drawLens(){ const L=$("#lens"); if(!mag||!mouse||!VOL||$(".menu")){L.style.display="none";return}
+  const k=mouse.k,vp=vps[k],g=geom(k),r=vp.cv.getBoundingClientRect(),R=100,dpr=window.devicePixelRatio||1;
+  if(L.width!==2*R*dpr){L.width=L.height=2*R*dpr}
+  L.style.display="block"; L.style.left=(r.left+mouse.x-R)+"px"; L.style.top=(r.top+mouse.y-R)+"px";
+  const x=L.getContext("2d"); x.setTransform(dpr,0,0,dpr,0,0); x.fillStyle="#000"; x.fillRect(0,0,2*R,2*R); x.save();
+  x.translate(R-mouse.x*MAGF,R-mouse.y*MAGF); x.scale(MAGF,MAGF); x.imageSmoothingEnabled=true; x.imageSmoothingQuality="high";
+  x.drawImage(vp.off,g.ox,g.oy,g.nh*g.sx,g.nv*g.sy); strokeEdges(x,g,vp.E,MAGF); x.restore();
+  x.fillStyle="#ffd866"; x.font="11px Menlo,monospace"; x.fillText(MAGF+"×",R-10,2*R-10) }
+let raf=0; function draw(){ if(raf)return; raf=requestAnimationFrame(()=>{raf=0;for(let k=0;k<3;k++)render(k);syncSliders();drawLens()}) }
 function syncSliders(){ $("#zoom").value=Math.log(zoom)/Math.log(12)*100; $("#zoomv").textContent=zoom.toFixed(1)+"×";
   const w=(wl[1]-wl[0])/655.35,l=100-(wl[0]+wl[1])/2/655.35; $("#win").value=101-Math.max(1,Math.min(100,w)); $("#winv").textContent=Math.round(101-w); $("#lev").value=l; $("#levv").textContent=Math.round(l) }
 function setWL(w,l){ w=Math.max(0.5,Math.min(100,w)); l=Math.max(0,Math.min(100,l)); const c=(100-l)*655.35; wl=[c-w*655.35/2,c+w*655.35/2]; setLut(); draw() }
 function getWL(){ return [(wl[1]-wl[0])/655.35, 100-(wl[0]+wl[1])/2/655.35] }
-function resetView(){ zoom=1; ctr=[(nx-1)/2,(ny-1)/2,(nz-1)/2]; const m=seqmeta[seq]; wl=m.win.slice(); setLut(); draw() }
+function resetView(){ zoom=1; ctr=[(nx-1)/2,(ny-1)/2,(nz-1)/2]; wl=seqmeta[seq].win.slice(); setLut(); draw() }
 function setZoom(z){ zoom=Math.max(1,Math.min(12,z)); draw() }
 
 // ---------- data ----------
 async function api(path,body){ const r=await fetch(path,body?{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}:{}); const j=await r.json(); if(!r.ok||j.error)throw new Error(j.error||r.statusText); return j }
 async function loadVol(s){ if(!vols[s]){ status("loading "+s+" ..."); const r=await fetch(`/api/vol?study=${M.study}&seq=${s}`); vols[s]=new Uint16Array(await r.arrayBuffer());
     if(!seqmeta[s]||!seqmeta[s].win) seqmeta[s]=await api(`/api/seqmeta?study=${M.study}&seq=${s}`); status("") } return vols[s] }
-async function setSeq(s){ VOL=await loadVol(s); seq=s; $("#seq").value=s; wl=seqmeta[s].win.slice(); setLut(); draw() }
+async function setSeq(s){ if(!M.seqs.some(q=>q.key===s))return; VOL=await loadVol(s); seq=s; $("#seq").value=s; wl=seqmeta[s].win.slice(); setLut(); draw() }
+function nextSeq(){const i=M.seqs.findIndex(s=>s.key===seq);setSeq(M.seqs[(i+1)%M.seqs.length].key)}
 function reviewer(){ return $("#reviewer").value.trim() }
+function setMissed(m){ missed=(m||[]).map(r=>{let pts=null; try{pts=r.points?JSON.parse(r.points):null}catch(e){} return Object.assign({},r,{pts:(pts&&r.plane!==""&&r.shape!=="point")?pts:null})}); renderMissed() }
 async function loadStudy(sid){ status("loading study ...");
   M=await api(`/api/meta?study=${sid||""}&reviewer=${encodeURIComponent(reviewer())}`); [nx,ny,nz]=M.shape; vox=M.vox; vols={}; seqmeta={}; M.seqs.forEach(s=>seqmeta[s.key]=s);
-  $("#study").innerHTML=M.studies.map(s=>`<option ${s===M.study?"selected":""}>${s}</option>`).join("");
+  $("#study").innerHTML=M.studies.map(s=>`<option ${s===M.study?"selected":""}>${esc(s)}</option>`).join("");
   $("#seq").innerHTML=M.seqs.map((s,i)=>`<option value="${s.key}">${s.label}  (${i+1})</option>`).join("");
-  $("#revlist").innerHTML=M.reviewers.names.map(n=>`<option value="${n}">`).join("");
+  $("#revlist").innerHTML=M.reviewers.names.map(n=>`<option value="${esc(n)}">`).join("");
   if(!reviewer()&&M.reviewers.last){ $("#reviewer").value=M.reviewers.last; M=await api(`/api/meta?study=${M.study}&reviewer=${encodeURIComponent(reviewer())}`) }
-  calls=M.calls||{}; missed=M.missed||[]; undo=[];
+  calls=M.calls||{}; undo=[]; draft=null;
   const b=$("#banner"); const msg=[M.qc,M.note].filter(Boolean).join("  ·  "); $("#seqnote").textContent=M.missing_seqs.length?("Not imported for this patient: "+M.missing_seqs.join(", ")):""; b.textContent=msg; b.style.display=msg?"block":"none";
   const lr=await fetch(`/api/labels?study=${M.study}`); LAB=new Uint16Array(await lr.arrayBuffer());
   seq="swi"; VOL=await loadVol("swi"); ctr=[(nx-1)/2,(ny-1)/2,(nz-1)/2]; wl=seqmeta.swi.win.slice(); setLut();
-  buildStrip(); renderMissed(); const first=M.cands.findIndex(c=>!(calls[c.id]&&calls[c.id].call)); go(first<0?0:first); status("");
+  buildStrip(); setMissed(M.missed); const first=M.cands.findIndex(c=>!(calls[c.id]&&calls[c.id].call)); go(first<0?0:first); status("");
   if(!reviewer()) status("Enter your name (upper right) before the first decision.",true) }
 function status(t,err){ const s=$("#saved"); s.textContent=t||""; s.className="saved "+(err?"err":"ok") }
 
 // ---------- candidates ----------
-function buildStrip(){ $("#strip").innerHTML=M.cands.map((c,i)=>`<div class="chip" data-i="${i}" title="${c.hemi} ${c.region}">${c.id}</div>`).join("")||'<span class="mut">No candidates in this study.</span>'; paintStrip() }
-function paintStrip(){ let n=0; $$("#strip .chip").forEach((e,i)=>{const c=calls[M.cands[i].id]; const call=c&&c.call; if(call)n++; e.style.background=call?CALLCOL[call]:""; e.style.color=call?"#fff":""; e.classList.toggle("cur",i===ci)});
+const callOf=c=>(calls[c.id]||{}).call||"";
+function verdict(c){ const call=callOf(c),b=c.ai.band; if(!call)return "not read"; if(call==="Unsure")return "you unsure"; if(b==="yellow")return "AI unsure";
+  const css=call==="cSS"; return (css&&b==="green")||(!css&&b==="red")?"agree":"differ" }
+function pill(t,c){return `<span class="pill" style="background:${c}">${esc(t)}</span>`}
+function buildStrip(){ $("#strip").innerHTML=M.cands.map((c,i)=>`<div class="chip" data-i="${i}" title="${c.hemi} ${esc(c.region)}">${c.id}</div>`).join("")||'<span class="mut">No candidates in this study.</span>'; paintLists() }
+function paintLists(){ let n=0; $$("#strip .chip").forEach((e,i)=>{const call=callOf(M.cands[i]); if(call)n++; e.style.background=call?CALLCOL[call]:""; e.style.color=call?"#fff":""; e.classList.toggle("cur",i===ci)});
   $("#progbar").style.width=(M.cands.length?100*n/M.cands.length:0)+"%"; $("#progtxt").textContent=n+" of "+M.cands.length+" read";
-  const e=$("#strip .cur"); if(e)e.scrollIntoView({block:"nearest",inline:"nearest"}) }
+  const e=$("#strip .cur"); if(e)e.scrollIntoView({block:"nearest",inline:"nearest"});
+  $("#candtable").innerHTML="<tr><th>#</th><th>Side · region</th><th>mm³</th><th>Your call</th></tr>"+M.cands.map((c,i)=>{const call=callOf(c),cm=(calls[c.id]||{}).comment;
+    return `<tr class="r ${i===ci?"cur":""}" data-i="${i}"><td><b>${c.id}</b></td><td>${c.hemi} · ${esc(c.region)}${cm?` <span class="mut" title="${esc(cm)}">✎</span>`:""}</td><td>${Math.round(c.volume)}</td><td>${call?pill(CALLLBL[call],CALLCOL[call]):'<span class="mut">—</span>'}</td></tr>`}).join("");
+  const T={}; ["cSS","not cSS","unsure","not read"].forEach(r=>T[r]={green:0,yellow:0,red:0}); let ag=0,df=0;
+  const rows=M.cands.map((c,i)=>{const call=callOf(c),v=verdict(c); const row=!call?"not read":call==="cSS"?"cSS":call==="Unsure"?"unsure":"not cSS"; T[row][c.ai.band]++; if(v==="agree")ag++; if(v==="differ")df++;
+    if(onlyDiffer&&v!=="differ")return ""; const sus=c.ai.band==="green"?"cSS":c.ai.band==="yellow"?"uncertain":c.ai.suspect.replace(/^I suspect /,"").replace(/^Probably not cSS.*/,"not cSS");
+    return `<tr class="r ${i===ci?"cur":""}" data-i="${i}"><td><b>${c.id}</b></td><td>${pill(c.ai.score.toFixed(2),BANDCOL[c.ai.band])}</td><td>${esc(sus)}</td><td>${call?pill(CALLLBL[call],CALLCOL[call]):'<span class="mut">—</span>'}</td><td class="${v==="differ"?"err":"mut"}">${v}</td></tr>`}).join("");
+  $("#cmptitle").textContent="AI vs reviewer · "+M.study+(onlyDiffer?" · only differ":"");
+  $("#cmptable").innerHTML="<tr><th>#</th><th>AI meter</th><th>AI suspects</th><th>Your call</th><th></th></tr>"+(rows||'<tr><td colspan="5" class="mut">nothing to show</td></tr>');
+  $("#cmpsum").innerHTML=`<table class="cmp"><tr><th></th><th>AI green</th><th>AI yellow</th><th>AI red</th></tr>`+Object.entries(T).map(([r,t])=>`<tr><td>${r==="not read"?"Not read":"You: "+r}</td><td>${r==="not cSS"&&t.green?`<b class="err">${t.green}</b>`:t.green}</td><td>${t.yellow}</td><td>${r==="cSS"&&t.red?`<b class="err">${t.red}</b>`:t.red}</td></tr>`).join("")+`</table>
+   <div style="margin-top:8px">Read <b>${n} of ${M.cands.length}</b> · agree <b>${ag}</b> · differ <b>${df}</b> · missed cSS marked <b>${missed.length}</b></div>`;
+  $("#bDiffer").classList.toggle("on",onlyDiffer) }
 function gauge(a){ const P=t=>[110-90*Math.cos(Math.PI*t),105-90*Math.sin(Math.PI*t)], arc=(a0,a1,c)=>{const [x0,y0]=P(a0),[x1,y1]=P(a1);return `<path d="M${x0},${y0} A90,90 0 0 1 ${x1},${y1}" stroke="${c}" stroke-width="16" fill="none"/>`};
   const nxp=110-72*Math.cos(Math.PI*a.score), nyp=105-72*Math.sin(Math.PI*a.score);
   $("#gauge").innerHTML=arc(0,.33,"#d64545")+arc(.335,.66,"#e0b030")+arc(.665,1,"#3aa655")+`<line x1="110" y1="105" x2="${nxp}" y2="${nyp}" stroke="var(--text)" stroke-width="4" stroke-linecap="round"/><circle cx="110" cy="105" r="7" fill="var(--text)"/>
    <text x="14" y="120" font-size="10" fill="var(--mut)">0</text><text x="194" y="120" font-size="10" fill="var(--mut)">1.0</text><text x="110" y="78" text-anchor="middle" font-size="26" font-weight="700" fill="var(--text)">${a.score.toFixed(2)}</text>`;
-  const col={green:"#3aa655",yellow:"#e0b030",red:"#d64545"}[a.band]; const s=$("#aisay"); s.style.borderLeftColor=col;
-  s.innerHTML=`<b>${a.suspect}</b>`+(a.reason?`: ${a.reason}.`:"."); $("#aisrc").textContent=a.source+" · not validated" }
-function go(i,keepView){ if(!M.cands.length){draw();return} ci=Math.max(0,Math.min(M.cands.length-1,i)); const c=M.cands[ci]; cur=c.centre.slice(); if(!keepView){ctr=cur.slice(); zoom=Math.max(zoom,3)}
-  ruler=null; probe=null; $("#readout").textContent="";
+  const s=$("#aisay"); s.style.borderLeftColor=BANDCOL[a.band]; s.innerHTML=`<b>${esc(a.suspect)}</b>`+(a.reason?`: ${esc(a.reason)}.`:"."); $("#aisrc").textContent=a.source+" · not validated" }
+function go(i,keepView){ if(!M.cands.length){paintLists();draw();return} ci=Math.max(0,Math.min(M.cands.length-1,i)); const c=M.cands[ci]; cur=c.centre.slice(); if(!keepView){ctr=cur.slice(); zoom=Math.max(zoom,3)}
+  ruler=null; probe=null; if(tool!=="miss")$("#readout").textContent="";
   $("#candinfo").textContent=`Candidate ${ci+1} of ${M.cands.length} · #${c.id} · ${c.hemi==="L"?"left":"right"} ${c.region} · ${Math.round(c.volume)} mm³`;
-  gauge(c.ai); paintDecision(); paintStrip(); draw() }
+  gauge(c.ai); paintDecision(); paintLists(); draw() }
 function paintDecision(){ const c=M.cands[ci]; if(!c)return; const st=calls[c.id]||{}; $$("#dec .b").forEach(b=>{const on=b.dataset.call===st.call; b.classList.toggle("on",on); b.style.borderColor=on?CALLCOL[st.call]:""; b.style.background=on?CALLCOL[st.call]+"33":""});
   $("#curcall").textContent=st.call?("saved: "+CALLLBL[st.call]):"not read yet"; if(document.activeElement!==$("#comment")) $("#comment").value=st.comment||"" }
+const firstUnread=from=>{const n=M.cands.findIndex((x,j)=>j>from&&!callOf(x)); return n<0?M.cands.findIndex(x=>!callOf(x)):n};
 async function decide(call,isUndo){ const c=M.cands[ci]; if(!c)return; if(!reviewer()){status("Enter your name (upper right) first.",true);$("#reviewer").focus();return}
-  const prev=(calls[c.id]||{}).call||""; if(!isUndo)undo.push({i:ci,prev});
+  const prev=callOf(c); if(!isUndo)undo.push({i:ci,prev});
   try{ const r=await api("/api/call",{study:M.study,reviewer:reviewer(),cand_id:c.id,call,action:isUndo?"undo":(call?"call":"clear"),meter:showAI?c.ai.score:""}); calls=r.calls; status("✓ Saved automatically · "+r.saved.slice(11));
-    paintDecision(); paintStrip();
-    if(call&&!isUndo&&autoNext){ const n=M.cands.findIndex((x,j)=>j>ci&&!(calls[x.id]&&calls[x.id].call)); const m=n<0?M.cands.findIndex(x=>!(calls[x.id]&&calls[x.id].call)):n;
-      if(m>=0)setTimeout(()=>go(m),180); else setTimeout(summary,250) } }
+    paintDecision(); paintLists();
+    if(call&&!isUndo&&autoNext){ const m=firstUnread(ci); if(m>=0)setTimeout(()=>go(m),180); else setTimeout(summary,250) } }
   catch(e){ status("NOT SAVED: "+e.message,true) } }
-async function saveComment(){ const c=M.cands[ci]; if(!c||!reviewer())return; const t=$("#comment").value; if(((calls[c.id]||{}).comment||"")===t)return;
-  try{ const r=await api("/api/call",{study:M.study,reviewer:reviewer(),cand_id:c.id,comment:t,action:"comment"}); calls=r.calls; status("✓ Comment saved · "+r.saved.slice(11)) }catch(e){status("NOT SAVED: "+e.message,true)} }
+async function saveComment(){ const c=M.cands[ci]; if(!c)return; const t=$("#comment").value; if(((calls[c.id]||{}).comment||"")===t)return; if(!reviewer()){status("Enter your name first.",true);return}
+  try{ const r=await api("/api/call",{study:M.study,reviewer:reviewer(),cand_id:c.id,comment:t,action:"comment"}); calls=r.calls; status("✓ Comment saved · "+r.saved.slice(11)); paintLists() }catch(e){status("NOT SAVED: "+e.message,true)} }
 function doUndo(){ const u=undo.pop(); if(!u){status("Nothing to undo.");return} go(u.i,false); decide(u.prev,true) }
-function nextUnread(){ const n=M.cands.findIndex((x,j)=>j>ci&&!(calls[x.id]&&calls[x.id].call)); const m=n<0?M.cands.findIndex(x=>!(calls[x.id]&&calls[x.id].call)):n; if(m>=0)go(m); else status("All candidates are read.") }
+function nextUnread(){ const m=firstUnread(ci); if(m>=0)go(m); else status("All candidates are read.") }
 async function summary(){ if(!reviewer()){status("Enter your name first.",true);return} $("#sumbody").innerHTML="<p>Saving and scoring ...</p>"; $("#summary").classList.add("show");
   try{ const r=await api("/api/finish",{study:M.study,reviewer:reviewer()});
     const rows=Object.entries(r.counts).map(([k,v])=>`<tr><td><span style="color:${CALLCOL[k]}">●</span> ${CALLLBL[k]}</td><td><b>${v}</b></td></tr>`).join("");
-    $("#sumbody").innerHTML=`<p><b>${M.study}</b> · reviewer <b>${reviewer()}</b></p><table>${rows}<tr><td>Not read</td><td><b>${r.unread}</b></td></tr><tr><td>Missed cSS marked</td><td><b>${r.missed}</b></td></tr></table>`
-      +(r.unread?`<p class="err">${r.unread} candidate(s) not read: the score below is a lower bound.</p>`:"")+`<h3>Score</h3><pre>${(r.text||"").replace(/</g,"&lt;")}</pre>` }
-  catch(e){ $("#sumbody").innerHTML=`<p class="err">${e.message}</p>` } }
+    const ms=r.missed.length?`<h3>Missed cSS marked (not counted in the score)</h3><table>`+r.missed.map(m=>`<tr><td><b>${m.missed_id}</b></td><td>${esc(m.reviewer)}</td><td>${esc(m.comment)}</td><td class="mut">${esc(m.detector_fate)}</td></tr>`).join("")+"</table>":"";
+    $("#sumbody").innerHTML=`<p><b>${esc(M.study)}</b> · reviewer <b>${esc(reviewer())}</b></p><table>${rows}<tr><td>Not read</td><td><b>${r.unread}</b></td></tr><tr><td>Missed cSS marked</td><td><b>${r.missed.length}</b></td></tr></table>`
+      +(r.unread?`<p class="err">${r.unread} candidate(s) not read: the score below is a lower bound.</p>`:"")+`<h3>Score</h3><pre>${esc(r.text||"")}</pre>`+ms }
+  catch(e){ $("#sumbody").innerHTML=`<p class="err">${esc(e.message)}</p>` } }
+function exportCsv(){ const q=s=>'"'+String(s==null?"":s).replace(/"/g,'""')+'"';
+  const lines=[["study","reviewer","cand_id","hemi","region","volume_mm3","ai_meter","ai_band","ai_suspects","reviewer_call","comment","agreement"].join(",")]
+    .concat(M.cands.map(c=>[M.study,reviewer(),c.id,c.hemi,c.region,c.volume,c.ai.score,c.ai.band,c.ai.suspect,callOf(c),(calls[c.id]||{}).comment||"",verdict(c)].map(q).join(",")));
+  const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([lines.join("\n")+"\n"],{type:"text/csv"})); a.download=`${M.study}_ai_vs_${reviewer().replace(/\W+/g,"_")||"reviewer"}.csv`; a.click(); status("Exported "+a.download) }
+function setTab(t){ $$("#tabs button").forEach(b=>b.classList.toggle("on",b.dataset.tab===t)); $$(".tab").forEach(e=>e.classList.toggle("on",e.id==="tab-"+t)); LSS("tab",t); draw() }
 
-// ---------- missed ----------
-function renderMissed(){ $("#misslist").innerHTML=missed.length?('<div class="mut sm" style="margin-top:6px">Missed cSS marks</div>'+missed.map(m=>`<div class="miss"><button class="btn" data-go="${m.missed_id}" title="go to it">${m.missed_id}</button><input type="text" data-mid="${m.missed_id}" value="${String(m.comment||"").replace(/"/g,"&quot;")}" placeholder="note (${m.reviewer})"><button class="btn" data-del="${m.missed_id}" title="delete">×</button></div>`).join("")):"" }
-async function missedApi(body){ if(!reviewer()){status("Enter your name first.",true);return} try{ const r=await api("/api/missed",Object.assign({study:M.study,reviewer:reviewer()},body)); missed=r.missed; renderMissed(); draw(); status("✓ Saved · "+r.saved.slice(11)) }catch(e){status("NOT SAVED: "+e.message,true)} }
-$("#misslist").addEventListener("click",e=>{const d=e.target.dataset; if(d.del)missedApi({action:"delete",id:+d.del}); if(d.go){const m=missed.find(x=>x.missed_id==d.go); if(m){cur=[m.can_i,m.can_j,m.can_k];ctr=cur.slice();draw()}}});
-$("#misslist").addEventListener("change",e=>{const d=e.target.dataset; if(d.mid)missedApi({action:"comment",id:+d.mid,comment:e.target.value})});
+// ---------- missed cSS ----------
+function renderMissed(){ $("#misslist").innerHTML=missed.length?missed.map(m=>`<div class="miss"><button class="btn" data-go="${m.missed_id}" title="go to it">${m.missed_id}</button><input type="text" data-mid="${m.missed_id}" value="${esc(m.comment)}" placeholder="note (${esc(m.reviewer)})"><button class="btn" data-del="${m.missed_id}" title="delete">×</button></div><div class="mut sm" style="margin:-2px 0 6px 2px">${esc(m.shape||"point")} · ${esc(m.detector_fate||"")}</div>`).join(""):'<span class="mut sm">None. Press X, draw a rectangle or trace with the pen, then Save.</span>'; if(M)paintLists() }
+async function missedApi(body){ if(!reviewer()){status("Enter your name first.",true);return false} try{ const r=await api("/api/missed",Object.assign({study:M.study,reviewer:reviewer()},body)); setMissed(r.missed); draw(); status("✓ Saved · "+r.saved.slice(11)); return true }catch(e){status("NOT SAVED: "+e.message,true);return false} }
+function setShape(s){ shape=s; $("#dRect").classList.toggle("on",s==="rect"); $("#dPen").classList.toggle("on",s==="pen"); if(draft&&draft.type!==s){draft=null;draw()} }
+async function saveDraft(){ if(!draft||!draft.strokes.length||(draft.type==="rect"&&draft.strokes[0].length<2)){$("#readout").textContent="Draw the missed cSS first.";return}
+  const ok=await missedApi({action:"add",plane:draft.k,slice:draft.s,shape:draft.type,strokes:draft.strokes,comment:$("#dNote").value}); if(ok){draft=null;$("#dNote").value="";$("#readout").textContent="Missed cSS saved. Draw another, or Esc to finish.";draw()} }
+function cancelDraft(){ draft=null; $("#dNote").value=""; setTool("nav") }
+function undoStroke(){ if(draft){draft.strokes.pop(); if(!draft.strokes.length)draft=null; draw()} }
 
 // ---------- tools ----------
-function setTool(t){ tool=t; $$(".tool").forEach(b=>b.classList.toggle("on",b.dataset.tool===t)); vps.forEach(v=>v.cv.style.cursor=t==="nav"?"grab":"crosshair");
-  $("#readout").textContent={nav:"",dark:"Darkness probe: click a point.",ruler:"Ruler: drag a line.",miss:"Missed cSS: click on a cSS that has no outline."}[t] }
-function doProbe(k,p){ const V=VIEWS[k],st=[1,nx,nx*ny],d=[nx,ny,nz]; let s=0,n=0; for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const q=p.slice();q[V.h]+=a;q[V.v]+=b; if(q[V.h]<0||q[V.v]<0||q[V.h]>=d[V.h]||q[V.v]>=d[V.v])continue; s+=VOL[IDX(q[0],q[1],q[2])];n++}
+function setTool(t){ tool=t; if(t!=="miss")draft=null; $$(".tool").forEach(b=>b.classList.toggle("on",b.dataset.tool===t)); vps.forEach(v=>v.cv.style.cursor=t==="nav"?"grab":"crosshair");
+  $("#drawbar").classList.toggle("show",t==="miss"); if(t==="miss")setShape(shape);
+  $("#readout").textContent={nav:"",dark:"Darkness probe: click a point.",ruler:"Ruler: drag a line.",miss:"Missed cSS: draw on the slice where it is clearest, then Save."}[t]; draw() }
+function doProbe(k,p){ const V=VIEWS[k],d=[nx,ny,nz]; let s=0,n=0; for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const q=p.slice();q[V.h]+=a;q[V.v]+=b; if(q[V.h]<0||q[V.v]<0||q[V.h]>=d[V.h]||q[V.v]>=d[V.v])continue; s+=VOL[IDX(q[0],q[1],q[2])];n++}
   const m=seqmeta[seq],raw=m.lo+(s/n/65535)*(m.hi-m.lo); probe={k,p}; let t=`${m.label} signal ${raw.toFixed(seq==="phase"?2:0)} (3×3 mean)`;
   if(seq==="swi"){const z=(raw-M.ref.mu)/M.ref.sd; t+=`\n${Math.round(100*raw/M.ref.mu)} % of normal ${M.ref.src}  ·  ${z>=0?"+":""}${z.toFixed(1)} SD`+(z<=-2.5?"  (dark: detector range)":z<=-2?"  (borderline dark)":"  (not dark)")}
   else if(seq==="phase") t+=" rad"; $("#readout").textContent=t; draw() }
-vps.forEach((vp,k)=>{ const c=vp.cv; let st=null;
+vps.forEach((vp,k)=>{ const c=vp.cv; let st=null; const pos=e=>{const r=c.getBoundingClientRect();return [e.clientX-r.left,e.clientY-r.top]};
   c.addEventListener("mouseenter",()=>{hover=k;vps.forEach((v,j)=>v.el.classList.toggle("act",j===k))});
+  c.addEventListener("mousemove",e=>{const [x,y]=pos(e);mouse={k,x,y}; if(mag)drawLens()});
+  c.addEventListener("mouseleave",()=>{mouse=null;drawLens()});
   c.addEventListener("contextmenu",e=>e.preventDefault());
-  c.addEventListener("wheel",e=>{ e.preventDefault(); if(!VOL)return; if(e.ctrlKey||e.metaKey){setZoom(zoom*(e.deltaY<0?1.12:1/1.12));return} step(k,e.deltaY>0?-1:1) },{passive:false});
-  c.addEventListener("mousedown",e=>{ if(!VOL)return; e.preventDefault(); document.activeElement.blur(); const r=c.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
-    st={b:e.button,x:e.clientX,y:e.clientY,moved:false,ctr:ctr.slice(),wl:getWL(),p0:toVox(k,mx,my)};
-    if(e.button===0&&tool==="ruler"){ruler={k,s:cur[VIEWS[k].s],a:st.p0,b:st.p0,mm:0}} });
-  window.addEventListener("mousemove",e=>{ if(!st)return; const dx=e.clientX-st.x,dy=e.clientY-st.y; if(Math.abs(dx)+Math.abs(dy)>3)st.moved=true; const g=geom(k);
-    if(st.b===2||(st.b===0&&e.shiftKey&&tool==="nav")){ setWL(st.wl[0]-dx*0.15,st.wl[1]-dy*0.15) }
-    else if(st.b===0&&tool==="ruler"&&ruler){ const r=c.getBoundingClientRect(); ruler.b=toVox(k,e.clientX-r.left,e.clientY-r.top); const V=g.V; ruler.mm=Math.hypot((ruler.b[V.h]-ruler.a[V.h])*vox[V.h],(ruler.b[V.v]-ruler.a[V.v])*vox[V.v]); $("#readout").textContent="Length "+ruler.mm.toFixed(1)+" mm"; draw() }
+  c.addEventListener("wheel",e=>{ e.preventDefault(); if(!VOL)return; if(e.ctrlKey||e.metaKey){setZoom(zoom*Math.exp(-e.deltaY*(e.deltaMode?0.05:0.004)));return} if(Math.abs(e.deltaY)<1)return; step(k,e.deltaY>0?-1:1) },{passive:false});
+  c.addEventListener("mousedown",e=>{ if(!VOL)return; e.preventDefault(); closeMenus(); if(document.activeElement&&document.activeElement.blur)document.activeElement.blur(); const [mx,my]=pos(e);
+    st={b:e.button,x:e.clientX,y:e.clientY,moved:false,ctr:ctr.slice(),wl:getWL(),p0:toVox(k,mx,my),wlmode:e.button===2||(e.button===0&&e.shiftKey&&tool==="nav")||(e.button===0&&e.ctrlKey&&MAC),menu:e.button===2||(e.button===0&&e.ctrlKey&&MAC)};
+    if(st.wlmode)return;
+    if(e.button===0&&tool==="ruler"){ruler={k,s:cur[VIEWS[k].s],a:st.p0,b:st.p0,mm:0}}
+    if(e.button===0&&tool==="miss"){ const s=cur[VIEWS[k].s],p=toVoxF(k,mx,my); if(!draft||draft.k!==k||draft.s!==s||draft.type!==shape||shape==="rect")draft={k,s,type:shape,strokes:[]};
+      draft.strokes.push(shape==="rect"?[p,p]:[p]); draw() } });
+  window.addEventListener("mousemove",e=>{ if(!st)return; const dx=e.clientX-st.x,dy=e.clientY-st.y; if(Math.abs(dx)+Math.abs(dy)>3)st.moved=true; const g=geom(k),[mx,my]=pos(e);
+    if(st.wlmode){ if(st.moved)setWL(st.wl[0]-dx*0.15,st.wl[1]-dy*0.15) }
+    else if(st.b===0&&tool==="ruler"&&ruler){ ruler.b=toVox(k,mx,my); const V=g.V; ruler.mm=Math.hypot((ruler.b[V.h]-ruler.a[V.h])*vox[V.h],(ruler.b[V.v]-ruler.a[V.v])*vox[V.v]); $("#readout").textContent="Length "+ruler.mm.toFixed(1)+" mm"; draw() }
+    else if(st.b===0&&tool==="miss"&&draft){ const s=draft.strokes[draft.strokes.length-1],p=toVoxF(k,mx,my); if(draft.type==="rect")s[1]=p; else s.push(p); draw() }
     else if(st.b===0&&tool==="nav"&&st.moved){ ctr=st.ctr.slice(); ctr[g.V.h]=st.ctr[g.V.h]+dx/g.sx; ctr[g.V.v]=st.ctr[g.V.v]+dy/g.sy; draw() } });
-  window.addEventListener("mouseup",e=>{ if(!st)return; const s=st; st=null; if(s.b!==0)return;
-    if(tool==="dark"){doProbe(k,s.p0)} else if(tool==="miss"){ if(!s.moved)missedApi({action:"add",ijk:s.p0,comment:""}) }
+  window.addEventListener("mouseup",e=>{ if(!st)return; const s=st; st=null;
+    if(s.wlmode){ if(s.menu&&!s.moved)ctxMenu(e.clientX,e.clientY,k,s.p0); return } if(s.b!==0)return;
+    if(tool==="dark"){doProbe(k,s.p0)}
+    else if(tool==="miss"&&draft){ const t=draft.strokes[draft.strokes.length-1]; if(draft.type==="rect"&&!s.moved){draft=null;draw()} else if(draft.type==="rect"){const V=VIEWS[k]; $("#readout").textContent=`Rectangle ${(Math.abs(t[1][V.h]-t[0][V.h])*vox[V.h]).toFixed(0)} × ${(Math.abs(t[1][V.v]-t[0][V.v])*vox[V.v]).toFixed(0)} mm · Enter = save`} }
     else if(tool==="nav"&&!s.moved){ cur=s.p0; draw() } });
 });
 function step(k,d){ const V=VIEWS[k],n=[nx,ny,nz][V.s]; cur[V.s]=Math.max(0,Math.min(n-1,cur[V.s]+d)); draw() }
+
+// ---------- actions, menu bar, right-click menu ----------
+function tog(){ $("#tMark").classList.toggle("on",showMark); $("#tOther").classList.toggle("on",showOther); $("#tMip").classList.toggle("on",mip); $("#tAuto").classList.toggle("on",autoNext); $("#tMag").classList.toggle("on",mag); $("#aibody").style.display=showAI?"":"none"; LSS("mark",showMark);LSS("other",showOther);LSS("auto",autoNext);LSS("ai",showAI); draw() }
+const A={
+ summary:{l:"Summary and score",k:"Q",f:summary}, exportcsv:{l:"Export AI vs reviewer (CSV)",k:"E",f:exportCsv},
+ undo:{l:"Undo last decision",k:"Z",f:doUndo}, clear:{l:"Clear this decision",k:"⌫",f:()=>decide("")}, comment:{l:"Add a comment",k:"C",f:()=>{setTab("viewer");setTimeout(()=>$("#comment").focus(),0)}},
+ mark:{l:"Show this marking",k:"M",f:()=>{showMark=!showMark;tog()},on:()=>showMark}, other:{l:"Show other markings",k:"O",f:()=>{showOther=!showOther;tog()},on:()=>showOther},
+ mag:{l:"Magnifier",k:"B",f:()=>{mag=!mag;tog()},on:()=>mag}, mip:{l:"minIP slab",k:"I",f:()=>{mip=!mip;tog()},on:()=>mip}, ai:{l:"Show the AI meter",k:"K",f:()=>{showAI=!showAI;tog()},on:()=>showAI},
+ zin:{l:"Zoom in",k:"+",f:()=>setZoom(zoom*1.2)}, zout:{l:"Zoom out",k:"-",f:()=>setZoom(zoom/1.2)}, reset:{l:"Reset view",k:"R",f:resetView}, centre:{l:"Centre on candidate",k:"F",f:()=>go(ci)},
+ tviewer:{l:"Panel: viewer",k:"F1",f:()=>setTab("viewer")}, tcands:{l:"Panel: candidates",k:"F2",f:()=>setTab("cands")}, tcalls:{l:"Panel: calls summary",k:"F3",f:()=>setTab("calls")},
+ prev:{l:"Previous candidate",k:"←",f:()=>go(ci-1)}, next:{l:"Next candidate",k:"→",f:()=>go(ci+1)}, unread:{l:"Next unread",k:"J",f:nextUnread},
+ auto:{l:"Auto-next after a decision",k:"G",f:()=>{autoNext=!autoNext;tog();status("Auto-next "+(autoNext?"on":"off"))},on:()=>autoNext},
+ nav:{l:"Navigate (pan / crosshair)",k:"Esc",f:()=>setTool("nav"),on:()=>tool==="nav"}, dark:{l:"Darkness probe",k:"D",f:()=>setTool(tool==="dark"?"nav":"dark"),on:()=>tool==="dark"},
+ ruler:{l:"Ruler",k:"L",f:()=>setTool(tool==="ruler"?"nav":"ruler"),on:()=>tool==="ruler"}, miss:{l:"Mark a missed cSS…",k:"X",f:()=>setTool(tool==="miss"?"nav":"miss"),on:()=>tool==="miss"},
+ help:{l:"Keys and reading rules",k:"?",f:()=>$("#help").classList.toggle("show")} };
+Object.entries(CALLKEYS).forEach(([k,c])=>A["call_"+k]={l:"Decide: "+CALLLBL[c],k:k.toUpperCase(),f:()=>decide(c),on:()=>M&&M.cands[ci]&&callOf(M.cands[ci])===c});
+const seqItems=()=>M.seqs.map((s,i)=>({l:s.label,k:String(i+1),f:()=>setSeq(s.key),on:()=>seq===s.key})).concat(M.missing_seqs.map(n=>({l:n+" (not imported)",dis:true})));
+const themeItems=()=>["light","dark","blue"].map(t=>({l:t==="blue"?"Eye-preserving blue":t[0].toUpperCase()+t.slice(1),f:()=>theme(t),on:()=>document.documentElement.dataset.theme===t}));
+const studyItems=()=>M.studies.map(s=>({l:s,f:()=>loadStudy(s),on:()=>s===M.study}));
+const MENUS={ file:()=>[{sub:"Open study",items:studyItems},"-","summary","exportcsv"], edit:()=>["undo","clear","comment"],
+ view:()=>["mark","other","mag","mip","ai","-",{sub:"Sequence",items:seqItems},{sub:"Theme",items:themeItems},"-","zin","zout","reset","centre","-","tviewer","tcands","tcalls"],
+ cand:()=>["prev","next","unread","-","call_y","call_v","call_n","call_a","call_u","call_h","-","auto"], tools:()=>["nav","mag","dark","ruler","miss"], help:()=>["help"] };
+function closeMenus(){ $$(".menu").forEach(m=>m.remove()); $$("#mbar span").forEach(s=>s.classList.remove("on")); drawLens() }
+function openMenu(items,x,y,level){ $$(".menu").forEach(m=>{if(+m.dataset.level>=level)m.remove()});
+  const m=document.createElement("div"); m.className="menu"; m.dataset.level=level;
+  for(const it0 of items){ if(it0==="-"){m.appendChild(document.createElement("hr"));continue} const it=typeof it0==="string"?A[it0]:it0; const d=document.createElement("div");
+    d.innerHTML=`<span class="ck">${it.on&&it.on()?"✓":""}</span><span>${esc(it.sub||it.l)}</span><span class="k">${it.sub?"▸":esc(it.k||"")}</span>`; if(it.dis)d.className="dis";
+    const unhi=()=>$$(".menu div.hi").forEach(e=>{if(e.parentNode===m)e.classList.remove("hi")});
+    if(it.sub){ const open=()=>{unhi();d.classList.add("hi");const r=d.getBoundingClientRect();openMenu(it.items(),r.right-2,r.top-5,level+1)}; d.addEventListener("mouseenter",open); d.addEventListener("click",e=>{e.stopPropagation();open()}) }
+    else { d.addEventListener("mouseenter",()=>{$$(".menu").forEach(q=>{if(+q.dataset.level>level)q.remove()});unhi()}); d.addEventListener("click",e=>{e.stopPropagation();closeMenus();it.f()}) }
+    m.appendChild(d) }
+  document.body.appendChild(m); const r=m.getBoundingClientRect(); m.style.left=Math.max(4,Math.min(x,innerWidth-r.width-6))+"px"; m.style.top=Math.max(4,Math.min(y,innerHeight-r.height-6))+"px"; return m }
+function ctxMenu(x,y,k,p){ closeMenus(); $("#lens").style.display="none";
+  openMenu(["mark","other","mag","mip","-",{sub:"Sequence",items:seqItems},{l:"Mark a missed cSS here…",k:"X",f:()=>{cur[VIEWS[k].s]=p[VIEWS[k].s];setTool("miss")}},"dark","ruler","-","centre","reset"],x,y,0) }
+$$("#mbar span").forEach(s=>{ const open=()=>{closeMenus();s.classList.add("on");const r=s.getBoundingClientRect();openMenu(MENUS[s.dataset.m](),r.left,r.bottom+2,0)};
+  s.addEventListener("click",e=>{e.stopPropagation(); if(s.classList.contains("on"))closeMenus(); else open()}); s.addEventListener("mouseenter",()=>{if($("#mbar span.on")&&!s.classList.contains("on"))open()}) });
+window.addEventListener("mousedown",e=>{ if(!e.target.closest(".menu")&&!e.target.closest("#mbar"))closeMenus() });
 
 // ---------- controls ----------
 $("#dec").innerHTML=Object.entries(CALLKEYS).map(([k,c])=>`<button class="b" data-call="${c}"><kbd>${k.toUpperCase()}</kbd>${CALLLBL[c]}</button>`).join("");
 $("#dec").addEventListener("click",e=>{const b=e.target.closest(".b"); if(b)decide(b.dataset.call)});
 $("#strip").addEventListener("click",e=>{const d=e.target.dataset.i; if(d!==undefined)go(+d)});
+for(const id of ["#candtable","#cmptable"]) $(id).addEventListener("click",e=>{const r=e.target.closest("tr.r"); if(r)go(+r.dataset.i)});
 $$("#themes button").forEach(b=>b.onclick=()=>theme(b.dataset.t));
+$$("#tabs button").forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
 $$(".tool").forEach(b=>b.onclick=()=>setTool(b.dataset.tool));
 $("#seq").onchange=e=>{setSeq(e.target.value);e.target.blur()};
 $("#study").onchange=e=>{loadStudy(e.target.value);e.target.blur()};
 $("#zoom").oninput=e=>setZoom(Math.pow(12,e.target.value/100));
 $("#win").oninput=e=>setWL(101-e.target.value,getWL()[1]); $("#lev").oninput=e=>setWL(getWL()[0],+e.target.value);
-function tog(){ $("#tMark").classList.toggle("on",showMark); $("#tOther").classList.toggle("on",showOther); $("#tMip").classList.toggle("on",mip); $("#tAuto").classList.toggle("on",autoNext); $("#aibody").style.display=showAI?"":"none"; LSS("mark",showMark);LSS("other",showOther);LSS("auto",autoNext);LSS("ai",showAI); draw() }
-$("#tMark").onclick=()=>{showMark=!showMark;tog()}; $("#tOther").onclick=()=>{showOther=!showOther;tog()}; $("#tMip").onclick=()=>{mip=!mip;tog()}; $("#tAuto").onclick=()=>{autoNext=!autoNext;tog()};
-$("#bReset").onclick=resetView; $("#bCentre").onclick=()=>go(ci); $("#bHelp").onclick=()=>$("#help").classList.toggle("show"); $("#bSummary").onclick=summary;
+$("#tMark").onclick=A.mark.f; $("#tOther").onclick=A.other.f; $("#tMip").onclick=A.mip.f; $("#tAuto").onclick=A.auto.f; $("#tMag").onclick=A.mag.f;
+$("#bReset").onclick=resetView; $("#bCentre").onclick=()=>go(ci); $("#bScore").onclick=summary; $("#bExport").onclick=exportCsv; $("#bUnread").onclick=nextUnread;
+$("#bDiffer").onclick=()=>{onlyDiffer=!onlyDiffer;paintLists()};
+$("#dRect").onclick=()=>setShape("rect"); $("#dPen").onclick=()=>setShape("pen"); $("#dUndo").onclick=undoStroke; $("#dSave").onclick=saveDraft; $("#dCancel").onclick=cancelDraft;
+$("#misslist").addEventListener("click",e=>{const d=e.target.dataset; if(d.del)missedApi({action:"delete",id:+d.del}); if(d.go){const m=missed.find(x=>x.missed_id==d.go); if(m){cur=[m.can_i,m.can_j,m.can_k]; if(m.pts){cur[VIEWS[+m.plane].s]=+m.slice} ctr=cur.slice();draw()}}});
+$("#misslist").addEventListener("change",e=>{const d=e.target.dataset; if(d.mid)missedApi({action:"comment",id:+d.mid,comment:e.target.value})});
 $$(".modal").forEach(m=>m.addEventListener("click",e=>{if(e.target===m)m.classList.remove("show")}));
 $("#comment").addEventListener("blur",saveComment);
-$("#reviewer").addEventListener("change",async()=>{ const n=reviewer(); if(!n)return; await api("/api/reviewer",{name:n}); const keep=ci; await loadStudy(M.study); status("Reviewer: "+n) });
+$("#reviewer").addEventListener("change",async()=>{ const n=reviewer(); if(!n)return; await api("/api/reviewer",{name:n}); await loadStudy(M.study); status("Reviewer: "+n) });
 window.addEventListener("resize",draw);
-window.addEventListener("keydown",e=>{ const tag=(e.target.tagName||"").toLowerCase(), typing=tag==="input"&&e.target.type==="text"||tag==="textarea";
-  if(e.key==="Escape"){ if(typing){e.target.blur();return} if($(".modal.show")){$$(".modal").forEach(m=>m.classList.remove("show"));return} setTool("nav"); ruler=null;probe=null;draw(); return }
-  if(typing){ if(e.key==="Enter"&&tag==="input")e.target.blur(); return }
-  if(e.metaKey||e.altKey||(e.ctrlKey&&!["=","-","+"].includes(e.key)))return; if(!M)return;
+window.addEventListener("keydown",e=>{ const tag=(e.target.tagName||"").toLowerCase(), typing=tag==="input"&&e.target.type==="text";
+  if(e.key==="Escape"){ if($(".menu")){closeMenus();return} if(typing){e.target.blur();return} if($(".modal.show")){$$(".modal").forEach(m=>m.classList.remove("show"));return} if(tool==="miss"){cancelDraft();return} setTool("nav"); ruler=null;probe=null;draw(); return }
+  if(typing){ if(e.key==="Enter"){ if(e.target.id==="dNote"){e.target.blur();saveDraft()} else e.target.blur() } return }
+  if(e.altKey||((e.metaKey||e.ctrlKey)&&!["=","-","+","_"].includes(e.key)))return; if(!M)return;
   const k=e.key.length===1?e.key.toLowerCase():e.key; let used=true;
-  if(CALLKEYS[k])decide(CALLKEYS[k]);
+  if(tool==="miss"&&k==="Enter")saveDraft(); else if(tool==="miss"&&k==="w")setShape(shape==="rect"?"pen":"rect"); else if(tool==="miss"&&(k==="Backspace"||k==="Delete"))undoStroke();
+  else if(CALLKEYS[k])decide(CALLKEYS[k]);
   else if(k==="ArrowRight")go(ci+1); else if(k==="ArrowLeft")go(ci-1); else if(k==="j")nextUnread();
   else if(k==="ArrowUp")step(hover,1); else if(k==="ArrowDown")step(hover,-1); else if(k==="PageUp")step(hover,5); else if(k==="PageDown")step(hover,-5);
-  else if(k==="="||k==="+")setZoom(zoom*1.2); else if(k==="-"||k==="_")setZoom(zoom/1.2);
+  else if(k==="="||k==="+"||e.code==="NumpadAdd")setZoom(zoom*1.2); else if(k==="-"||k==="_"||e.code==="NumpadSubtract")setZoom(zoom/1.2);
   else if(k==="[")setWL(getWL()[0],getWL()[1]-2); else if(k==="]")setWL(getWL()[0],getWL()[1]+2);
   else if(k===";")setWL(getWL()[0]*1.1,getWL()[1]); else if(k==="'")setWL(getWL()[0]/1.1,getWL()[1]);
   else if(k==="r")resetView(); else if(k==="f")go(ci);
-  else if(k==="m"){showMark=!showMark;tog()} else if(k==="o"){showOther=!showOther;tog()} else if(k==="i"){mip=!mip;tog()} else if(k==="g"){autoNext=!autoNext;tog();status("Auto-next "+(autoNext?"on":"off"))} else if(k==="k"){showAI=!showAI;tog()}
-  else if(k==="s"){const i=M.seqs.findIndex(s=>s.key===seq);setSeq(M.seqs[(i+1)%M.seqs.length].key)} else if(/^[1-5]$/.test(k)){const s=M.seqs[+k-1]; if(s)setSeq(s.key)}
+  else if(k==="m")A.mark.f(); else if(k==="o")A.other.f(); else if(k==="i")A.mip.f(); else if(k==="g")A.auto.f(); else if(k==="k")A.ai.f(); else if(k==="b")A.mag.f();
+  else if(k==="s")nextSeq(); else if(/^[1-5]$/.test(k)){const s=M.seqs[+k-1]; if(s)setSeq(s.key)}
   else if(k==="t"){const t=["light","dark","blue"];theme(t[(t.indexOf(document.documentElement.dataset.theme)+1)%3])}
-  else if(k==="d")setTool(tool==="dark"?"nav":"dark"); else if(k==="l")setTool(tool==="ruler"?"nav":"ruler"); else if(k==="x")setTool(tool==="miss"?"nav":"miss");
-  else if(k==="c")$("#comment").focus(); else if(k==="z")doUndo(); else if(k==="Backspace"||k==="Delete")decide("");
-  else if(k==="q")summary(); else if(k==="?"||k==="/"||k==="F1")$("#help").classList.toggle("show"); else used=false;
+  else if(k==="d")A.dark.f(); else if(k==="l")A.ruler.f(); else if(k==="x")A.miss.f();
+  else if(k==="c")A.comment.f(); else if(k==="z")doUndo(); else if(k==="Backspace"||k==="Delete")decide("");
+  else if(k==="q")summary(); else if(k==="e")exportCsv(); else if(k==="F1")setTab("viewer"); else if(k==="F2")setTab("cands"); else if(k==="F3")setTab("calls");
+  else if(k==="?"||k==="/")A.help.f(); else used=false;
   if(used)e.preventDefault() });
-theme(LS("theme","dark")); setTool("nav"); tog();
+theme(LS("theme","dark")); setTab(LS("tab","viewer")); setTool("nav"); tog();
 loadStudy("").catch(e=>status("Could not load: "+e.message,true));
 </script></body></html>

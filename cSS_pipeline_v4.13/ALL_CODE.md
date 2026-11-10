@@ -1,130 +1,10 @@
-# All code — cSS pipeline v5.2.6
+# All code — cSS pipeline v5.4.1
 
 Generated from the files below; the files are authoritative.
 
-## scripts/run_css.sh
-
-```bash
-#!/bin/zsh
-# One patient, start to finish (up to review).
-# usage: run_css.sh SUBJECT_ID [path/to/swi.nii(.gz)] [--nostrip] [--t1 T1.nii] [--flair FLAIR.nii] [--recon]
-#                   [--phase PHASE.nii]
-#   - with a SWI path: imports the scan; skull-strips it (with --t1: by the T1 brain labels after registration,
-#     v5.2.5; without a T1: SynthStrip, which can need > 30 GB of memory) unless --nostrip
-#     (use --nostrip only for scans that are already skull-stripped)
-#   - SWI = the processed SWI (or magnitude) series, NOT the minIP and NOT the phase map
-#   - --t1 / --flair / --recon: v4 anatomy from T1 (and FLAIR), see prep_anat.sh
-#     (T1 labels are re-used on later runs; SynthSeg on the SWI is then skipped)
-#   - --phase: the SWI PHASE series of the same acquisition (for reading only: the reviewer shows the
-#     filtered phase, where calcium has the opposite sign to veins/blood products)
-#   - set NOVIEW=1 to skip opening freeview (batch use)
-set -e
-S=$1; shift 2>/dev/null || true
-SRC=""; STRIP=1; ANAT=(); PHASE=""
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --nostrip) STRIP=0; shift;;
-    --t1|--flair) ANAT+=("$1" "$2"); shift 2;;
-    --recon) ANAT+=("$1"); shift;;
-    --phase) PHASE=$2; shift 2;;
-    -*) echo "run_css.sh: unknown option $1"; exit 1;;
-    *) SRC=$1; shift;;
-  esac
-done
-B=${CSS_BASE:-$HOME/css_project}; SC=$B/scripts
-if [ -z "$S" ]; then
-  echo "usage: run_css.sh SUBJECT_ID [swi.nii] [--nostrip] [--t1 T1.nii] [--flair FLAIR.nii] [--recon]"; exit 1
-fi
-mkdir -p $B/data $B/synthseg $B/work $B/review
-# v5.2.5: with a T1 the SWI is NOT skull-stripped with SynthStrip (it peaked at 64 GB on a 2 mm SWI and froze the
-# user's 36 GB Mac): it is imported whole-head, registered as it is, and masked with the T1 brain labels after
-# prep_anat.sh (swi_mask_from_t1.py). CSS_SWI_SKULLSTRIP=synthstrip restores the old SynthStrip route.
-HAS_T1=0; for a_ in "${ANAT[@]}"; do [ "$a_" = "--t1" ] && HAS_T1=1; done
-MASK_T1=0
-if [ -n "$SRC" ] && [ $STRIP -eq 1 ] && [ $HAS_T1 -eq 1 ] && [ "${CSS_SWI_SKULLSTRIP:-t1}" != synthstrip ]; then MASK_T1=1; fi
-if [ -n "$SRC" ] && [ $MASK_T1 -eq 1 ]; then
-  echo "[0/4] importing (whole head; skull-stripped with the T1 brain labels after registration) $SRC"
-  mri_convert "$SRC" $B/work/${S}_raw.nii.gz > /dev/null || { echo "ERROR: mri_convert could not read $SRC"; exit 1; }
-  mri_convert $B/work/${S}_raw.nii.gz $B/data/${S}_swi.nii > /dev/null || { echo "ERROR: mri_convert failed on the SWI"; exit 1; }
-elif [ -n "$SRC" ]; then
-  if [ $STRIP -eq 1 ]; then
-    echo "[0/4] importing + skull-stripping (SynthStrip, CSF kept) $SRC"
-    mri_convert "$SRC" $B/work/${S}_raw.nii.gz > /dev/null || { echo "ERROR: mri_convert could not read $SRC"; exit 1; }
-    # v4.18.3: errors were silent under set -e (LEMON P203 stopped here with no message); keep SynthStrip's output
-    mri_synthstrip -i $B/work/${S}_raw.nii.gz -o $B/data/${S}_swi.nii -t ${CSS_THREADS:-4} \
-      -m $B/work/${S}_brainmask.nii.gz > $B/work/${S}_synthstrip.log 2>&1 \
-      || { echo "ERROR: mri_synthstrip failed on the SWI (exit $?) - last lines of $B/work/${S}_synthstrip.log:"; tail -5 $B/work/${S}_synthstrip.log; exit 1; }
-  else
-    echo "[0/4] importing (no skull-strip) $SRC"
-    mri_convert "$SRC" $B/data/${S}_swi.nii > /dev/null
-  fi
-fi
-if [ ! -f $B/data/${S}_swi.nii ]; then
-  echo "ERROR: $B/data/${S}_swi.nii not found - give the scan path as 2nd argument"; exit 1
-fi
-if [ -n "$PHASE" ]; then
-  echo "[0a] importing SWI phase (for the reviewer)"
-  mri_convert "$PHASE" $B/data/${S}_phase.nii.gz > /dev/null
-fi
-if [ ${#ANAT[@]} -gt 0 ]; then
-  echo "[0b] T1/FLAIR anatomy -> SWI grid"
-  CSS_SWI_HEAD=$MASK_T1 zsh $SC/prep_anat.sh $S "${ANAT[@]}" || { echo "ERROR: prep_anat.sh failed - stopping (old labels would be used)"; exit 1; }
-  if [ $MASK_T1 -eq 1 ]; then
-    echo "[0c] skull-stripping the SWI with the T1 brain labels (no SynthStrip)"
-    python $SC/swi_mask_from_t1.py $S || { echo "ERROR: swi_mask_from_t1.py failed - the SWI is still whole-head; stopping"; exit 1; }
-  fi
-fi
-T1SEG=$B/work/${S}_t1seg_swispace.nii.gz
-echo "[1/4] segmentation"
-if [ -f $T1SEG ] && [ ! $B/data/${S}_swi.nii -nt $T1SEG ]; then
-  echo "      using T1-derived labels ($T1SEG)"
-# re-run when missing OR when the SWI was re-imported after the last segmentation (v4 fix:
-# v3 silently reused a stale segmentation for a different scan with the same ID)
-elif [ ! -f $B/synthseg/${S}_seg.nii.gz ] || [ $B/data/${S}_swi.nii -nt $B/synthseg/${S}_seg.nii.gz ]; then
-  echo "      SynthSeg on the SWI (no T1 labels - consider --t1 for better anatomy)"
-  mri_synthseg --i $B/data/${S}_swi.nii --o $B/synthseg/${S}_seg.nii.gz \
-    --parc --robust --threads ${CSS_THREADS:-8} > /dev/null
-else
-  echo "      SynthSeg on the SWI (already done, skipping)"
-fi
-echo "[2/4] aligning segmentation to SWI"
-python $SC/align_seg.py $S
-echo "[3/4] detecting cSS candidates"
-python $SC/detect_css.py $S -2.5 85 3 || { rc=$?
-  [ $rc -eq 3 ] && echo "== $S: case cannot be scored (QC insufficient_quality, CSS_QC_STRICT=1) - see review/${S}_qc.json"
-  exit $rc; }
-# v4.19: pial-surface features (incl. curve-vs-patch width) whenever recon-all surfaces exist; recorded only,
-# and a failure here (e.g. the surface/label registration check) never stops the run
-SD=${CSS_SUBJECTS_DIR:-$B/subjects}
-if [ -f $SD/$S/surf/lh.pial ] && [ -f $SD/$S/mri/orig.mgz ] && [ -f $B/work/${S}_swi2t1.lta ]; then
-  echo "[3b] pial-surface features (recon-all surfaces; recorded only)"
-  python $SC/surface_features.py $S || echo "      WARNING: surface_features.py failed - detection results are unaffected"
-fi
-# v5.0: trained ranking model, only when one exists AND the study is in the dev split (labels/study_meta.csv).
-# Test-split studies are ranked by hand with the frozen model; studies without a split are not ranked.
-if [ -f $B/review/ranker_model.json ]; then
-  SPLIT=$(python -c "import pandas as pd,sys; m=pd.read_csv(sys.argv[1],dtype=str); m=m[m.study_id==sys.argv[2]]; print(m.split.iloc[0] if len(m) else '')" \
-          $B/labels/study_meta.csv $S 2>/dev/null || true)
-  if [ "$SPLIT" = "dev" ]; then
-    echo "[3c] trained ranking model (rank_candidates.py; dev split)"
-    python $SC/rank_candidates.py $S || echo "      WARNING: rank_candidates.py did not rank $S - the score_v4 order stands"
-  else
-    echo "[3c] ranking model not applied: $S split is '${SPLIT:-unassigned}' (only dev studies are ranked automatically)"
-  fi
-fi
-if [ -z "$NOVIEW" ]; then
-  echo "[4/4] opening viewer"
-  freeview -v $B/data/${S}_swi.nii \
-    $B/review/${S}_candidates.nii.gz:colormap=lut:opacity=0.6 > /dev/null 2>&1 &
-fi
-echo ""
-echo "NEXT: python $SC/review_css.py $S          (interactive review of ALL candidates + score)"
-echo "      or: python $SC/export_review.py $S 40 | pbcopy    (paste into the workbook)"
-```
-
 ## scripts/prep_anat.sh
 
-```bash
+````bash
 #!/bin/zsh
 # Bring T1 (and FLAIR) anatomy onto the SWI grid (v4).
 # usage: prep_anat.sh SUBJECT_ID --t1 T1.nii(.gz) [--flair FLAIR.nii(.gz)] [--recon]
@@ -250,11 +130,11 @@ echo "  freeview -v $SWI $W/${S}_t1seg_swispace.nii.gz:colormap=lut:opacity=0.3"
      "$( [ -n "$FL" ] && echo "$W/${S}_flair_swispace.nii.gz:visible=0" )" \
      "$( [ -n "$A2" ] && echo "$W/${S}_a2009s_swispace.nii.gz:colormap=lut:opacity=0.3:visible=0" )"
 echo "If misaligned: delete work/${S}_t1seg_swispace.nii.gz and the pipeline falls back to SWI SynthSeg."
-```
+````
 
 ## scripts/run_all.sh
 
-```bash
+````bash
 #!/bin/zsh
 # Batch: run several patients without opening the viewer.
 # usage: run_all.sh P006 P007 P008        (expects data/<ID>_swi.nii already imported)
@@ -271,31 +151,253 @@ for s in "$@"; do
     echo "FAILED - see $B/logs/${s}_run.log"; tail -5 $B/logs/${s}_run.log
   fi
 done
-```
+````
 
-## install.sh
+## scripts/run_css.sh
 
-```bash
+````bash
 #!/bin/zsh
-# usage (from the package root):  zsh install.sh
-B=$HOME/css_project; SRC=$(cd "$(dirname "$0")" && pwd)/scripts
-mkdir -p $B/scripts $B/data $B/synthseg $B/work $B/review $B/results
-if ls $B/scripts/*.py >/dev/null 2>&1; then
-  BK=$B/scripts/backup_$(date +%Y%m%d_%H%M); mkdir -p $BK; cp $B/scripts/*.py $B/scripts/*.sh $BK/ 2>/dev/null
-  echo "old scripts backed up to $BK"
-fi
-# v4.18.3: copy to a temporary name, then rename - a batch that is running keeps reading its old file
-# (cp over a running zsh script changes it under the shell's feet)
-for f in $SRC/*.py $SRC/*.sh $SRC/BUILD; do   # BUILD: commit id, filled in by git archive (v5.1)
-  t=$B/scripts/.$(basename $f).new; cp $f $t && chmod +x $t && mv -f $t $B/scripts/$(basename $f) || { echo "install FAILED at $f"; exit 1; }
+# One patient, start to finish (up to review).
+# usage: run_css.sh SUBJECT_ID [path/to/swi.nii(.gz)] [--nostrip] [--t1 T1.nii] [--flair FLAIR.nii] [--recon]
+#                   [--phase PHASE.nii]
+#   - with a SWI path: imports the scan; skull-strips it (with --t1: by the T1 brain labels after registration,
+#     v5.2.5; without a T1: SynthStrip, which can need > 30 GB of memory) unless --nostrip
+#     (use --nostrip only for scans that are already skull-stripped)
+#   - SWI = the processed SWI (or magnitude) series, NOT the minIP and NOT the phase map
+#   - --t1 / --flair / --recon: v4 anatomy from T1 (and FLAIR), see prep_anat.sh
+#     (T1 labels are re-used on later runs; SynthSeg on the SWI is then skipped)
+#   - --phase: the SWI PHASE series of the same acquisition (for reading only: the reviewer shows the
+#     filtered phase, where calcium has the opposite sign to veins/blood products)
+#   - set NOVIEW=1 to skip opening freeview (batch use)
+set -e
+S=$1; shift 2>/dev/null || true
+SRC=""; STRIP=1; ANAT=(); PHASE=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --nostrip) STRIP=0; shift;;
+    --t1|--flair) ANAT+=("$1" "$2"); shift 2;;
+    --recon) ANAT+=("$1"); shift;;
+    --phase) PHASE=$2; shift 2;;
+    -*) echo "run_css.sh: unknown option $1"; exit 1;;
+    *) SRC=$1; shift;;
+  esac
 done
-grep -q 'css_project/scripts' ~/.zshrc || echo 'export PATH="$HOME/css_project/scripts:$PATH"' >> ~/.zshrc
-echo "installed to $B/scripts  - open a new Terminal window"
-```
+B=${CSS_BASE:-$HOME/css_project}; SC=$B/scripts
+if [ -z "$S" ]; then
+  echo "usage: run_css.sh SUBJECT_ID [swi.nii] [--nostrip] [--t1 T1.nii] [--flair FLAIR.nii] [--recon]"; exit 1
+fi
+mkdir -p $B/data $B/synthseg $B/work $B/review
+# v5.2.5: with a T1 the SWI is NOT skull-stripped with SynthStrip (it peaked at 64 GB on a 2 mm SWI and froze the
+# user's 36 GB Mac): it is imported whole-head, registered as it is, and masked with the T1 brain labels after
+# prep_anat.sh (swi_mask_from_t1.py). CSS_SWI_SKULLSTRIP=synthstrip restores the old SynthStrip route.
+HAS_T1=0; for a_ in "${ANAT[@]}"; do [ "$a_" = "--t1" ] && HAS_T1=1; done
+MASK_T1=0
+if [ -n "$SRC" ] && [ $STRIP -eq 1 ] && [ $HAS_T1 -eq 1 ] && [ "${CSS_SWI_SKULLSTRIP:-t1}" != synthstrip ]; then MASK_T1=1; fi
+if [ -n "$SRC" ] && [ $MASK_T1 -eq 1 ]; then
+  echo "[0/4] importing (whole head; skull-stripped with the T1 brain labels after registration) $SRC"
+  mri_convert "$SRC" $B/work/${S}_raw.nii.gz > /dev/null || { echo "ERROR: mri_convert could not read $SRC"; exit 1; }
+  mri_convert $B/work/${S}_raw.nii.gz $B/data/${S}_swi.nii > /dev/null || { echo "ERROR: mri_convert failed on the SWI"; exit 1; }
+elif [ -n "$SRC" ]; then
+  if [ $STRIP -eq 1 ]; then
+    echo "[0/4] importing + skull-stripping (SynthStrip, CSF kept) $SRC"
+    mri_convert "$SRC" $B/work/${S}_raw.nii.gz > /dev/null || { echo "ERROR: mri_convert could not read $SRC"; exit 1; }
+    # v4.18.3: errors were silent under set -e (LEMON P203 stopped here with no message); keep SynthStrip's output
+    mri_synthstrip -i $B/work/${S}_raw.nii.gz -o $B/data/${S}_swi.nii -t ${CSS_THREADS:-4} \
+      -m $B/work/${S}_brainmask.nii.gz > $B/work/${S}_synthstrip.log 2>&1 \
+      || { echo "ERROR: mri_synthstrip failed on the SWI (exit $?) - last lines of $B/work/${S}_synthstrip.log:"; tail -5 $B/work/${S}_synthstrip.log; exit 1; }
+  else
+    echo "[0/4] importing (no skull-strip) $SRC"
+    mri_convert "$SRC" $B/data/${S}_swi.nii > /dev/null
+  fi
+fi
+if [ ! -f $B/data/${S}_swi.nii ]; then
+  echo "ERROR: $B/data/${S}_swi.nii not found - give the scan path as 2nd argument"; exit 1
+fi
+if [ -n "$PHASE" ]; then
+  echo "[0a] importing SWI phase (for the reviewer)"
+  mri_convert "$PHASE" $B/data/${S}_phase.nii.gz > /dev/null
+fi
+if [ ${#ANAT[@]} -gt 0 ]; then
+  echo "[0b] T1/FLAIR anatomy -> SWI grid"
+  CSS_SWI_HEAD=$MASK_T1 zsh $SC/prep_anat.sh $S "${ANAT[@]}" || { echo "ERROR: prep_anat.sh failed - stopping (old labels would be used)"; exit 1; }
+  if [ $MASK_T1 -eq 1 ]; then
+    echo "[0c] skull-stripping the SWI with the T1 brain labels (no SynthStrip)"
+    python $SC/swi_mask_from_t1.py $S || { echo "ERROR: swi_mask_from_t1.py failed - the SWI is still whole-head; stopping"; exit 1; }
+  fi
+fi
+T1SEG=$B/work/${S}_t1seg_swispace.nii.gz
+echo "[1/4] segmentation"
+if [ -f $T1SEG ] && [ ! $B/data/${S}_swi.nii -nt $T1SEG ]; then
+  echo "      using T1-derived labels ($T1SEG)"
+# re-run when missing OR when the SWI was re-imported after the last segmentation (v4 fix:
+# v3 silently reused a stale segmentation for a different scan with the same ID)
+elif [ ! -f $B/synthseg/${S}_seg.nii.gz ] || [ $B/data/${S}_swi.nii -nt $B/synthseg/${S}_seg.nii.gz ]; then
+  echo "      SynthSeg on the SWI (no T1 labels - consider --t1 for better anatomy)"
+  mri_synthseg --i $B/data/${S}_swi.nii --o $B/synthseg/${S}_seg.nii.gz \
+    --parc --robust --threads ${CSS_THREADS:-8} > /dev/null
+else
+  echo "      SynthSeg on the SWI (already done, skipping)"
+fi
+echo "[2/4] aligning segmentation to SWI"
+python $SC/align_seg.py $S
+echo "[3/4] detecting cSS candidates"
+python $SC/detect_css.py $S -2.5 85 3 || { rc=$?
+  [ $rc -eq 3 ] && echo "== $S: case cannot be scored (QC insufficient_quality, CSS_QC_STRICT=1) - see review/${S}_qc.json"
+  exit $rc; }
+# v4.19: pial-surface features (incl. curve-vs-patch width) whenever recon-all surfaces exist; recorded only,
+# and a failure here (e.g. the surface/label registration check) never stops the run
+SD=${CSS_SUBJECTS_DIR:-$B/subjects}
+if [ -f $SD/$S/surf/lh.pial ] && [ -f $SD/$S/mri/orig.mgz ] && [ -f $B/work/${S}_swi2t1.lta ]; then
+  echo "[3b] pial-surface features (recon-all surfaces; recorded only)"
+  python $SC/surface_features.py $S || echo "      WARNING: surface_features.py failed - detection results are unaffected"
+fi
+# v5.0: trained ranking model, only when one exists AND the study is in the dev split (labels/study_meta.csv).
+# Test-split studies are ranked by hand with the frozen model; studies without a split are not ranked.
+if [ -f $B/review/ranker_model.json ]; then
+  SPLIT=$(python -c "import pandas as pd,sys; m=pd.read_csv(sys.argv[1],dtype=str); m=m[m.study_id==sys.argv[2]]; print(m.split.iloc[0] if len(m) else '')" \
+          $B/labels/study_meta.csv $S 2>/dev/null || true)
+  if [ "$SPLIT" = "dev" ]; then
+    echo "[3c] trained ranking model (rank_candidates.py; dev split)"
+    python $SC/rank_candidates.py $S || echo "      WARNING: rank_candidates.py did not rank $S - the score_v4 order stands"
+  else
+    echo "[3c] ranking model not applied: $S split is '${SPLIT:-unassigned}' (only dev studies are ranked automatically)"
+  fi
+fi
+if [ -z "$NOVIEW" ]; then
+  echo "[4/4] opening viewer"
+  freeview -v $B/data/${S}_swi.nii \
+    $B/review/${S}_candidates.nii.gz:colormap=lut:opacity=0.6 > /dev/null 2>&1 &
+fi
+echo ""
+echo "NEXT: python $SC/review_css.py $S          (interactive review of ALL candidates + score)"
+echo "      or: python $SC/export_review.py $S 40 | pbcopy    (paste into the workbook)"
+````
+
+## scripts/run_lemon.sh
+
+````bash
+#!/bin/zsh
+# Batch for OpenNeuro ds000221 (MPI-Leipzig LEMON): healthy volunteers with gradient-echo magnitude + phase,
+# MP2RAGE T1 and 3-D FLAIR. Use: cSS-NEGATIVE CONTROL scans (false positives per scan, robustness) - 'dev' only.
+# usage: run_lemon.sh LEMON_DIR [--download] [--parallel N] [--subjects "sub-010239 sub-010255"] [--summary]
+#   LEMON_DIR   folder with sub-XXXXXX/ses-01/anat/ (created by --download); no spaces in the path
+#   --download  fetch the 4 files per subject from the public OpenNeuro S3 bucket (curl; skips files present)
+#   --parallel  subjects processed at the same time (default 1 since v4.19.1; 2 crashed a laptop)
+#   --threads   CPU threads per subject for recon-all / SynthSeg (default 4; CSS_THREADS)
+#   --subjects  default: the 26 volunteers aged 55-75 with GRE + 3-D FLAIR
+#   --summary   only print the summary table of finished subjects
+#   --force     re-run subjects that already finished (default: skipped, so an interrupted batch can be restarted)
+# Per subject: make_swi.py (magnitude + phase -> SWI); mp2rage_robust.py (UNI + INV1 + INV2 -> T1 with a clean
+#   background: the noisy MP2RAGE background made recon-all fail on P201) -> run_css.sh ID swi --t1 --flair --recon
+#   --phase; if recon-all still fails: the same without --recon (SynthSeg on the T1 + mri_coreg; no surfaces)
+#   -> study_meta.py ID --split dev. IDs P201... are fixed in labels/id_map.csv (study code <-> source id).
+# Logs: logs/ID_run.log. Summary: review/lemon_summary.csv.
+# These volunteers are PRESUMED cSS-negative (community volunteers, not expert-read) - never claim more.
+B=${CSS_BASE:-$HOME/css_project}; SC=$B/scripts
+DEFAULT="sub-010239 sub-010255 sub-010257 sub-010258 sub-010146 sub-010148 sub-010152 sub-010267 sub-010268
+sub-010272 sub-010275 sub-010276 sub-010277 sub-010278 sub-010279 sub-010280 sub-010282 sub-010283 sub-010284
+sub-010285 sub-010286 sub-010287 sub-010288 sub-010289 sub-010290 sub-010291"
+FILES="acq-mag_GRE acq-phase_GRE acq-mp2rage_T1w inv-1_mp2rage inv-2_mp2rage acq-highres_FLAIR"
+URL=https://s3.amazonaws.com/openneuro.org/ds000221
+
+if [ "$1" = "--one" ]; then                      # internal: one subject (run in parallel by xargs)
+  s=$2; ID=$3; p=$LEMON_DIR/$s/ses-01/anat/${s}_ses-01
+  mkdir -p $B/work $B/logs
+  if [ -z "$LEMON_FORCE" ] && grep -q "^== $ID done" $B/logs/${ID}_run.log 2>/dev/null; then
+    echo "SKIP   $ID ($s) - already done (--force to re-run)"; exit 0
+  fi
+  if ( echo "== $ID = $s ($(date))"
+       for f in $(echo $FILES); do [ -s ${p}_${f}.nii.gz ] || { echo "ERROR: missing ${p}_${f}.nii.gz"; exit 1; }; done
+       python $SC/make_swi.py ${p}_acq-mag_GRE.nii.gz ${p}_acq-phase_GRE.nii.gz $B/work/${ID}_gre_swi.nii.gz || exit 1
+       python $SC/mp2rage_robust.py ${p}_acq-mp2rage_T1w.nii.gz ${p}_inv-1_mp2rage.nii.gz ${p}_inv-2_mp2rage.nii.gz \
+         $B/work/${ID}_t1_robust.nii.gz || exit 1
+       ANAT="recon-all"
+       if ! NOVIEW=1 zsh $SC/run_css.sh $ID $B/work/${ID}_gre_swi.nii.gz --t1 $B/work/${ID}_t1_robust.nii.gz \
+              --flair ${p}_acq-highres_FLAIR.nii.gz --recon --phase ${p}_acq-phase_GRE.nii.gz; then
+         echo "== recon-all route failed for $ID - falling back to SynthSeg on the T1 (no surfaces, mri_coreg)"
+         [ -d $B/subjects/$ID ] && mv $B/subjects/$ID $B/subjects/${ID}_failed_$(date +%Y%m%d_%H%M%S)
+         ANAT="SynthSeg fallback (recon-all failed)"
+         NOVIEW=1 zsh $SC/run_css.sh $ID $B/work/${ID}_gre_swi.nii.gz --t1 $B/work/${ID}_t1_robust.nii.gz \
+           --flair ${p}_acq-highres_FLAIR.nii.gz --phase ${p}_acq-phase_GRE.nii.gz || exit 1
+       fi
+       python $SC/study_meta.py $ID --split dev \
+         --note "LEMON ds000221 $s healthy volunteer: PRESUMED cSS-negative, not expert-read; GRE->SWI by make_swi.py; T1 robust MP2RAGE; anatomy $ANAT" || exit 1
+       echo "== $ID done ($(date))" ) > $B/logs/${ID}_run.log 2>&1; then
+    echo "OK     $ID ($s)"
+  else
+    echo "FAILED $ID ($s) - see logs/${ID}_run.log"; tail -3 $B/logs/${ID}_run.log
+  fi
+  exit 0
+fi
+
+L=$1; shift 2>/dev/null || true
+[ -n "$L" ] || { sed -n 2,14p $0; exit 1; }
+DL=0; PAR=1; SUBS=$DEFAULT; SUMONLY=0; export CSS_THREADS=${CSS_THREADS:-4}
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --download) DL=1; shift;;
+    --parallel) PAR=$2; shift 2;;
+    --threads) export CSS_THREADS=$2; shift 2;;
+    --subjects) SUBS=$2; shift 2;;
+    --summary) SUMONLY=1; shift;;
+    --force) export LEMON_FORCE=1; shift;;
+    *) echo "run_lemon.sh: unknown option $1"; exit 1;;
+  esac
+done
+case "$L" in *" "*) echo "ERROR: no spaces in LEMON_DIR please ($L)"; exit 1;; esac
+mkdir -p $L $B/labels $B/logs $B/review
+export LEMON_DIR=$(cd $L && pwd)
+
+# fixed study codes: reuse labels/id_map.csv, append new subjects as the next P2xx
+MAP=$B/labels/id_map.csv
+[ -f $MAP ] || echo "study_id,source_dataset,source_id" > $MAP
+for s in $(echo $SUBS); do
+  if ! grep -q ",ds000221,$s\$" $MAP; then
+    n=$(grep -c ",ds000221," $MAP); printf "P%03d,ds000221,%s\n" $((201 + n)) $s >> $MAP
+  fi
+done
+
+if [ $SUMONLY -eq 0 ]; then
+  if [ $DL -eq 1 ]; then
+    for s in $(echo $SUBS); do for f in $(echo $FILES); do
+      o=$LEMON_DIR/$s/ses-01/anat/${s}_ses-01_${f}.nii.gz; mkdir -p $(dirname $o)
+      [ -s $o ] || curl -fsSL -o $o $URL/$s/ses-01/anat/${s}_ses-01_${f}.nii.gz || { echo "download FAILED: $s $f"; rm -f $o; }
+    done; done
+  fi
+  echo "LEMON: $(echo $SUBS | wc -w | tr -d ' ') subjects, $PAR at a time, $CSS_THREADS threads, low priority (nice); recon-all ~1-3 h each (progress: tail -f $B/logs/<ID>_run.log)"
+  for s in $(echo $SUBS); do echo "$s $(grep ",ds000221,$s\$" $MAP | cut -d, -f1)"; done | xargs -n 2 -P $PAR nice -n 15 zsh $0 --one
+fi
+
+python - "$B" $(echo $SUBS) <<'EOF'
+import sys, os, json, pandas as pd
+B = sys.argv[1]; subs = sys.argv[2:]
+m = pd.read_csv(f"{B}/labels/id_map.csv"); m = m[m.source_dataset == "ds000221"].set_index("source_id")
+rows = []
+for s in subs:
+    if s not in m.index: continue
+    i = m.loc[s, "study_id"]; r = dict(study_id=i, source_id=s)
+    c, x, q = (f"{B}/review/{i}_{k}" for k in ("candidates.csv", "excluded.csv", "qc.json"))
+    if not os.path.exists(c): r["status"] = "not run / failed"; rows.append(r); continue
+    cd = pd.read_csv(c); r.update(status="done", candidates=len(cd), excluded=len(pd.read_csv(x)) if os.path.exists(x) else None)
+    if "review_tier" in cd: r.update(tier1=int((cd.review_tier == 1).sum()), tier2=int((cd.review_tier == 2).sum()))
+    if os.path.exists(q):
+        qq = json.load(open(q)); r.update(qc=qq.get("status"), label_shift_mm=qq.get("label_shift_mm"), anatomy=qq.get("anatomy"))
+    rows.append(r)
+d = pd.DataFrame(rows)
+if len(d):
+    d.to_csv(f"{B}/review/lemon_summary.csv", index=False)
+    print(d.to_string(index=False))
+    ok = d[d.status == "done"]
+    if len(ok):
+        print(f"\ncandidates per PRESUMED-negative scan: median {ok.candidates.median():g}, range {ok.candidates.min():g}-"
+              f"{ok.candidates.max():g} (n={len(ok)}); QC ok in {int((ok.get('qc') == 'ok').sum())}/{len(ok)}. They count as "
+              f"false positives only if an expert confirms the scan is cSS-free.")
+EOF
+````
 
 ## scripts/agreement.py
 
-```python
+````python
 #!/usr/bin/env python3
 """Reproducibility statistics as in van Harten et al. (NeuroImage Clin 2023;38:103447).
 usage: agreement.py --a DIR_A --b DIR_B [--col grown_volume_mm3] [--plot out.png]
@@ -385,11 +487,11 @@ if arg("--plot"):
     for v, ls in ((bias, "-"), (bias - 1.96 * sd, "--"), (bias + 1.96 * sd, "--")): ax[1].axhline(v, color="k", ls=ls, lw=0.8)
     ax[1].set_xlabel("mean of A and B"); ax[1].set_ylabel("A - B"); ax[1].set_title("Bland-Altman")
     fig.tight_layout(); fig.savefig(ex(arg("--plot")), dpi=150); print(f"plot -> {arg('--plot')}")
-```
+````
 
 ## scripts/align_seg.py
 
-```python
+````python
 """Labels on the SWI grid -> work/ID_seg_swispace.nii.gz (masked to SWI coverage).
 Source, best first:
   work/ID_t1seg_swispace.nii.gz  T1-derived labels already in SWI space (prep_anat.sh, v4)
@@ -416,11 +518,110 @@ out = nib.Nifti1Image(seg_swi, swi.affine, swi.header); out.set_data_dtype(np.in
 nib.save(out, f"{base}/work/{subj}_seg_swispace.nii.gz")
 print(f"{subj}: labels from {os.path.basename(src)}; labelled voxels before mask {n_before:,}, "
       f"after mask {(seg_swi>0).sum():,}")
-```
+````
+
+## scripts/audit_case.py
+
+````python
+#!/usr/bin/env python3
+"""Per-case audit report (v5.1): what went in, what the detector did with every object, and what to distrust.
+usage: audit_case.py SUBJECT            -> prints the report, writes review/ID_audit.json
+Reads only existing outputs (review/ID_manifest.json, ID_qc.json, candidates / excluded CSVs, work/ID_dropped.csv)
+and image headers; changes nothing. Sections:
+  inputs       file, sha256 (from the manifest), shape, voxel size, orientation, obliquity, S-I array axis
+  acquisition  sequence type (SWI / T2*-GRE / SWI built from GRE by make_swi.py / unknown), field, TE, TR, slice
+               thickness, vendor (dcm2niix JSON, if present)
+  anatomy      T1 route, FLAIR / phase availability and FRESHNESS against the SWI, registration method, cost,
+               label shift, edge agreement, QC status and reasons
+  fates        raw components -> not generated (no strong seed) -> pieces -> merged objects -> dropped per gate /
+               excluded per rule / shown; the counts must add up (the detector stops otherwise, exit 4)
+Research software: expert review of every candidate remains required; not validated for clinical use."""
+import sys, os, json, glob, nibabel as nib, numpy as np, pandas as pd
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from css_common import base as _base, stale_against
+
+if len(sys.argv) < 2: sys.exit(__doc__)
+s = sys.argv[1]; B = _base()
+J = lambda p: json.load(open(p)) if os.path.exists(p) else {}
+man, qc = J(f"{B}/review/{s}_manifest.json"), J(f"{B}/review/{s}_qc.json")
+det = man.get("detect", {})
+if not det: sys.exit(f"{s}: no detector run recorded (review/{s}_manifest.json) - run detect_css.py first")
+swi_p = f"{B}/data/{s}_swi.nii"
+rep = dict(subject=s, schema_version=man.get("schema_version"), build=(det.get("environment") or {}).get("build"),
+           detector=det.get("pipeline_version"), run_at=det.get("run_at"), parameters=det.get("parameters"),
+           note="research software; expert review of every candidate remains required; not validated for clinical use")
+# inputs
+def geom(p):
+    try: im = nib.load(p)
+    except Exception: return None
+    a = im.affine; vox = [round(float(v), 3) for v in im.header.get_zooms()[:3]]
+    si = int(np.argmax(np.abs(a[2, :3]))); n = a[:3, si] / np.linalg.norm(a[:3, si])
+    return dict(shape=list(im.shape[:3]), voxel_mm=vox, orientation="".join(nib.aff2axcodes(a)), si_axis=si,
+                obliquity_deg=round(float(np.degrees(np.arccos(min(1.0, abs(n[2]))))), 1))
+inp = det.get("inputs", {})
+rep["inputs"] = {k: dict(path=v.get("path"), sha256=(v.get("sha256") or "")[:16], **(geom(v["path"]) or {}))
+                 for k, v in inp.items() if k in ("swi", "labels", "t1_labels", "flair", "phase", "destrieux")}
+# acquisition
+acq = qc.get("acquisition") or {}
+if acq.get("sequence"): seq = acq["sequence"]
+elif os.path.exists(f"{B}/work/{s}_gre_swi.nii.gz"): seq = "SWI built from GRE magnitude + phase (make_swi.py)"
+else: seq = "unknown (no dcm2niix JSON in raw/ID/SWI)"
+rep["acquisition"] = dict(sequence=seq, field_T=acq.get("field_T"), TE_ms=acq.get("TE_ms"), TR_ms=acq.get("TR_ms"),
+                          slice_thickness_mm=acq.get("slice_thickness_mm"), vendor=acq.get("manufacturer"))
+# anatomy, freshness
+fresh = {}
+for name, p in (("T1 labels", f"{B}/work/{s}_t1seg_swispace.nii.gz"), ("FLAIR", f"{B}/work/{s}_flair_swispace.nii.gz"),
+                ("phase", f"{B}/data/{s}_phase.nii.gz"), ("Destrieux labels", f"{B}/work/{s}_a2009s_swispace.nii.gz")):
+    fresh[name] = "absent" if not os.path.exists(p) else ("STALE (older than the SWI) - ignored" if stale_against(p, [swi_p]) else "fresh")
+sp = f"{B}/review/{s}_surface_features.csv"
+fresh["surface features"] = "absent" if not os.path.exists(sp) else \
+    ("STALE (older than this detection) - ignored" if stale_against(sp, [f"{B}/review/{s}_candidates.nii.gz"]) else "fresh")
+reg = qc.get("registration") or {}
+rep["anatomy"] = dict(route=qc.get("anatomy"), inputs=fresh, registration=reg.get("method"), registration_cost=reg.get("cost"),
+                      label_shift_mm=qc.get("label_shift_mm"), edge_bias_mm=qc.get("edge_bias_mm"),
+                      edge_scatter_mm=qc.get("edge_scatter_mm"), edge_n=qc.get("edge_n"),
+                      qc_status=qc.get("status"), qc_reasons=qc.get("reasons"), qc_notes=qc.get("notes"),
+                      phase_rule=(det.get("parameters") or {}).get("phase"))
+# fates
+F = det.get("fates") or {}
+dp, xp, cp = f"{B}/work/{s}_dropped.csv", f"{B}/review/{s}_excluded.csv", f"{B}/review/{s}_candidates.csv"
+nd = len(pd.read_csv(dp)) if os.path.exists(dp) else None
+nx = len(pd.read_csv(xp)) if os.path.exists(xp) else None
+nc = len(pd.read_csv(cp)) if os.path.exists(cp) else None
+check = None
+if F.get("objects") is not None and None not in (nd, nx, nc):
+    check = "ok" if (F.get("qc_blocked") or nd + nx + nc) == F["objects"] else \
+        f"MISMATCH: {F['objects']} objects vs {nd} dropped + {nx} excluded + {nc} shown (files changed after the run?)"
+rep["fates"] = dict(F, files=dict(dropped=nd, excluded=nx, shown=nc), consistency=check)
+json.dump(rep, open(f"{B}/review/{s}_audit.json", "w"), indent=2, default=str)
+
+# printed report
+print(f"{s}: audit (schema {rep['schema_version']}, build {rep['build']}, detector {rep['detector']}, run {rep['run_at']})")
+print("  research software - expert review of every candidate remains required; not validated for clinical use")
+for k, v in rep["inputs"].items():
+    print(f"  input {k:10s} {v.get('orientation', '?')} {v.get('voxel_mm')} mm, obliquity {v.get('obliquity_deg')} deg, "
+          f"S-I axis {v.get('si_axis')}, sha256 {v.get('sha256')}")
+a = rep["acquisition"]
+print(f"  acquisition: {a['sequence']}; field {a['field_T']} T, TE {a['TE_ms']} ms, slice {a['slice_thickness_mm']} mm, vendor {a['vendor']}")
+an = rep["anatomy"]
+print(f"  anatomy: {an['route']}; " + ", ".join(f"{k} {v}" for k, v in an["inputs"].items()))
+print(f"  registration: {an['registration']} (cost {an['registration_cost']}); label shift {an['label_shift_mm']} mm, "
+      f"edge bias {an['edge_bias_mm']} mm, scatter {an['edge_scatter_mm']} mm (n {an['edge_n']})")
+print(f"  QC: {an['qc_status']}" + (f" - {'; '.join(an['qc_reasons'])}" if an["qc_reasons"] else "")
+      + (f" [notes: {'; '.join(an['qc_notes'])}]" if an.get("qc_notes") else ""))
+print(f"  phase rule: {an['phase_rule']}")
+if F:
+    print(f"  fates: {F.get('raw_components')} raw components -> {F.get('not_generated_unseeded')} not generated (no strong seed) "
+          f"-> {F.get('pieces_before_merge')} pieces -> {F.get('objects')} objects")
+    print(f"         dropped by gate {F.get('dropped_by_gate')}; excluded by rule {F.get('excluded_by_rule')}; "
+          f"shown {F.get('shown')}; QC-blocked {F.get('qc_blocked')}  [{check}]")
+else:
+    print("  fates: not recorded (detector run before v5.1)")
+````
 
 ## scripts/check_known.py
 
-```python
+````python
 #!/usr/bin/env python3
 """Safety check: are KNOWN lesions still detected after a detector change?
 usage: check_known.py SUBJECT --old OLD_candidates.nii.gz --ids 3,4,5
@@ -457,11 +658,764 @@ for i in [int(x) for x in arg("--ids").split(",") if x.strip()]:
           ("; " if c and x else "") + ("; ".join(f"EXCLUDED ({xr.get(v, '?')})" for v in x) if x else "")
     print(f"known lesion #{i}: {msg or 'NOT DETECTED'}")
 print(f"{subj}: {kept} of {len(arg('--ids').split(','))} known lesions still shown for review")
-```
+````
+
+## scripts/classify_surface_patches.py
+
+````python
+#!/usr/bin/env python3
+"""cSS-versus-vein ranking from surface-aligned patches (v5.2, master plan Stage 3). Research software: the output
+ranks candidates for expert review; it is not a diagnosis and not a calibrated probability.
+usage:
+  classify_surface_patches.py features SUBJECT [SUBJECT ...]
+        review/ID_patches/*.npz (surface_aligned_patch.py) -> review/ID_patch_features.csv
+  classify_surface_patches.py train [--split dev] [--source consensus|reader:NAME] [--negatives vein|all]
+        [--min-studies 5] [--l2 1.0] [--no-nested] [--out review/surface_patch_model.json]
+  classify_surface_patches.py predict SUBJECT [SUBJECT ...] [--model review/surface_patch_model.json]
+        [--allow-training-study]          -> review/ID_patch_predictions.csv
+  classify_surface_patches.py lopo-manifest MANIFEST.csv [--l2 1.0]
+        explicit patch list (columns patch_path, study_id, label = cSS | vein code): LOPO by study, no model saved
+Library: read_manifest / build_matrix / grouped_lopo (same features, same css_model LOPO as 'train').
+Features per channel, in a FIXED order (swi, phase, flair, labels): validity fraction, robust-z distribution
+(mean, sd, p5, p50, p95, min, max), mean |gradient| along u / v / n, and 8-bin profiles (mean, sd) along each axis;
+for the label channel the tissue share in 8 bins along the normal. Every channel adds <ch>_missing and
+<ch>_valid_fraction: a missing phase / FLAIR is information and is never a zero image. Optional geometry and vessel
+columns are read from review/ID_candidates|excluded.csv (surface / vessel topology, v5.1.x).
+Training: labelled objects of the DEV split only (labels/study_meta.csv; --split test is refused), target cSS (1)
+vs vein (VS / VC / VT / VX / V; --negatives all = every non-cSS label), 'uncertain' left out. Class-balanced L2
+logistic regression, leave-one-patient-out with nested L2 selection (css_model.py); folds whose training part has
+one class are skipped and reported. Ablations on the same folds: A swi, B swi+phase, C swi+labels+surface geometry,
+D swi+vessel topology, E swi+flair, F swi+phase+labels+geometry+vessel, G everything. Reported per ablation: AUC,
+PR-AUC, Brier, sensitivity at 1 FP per scan, with patient-bootstrap intervals for AUC. Needs >= --min-studies studies
+and both classes, else it refuses. The model JSON records the feature schema, channel order, preprocessing,
+training studies, fold log, out-of-fold predictions, label-file hash, build and a model hash."""
+import sys, os, json, argparse, numpy as np, pandas as pd
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from css_common import base as _base, label_class, sha256, build_id
+import css_model as CM
+
+FEATURE_SCHEMA = "css-patch-features/1.0"
+CHANNELS = ["swi", "phase", "flair", "labels"]
+GEOMETRY = ["pial_dist_mm", "csf_depth_mm", "sulcal_depth_mm", "surface_contact_frac_1mm", "elongation_3d",
+            "compactness_3d", "surf_width_mm", "surf_inradius_mm", "surf_aspect", "geo_length_mm"]
+VESSEL = ["tube_ratio", "local_cont_max_mm", "local_cont_min_mm", "terminal_ends", "local_branch_per10mm",
+          "vessel_wm_mm", "vessel_run_mm", "tortuosity", "cand_radius_med_mm", "net_radius_med_mm"]
+ABLATIONS = {"A_swi": ["swi"], "B_swi_phase": ["swi", "phase"], "C_swi_surface": ["swi", "labels", "geometry"],
+             "D_swi_vessel": ["swi", "vessel"], "E_swi_flair": ["swi", "flair"],
+             "F_swi_phase_surface_vessel": ["swi", "phase", "labels", "geometry", "vessel"],
+             "G_all": ["swi", "phase", "flair", "labels", "geometry", "vessel"]}
+
+
+def robust_z(x, valid):
+    valid = valid & np.isfinite(x); z = np.full(x.shape, np.nan, np.float32)
+    if not valid.any(): return z
+    med = np.median(x[valid]); mad = np.median(np.abs(x[valid] - med))
+    z[valid] = (x[valid] - med) / max(1.4826 * mad, float(np.std(x[valid])), 1e-3)
+    return z
+
+
+def axis_profile(z, valid, axis, bins=8):
+    e = np.linspace(0, z.shape[axis], bins + 1).astype(int); m, s = [], []
+    for lo, hi in zip(e[:-1], e[1:]):
+        sl = [slice(None)] * 3; sl[axis] = slice(lo, max(lo + 1, hi))
+        v = z[tuple(sl)][valid[tuple(sl)]]
+        m.append(float(v.mean()) if len(v) else np.nan); s.append(float(v.std()) if len(v) else np.nan)
+    return m + s
+
+
+def channel_features(name, img, valid):
+    """-> ordered (names, values); img None = channel missing (values NaN, <ch>_missing = 1)"""
+    names = [f"{name}_missing", f"{name}_valid_fraction"]
+    if name == "labels":
+        names += [f"labels_tissue_n{b}" for b in range(8)]
+        if img is None: return names, [1.0, 0.0] + [np.nan] * 8
+        t = ((img > 0) & (img != 24)).astype(np.float32)
+        return names, [0.0, float(valid.mean())] + axis_profile(np.where(valid, t, np.nan), valid, 2)[:8]
+    stats = ["mean", "sd", "p5", "p50", "p95", "min", "max", "grad_u", "grad_v", "grad_n"]
+    prof = [f"prof_{ax}_{k}{b}" for ax in "uvn" for k in ("mean", "sd") for b in range(8)]
+    names += [f"{name}_{s}" for s in stats + prof]
+    if img is None or not valid.any(): return names, [1.0 if img is None else 0.0, float(valid.mean()) if img is not None else 0.0] + [np.nan] * (len(names) - 2)
+    z = robust_z(img.astype(np.float32), valid); v = z[valid]
+    g = [float(np.nanmean(np.abs(gg[valid]))) for gg in np.gradient(np.where(valid, z, 0.0))]
+    vals = [0.0, float(valid.mean()), float(v.mean()), float(v.std()), *map(float, np.percentile(v, [5, 50, 95])),
+            float(v.min()), float(v.max()), *g]
+    for ax in range(3): vals += axis_profile(z, valid, ax)
+    return names, vals
+
+
+def patch_features(npz_path):
+    z = np.load(npz_path, allow_pickle=False); names, vals = [], []
+    for ch in CHANNELS:
+        img = z[f"image_{ch}"] if f"image_{ch}" in z.files else None
+        vm = z[f"valid_{ch}"] if f"valid_{ch}" in z.files else np.zeros(z["valid"].shape, bool)
+        n_, v_ = channel_features(ch, img, np.asarray(vm).astype(bool))
+        names += n_; vals += v_
+    return names, vals, json.loads(str(z["metadata_json"])) if "metadata_json" in z.files else {}
+
+
+POSITIVE = {"cSS", "css", "C"}
+NEGATIVE = {"vein", "surface_vein", "other_vein", "V", "VS", "VC", "VT", "VX"}
+
+
+def read_manifest(path):
+    """explicit patch list -> rows (dicts). Needs columns patch_path, study_id, label; a relative patch_path is read
+    against the manifest's folder, then $CSS_BASE. A patch listed twice (whatever its labels) or a missing file -> ValueError."""
+    d = pd.read_csv(path, dtype=str)
+    need = {"patch_path", "study_id", "label"} - set(d.columns)
+    if need: raise ValueError(f"{path}: missing columns {sorted(need)}")
+    here = os.path.dirname(os.path.abspath(path)); rows, seen = [], set()
+    for _, r in d.iterrows():
+        pp = r.patch_path
+        if not os.path.isabs(pp):
+            pp = next((c for c in (os.path.join(here, pp), os.path.join(_base(), pp)) if os.path.exists(c)), os.path.join(here, pp))
+        key = os.path.realpath(pp)
+        if key in seen: raise ValueError(f"{path}: patch listed more than once: {r.patch_path}")
+        if not os.path.exists(pp): raise ValueError(f"{path}: patch file not found: {r.patch_path}")
+        seen.add(key); rows.append(dict(r, patch_path=pp))
+    return rows
+
+
+def build_matrix(rows):
+    """rows from read_manifest -> (X, y, groups, feature_names, channels). Features of channels present in at least one
+    patch, named '<channel>:<feature>' (e.g. 'phase:missing' = 1 where that patch has no phase). Labels: cSS -> 1,
+    vein codes -> 0; anything else -> ValueError (no silent relabelling)."""
+    bad = sorted({r["label"] for r in rows if r["label"] not in POSITIVE | NEGATIVE})
+    if bad: raise ValueError(f"labels must be cSS or a vein code, got {bad}")
+    feats, present = [], set()
+    for r in rows:
+        names, vals, _ = patch_features(r["patch_path"]); feats.append(vals)
+        z = np.load(r["patch_path"], allow_pickle=False); present |= {ch for ch in CHANNELS if f"image_{ch}" in z.files}
+    keep = [k for k, n in enumerate(names) if n.split("_", 1)[0] in present]
+    X = np.asarray(feats, float)[:, keep]
+    fn = [names[k].replace("_", ":", 1) for k in keep]
+    y = np.array([1 if r["label"] in POSITIVE else 0 for r in rows]); g = np.array([r["study_id"] for r in rows])
+    return X, y, g, fn, sorted(present)
+
+
+def grouped_lopo(X, y, groups, l2=1.0, nested=False):
+    """leave-one-study-out scores + fold log (css_model.lopo: folds by study, one-class training folds skipped)"""
+    return CM.lopo(X, y, groups, l2, nested=nested)
+
+
+auc = CM.auc
+
+
+def cmd_features(subjects, B):
+    for s in subjects:
+        mp = f"{B}/review/{s}_patches.csv"
+        if not os.path.exists(mp): print(f"{s}: no {mp} - run surface_aligned_patch.py first"); continue
+        man = pd.read_csv(mp); rows = []
+        for _, r in man[man.status == "ok"].iterrows():
+            names, vals, meta = patch_features(f"{B}/{r.patch_path}")
+            rows.append(dict(study_id=s, cand_uid=r.cand_uid, list=r.list, obj_id=r.obj_id, **dict(zip(names, vals)),
+                             feature_schema=FEATURE_SCHEMA))
+        pd.DataFrame(rows).to_csv(f"{B}/review/{s}_patch_features.csv", index=False)
+        print(f"{s}: {len(rows)} patch feature rows ({len(names) if rows else 0} features) -> review/{s}_patch_features.csv")
+
+
+def study_table(B, s):
+    p = f"{B}/review/{s}_patch_features.csv"
+    if not os.path.exists(p): return None
+    d = pd.read_csv(p)
+    geo = []
+    for lst in ("candidates", "excluded"):
+        q = f"{B}/review/{s}_{lst}.csv"
+        if os.path.exists(q):
+            g = pd.read_csv(q); g["list"] = lst; g["obj_id"] = g["cand_id" if lst == "candidates" else "excl_id"]; geo.append(g)
+    if geo:
+        g = pd.concat(geo, ignore_index=True)
+        sp = f"{B}/review/{s}_surface_features.csv"
+        if os.path.exists(sp):
+            sf = pd.read_csv(sp); sf["list"] = sf["list"].map({"candidate": "candidates", "excluded": "excluded"})
+            g = g.merge(sf[["list", "obj_id"] + [c for c in GEOMETRY if c in sf.columns and c not in g.columns]],
+                        on=["list", "obj_id"], how="left")
+        keep = ["list", "obj_id"] + [c for c in GEOMETRY + VESSEL if c in g.columns]
+        d = d.merge(g[keep], on=["list", "obj_id"], how="left")
+    return d
+
+
+def columns_for(groups, cols):
+    out = []
+    for gname in groups:
+        if gname in CHANNELS: out += [c for c in cols if c.startswith(gname + "_")]
+        elif gname == "geometry": out += [c for c in GEOMETRY if c in cols]
+        elif gname == "vessel": out += [c for c in VESSEL if c in cols]
+    return out
+
+
+def cmd_train(a, B):
+    if a.split == "test": sys.exit("training on the test split is refused (labels/study_meta.csv): test studies are for reporting")
+    L = f"{B}/labels"; meta = pd.read_csv(f"{L}/study_meta.csv", dtype=str)
+    studies = meta[meta.split == "dev"].study_id if a.split == "dev" else meta[meta.split != "test"].study_id
+    if a.source == "consensus":
+        lab = pd.read_csv(f"{L}/consensus.csv"); lab = lab[lab.method != "pending"].assign(cls=lambda x: x.consensus_class)
+        lab_path = f"{L}/consensus.csv"
+    else:
+        rd = a.source.split(":", 1)[1]; lab = pd.read_csv(f"{L}/candidate_labels.csv"); lab = lab[lab.reader_id == rd]
+        lab = lab[lab.session == lab.groupby("study_id").session.transform("max")].assign(cls=lambda x: x.label.map(label_class))
+        lab_path = f"{L}/candidate_labels.csv"
+    neg = {"surface_vein", "other_vein"} if a.negatives == "vein" else None
+    rows = []
+    for s in studies:
+        d = study_table(B, s)
+        if d is None: continue
+        m = d.merge(lab[["study_id", "cand_uid", "cls"]], on=["study_id", "cand_uid"], how="inner")
+        m = m[(m.cls == "cSS") | (m.cls.isin(neg) if neg else (m.cls != "uncertain"))]
+        if len(m): rows.append(m.assign(y=(m.cls == "cSS").astype(int)))
+    if not rows: sys.exit("no labelled patches in the requested split - extract patches and label studies first")
+    T = pd.concat(rows, ignore_index=True); n_st = T.study_id.nunique()
+    print(f"train: {len(T)} labelled patches ({int(T.y.sum())} cSS, {int((1 - T.y).sum())} "
+          f"{'vein' if neg else 'non-cSS'}) from {n_st} studies, split {a.split}")
+    if n_st < a.min_studies: sys.exit(f"need >= {a.min_studies} labelled studies, have {n_st} - not fitted")
+    if T.y.nunique() < 2: sys.exit("need both cSS and negative labels - not fitted")
+    cols = [c for c in T.columns if c not in ("study_id", "cand_uid", "list", "obj_id", "cls", "y", "feature_schema")]
+    res, oof = {}, {}
+    for name, groups in ABLATIONS.items():
+        fc = [c for c in columns_for(groups, cols) if T[c].notna().any()]
+        if not fc: res[name] = dict(n_features=0, note="no features available"); continue
+        sc, log = CM.lopo(T[fc].values.astype(float), T.y.values, T.study_id.values, a.l2, nested=not a.no_nested)
+        ok = np.isfinite(sc); D = T[ok].assign(s=sc[ok])
+        res[name] = dict(n_features=len(fc), auc=CM.auc(D.y, D.s), auc_ci95=CM.patient_bootstrap(D, lambda x: CM.auc(x.y, x.s), 300),
+                         pr_auc=CM.average_precision(D.y, D.s), brier=CM.brier(D.y, D.s),
+                         sens_at_1fp_per_scan=CM.sens_at_fp(D, "s", 1.0),
+                         folds_skipped=[f["study_id"] for f in log if f["status"] == "skipped"])
+        oof[name] = (sc, log)
+    fc = [c for c in columns_for(ABLATIONS["G_all"], cols) if T[c].notna().any()]
+    Z, med, mu, sd = CM.prep(T[fc].values.astype(float)); w, b = CM.fit_lr(Z, T.y.values, a.l2)
+    model = dict(model_type="logistic_l2_balanced", model_version="v5.2", feature_schema=FEATURE_SCHEMA, channel_order=CHANNELS,
+                 feature_names=fc, weights=[float(x) for x in w], bias=b, imputation_medians=[float(x) for x in med],
+                 training_mean=[float(x) for x in mu], training_scale=[float(x) for x in sd], l2=a.l2,
+                 training_studies=sorted(T.study_id.unique().tolist()), n_patches=int(len(T)), n_css=int(T.y.sum()),
+                 n_negative=int((1 - T.y).sum()), negatives=a.negatives, split=a.split, source=a.source,
+                 label_file=lab_path, label_sha256=sha256(lab_path), ablations=res,
+                 lopo_fold_status=oof["G_all"][1] if "G_all" in oof else [],
+                 lopo_predictions=[dict(study_id=s_, cand_uid=u_, y=int(y_), score=None if not np.isfinite(p_) else round(float(p_), 4))
+                                   for s_, u_, y_, p_ in zip(T.study_id, T.cand_uid, T.y, oof["G_all"][0])] if "G_all" in oof else [],
+                 build=build_id(), research_only=True,
+                 note="ranks candidates for expert review; not calibrated, not clinically validated")
+    model["model_hash"] = CM.model_hash(model)
+    out = a.out or f"{B}/review/surface_patch_model.json"; json.dump(model, open(out, "w"), indent=2, default=float)
+    for name, r in res.items():
+        if "auc" in r:
+            print(f"  {name:28s} n_feat {r['n_features']:4d}  AUC {r['auc']:.3f} {r['auc_ci95']}  PR-AUC {r['pr_auc']:.3f}  "
+                  f"Brier {r['brier']:.3f}  sens@1FP {r['sens_at_1fp_per_scan']:.2f}" + (f"  skipped {r['folds_skipped']}" if r["folds_skipped"] else ""))
+    print(f"-> {out} (model hash {model['model_hash'][:12]}; fitted on {len(model['training_studies'])} dev studies)")
+
+
+def cmd_predict(a, B):
+    mp = a.model or f"{B}/review/surface_patch_model.json"
+    if not os.path.exists(mp): sys.exit(f"no model {mp}")
+    M = json.load(open(mp))
+    if M.get("feature_schema") != FEATURE_SCHEMA or M.get("channel_order") != CHANNELS:
+        sys.exit(f"model feature schema / channel order ({M.get('feature_schema')}, {M.get('channel_order')}) do not match this "
+                 f"script ({FEATURE_SCHEMA}, {CHANNELS}) - retrain")
+    if M.get("model_hash") != CM.model_hash(M): sys.exit("model hash mismatch - the model file was changed after fitting")
+    for s in a.subjects:
+        if s in M["training_studies"] and not a.allow_training_study:
+            print(f"{s}: used to train the model - not predicted (--allow-training-study)"); continue
+        d = study_table(B, s)
+        if d is None: print(f"{s}: no patch features - run 'features' first"); continue
+        miss = [c for c in M["feature_names"] if c not in d.columns]
+        if [c for c in miss if not any(c.startswith(ch + "_") for ch in CHANNELS)]:
+            sys.exit(f"{s}: features the model needs are absent: {miss[:5]} - schema mismatch")
+        X = np.column_stack([pd.to_numeric(d[c], errors="coerce").values if c in d.columns else np.full(len(d), np.nan)
+                             for c in M["feature_names"]])
+        sc = CM.predict(X, np.array(M["imputation_medians"]), np.array(M["training_mean"]), np.array(M["training_scale"]),
+                        np.array(M["weights"]), M["bias"])
+        mm = d[[c for c in d.columns if c.endswith("_missing")]]
+        out = pd.DataFrame(dict(study_id=s, cand_uid=d.cand_uid, list=d.list, obj_id=d.obj_id, css_score=np.round(sc, 4),
+                                missing_modalities=[";".join(c[:-8] for c in mm.columns if r_[c] == 1) for _, r_ in mm.iterrows()],
+                                model_hash=M["model_hash"], model_version=M["model_version"], build=build_id(), research_only=1))
+        out.to_csv(f"{B}/review/{s}_patch_predictions.csv", index=False)
+        print(f"{s}: {len(out)} patch scores -> review/{s}_patch_predictions.csv (model {M['model_hash'][:12]}; research only)")
+
+
+def cmd_lopo_manifest(a):
+    X, y, g, fn, ch = build_matrix(read_manifest(a.manifest))
+    sc, log = grouped_lopo(X, y, g, a.l2); ok = np.isfinite(sc)
+    sk = [f["study_id"] for f in log if f["status"] == "skipped"]
+    print(f"{len(y)} patches ({int(y.sum())} cSS) from {len(set(g))} studies, channels {ch}, {len(fn)} features: LOPO AUC "
+          f"{CM.auc(y[ok], sc[ok]):.3f}, PR-AUC {CM.average_precision(y[ok], sc[ok]):.3f}" + (f"; folds skipped {sk}" if sk else "")
+          + "  [research only, no model saved]")
+
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    f = sub.add_parser("features"); f.add_argument("subjects", nargs="+")
+    t = sub.add_parser("train"); t.add_argument("--split", default="dev", choices=["dev", "all", "test"])
+    t.add_argument("--source", default="consensus"); t.add_argument("--negatives", default="vein", choices=["vein", "all"])
+    t.add_argument("--min-studies", type=int, default=5); t.add_argument("--l2", type=float, default=1.0)
+    t.add_argument("--no-nested", action="store_true"); t.add_argument("--out", default="")
+    p = sub.add_parser("predict"); p.add_argument("subjects", nargs="+"); p.add_argument("--model", default="")
+    p.add_argument("--allow-training-study", action="store_true")
+    q = sub.add_parser("lopo-manifest"); q.add_argument("manifest"); q.add_argument("--l2", type=float, default=1.0)
+    a = ap.parse_args(); B = _base()
+    {"features": lambda: cmd_features(a.subjects, B), "train": lambda: cmd_train(a, B), "predict": lambda: cmd_predict(a, B),
+     "lopo-manifest": lambda: cmd_lopo_manifest(a)}[a.cmd]()
+````
+
+## scripts/cohort.py
+
+````python
+#!/usr/bin/env python3
+"""Import and run a whole cohort of subject folders (v5.2.1). Research software.
+usage: cohort.py import COHORT_DIR [--ids M01,M02] [--dcm2niix dcm2niix]
+       cohort.py run [--ids M01,M02] [--no-recon] [--redo]
+COHORT_DIR holds one folder per study code (M01, M02 ... - codes, never names), each with sub-folders T1, SWI and
+FLAIR (case-insensitive; FLAIR may be missing). A sub-folder may hold DICOM files (converted with dcm2niix) or NIfTI
+files (+ dcm2niix JSON sidecars, copied); either way they land in $CSS_BASE/raw/ID/<T1|SWI|FLAIR> and the runs read
+only that copy (an existing raw/ID/MOD is kept: delete it to re-import).
+'import' picks the series to use and writes review/cohort_import.csv - CHECK IT before 'run':
+  SWI    the processed SWI (description / ImageType SWI), else the magnitude; NEVER the minIP (mIP / MNIP / MIP),
+         never the phase. The phase series of the same folder (ImageType P / PHASE, description Pha) -> --phase,
+         only if it has the SWI's grid.
+  T1     the most isotropic series (smallest largest voxel side; ties: smallest voxel) - an original 3-D sagittal
+  FLAIR  acquisition beats a thick axial MPR reformat; orientation does not matter (registered to the SWI).
+  DICOM  copied into raw/ID/MOD/_dicom first; JPEG-compressed files are decompressed with dcmdjpeg (DCMTK: conda install
+         -n css -c conda-forge dcmtk). A file that does not decode is a broken / partly written file: the series is
+         never converted with gaps: with --repair-missing its missing slices are interpolated from the neighbours
+         (dicom_repair.py; refused above --max-missing-frac 0.2 or --max-missing-run 2 consecutive slices, for phase
+         series and irregular positions), otherwise the series is removed. Flags <mod>_series<N>_repaired_KofM_
+         interpolated / _unrepairable_ / _incomplete_; details in raw/ID/MOD/repair.json, unreadable_files.txt. A
+         volume with missing slices hides lesions without any error; interpolated slices cannot show a lesion that
+         is only in that slice. Browser downloads leave *.crswap files beside broken files (<mod>_N_crswap_files).
+'run' skips a study without a usable SWI or T1 (--allow-no-t1: SWI-only route).
+  flags  dcm2niix_<mod>_<reason> (messages in raw/ID/MOD/dcm2niix.log), swi_slice_gt_2mm, t1_not_3d (largest side > 1.5 mm), several_swi_candidates, no_t1, no_flair, no_phase ...
+'run' calls run_css.sh for every study in the table, ONE AT A TIME (NOVIEW=1; CSS_THREADS, CSS_QC_STRICT,
+CSS_MIXED_REVIEW, CSS_USE_MIMIC are passed through), logs to logs/ID_run.log, skips studies already detected unless
+--redo, and appends the outcome (ok / qc_insufficient / failed + exit code) to review/cohort_run.csv.
+Scoring is NOT automatic: read each case with review_css.py ID (blinded to the expert grades), then
+compare_grades.py."""
+import sys, os, glob, json, shutil, argparse, subprocess, datetime, numpy as np, pandas as pd, nibabel as nib
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from css_common import base as _base
+
+MODS = ("T1", "SWI", "FLAIR")
+DCM2NIIX_EXIT = {1: "error", 2: "no_dicom_found", 4: "corrupt_file", 5: "input_folder_invalid", 6: "output_folder_invalid",
+                 7: "output_read_only", 8: "some_files_failed", 9: "rename_error", 10: "incomplete_volumes"}
+
+
+def transfer_syntax(path):
+    """(0002,0010) Transfer Syntax UID from the DICOM file meta header ('' if not a Part-10 file)"""
+    try:
+        b = open(path, "rb").read(16384)
+    except OSError:
+        return ""
+    if b[128:132] != b"DICM": return ""
+    i = 132
+    while i + 8 <= len(b):
+        grp, el = int.from_bytes(b[i:i + 2], "little"), int.from_bytes(b[i + 2:i + 4], "little")
+        if grp != 2: break
+        vr = b[i + 4:i + 6]
+        if vr in (b"OB", b"OW", b"OF", b"SQ", b"UT", b"UN"):
+            n = int.from_bytes(b[i + 8:i + 12], "little"); v0 = i + 12
+        else:
+            n = int.from_bytes(b[i + 6:i + 8], "little"); v0 = i + 8
+        if el == 0x0010: return b[v0:v0 + n].decode("ascii", "ignore").strip("\x00 ")
+        i = v0 + n
+    return ""
+
+
+def stage_dicom(src, dst, dcmdjpeg):
+    """copy a DICOM folder to dst, decompressing JPEG files with dcmdjpeg (DCMTK). A JPEG file that does not decode is
+    a broken / partly written file (browser downloads leave *.crswap beside them). -> (dict failed / unchecked, n_failed,
+    n_crswap). Skips macOS '._' files and *.crswap."""
+    shutil.rmtree(dst, ignore_errors=True); os.makedirs(dst)
+    tool = shutil.which(dcmdjpeg) if dcmdjpeg else None
+    failed, unchecked, n_swap = [], 0, 0
+    for root, _, files in os.walk(src):
+        for fn in sorted(files):
+            if fn.endswith(".crswap"): n_swap += 1; continue
+            if fn.startswith("._") or fn.startswith("."): continue
+            f = os.path.join(root, fn); t = os.path.join(dst, f"{len(os.listdir(dst)):05d}_{fn}")
+            ts = transfer_syntax(f)
+            if ts.startswith("1.2.840.10008.1.2.4."):                       # JPEG family
+                if tool is None:
+                    shutil.copy2(f, t); unchecked += 1; continue
+                r = subprocess.run([tool, f, t], capture_output=True)
+                if r.returncode:
+                    failed.append(os.path.relpath(f, src))
+                    if os.path.exists(t): os.remove(t)
+            else:
+                shutil.copy2(f, t)
+    return dict(failed=failed, unchecked=unchecked), len(failed), n_swap
+
+
+def find_sub(folder, mod):
+    for d in sorted(os.listdir(folder)):
+        if os.path.isdir(os.path.join(folder, d)) and d.lower() == mod.lower(): return os.path.join(folder, d)
+    return None
+
+
+def niftis(d):
+    return sorted(glob.glob(f"{d}/**/*.nii.gz", recursive=True) + glob.glob(f"{d}/**/*.nii", recursive=True))
+
+
+def series_info(p):
+    js = p[:-7] + ".json" if p.endswith(".nii.gz") else p[:-4] + ".json"
+    j = json.load(open(js)) if os.path.exists(js) else {}
+    im = nib.load(p); z = [float(v) for v in im.header.get_zooms()[:3]]
+    it = j.get("ImageType", []); it = it if isinstance(it, list) else [str(it)]
+    desc = str(j.get("SeriesDescription", "")) + " " + os.path.basename(p)
+    return dict(path=p, shape=tuple(int(s) for s in im.shape[:3]), vox=z, te=j.get("EchoTime"), image_type=[str(t).upper() for t in it],
+                desc=desc, affine=im.affine, n_dims=len(im.shape))
+
+
+def kind_swi(s):
+    d = s["desc"].lower(); it = s["image_type"]
+    if any(k in d for k in ("mip", "mnip", "minip")) or "MNIP" in it or "MIP" in it: return "minip"
+    if "P" in it or "PHASE" in it or "pha" in d: return "phase"
+    if "swi" in d or "SWI" in it: return "swi"
+    if "mag" in d or "M" in it: return "magnitude"
+    return "unknown"
+
+
+def pick_structural(series):
+    ok = [s for s in series if s["n_dims"] == 3]
+    if not ok: return None
+    return sorted(ok, key=lambda s: (round(max(s["vox"]), 2), float(np.prod(s["vox"]))))[0]
+
+
+def cmd_import(a, B):
+    rows = []
+    subjects = sorted(d for d in os.listdir(a.cohort_dir) if os.path.isdir(os.path.join(a.cohort_dir, d)))
+    if a.ids: subjects = [s for s in subjects if s in a.ids.split(",")]
+    for sid in subjects:
+        src = os.path.join(a.cohort_dir, sid); row = dict(study_id=sid); flags = []
+        found = {}
+        for mod in MODS:
+            d = find_sub(src, mod)
+            if d is None: found[mod] = []; continue
+            out = f"{B}/raw/{sid}/{mod}"; os.makedirs(out, exist_ok=True)
+            # everything is copied / converted into $CSS_BASE/raw/ID/MOD: the runs never read the source drive
+            # (external drives disconnect; their names often contain spaces)
+            if not niftis(out):
+                src_nii = niftis(d)
+                for f in src_nii:                                  # NIfTI (+ JSON sidecar) as they are
+                    shutil.copy2(f, out)
+                    js = f[:-7] + ".json" if f.endswith(".nii.gz") else f[:-4] + ".json"
+                    if os.path.exists(js): shutil.copy2(js, out)
+                if not src_nii:                                    # DICOM -> NIfTI; its messages kept in the log
+                    staged, bad, n_swap = stage_dicom(d, f"{out}/_dicom", a.dcmdjpeg)
+                    if n_swap: flags.append(f"{mod.lower()}_{n_swap}_crswap_files")
+                    if bad:                       # a series with missing slices is repaired (opt-in) or removed
+                        open(f"{out}/unreadable_files.txt", "w").write("\n".join(staged["failed"]) + "\n")
+                        try:
+                            import dicom_repair
+                            fl, rep = dicom_repair.repair_folder(f"{out}/_dicom", [os.path.join(d, f) for f in staged["failed"]],
+                                                                 a.repair_missing, a.max_missing_frac, a.max_missing_run)
+                        except ImportError:
+                            fl, rep = ["pydicom_missing_cannot_repair_or_isolate"], {}
+                            shutil.rmtree(f"{out}/_dicom", ignore_errors=True); os.makedirs(f"{out}/_dicom")
+                        json.dump(rep, open(f"{out}/repair.json", "w"), indent=2, default=str)
+                        flags += [f"{mod.lower()}_{x}" for x in fl]
+                    if staged["unchecked"]: flags.append(f"{mod.lower()}_jpeg_not_checked_no_dcmdjpeg")
+                    r = subprocess.run([a.dcm2niix, "-z", "y", "-f", "%s_%d", "-o", out, f"{out}/_dicom"], capture_output=True, text=True)
+                    open(f"{out}/dcm2niix.log", "w").write(r.stdout + r.stderr)
+                    if r.returncode:
+                        flags.append(f"dcm2niix_{mod.lower()}_{DCM2NIIX_EXIT.get(r.returncode, f'exit{r.returncode}')}")
+            nii = niftis(out)
+            found[mod] = [series_info(p) for p in nii]
+        sw = found["SWI"]; kinds = [(kind_swi(s), s) for s in sw]
+        main = [s for k, s in kinds if k == "swi"] or [s for k, s in kinds if k == "magnitude"] or [s for k, s in kinds if k == "unknown"]
+        if len(main) > 1: flags.append("several_swi_candidates")
+        swi = sorted(main, key=lambda s: float(np.prod(s["vox"])))[0] if main else None
+        if swi is None: flags.append("no_swi" if not sw else "only_minip_or_phase_in_swi_folder")
+        ph = [s for k, s in kinds if k == "phase" and swi is not None and s["shape"] == swi["shape"]
+              and np.allclose(s["affine"], swi["affine"], atol=1e-3)]
+        if any(k == "phase" for k, _ in kinds) and not ph: flags.append("phase_not_on_swi_grid")
+        t1, fl = pick_structural(found["T1"]), pick_structural(found["FLAIR"])
+        if t1 is None: flags.append("no_t1")
+        elif max(t1["vox"]) > 1.5: flags.append("t1_not_3d")
+        if fl is None: flags.append("no_flair")
+        if swi is not None and swi["vox"][2] > 2.0: flags.append("swi_slice_gt_2mm")
+        if not ph: flags.append("no_phase")
+        fmt = lambda s: "x".join(f"{v:.2f}" for v in s["vox"]) if s else ""
+        row.update(swi=swi["path"] if swi else "", swi_vox_mm=fmt(swi), swi_te=swi["te"] if swi else "",
+                   swi_kind=kind_swi(swi) if swi else "", phase=ph[0]["path"] if ph else "",
+                   t1=t1["path"] if t1 else "", t1_vox_mm=fmt(t1), flair=fl["path"] if fl else "", flair_vox_mm=fmt(fl),
+                   n_swi_series=len(sw), n_t1_series=len(found["T1"]), n_flair_series=len(found["FLAIR"]),
+                   flags=";".join(flags))
+        rows.append(row)
+        print(f"{sid}: SWI {row['swi_kind'] or '-'} {row['swi_vox_mm']}  T1 {row['t1_vox_mm'] or '-'}  FLAIR {row['flair_vox_mm'] or '-'}"
+              f"  phase {'yes' if ph else 'no'}" + (f"  [{row['flags']}]" if flags else ""))
+    os.makedirs(f"{B}/review", exist_ok=True)
+    pd.DataFrame(rows).to_csv(f"{B}/review/cohort_import.csv", index=False)
+    print(f"-> {B}/review/cohort_import.csv ({len(rows)} studies). Check the chosen series, then: cohort.py run")
+
+
+def cmd_run(a, B):
+    t = pd.read_csv(f"{B}/review/cohort_import.csv", dtype=str).fillna("")
+    if a.ids: t = t[t.study_id.isin(a.ids.split(","))]
+    os.makedirs(f"{B}/logs", exist_ok=True); runlog = f"{B}/review/cohort_run.csv"
+    env = dict(os.environ, NOVIEW="1"); env.setdefault("CSS_THREADS", "4")
+    for _, r in t.iterrows():
+        s = r.study_id
+        if not r.swi: print(f"{s}: no SWI chosen - skipped ({r['flags']})"); continue
+        if not r.t1 and not a.allow_no_t1:
+            print(f"{s}: no usable T1 - skipped (--allow-no-t1 runs the SWI-only route; {r['flags']})"); continue
+        if os.path.exists(f"{B}/review/{s}_manifest.json") and os.path.exists(f"{B}/review/{s}_candidates.csv") and not a.redo:
+            print(f"{s}: already detected - skipped (--redo to run again)"); continue
+        cmd = ["zsh", f"{B}/scripts/run_css.sh", s, r.swi]
+        if r.t1: cmd += ["--t1", r.t1]
+        if r.flair: cmd += ["--flair", r.flair]
+        if r.t1 and not a.no_recon: cmd += ["--recon"]
+        if r.phase: cmd += ["--phase", r.phase]
+        t0 = datetime.datetime.now(); print(f"{s}: running ({t0:%H:%M}) ... log: logs/{s}_run.log", flush=True)
+        with open(f"{B}/logs/{s}_run.log", "w") as lf:
+            rc = subprocess.run(cmd, stdout=lf, stderr=subprocess.STDOUT, env=env).returncode
+        status = "ok" if rc == 0 else ("qc_insufficient" if rc == 3 else "failed")
+        mins = round((datetime.datetime.now() - t0).total_seconds() / 60, 1)
+        print(f"{s}: {status} (exit {rc}, {mins} min)")
+        old = pd.read_csv(runlog) if os.path.exists(runlog) else pd.DataFrame()
+        pd.concat([old, pd.DataFrame([dict(study_id=s, status=status, exit_code=rc, minutes=mins, finished=f"{datetime.datetime.now():%Y-%m-%d %H:%M}",
+                                           command=" ".join(cmd[2:]))])], ignore_index=True).to_csv(runlog, index=False)
+    print(f"-> {runlog}. Next: read every case with review_css.py ID (blinded to the expert grades), then compare_grades.py")
+
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    i = sub.add_parser("import"); i.add_argument("cohort_dir"); i.add_argument("--ids", default=""); i.add_argument("--dcm2niix", default="dcm2niix")
+    i.add_argument("--dcmdjpeg", default="dcmdjpeg")
+    i.add_argument("--repair-missing", action="store_true", help="fill missing slices by interpolation (dicom_repair.py)")
+    i.add_argument("--max-missing-frac", type=float, default=0.2); i.add_argument("--max-missing-run", type=int, default=2)
+    r = sub.add_parser("run"); r.add_argument("--ids", default=""); r.add_argument("--no-recon", action="store_true"); r.add_argument("--redo", action="store_true")
+    r.add_argument("--allow-no-t1", action="store_true")
+    a = ap.parse_args(); B = _base()
+    cmd_import(a, B) if a.cmd == "import" else cmd_run(a, B)
+````
+
+## scripts/compare_grades.py
+
+````python
+#!/usr/bin/env python3
+"""Compare the pipeline's cSS multifocality score with an expert's PATIENT-LEVEL grades (v5.2.1). Research software.
+usage: compare_grades.py --template                       -> labels/expert_grades.csv to fill (ids from cohort_import.csv)
+       compare_grades.py [--expert labels/expert_grades.csv] [--scores review/css_scores.csv] [--boot 2000]
+                         [--out results/grade_comparison]
+       compare_grades.py --results-only     -> results/css_results.xlsx (+ .csv): the pipeline's scores alone
+Expert file (.csv or .xlsx; one row per patient; the radiologist's own sheet works as it is: "Patient name", "ID",
+"R css", "L css", "cSS score (0-4)" are recognised): study_id, expert_L (0-2), expert_R (0-2), expert_total (0-4; filled from L + R
+when empty; a total that differs from L + R is reported, the given total is used). Optional column note.
+Pipeline scores: review/css_scores.csv (score_css.py, after the cases were READ with review_css.py or expert_import
+--score); qc_status from review/ID_qc.json, build from review/ID_manifest.json.
+Writes (opens in Excel / Numbers):
+  <out>_results.csv    the radiologist's layout: Patient name, ID, R cSS, L cSS, cSS score (0-4) of the pipeline, the
+                       radiologist's three values, difference, agree, field strength, QC, notes (first sheet in .xlsx)
+  <out>_patients.csv   one row per patient: expert and pipeline L / R / total, differences, presence, QC, flags
+  <out>_summary.csv    per scale (total 0-4, left 0-2, right 0-2): n, exact agreement, within +-1, quadratic weighted
+                       kappa with patient-bootstrap 95 % CI, unweighted kappa, Spearman rho, mean difference (pipeline -
+                       expert) with 95 % limits of agreement; cSS presence per patient and per hemisphere: sensitivity,
+                       specificity, counts
+  <out>_confusion_total.csv  expert (rows) x pipeline (columns), total score 0-4
+  <out>.xlsx           the same three tables as sheets, when openpyxl is installed
+Patients without a pipeline score are listed, not dropped silently; scores with unreviewed candidates are flagged
+(n_unreviewed > 0: the score is a lower bound), and so are patients whose series had missing slices interpolated on
+import (cohort.py --repair-missing; column repaired_series). Patient-level grades cannot measure lesion-level sensitivity or false
+positives - that needs candidate labels (expert_sheet.py / expert_import.py)."""
+import sys, os, re, json, argparse, numpy as np, pandas as pd
+from scipy.stats import spearmanr
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from css_common import base as _base, cohen_kappa
+
+# v5.2.3: the radiologist's own sheet can be given as it is - column names are matched case / space / bracket-blind
+ALIASES = {**dict.fromkeys(["studyid", "patientname", "patient", "name", "subject", "code"], "study_id"),
+           **dict.fromkeys(["id", "patientid"], "patient_id"),
+           **dict.fromkeys(["expertr", "rcss", "rightcss", "r", "right", "rscore", "rightscore"], "expert_R"),
+           **dict.fromkeys(["expertl", "lcss", "leftcss", "l", "left", "lscore", "leftscore"], "expert_L"),
+           **dict.fromkeys(["experttotal", "cssscore04", "cssscore", "total", "totalscore", "score", "csstotal"], "expert_total"),
+           **dict.fromkeys(["note", "notes", "comment", "comments"], "note")}
+RESULT_COLS = ["Patient name", "ID", "R cSS", "L cSS", "cSS score (0-4)"]
+SCALES = [("total", "expert_total", "pipe_total", list(range(5))), ("left", "expert_L", "pipe_L", [0, 1, 2]),
+          ("right", "expert_R", "pipe_R", [0, 1, 2])]
+
+
+def read_json(p):
+    try: return json.load(open(p))
+    except Exception: return {}
+
+
+def load(expert_p, scores_p, B):
+    E = (pd.read_excel(expert_p, dtype=str) if expert_p.lower().endswith((".xlsx", ".xls"))
+         else pd.read_csv(expert_p, dtype=str))                         # .xlsx needs openpyxl
+    E = E.rename(columns=lambda c: ALIASES.get(re.sub(r"[^a-z0-9]", "", str(c).lower()), c))
+    E = E.dropna(how="all")
+    for c in ("study_id", "patient_id"):
+        if c in E.columns: E[c] = E[c].astype(str).str.strip()
+    need = {"study_id", "expert_L", "expert_R"} - set(E.columns)
+    if need: sys.exit(f"{expert_p}: missing columns {sorted(need)}")
+    if "expert_total" not in E.columns: E["expert_total"] = np.nan
+    for c in ("expert_L", "expert_R", "expert_total"): E[c] = pd.to_numeric(E[c], errors="coerce")
+    E["expert_LR_sum"] = E.expert_L + E.expert_R
+    E["expert_total_mismatch"] = (E.expert_total.notna() & (E.expert_total != E.expert_LR_sum)).astype(int)
+    E["expert_total"] = E.expert_total.fillna(E.expert_LR_sum)
+    bad = E[(~E.expert_L.isin([0, 1, 2])) | (~E.expert_R.isin([0, 1, 2])) | (~E.expert_total.isin(range(5)))]
+    if len(bad): sys.exit(f"{expert_p}: grades out of range (L/R 0-2, total 0-4) for {bad.study_id.tolist()}")
+    S = pd.read_csv(scores_p, dtype={"subject": str}) if os.path.exists(scores_p) else pd.DataFrame(columns=["subject"])
+    S = S.drop_duplicates("subject", keep="last").rename(columns={"subject": "study_id", "L_score": "pipe_L",
+                                                                  "R_score": "pipe_R", "multifocality_0_4": "pipe_total"})
+    keep = [c for c in ("study_id", "pipe_L", "pipe_R", "pipe_total", "scoring_method", "n_candidates", "n_unreviewed")
+            if c in S.columns]
+    D = E.merge(S[keep], on="study_id", how="left")
+    D["qc_status"] = [read_json(f"{B}/review/{s}_qc.json").get("status", "") for s in D.study_id]
+    D["field_T"] = [read_json(f"{B}/review/{s}_score.json").get("field_T", "") for s in D.study_id]
+    D["build"] = [str(((read_json(f"{B}/review/{s}_manifest.json").get("detect") or {}).get("environment") or {}).get("build", ""))
+                  for s in D.study_id]
+    D["n_accepted"] = [int(pd.read_csv(p).get("accept", pd.Series(dtype=float)).fillna(0).sum())
+                       if os.path.exists(p := f"{B}/review/{s}_candidates.csv") else np.nan for s in D.study_id]
+    for e, p in (("expert_L", "pipe_L"), ("expert_R", "pipe_R"), ("expert_total", "pipe_total")):
+        if p not in D.columns: D[p] = np.nan
+        D[f"diff_{p[5:]}"] = D[p] - D[e]
+    D["expert_css"] = (D.expert_total > 0).astype(int)
+    D["pipe_css"] = np.where(D.pipe_total.notna(), (D.pipe_total > 0).astype(float), np.nan)
+    ci = f"{B}/review/cohort_import.csv"                    # v5.2.2: series repaired by interpolation on import
+    imp = pd.read_csv(ci, dtype=str).fillna("").set_index("study_id")["flags"] if os.path.exists(ci) else pd.Series(dtype=str)
+    D["repaired_series"] = [";".join(x for x in imp.get(s, "").split(";") if "_repaired_" in x) for s in D.study_id]
+    fl = []
+    for _, r in D.iterrows():
+        f = []
+        if r.repaired_series: f.append(f"slices interpolated on import ({r.repaired_series}) - preliminary")
+        if pd.isna(r.pipe_total): f.append("no pipeline score")
+        if r.get("n_unreviewed", 0) and r.get("n_unreviewed", 0) > 0: f.append(f"{int(r.n_unreviewed)} candidates unreviewed")
+        if r.expert_total_mismatch: f.append("expert total != L + R")
+        if str(r.qc_status) not in ("", "ok"): f.append(f"QC {r.qc_status}")
+        if str(r.get("scoring_method", "")).startswith("euclid"): f.append("Euclidean approximation (no Destrieux labels)")
+        fl.append("; ".join(f))
+    D["flags"] = fl
+    return D
+
+
+def results_table(D):
+    """the radiologist's layout: Patient name, ID, R cSS, L cSS, cSS score (0-4) - pipeline, then radiologist, then
+    the difference and agreement per patient (only the pipeline columns when there are no expert grades)"""
+    iv = lambda v: "" if pd.isna(v) else int(v)
+    rows = []
+    for _, r in D.iterrows():
+        row = {"Patient name": r.study_id, "ID": r.get("patient_id", "") if pd.notna(r.get("patient_id", "")) else "",
+               "R cSS": iv(r.pipe_R), "L cSS": iv(r.pipe_L), "cSS score (0-4)": iv(r.pipe_total)}
+        if "expert_total" in D.columns:
+            row.update({"radiologist R cSS": iv(r.expert_R), "radiologist L cSS": iv(r.expert_L),
+                        "radiologist cSS score (0-4)": iv(r.expert_total),
+                        "difference (pipeline - radiologist)": iv(r.diff_total),
+                        "agree": "" if pd.isna(r.pipe_total) else ("yes" if r.pipe_total == r.expert_total else "no")})
+        row.update({"field (T)": r.get("field_T", ""), "QC": r.get("qc_status", ""), "notes": r.get("flags", "")})
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def boot_kappa(a, b, cats, n, seed):
+    rng = np.random.default_rng(seed); v = []
+    for _ in range(n):
+        i = rng.integers(0, len(a), len(a)); k = cohen_kappa(a[i], b[i], cats, "quadratic")
+        if np.isfinite(k): v.append(k)
+    return [round(float(np.percentile(v, 2.5)), 3), round(float(np.percentile(v, 97.5)), 3)] if len(v) > 20 else [None, None]
+
+
+def presence(y, p):
+    tp, fn = int(((y == 1) & (p == 1)).sum()), int(((y == 1) & (p == 0)).sum())
+    tn, fp = int(((y == 0) & (p == 0)).sum()), int(((y == 0) & (p == 1)).sum())
+    return dict(tp=tp, fn=fn, tn=tn, fp=fp, sensitivity=round(tp / (tp + fn), 3) if tp + fn else None,
+                specificity=round(tn / (tn + fp), 3) if tn + fp else None)
+
+
+def summarise(D, boot, seed):
+    rows = []
+    for name, e, p, cats in SCALES:
+        d = D[D[p].notna()]; a, b = d[e].astype(int).values, d[p].astype(int).values
+        if not len(d): rows.append(dict(scale=name, n=0)); continue
+        diff = b - a; sd = float(np.std(diff, ddof=1)) if len(diff) > 1 else np.nan
+        rho = spearmanr(a, b).statistic if len(set(a)) > 1 and len(set(b)) > 1 else np.nan
+        rows.append(dict(scale=name, n=len(d), exact_agreement=round(float((diff == 0).mean()), 3),
+                         within_1=round(float((np.abs(diff) <= 1).mean()), 3),
+                         kappa_quadratic=round(cohen_kappa(a, b, cats, "quadratic"), 3),
+                         kappa_quadratic_ci95=boot_kappa(a, b, cats, boot, seed),
+                         kappa_unweighted=round(cohen_kappa(a, b, cats), 3),
+                         spearman_rho=None if not np.isfinite(rho) else round(float(rho), 3),
+                         mean_diff_pipeline_minus_expert=round(float(diff.mean()), 3),
+                         loa95_low=None if not np.isfinite(sd) else round(float(diff.mean() - 1.96 * sd), 3),
+                         loa95_high=None if not np.isfinite(sd) else round(float(diff.mean() + 1.96 * sd), 3),
+                         pipeline_higher=int((diff > 0).sum()), pipeline_lower=int((diff < 0).sum())))
+    d = D[D.pipe_total.notna()]
+    rows.append(dict(scale="cSS present (patient, total > 0)", n=len(d),
+                     **presence(d.expert_css.values, d.pipe_css.astype(int).values)))
+    hy = np.r_[(d.expert_L > 0).values, (d.expert_R > 0).values].astype(int)
+    hp = np.r_[(d.pipe_L > 0).values, (d.pipe_R > 0).values].astype(int)
+    rows.append(dict(scale="cSS present (hemisphere, score > 0)", n=2 * len(d), **presence(hy, hp)))
+    return pd.DataFrame(rows)
+
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--template", action="store_true"); ap.add_argument("--expert", default="")
+    ap.add_argument("--scores", default=""); ap.add_argument("--boot", type=int, default=2000)
+    ap.add_argument("--seed", type=int, default=1); ap.add_argument("--out", default="")
+    ap.add_argument("--results-only", action="store_true", help="pipeline scores in the radiologist's layout, no comparison")
+    a = ap.parse_args(); B = _base()
+    ep = a.expert or f"{B}/labels/expert_grades.csv"
+    if a.template:
+        ci = f"{B}/review/cohort_import.csv"
+        ids = pd.read_csv(ci, dtype=str).study_id.tolist() if os.path.exists(ci) else []
+        if os.path.exists(ep): sys.exit(f"{ep} exists - not overwritten")
+        os.makedirs(os.path.dirname(ep), exist_ok=True)
+        pd.DataFrame(dict(study_id=ids, expert_L="", expert_R="", expert_total="", note="")).to_csv(ep, index=False)
+        sys.exit(print(f"-> {ep} with {len(ids)} rows: fill expert_L / expert_R (0-2) and expert_total (0-4)") or 0)
+    if a.results_only:                   # no expert file: every scored patient, pipeline columns only
+        ids = pd.read_csv(a.scores or f"{B}/review/css_scores.csv", dtype=str).subject.drop_duplicates().tolist()
+        tmp = f"{B}/results/.ids_only.csv"; os.makedirs(os.path.dirname(tmp), exist_ok=True)
+        pd.DataFrame(dict(study_id=ids, expert_L=0, expert_R=0)).to_csv(tmp, index=False)
+        D = load(tmp, a.scores or f"{B}/review/css_scores.csv", B); os.remove(tmp)
+        R = results_table(D.drop(columns=["expert_total"]))
+        R["notes"] = [f.replace("expert total != L + R", "").strip("; ") for f in R.notes]
+        out = a.out or f"{B}/results/css_results"; R.to_csv(f"{out}.csv", index=False)
+        try:
+            R.to_excel(f"{out}.xlsx", sheet_name="results", index=False); xl = f" and {out}.xlsx"
+        except ImportError:
+            xl = " (.xlsx: conda install -n css -c conda-forge openpyxl)"
+        print(R[RESULT_COLS].to_string(index=False))
+        sys.exit(print(f"-> {out}.csv{xl}   [research software: pipeline + reader scores, not validated]") or 0)
+    D = load(ep, a.scores or f"{B}/review/css_scores.csv", B)
+    out = a.out or f"{B}/results/grade_comparison"; os.makedirs(os.path.dirname(out), exist_ok=True)
+    cols = ["study_id", "expert_L", "pipe_L", "diff_L", "expert_R", "pipe_R", "diff_R", "expert_total", "pipe_total",
+            "diff_total", "expert_css", "pipe_css", "scoring_method", "qc_status", "n_candidates", "n_accepted",
+            "n_unreviewed", "build", "repaired_series", "flags"] + [c for c in ("note",) if c in D.columns]
+    P = D[[c for c in cols if c in D.columns]]; Sm = summarise(D, a.boot, a.seed)
+    sc = D[D.pipe_total.notna()]
+    C = pd.crosstab(pd.Categorical(sc.expert_total.astype(int), categories=range(5)),
+                    pd.Categorical(sc.pipe_total.astype(int), categories=range(5)), rownames=["expert"], colnames=["pipeline"], dropna=False)
+    Rt = results_table(D)
+    P.to_csv(f"{out}_patients.csv", index=False); Sm.to_csv(f"{out}_summary.csv", index=False); C.to_csv(f"{out}_confusion_total.csv")
+    Rt.to_csv(f"{out}_results.csv", index=False)
+    try:
+        import openpyxl  # noqa: F401
+        with pd.ExcelWriter(f"{out}.xlsx") as w:
+            Rt.to_excel(w, sheet_name="results", index=False)
+            P.to_excel(w, sheet_name="patients", index=False); Sm.to_excel(w, sheet_name="summary", index=False)
+            C.to_excel(w, sheet_name="confusion_total")
+        xl = f" and {out}.xlsx"
+    except ImportError:
+        xl = " (for one .xlsx workbook: conda install -n css -c conda-forge openpyxl)"
+    miss = D[D.pipe_total.isna()].study_id.tolist()
+    t = Sm.iloc[0]
+    print(f"compare_grades: {len(D)} patients with expert grades, {len(sc)} with a pipeline score"
+          + (f"; NO pipeline score: {', '.join(miss)}" if miss else ""))
+    if len(sc):
+        print(f"  total 0-4: exact {t.exact_agreement:.0%}, within 1 {t.within_1:.0%}, weighted kappa {t.kappa_quadratic} "
+              f"{t.kappa_quadratic_ci95}, mean difference {t.mean_diff_pipeline_minus_expert:+.2f} "
+              f"(LoA {t.loa95_low} to {t.loa95_high})")
+        for _, r in Sm.iloc[1:3].iterrows():
+            print(f"  {r.scale:5s} 0-2: exact {r.exact_agreement:.0%}, weighted kappa {r.kappa_quadratic} {r.kappa_quadratic_ci95}")
+        for _, r in Sm.iloc[3:].iterrows():
+            print(f"  {r.scale}: sensitivity {r.sensitivity}, specificity {r.specificity} (TP {r.tp} FN {r.fn} TN {r.tn} FP {r.fp})")
+    fl = P[P["flags"] != ""]
+    for _, r in fl.iterrows(): print(f"  {r.study_id}: {r['flags']}")
+    print(f"-> {out}_results.csv, _patients.csv, _summary.csv, _confusion_total.csv{xl}   [research software; n = {len(sc)}: read the intervals]")
+````
 
 ## scripts/consensus.py
 
-```python
+````python
 #!/usr/bin/env python3
 """Two-reader consensus, adjudication and agreement statistics for expert candidate labels (v4.17).
 usage: consensus.py --readers expertA,expertB [--subjects P012,P013] [--session 1]
@@ -554,11 +1508,11 @@ print(f"{ra} vs {rb}: {len(P)} objects in {len(studies)} patient(s): kappa cSS-v
 print(f"consensus -> {cons_p} ({sum(r['method'] == 'agreement' for r in rows)} agreed, {len(todo)} pending, "
       f"{sum(r['method'] == 'single_reader' for r in rows)} single-reader)"
       + (f"; to adjudicate: {todo_p} (fill adjudicated_label, then --apply)" if todo else ""))
-```
+````
 
 ## scripts/css_common.py
 
-```python
+````python
 """Shared helpers for the cSS pipeline scripts (imported from the same folder)."""
 import os, sys, numpy as np, pandas as pd
 
@@ -885,11 +1839,290 @@ def homodyne_highpass(P_rad, vox, si, sigma_mm=4.0):
         if ax != si: sig[ax] = sigma_mm / vox[ax]
     lp = ndi.gaussian_filter(z.real, sig) + 1j * ndi.gaussian_filter(z.imag, sig)
     return np.angle(z * np.conj(lp)).astype(np.float32)
-```
+````
+
+## scripts/css_features.py
+
+````python
+"""Feature families of docs/FEATURE_SPEC (cSS vs VS / VC / VT / CA / MB) that the detector did not yet compute (v5.1.2).
+Pure functions on a candidate crop; imported by detect_css.py, unit-tested in tests/check_v512.py. RECORDED ONLY: no
+rule, score or tier uses them. All distances in mm (voxel size passed explicitly).
+
+Already computed elsewhere under another name (not duplicated): pial_dist_mm (median signed pial distance),
+cortex_frac (cortex overlap), parenchyma_frac, bank_frac / tram_frac, tube_ratio, cand_radius_med/p95_mm / cv,
+local_cont_max/min_mm (curved continuation), vessel_run_mm (straight continuation), vessel_wm_mm (white-matter
+continuation), local_branch_per10mm, terminal_ends, end_type_* ("midline" = reaches the sagittal sinus zone), surf_*
+(surface morphology, surface_features.py), phase_z / phase_r (dipole fit), mb_cluster_n, flair_csf_z / flair_ctx_z,
+ich_dist_mm. Not computable here: CT hyperdensity (no CT input)."""
+import numpy as np
+from scipy import ndimage as ndi
+from scipy.sparse import coo_matrix
+from scipy.sparse.csgraph import dijkstra
+
+FEATURE_SCHEMA = "css-features/1.0"
+
+
+def csf_maps(csf, vox):
+    """whole-brain maps for position_features: distance into the CSF from tissue (0 in tissue), and 'within 1.5 mm
+    of CSF'. Computed once per scan (a per-candidate crop would cut the distances at the crop edge)."""
+    return (ndi.distance_transform_edt(csf, sampling=vox).astype(np.float32),
+            ndi.distance_transform_edt(~csf, sampling=vox) <= 1.5)
+
+
+def position_features(mm, pial_sd, csf_depth, near_csf, sulcal_depth=None):
+    """Family B/D: pial-distance percentiles, contact within 1 / 2 mm of the pial boundary, CSF adjacency, how far
+    into the CSF the candidate sits (median distance from tissue: ~0 on a bank, larger in mid-sulcus = VC) and how
+    deep below the gyral crowns (sulcal_depth_map). All maps are crops at the candidate."""
+    psd = pial_sd[mm]
+    out = dict(pial_sd_p10_mm=round(float(np.percentile(psd, 10)), 2), pial_sd_p90_mm=round(float(np.percentile(psd, 90)), 2),
+               surface_contact_frac_1mm=round(float((np.abs(psd) <= 1.0).mean()), 2),
+               surface_contact_frac_2mm=round(float((np.abs(psd) <= 2.0).mean()), 2),
+               csf_adjacent_frac=round(float(near_csf[mm].mean()), 2),
+               csf_depth_mm=round(float(np.median(csf_depth[mm])), 2),
+               sulcal_depth_mm=round(float(np.median(sulcal_depth[mm])), 2) if sulcal_depth is not None else np.nan)
+    return out
+
+
+def compactness_features(mm, vox):
+    """Family G: equivalent-sphere diameter, 3-D compactness 36 pi V^2 / S^3 (S = anisotropic marching-cubes area;
+    1 = sphere), sphericity = compactness^(1/3), elongation (longest / shortest principal axis) and flatness
+    (middle / shortest), principal axes from the voxel coordinates in mm."""
+    vox = np.asarray(vox, float); V = float(mm.sum() * np.prod(vox))
+    out = dict(equivalent_sphere_diameter_mm=round(float((6 * V / np.pi) ** (1 / 3)), 2),
+               compactness_3d=np.nan, sphericity=np.nan, elongation_3d=np.nan, flatness_3d=np.nan)
+    if mm.sum() < 4: return out
+    try:
+        from skimage.measure import marching_cubes, mesh_surface_area
+        v, f, _, _ = marching_cubes(np.pad(mm, 1).astype(np.float32), 0.5, spacing=tuple(vox))
+        S = float(mesh_surface_area(v, f))
+        if S > 0:
+            c = min(1.0, 36 * np.pi * V ** 2 / S ** 3)
+            out.update(compactness_3d=round(c, 3), sphericity=round(c ** (1 / 3), 3))
+    except Exception:
+        pass
+    P = np.argwhere(mm) * vox
+    ev = np.sort(np.linalg.eigvalsh(np.cov((P - P.mean(0)).T)))[::-1] if len(P) > 3 else None
+    if ev is not None:
+        a = np.sqrt(np.maximum(ev, 1e-6))
+        sd_min = max(a[2], vox.min() / np.sqrt(12))                     # a 1-voxel-thin object: voxel size floor
+        out.update(elongation_3d=round(float(a[0] / sd_min), 2), flatness_3d=round(float(a[1] / sd_min), 2))
+    return out
+
+
+_OFF = np.array([(a, b, c) for a in (-1, 0, 1) for b in (-1, 0, 1) for c in (-1, 0, 1) if (a, b, c) > (0, 0, 0)])
+
+
+def path_features(mm, vox):
+    """Family E: two-sweep geodesic diameter through the candidate's voxels (largest 26-connected piece), and
+    tortuosity = geodesic length / straight end-to-end distance (1 = straight; curved veins and wrapping cSS > 1)."""
+    vox = np.asarray(vox, float)
+    lab, n = ndi.label(mm, structure=np.ones((3, 3, 3), bool))       # merged objects: pieces need not touch;
+    if n > 1: mm = lab == (np.argmax(np.bincount(lab.ravel())[1:]) + 1)   # the path runs in the largest piece
+    idx = np.argwhere(mm)
+    if len(idx) < 3: return dict(path_length_mm=np.nan, tortuosity=np.nan)
+    lin = np.ravel_multi_index(idx.T, mm.shape); order = np.argsort(lin); sl = lin[order]
+    r_, c_, w_ = [], [], []
+    for o in _OFF:
+        q = idx + o; ok = np.all((q >= 0) & (q < np.array(mm.shape)), axis=1)
+        ql = np.full(len(idx), -1, np.int64); ql[ok] = np.ravel_multi_index(q[ok].T, mm.shape)
+        pos = np.clip(np.searchsorted(sl, ql), 0, len(sl) - 1); hit = ok & (sl[pos] == ql)
+        r_.append(np.nonzero(hit)[0]); c_.append(order[pos[hit]]); w_.append(np.full(hit.sum(), float(np.linalg.norm(o * vox))))
+    r, c, w = np.concatenate(r_), np.concatenate(c_), np.concatenate(w_)
+    G = coo_matrix((np.r_[w, w], (np.r_[r, c], np.r_[c, r])), shape=(len(idx),) * 2).tocsr()
+    d0 = dijkstra(G, indices=0); e1 = int(np.argmax(np.where(np.isfinite(d0), d0, -1)))
+    d1 = dijkstra(G, indices=e1); e2 = int(np.argmax(np.where(np.isfinite(d1), d1, -1)))
+    L = float(d1[e2]); eu = float(np.linalg.norm((idx[e1] - idx[e2]) * vox))
+    return dict(path_length_mm=round(L, 1), tortuosity=round(L / eu, 2) if eu > 1.0 else np.nan)
+
+
+def darkness_features(zc):
+    """Family A: lower tail and dark fractions of the candidate's local darkness z"""
+    zc = np.asarray(zc, float)
+    if not len(zc): return dict(darkness_z_p10=np.nan, dark_frac_z2=np.nan, dark_frac_z3=np.nan, dark_frac_z4=np.nan)
+    return dict(darkness_z_p10=round(float(-np.percentile(zc, 10)), 2), dark_frac_z2=round(float((zc < -2).mean()), 2),
+                dark_frac_z3=round(float((zc < -3).mean()), 2), dark_frac_z4=round(float((zc < -4).mean()), 2))
+
+
+def sulcal_depth_map(tissue, vox, close_mm=5.0):
+    """distance (mm) below the 'hull' of the brain tissue (closing by close_mm): ~0 on gyral crowns, grows into sulci"""
+    d_out = ndi.distance_transform_edt(~tissue, sampling=vox)
+    hull = ndi.distance_transform_edt(d_out <= close_mm, sampling=vox) > close_mm
+    hull |= tissue
+    return ndi.distance_transform_edt(hull, sampling=vox).astype(np.float32)
+
+
+def qc_flags(row):
+    """';'-joined reasons why some of this candidate's features are less trustworthy"""
+    f = []
+    if row.get("ref_valid_frac", 1) is not None and np.isfinite(row.get("ref_valid_frac", 1)) and row.get("ref_valid_frac", 1) < 0.5:
+        f.append("cortex_reference_sparse")
+    mv = row.get("mirror_valid_frac", np.nan)
+    if np.isfinite(mv) and mv < 0.5: f.append("mirror_outside_brain")
+    if row.get("missing_phase_features"): f.append("no_phase")
+    if row.get("missing_flair_features"): f.append("no_flair")
+    if row.get("missing_t1_anatomy"): f.append("swi_only_anatomy")
+    if row.get("mixed_object"): f.append("mixed_merged_object")
+    return ";".join(f)
+````
+
+## scripts/css_model.py
+
+````python
+"""Shared model code for the learned rankers (v5.2): class-balanced L2 logistic regression, patient-grouped
+leave-one-patient-out (LOPO) with optional nested selection of the L2 strength, metrics, model hashing.
+numpy / scipy only. Used by train_ranker.py and classify_surface_patches.py; tested in tests/check_v52.py.
+Every split is by PATIENT (study_id): all objects of one study are always on the same side."""
+import hashlib, json, numpy as np
+from scipy.optimize import minimize
+
+L2_GRID = (0.1, 1.0, 10.0)
+
+
+def prep(X, med=None, mu=None, sd=None):
+    """median imputation + standardisation; parameters from X (the training fold) unless given"""
+    X = np.asarray(X, float)
+    if med is None: med = np.nanmedian(X, axis=0); med = np.where(np.isfinite(med), med, 0.0)
+    X = np.where(np.isfinite(X), X, med)
+    if mu is None: mu = X.mean(0); sd = X.std(0); sd = np.where(sd > 1e-9, sd, 1.0)
+    return (X - mu) / sd, med, mu, sd
+
+
+def fit_lr(Z, y, l2):
+    """class-balanced L2 logistic regression on standardised Z -> (w, b); raises if only one class"""
+    y = np.asarray(y, float)
+    if len(np.unique(y)) < 2: raise ValueError("both classes are required")
+    cw = np.where(y == 1, 0.5 / y.mean(), 0.5 / (1 - y.mean()))
+    def f(p):
+        w, b = p[:-1], p[-1]; t = np.clip(Z @ w + b, -40, 40)
+        g = cw * (1 / (1 + np.exp(-t)) - y)
+        return (cw * (np.logaddexp(0, t) - y * t)).sum() / len(y) + 0.5 * l2 * (w @ w) / len(y), \
+            np.r_[Z.T @ g / len(y) + l2 * w / len(y), g.sum() / len(y)]
+    r = minimize(f, np.zeros(Z.shape[1] + 1), jac=True, method="L-BFGS-B")
+    return r.x[:-1], float(r.x[-1])
+
+
+def predict(X, med, mu, sd, w, b):
+    Z = prep(X, med, mu, sd)[0]
+    return 1 / (1 + np.exp(-(Z @ w + b)))
+
+
+def auc(y, s):
+    y = np.asarray(y); s = np.asarray(s, float); pos, neg = s[y == 1], s[y == 0]
+    if not len(pos) or not len(neg): return np.nan
+    return float(((pos[:, None] > neg[None, :]).sum() + 0.5 * (pos[:, None] == neg[None, :]).sum()) / (len(pos) * len(neg)))
+
+
+def average_precision(y, s):
+    """PR-AUC as average precision (precision at each positive, ranked by score)"""
+    y = np.asarray(y); s = np.asarray(s, float)
+    if not (y == 1).any(): return np.nan
+    o = np.argsort(-s, kind="stable"); yy = y[o]; tp = np.cumsum(yy)
+    return float((tp[yy == 1] / (np.nonzero(yy == 1)[0] + 1)).mean())
+
+
+def brier(y, p):
+    return float(np.mean((np.asarray(p, float) - np.asarray(y, float)) ** 2))
+
+
+def lopo(X, y, groups, l2=1.0, nested=False):
+    """leave-one-patient-out predictions. nested=True picks l2 from L2_GRID inside each training fold by an inner LOPO
+    (AUC). Folds whose training part has one class only are SKIPPED and reported (never fabricated).
+    -> (out-of-fold scores, fold log)"""
+    X = np.asarray(X, float); y = np.asarray(y); g = np.asarray(groups)
+    out = np.full(len(y), np.nan); log = []
+    for p in sorted(set(g)):
+        te, tr = g == p, g != p
+        if len(np.unique(y[tr])) < 2:
+            log.append(dict(study_id=str(p), status="skipped", reason="training fold has one class")); continue
+        lam = l2
+        if nested:
+            best = (-1, l2)
+            for cand in L2_GRID:
+                s_in, _ = lopo(X[tr], y[tr], g[tr], cand, nested=False)
+                a = auc(y[tr][np.isfinite(s_in)], s_in[np.isfinite(s_in)])
+                if np.isfinite(a) and a > best[0]: best = (a, cand)
+            lam = best[1]
+        Z, med, mu, sd = prep(X[tr]); w, b = fit_lr(Z, y[tr], lam)
+        out[te] = predict(X[te], med, mu, sd, w, b)
+        log.append(dict(study_id=str(p), status="evaluated", n_test=int(te.sum()), l2=lam))
+    return out, log
+
+
+def patient_bootstrap(df, fn, n=500, seed=1):
+    """95 % interval of fn(sub-dataframe) over bootstrap resamples of PATIENTS (column study_id)"""
+    rng = np.random.default_rng(seed); pats = df.study_id.unique(); vals = []
+    import pandas as pd
+    for _ in range(n):
+        d = pd.concat([df[df.study_id == p] for p in rng.choice(pats, len(pats), replace=True)])
+        v = fn(d)
+        if np.isfinite(v): vals.append(v)
+    return [round(float(np.percentile(vals, 2.5)), 3), round(float(np.percentile(vals, 97.5)), 3)] if vals else [None, None]
+
+
+def sens_at_fp(df, score, fp_per_scan=1.0):
+    """lesion sensitivity when, in every study, candidates are read down the score order until fp_per_scan false
+    positives have been passed (the reading-burden view; needs columns study_id, y and the score)"""
+    found = tot = 0
+    for _, d in df.groupby("study_id"):
+        d = d.sort_values(score, ascending=False); fp = np.cumsum(d.y.values == 0)
+        keep = fp <= fp_per_scan; found += int(d.y.values[keep].sum()); tot += int(d.y.sum())
+    return found / tot if tot else np.nan
+
+
+def model_hash(model):
+    """sha256 of the model content (weights, features, preprocessing), excluding the hash field itself"""
+    m = {k: v for k, v in model.items() if k not in ("model_hash",)}
+    return hashlib.sha256(json.dumps(m, sort_keys=True, default=str).encode()).hexdigest()
+````
+
+## scripts/css_pieces.py
+
+````python
+"""Per-piece evidence for merged candidates (v5.1.1). Pure functions, imported by detect_css.py; unit-tested in
+tests/check_v511.py.
+
+detect_css.py merges dark pieces closer than MERGE_GAP_MM into one candidate (a line broken by noise, the two banks of
+a tram-track). That can also join a cSS segment and a neighbouring vein; the group's median features then describe
+neither, and a vein rule (E5 / E6 / E7) would remove the cSS segment with it. Each pre-merge piece is therefore
+classified with the detector's own vein_like definition:
+  vein-like piece   median pial distance > 0.3 mm (off the cortex) and tubular (median tube ratio > 0.4, or unknown)
+  cSS-like piece    median pial distance <= 0.3 mm and not tubular (tube ratio <= 0.4, or unknown)
+mixed_object = >= 2 pieces and each kind holds >= min_frac of the object's volume.
+Limits: a vein TOUCHING a cSS segment voxel to voxel is one piece already (this cannot split it); merges undone by
+the 40 mm chain cap leave single pieces (nothing to compare). Thresholds are the v4 vein_like ones, not validated."""
+import numpy as np
+
+
+def piece_evidence(mm, pieces, pial_sd, tube, min_frac=0.15):
+    """mm: candidate mask (crop); pieces: pre-merge labels (same crop, or None = no merging); pial_sd, tube: maps (same
+    crop). -> dict of the per-piece columns"""
+    pcs = {}
+    if pieces is not None:
+        pl = pieces[mm]
+        for pid in np.unique(pl[pl > 0]):
+            pm = mm & (pieces == pid)
+            tv = tube[pm]; tp = float(np.nanmedian(tv)) if np.isfinite(tv).any() else np.nan
+            pp = float(np.median(pial_sd[pm]))
+            pcs[int(pid)] = (int(pm.sum()), pp, tp, bool(pp > 0.3 and (np.isnan(tp) or tp > 0.4)),
+                             bool(pp <= 0.3 and (np.isnan(tp) or tp <= 0.4)))
+    tot = sum(v[0] for v in pcs.values()) or 1
+    vf = sum(v[0] for v in pcs.values() if v[3]) / tot
+    cf = sum(v[0] for v in pcs.values() if v[4]) / tot
+    return dict(piece_vol_vox=";".join(str(v[0]) for v in pcs.values()),
+                piece_pial_mm=";".join(f"{v[1]:.2f}" for v in pcs.values()),
+                piece_tube=";".join("nan" if np.isnan(v[2]) else f"{v[2]:.2f}" for v in pcs.values()),
+                piece_vein_frac=round(vf, 2) if pcs else np.nan,
+                mixed_object=int(len(pcs) > 1 and vf >= min_frac and cf >= min_frac))
+
+
+def rescue_mixed(rule_version, mixed_object, enabled):
+    """True = a vein rule (E5 / E6 / E7) must not remove this mixed object as a whole (CSS_MIXED_REVIEW=1)"""
+    return bool(enabled and mixed_object and rule_version.split("@")[0] in ("E5", "E6", "E7"))
+````
 
 ## scripts/css_qc.py
 
-```python
+````python
 """Per-case quality control for detect_css.py (v4.14) -> review/ID_qc.json.
 
 Called by detect_css.py with the arrays it already has. Records the acquisition, orientation, coverage,
@@ -1107,11 +2340,11 @@ def case_qc(base, subj, swi, I, If, seg, brain, tissue, cortex, pial_sd, normal,
     os.makedirs(f"{base}/review", exist_ok=True)
     json.dump(qc, open(f"{base}/review/{subj}_qc.json", "w"), indent=2)
     return qc
-```
+````
 
 ## scripts/css_surface.py
 
-```python
+````python
 """FreeSurfer pial surface -> SWI space, with a registration check (v4.16; shared by surface_features.py and
 surface_overlay.py). FreeSurfer surfaces are in tkRAS. The transform is built from subjects/ID/mri/orig.mgz
 (tkRAS -> T1 scanner RAS) and work/ID_swi2t1.lta (prep_anat.sh). The LTA's direction is NOT trusted: both
@@ -1182,11 +2415,77 @@ def surface_to_swi(base, subj, sdir, surface_xfm="", force=False):
         sys.exit(f"{subj}: surfaces do not match the SWI labels (best {min(checks.values()):.2f} mm > {AGREE_MM} mm)"
                  f" - check the registration / transform (or --force)")
     return T, src, checks, surfs
-```
+````
+
+## scripts/css_tiers.py
+
+````python
+"""Review-priority tiers (v5.1.3): a transparent READING ORDER from the recorded evidence. Not a diagnosis, not an
+exclusion: every candidate stays in the list and in the audit trail. Pure function; unit-tested in tests/check_v513.py.
+
+  1 high_priority_cSS_candidate   no strong mimic evidence
+  2 css_vs_mimic_uncertain        mixed merged object; possible calcification (phase); FLAIR context (acute cSAH /
+                                  thrombosis)
+  3 likely_vein                   CONVERGENT vascular evidence (never one feature): white-matter continuation >= 4 mm
+                                  with dark continuation >= 8 mm or a tubular shape (transcortical); reaches the sinus
+                                  zone with >= 10 mm continuation; tubular and continuing at both ends; OFF the cortex
+                                  (pial distance > 0.3 mm) AND in the CSF (>= 0.5 mm from tissue) AND vessel-shaped
+                                  (tube ratio > 0.35, elongation >= 10 or continuation >= 10 mm). cSS in the
+                                  subarachnoid space can sit off the cortex too - one reason this only reorders.
+  4 likely_other_mimic_or_artifact  air-bone artifact zone; microbleed-like (single compact parenchymal focus or cluster)
+  5 case_qc_insufficient          the case failed QC (insufficient_quality): fix the case before reading
+A low_confidence_review case keeps its per-candidate tiers (a case-wide constant would not order anything); the
+case status is in qc_status and the reviewer shows it.
+All cut-offs are PLACEHOLDERS from the v4 rules and phantoms, not validated; compare the order with expert labels
+(evaluate.py) before relying on it."""
+import numpy as np
+
+TIER_NAMES = {1: "high_priority_cSS_candidate", 2: "css_vs_mimic_uncertain", 3: "likely_vein",
+              4: "likely_other_mimic_or_artifact", 5: "case_qc_insufficient"}
+WM_CONT_MM, WM_RUN_MM, SINUS_RUN_MM, TUBE_HI, TUBE_MID, CSF_DEPTH_MM, ELONG_HI = 4.0, 8.0, 10.0, 0.45, 0.35, 0.5, 10.0
+
+
+def _f(r, k, d=np.nan):
+    v = r.get(k, d)
+    try: return float(v)
+    except (TypeError, ValueError): return d
+
+
+def review_priority(r, qc_status):
+    """candidate row (dict) -> (tier 1-5, name, reason). v5.3 (rows with v53_active = 1, i.e. CSS_V53=1): "off the
+    cortex, in the CSF, vessel-shaped" alone no longer makes tier 3 (18 of 61 reader-called cSS in M02-M11 were tier 3;
+    cSS lines the sulcus, so it is partly in the sulcal CSF) - it only supports another vascular sign."""
+    if qc_status == "insufficient_quality":
+        return 5, TIER_NAMES[5], "case QC insufficient_quality"
+    if _f(r, "mixed_object", 0) >= 1:
+        return 2, TIER_NAMES[2], "mixed merged object (vein-like and cSS-like pieces)"
+    if str(r.get("mimic_class", "none")) in ("mb_cluster",) or _f(r, "cmb_like", 0) >= 1:
+        return 4, TIER_NAMES[4], "microbleed-like (compact parenchymal focus / cluster)"
+    if _f(r, "artifact_zone", 0) >= 1:
+        return 4, TIER_NAMES[4], "air-bone artifact zone"
+    tube, cont = _f(r, "tube_ratio"), _f(r, "local_cont_max_mm", 0)
+    vein = []
+    if _f(r, "vessel_wm_mm", 0) >= WM_CONT_MM and (cont >= WM_RUN_MM or (np.isfinite(tube) and tube > TUBE_HI)):
+        vein.append("continues into white matter")
+    if "midline" in (str(r.get("end_type_max", "")), str(r.get("end_type_min", ""))) and cont >= SINUS_RUN_MM:
+        vein.append("runs on to the sinus zone")
+    if np.isfinite(tube) and tube > TUBE_HI and _f(r, "terminal_ends", 2) == 0: vein.append("tubular, continues at both ends")
+    shaped = (np.isfinite(tube) and tube > TUBE_MID) or _f(r, "elongation_3d", 0) >= ELONG_HI or cont >= SINUS_RUN_MM
+    if _f(r, "pial_dist_mm", 0) > 0.3 and _f(r, "csf_depth_mm", 0) >= CSF_DEPTH_MM and shaped:
+        if _f(r, "v53_active", 0) < 1 or vein:
+            vein.append("off the cortex, in the CSF, vessel-shaped")
+    if str(r.get("mimic_class", "none")) == "calcification":
+        return 2, TIER_NAMES[2], "possible calcification (diamagnetic phase)" + (f"; also {vein[0]}" if vein else "")
+    if str(r.get("mimic_class", "none")) in ("acute", "thrombosis", "mixed"):
+        return 2, TIER_NAMES[2], f"FLAIR context ({r.get('mimic_class')})"
+    if vein:
+        return 3, TIER_NAMES[3], "; ".join(vein)
+    return 1, TIER_NAMES[1], "no strong mimic evidence"
+````
 
 ## scripts/css_vessel.py
 
-```python
+````python
 """Bounded local vein tracking for detect_css.py (v4.16) - RECORDED ONLY, no rule uses these values.
 
 vein_tree_mm saturated on real SWI because the dark tubular network merges brain-wide. These features
@@ -1358,11 +2657,11 @@ def local_tracking(cm, ves, vox, reach_mm, band=None, dark=None, midline=None):
             out.update(net_radius_med_mm=round(float(np.median(rn)), 2),
                        net_radius_p95_mm=round(float(np.percentile(rn, 95)), 2))
     return out
-```
+````
 
 ## scripts/detect_css.py
 
-```python
+````python
 #!/usr/bin/env python3
 """cSS candidate detector v4 (v4.17) - definition-driven.
 usage: detect_css.py SUBJECT [z_thr=-2.5] [ridge_pct=85] [rim_mm=3]
@@ -1472,6 +2771,20 @@ QC_STRICT = os.environ.get("CSS_QC_STRICT", "") == "1"
 #   CSS_MIXED_REVIEW=1 (v5.1.1) a merged object whose pieces disagree (vein-like + cSS-like) is not excluded by the
 #   vein rules E5 / E6 / E7 as a whole; it is shown with mixed_object_review = 1
 MIXED_REVIEW = os.environ.get("CSS_MIXED_REVIEW", "") == "1"
+#   CSS_V53=1 (v5.3, from the M02-M11 reading; NOT validated - thresholds were chosen on those 10 patients):
+#   needs T1 anatomy. (a) search zone = cortex + V53_OUT_MM outside the labelled pial boundary (was 4 mm) and no
+#   brain-mask edge band, so the dark inner skull / dura inside a grown brain mask is not searched;
+#   (b) exclusions E12 extent, E13 midline (falx / sinus in the interhemispheric fissure), E14 orbitofrontal
+#   air-bone zone, E15 skull band; (c) second merge pass (V53_GAP_MM, cap V53_MAX_MM) so one continuous lining is
+#   one candidate. Without the switch the columns below are still recorded and nothing else changes.
+V53 = os.environ.get("CSS_V53", "") == "1"
+V53_OUT_MM = 1.0                 # search this far outside the labelled pial boundary
+V53_GAP_MM, V53_MAX_MM = 6.0, 80.0   # second merge pass: gap and cap on the merged object's bounding-box diagonal
+E12_MM3, E12_EXT_MM = 3000.0, 60.0   # extent: largest reader-called cSS in M02-M11 was 830 mm3
+E13_MID_MM, E13_FRAC = 3.0, 0.5      # midline: share of the object within this distance of the hemisphere boundary
+E14_EDGE_MM = 8.0                    # orbitofrontal: object this close to the brain-mask edge
+E15_FRAC = 0.5                       # skull band: share of the object whose outward 3-6 mm is dark / outside the mask
+SKULL_EDGE_MM = 6.0                  # ... counted only this close to the brain-mask edge (not across a sulcus)
 PIECE_MIN_FRAC = 0.15        # mixed_object: each kind of piece holds >= this share of the object's volume
 MIMIC_CALC_EXCL, MIMIC_MB_EXCL = 0.7, 0.5   # E10 / E11 mimic_score cut-offs (not validated)
 HESS_SIGMAS_MM = (0.8, 1.6)            # 3-D shape analysis scales
@@ -1524,6 +2837,9 @@ if (_si != 2 or vox[2] < max(vox[0], vox[1]) - 1e-3) and os.environ.get("CSS_ALL
     sys.exit(2)
 T1_ANAT = os.path.exists(_t1p) and os.path.getmtime(_t1p) >= os.path.getmtime(f"{base}/data/{subj}_swi.nii")
 MERGE_GAP_MM = min(max(MERGE_GAP_MM, 2.0 * vox[2]), 4.0)   # thick slices: inter-slice gaps must not split a line
+if V53 and not T1_ANAT:
+    print(f"{subj}: CSS_V53=1 needs T1 anatomy (work/{subj}_t1seg_swispace.nii.gz) - v5.3 rules are OFF for this case")
+    V53 = False
 s2d = np.ones((3, 3, 1), bool); s3 = np.ones((3, 3, 3), bool)
 mm2vox = lambda mm: tuple(mm / v for v in vox)
 
@@ -1605,9 +2921,24 @@ def region_ref(code, vals_c, own_vals):
 dist_mm = ndi.distance_transform_edt(brain, sampling=vox)
 rim = brain & (dist_mm < RIM_MM)
 If = Ic.copy(); If[~brain] = mu
-shell = brain & (pial_sd >= -PIAL_IN_MM) & (pial_sd <= PIAL_OUT_MM) & ~np.isin(seg, WM + DEEP)
-shell |= edge_band & ~np.isin(seg, WM + DEEP)
+shell = brain & (pial_sd >= -PIAL_IN_MM) & (pial_sd <= (V53_OUT_MM if V53 else PIAL_OUT_MM)) & ~np.isin(seg, WM + DEEP)
+if not V53:                      # v5.3: the mask edge band is where the dark inner skull sits - not searched
+    shell |= edge_band & ~np.isin(seg, WM + DEEP)
 zone = shell & ~rim
+# v5.3 skull band map (recorded for every candidate; E15 acts only with CSS_V53=1): a voxel is "skull-backed" when it
+# lies near the brain-mask edge and at least 3 of the samples 3-6 mm outward along the pial normal are dark or outside the mask.
+# cSS lines cortex that has bright CSF / cortex beyond it; the inner table of the skull is dark all the way out.
+def _outward_dark():
+    out = np.zeros(I.shape, bool); near = brain & (dist_mm < SKULL_EDGE_MM) & (z < Z_LOW)
+    ii = np.nonzero(near)
+    if not len(ii[0]): return out
+    n_dark = np.zeros(len(ii[0]), np.int8); shp = np.array(I.shape)
+    for step in (3.0, 4.0, 5.0, 6.0):
+        q = [np.clip(np.round(ii[a] + step * normal[a][ii] / vox[a]).astype(int), 0, shp[a] - 1) for a in range(3)]
+        n_dark += (~brain[q[0], q[1], q[2]]) | (z[q[0], q[1], q[2]] < Z_LOW)
+    out[ii] = n_dark >= 3
+    return out
+SKULL = _outward_dark()
 
 # ---- 3. curvilinear dark structures, slice by slice (candidate generation)
 R = np.zeros_like(I)
@@ -1636,6 +2967,7 @@ dmid = np.where(hemiL, ndi.distance_transform_edt(hemiL, sampling=vox),
 lab = np.zeros(I.shape, np.int32); n_raw = 0; nxt = 0; n_seeded = 0
 n_pieces = None; n_before_merge = None     # set by the merge step
 PIECES = None                              # v5.1.1: pre-merge piece labels (None = no merging)
+BAND = np.zeros(I.shape, bool)             # v5.3: single objects larger than any cSS focus (E12), set before pass 2
 for side in (hemiL, ~hemiL):
     wl, nw = ndi.label(weak & side, structure=s3)
     n_raw += nw
@@ -1679,6 +3011,37 @@ if MERGE_GAP_MM > 0 and lab.max() > 0:
     PIECES = _orig                     # v5.1.1: pre-merge pieces kept for per-piece evidence
     del _sel, _pairs
     del near_lab, merged
+    # v5.3 second pass (CSS_V53=1): objects of the first pass within V53_GAP_MM of each other become one candidate
+    # (one continuous lining was reported as several fragments). The bridge may not cross white matter / deep
+    # nuclei, hemispheres never merge, and a group longer than V53_MAX_MM keeps its first-pass objects.
+    n_joined_v53 = 0
+    # E12 extent is judged on the objects of the FIRST pass (one connected dark structure, e.g. the inner skull):
+    # a lining merged from several foci by pass 2 may be long and is never an "extent" artifact for that reason
+    _vol1 = np.bincount(lab.ravel()) * float(np.prod(vox)); _big1 = np.zeros(int(lab.max()) + 1, bool)
+    for g, sl in enumerate(ndi.find_objects(lab), 1):
+        if sl is not None:
+            _big1[g] = _vol1[g] > E12_MM3 or np.sqrt(sum(((s_.stop - s_.start) * v) ** 2 for s_, v in zip(sl, vox))) > E12_EXT_MM
+    BAND = _big1[lab]; del _vol1, _big1
+    if V53 and V53_GAP_MM > MERGE_GAP_MM and lab.max() > 0:
+        _src = (lab > 0) & ~BAND                     # band objects neither join nor bridge
+        near2 = (ndi.distance_transform_edt(~_src, sampling=vox) <= V53_GAP_MM / 2) & ~(np.isin(seg, WM + DEEP) & ~_src) & ~BAND
+        m2 = np.zeros_like(lab); nxt = 0
+        for side in (hemiL, ~hemiL):
+            gl, ng = ndi.label(near2 & side, structure=s3)
+            sel = _src & side
+            m2[sel] = gl[sel] + nxt; nxt += ng
+        m2[BAND] = lab[BAND] + nxt                   # band objects keep their own label
+        g2 = int(m2.max()) + int(lab.max()); big2 = np.zeros(g2 + 1, bool)
+        for g, sl in enumerate(ndi.find_objects(m2), 1):
+            if g <= nxt and sl is not None and np.sqrt(sum(((s_.stop - s_.start) * v) ** 2 for s_, v in zip(sl, vox))) > V53_MAX_MM:
+                big2[g] = True
+        m2 = np.where(big2[m2] & (lab > 0), lab + g2, m2)
+        u = np.unique(m2[m2 > 0]); remap = np.zeros(int(m2.max()) + 1, np.int32); remap[u] = np.arange(1, len(u) + 1)
+        _n1 = int(lab.max()); lab = remap[m2]; n_joined_v53 = _n1 - int(lab.max())
+        _sel = _orig > 0
+        _pairs = np.unique(np.stack([lab[_sel], _orig[_sel]]), axis=1)
+        n_pieces = np.bincount(_pairs[0], minlength=int(lab.max()) + 1)
+        del near2, m2, _sel, _pairs, _src
 
 os.makedirs(f"{base}/work", exist_ok=True)
 nib.save(nib.Nifti1Image((zone & (z < GROW_Z)).astype(np.uint8), swi.affine),
@@ -2030,6 +3393,10 @@ for p in regionprops(lab, spacing=vox):
         if ctxn.sum() >= 5: fcz = float(np.median((FL[pad][ctxn] - fc_mu) / f_sd))
     mim = MIM.evaluate(mm, pad, tissue[pad], fz, fcz, dark_pad=z[pad] < Z_LOW)   # v5.0, recorded; acts only with CSS_USE_MIMIC=1
     artz      = any(a in region for a in ARTIFACT_ZONES)
+    # v5.3 (recorded always): midline share, distance to the brain-mask edge, skull-backed share
+    v53 = dict(midline_frac=round(float((dmid[pad][mm] < E13_MID_MM).mean()), 2),
+               mask_edge_mm=round(float(np.median(dist_mm[pad][mm])), 1),
+               skull_frac=round(float(SKULL[pad][mm].mean()), 2), v53_active=int(V53), _band=bool(BAND[pad][mm].any()))
     midz      = bool(np.median(dmid[pad][mm]) < 5.0)
     # off-surface tube. vein_tree_mm is recorded only: on real SWI (P006) the dark tubular network
     # along the cortex merges into one brain-wide component (255 mm for most candidates)
@@ -2099,7 +3466,7 @@ for p in regionprops(lab, spacing=vox):
                      basal_frac=round(float((d_basal[pad][mm] <= BASAL_MM).mean()), 2),
                      vessel_ext_mm=round(ves_ext, 1), vessel_wm_mm=round(ves_wm, 1), vessel_run_mm=round(min(ves_run, VES_REACH_MM), 1), axis_normal=round(axn, 2),
                      score_v3=round(s3_, 2), score_v4=round(s4, 2), _lab=p.label,
-                     n_pieces=int(n_pieces[p.label]) if n_pieces is not None else 1, **vt, **rad, **rref, **{k: v for k, v in mim.items() if not k.startswith('_')}, **piece, **feat))
+                     n_pieces=int(n_pieces[p.label]) if n_pieces is not None else 1, **vt, **rad, **rref, **{k: v for k, v in mim.items() if not k.startswith('_')}, **piece, **feat, **v53))
 
 # CSV columns up to "long_structure" are consumed by export_review.py / the workbook: keep them
 cols = ["cand_id", "hemi", "region", "label", "volume_mm3", "n_slices", "elongation",
@@ -2130,7 +3497,8 @@ V50_COLS = ["mimic_score", "mimic_class", "mimic_reason", "phase_z", "mb_cluster
             "equivalent_sphere_diameter_mm", "compactness_3d", "sphericity", "elongation_3d", "flatness_3d",
             "path_length_mm", "tortuosity", "darkness_z_p10", "dark_frac_z2", "dark_frac_z3", "dark_frac_z4",
             "flair_csf_bright_frac", "feature_qc_flags", "feature_schema_version",
-            "review_priority_rank", "review_priority", "review_priority_reason"]                # v5.1.3 (css_tiers.py)
+            "review_priority_rank", "review_priority", "review_priority_reason",                # v5.1.3 (css_tiers.py)
+            "midline_frac", "mask_edge_mm", "skull_frac", "v53_active"]                         # v5.3, appended
 cols = cols + V50_COLS
 
 # ---- 11. exclusions (v4.8) - each with an explicit, definition-based reason
@@ -2153,7 +3521,8 @@ FULL_BOTTOM = bool(len(_nz) and _area[_bot] < 0.2 * _area.max())
 # little real-data support or a case whose QC status is not ok (see review/ID_qc.json).
 RULE_CONF = {"E1": "high" if T1_ANAT else "medium", "E2": "medium", "E3": "medium", "E4": "high",
              "E5": "medium", "E6": "medium", "E7": "medium", "E8": "low", "E9": "medium",
-             "E10": "low", "E11": "low"}                       # v5.0 mimic rules: no real-data support yet
+             "E10": "low", "E11": "low",                       # v5.0 mimic rules: no real-data support yet
+             "E12": "low", "E13": "low", "E14": "low", "E15": "low"}   # v5.3: chosen on M02-M11, not validated
 def exclusion(r):
     """-> (rule_version, reason); ("", "") = kept. v5.1.1 CSS_MIXED_REVIEW=1: a mixed merged object (pieces disagree)
     is not removed whole by a vein rule (E5 / E6 / E7); it is shown with mixed_object_review = 1"""
@@ -2171,6 +3540,15 @@ def exclusion_v4(r):
     if T1_ANAT and FULL_BOTTOM and r["rel_height"] < 0.2:
         return "E3@v4.9.2", "skull base (lowest 20 % of the cerebrum)"
     if r["extent_mm"] < MIN_EXTENT_MM: return "E4@v4.8", f"speck (<{MIN_EXTENT_MM:g} mm)"
+    if V53:                          # v5.3 opt-in rules (CSS_V53=1); every excluded object stays in ID_excluded.csv
+        if r["skull_frac"] >= E15_FRAC:
+            return "E15@v5.3", "skull band: dark all the way out to the brain-mask edge (inner skull / dura, not a lining)"
+        if r["_band"]:
+            return "E12@v5.3", f"extent: one connected object larger than any cSS focus (> {E12_MM3:g} mm3 or > {E12_EXT_MM:g} mm) - band artifact"
+        if r["midline_frac"] >= E13_FRAC and r["pial_dist_mm"] > 0:
+            return "E13@v5.3", "midline: in the interhemispheric fissure (falx / sagittal sinus / midline veins)"
+        if "orbitofrontal" in r["region"] and r["mask_edge_mm"] < E14_EDGE_MM:
+            return "E14@v5.3", "orbitofrontal air-bone susceptibility zone"
     tub_, tram_ = r["tube_ratio"], r["tram_frac"]
     if r["pial_dist_mm"] > 0.5 and np.isfinite(tub_) and tub_ > 0.45 and not (np.isfinite(tram_) and tram_ >= 0.2):
         return "E5@v4.8", "vein: tubular, in the middle of the sulcal CSF"
@@ -2290,7 +3668,8 @@ print(f"{subj}: {n_raw} raw components -> {len(df)} candidates "
       f"[{len(excluded)} excluded: " + (", ".join(f"{v} {k.split(' (')[0].split(':')[0]}" for k, v in
       pd.Series([r['_excl'] for r in excluded]).value_counts().items()) if excluded else "none")
       + (f"; {n_before_merge - int(lab.max())} pieces joined, {n_chains} long chains kept apart"
-         if n_before_merge is not None else "") + "] "
+         if n_before_merge is not None else "")
+      + (f"; v5.3 ACTIVE: {n_joined_v53} more joined (gap {V53_GAP_MM:g} mm)" if V53 and n_before_merge is not None else "") + "] "
       f"({cnt('artifact_zone')} artifact zone, {cnt('midline_zone')} midline, {cnt('vein_like')} vein-like, "
       f"{cnt('near_ich_suggest')} near ICH [{ich_src}], {cnt('infratentorial')} infratentorial)  rank={RANK}"
       + ("  FLAIR used" if FL is not None else ""))
@@ -2317,16 +3696,143 @@ update_manifest(base, subj, "detect", dict(
     pipeline_version=RULESET, run_at=pd.Timestamp.now().isoformat(timespec="seconds"), args=sys.argv[1:],
     parameters=dict(z_thr=z_thr, ridge_pct=r_pct, rim_mm=RIM_MM, rank=RANK, keep_all=KEEP_ALL,
                     use_mimic=USE_MIMIC, qc_strict=QC_STRICT, mixed_review=MIXED_REVIEW, phase=MIM.phase_note,
-                    sato_sigmas_mm=list(SATO_SIGMAS_MM), sato_sigmas_px=[round(v, 2) for v in SATO_PX]),
+                    sato_sigmas_mm=list(SATO_SIGMAS_MM), sato_sigmas_px=[round(v, 2) for v in SATO_PX],
+                    v53=V53, v53_out_mm=V53_OUT_MM, v53_gap_mm=V53_GAP_MM, v53_max_mm=V53_MAX_MM),
     anatomy="T1" if T1_ANAT else "SWI-only", flair_used=FL is not None, qc_status=QC["status"],
     n_candidates=int(len(df)), n_excluded=len(excluded), n_dropped=len(dropped), fates=FATES,
     inputs={k: dict(path=p_, sha256=sha256(p_), mtime=os.path.getmtime(p_)) for k, p_ in _inputs.items()},
     environment=environment_record()))
-```
+````
+
+## scripts/dicom_repair.py
+
+````python
+"""Fill missing slices of a DICOM series by interpolation (v5.2.2, opt-in: cohort.py import --repair-missing).
+Research software. Used when an export left some files unreadable (e.g. browser downloads that stopped part-way,
+leaving *.crswap files) and the study cannot be exported again yet.
+
+Per series (SeriesNumber) of a staged, already decompressed folder:
+  - the unreadable files' instance numbers come from their header (read without pixel data) or, failing that, from the
+    file name (...Series-<series>-<instance>.dcm);
+  - the slice position (ImagePositionPatient) must be a straight-line function of the instance number on the readable
+    files (largest deviation <= 0.1 mm), else the series is refused (irregular / multi-volume);
+  - refused as well: more than max_frac of the slices missing, more than max_run consecutive missing slices, a phase
+    series (interpolating phase across wraps is wrong), fewer than 3 readable slices;
+  - each missing slice = linear interpolation (by instance distance) of the nearest readable slice below and above
+    (at the series ends: a copy of the nearest), written as a new file with its own position, instance number and UID,
+    ImageComments 'cSS pipeline: interpolated slice'.
+A refused series is REMOVED from the staged folder (never converted with gaps). Every decision is in the report.
+Interpolated slices cannot show a lesion that is only in that slice: results from repaired series are preliminary.
+Needs pydicom (conda install -n css -c conda-forge pydicom)."""
+import os, re, glob, numpy as np
+
+FN_RE = re.compile(r"Series-(\d+)-(\d+)\.dcm$", re.I)
+
+
+def _hdr(path):
+    import pydicom
+    try:
+        ds = pydicom.dcmread(path, stop_before_pixels=True, force=True)
+        it = [str(t).upper() for t in (ds.get("ImageType") or [])]
+        ipp = ds.get("ImagePositionPatient")
+        return dict(series=int(ds.SeriesNumber) if "SeriesNumber" in ds else None,
+                    instance=int(ds.InstanceNumber) if "InstanceNumber" in ds else None,
+                    ipp=np.array([float(v) for v in ipp]) if ipp is not None else None,
+                    loc=float(ds.SliceLocation) if "SliceLocation" in ds else None,
+                    phase="P" in it or "PHASE" in it)
+    except Exception:
+        return dict(series=None, instance=None, ipp=None, loc=None, phase=False)
+
+
+def _failed_ids(path):
+    h = _hdr(path)
+    m = FN_RE.search(os.path.basename(path))
+    if h["series"] is None and m: h["series"] = int(m.group(1))
+    if h["instance"] is None and m: h["instance"] = int(m.group(2))
+    return h
+
+
+def _runs(missing, present):
+    """longest run of consecutive missing instances (inside the series' instance range)"""
+    allv = sorted(set(missing) | set(present)); best = cur = 0; miss = set(missing)
+    for v in range(allv[0], allv[-1] + 1):
+        cur = cur + 1 if v in miss else 0; best = max(best, cur)
+    return best
+
+
+def repair_folder(staged_dir, failed_paths, enabled, max_frac=0.2, max_run=2, tol_mm=0.1):
+    """staged_dir: readable (decompressed) files of one modality folder; failed_paths: the unreadable source files.
+    -> (flags, report dict). Removes every series that has missing files and is not repaired."""
+    import pydicom
+    from pydicom.uid import generate_uid
+    good = {}
+    for f in sorted(glob.glob(os.path.join(staged_dir, "*"))):
+        h = _hdr(f)
+        if h["series"] is not None: good.setdefault(h["series"], []).append((f, h))
+    bad = {}
+    unknown = []
+    for f in failed_paths:
+        h = _failed_ids(f)
+        if h["series"] is None or h["instance"] is None: unknown.append(os.path.basename(f)); continue
+        bad.setdefault(h["series"], []).append(h["instance"])
+    flags, rep = [], dict(unidentified_failed_files=unknown, series={})
+    if unknown: flags.append(f"{len(unknown)}_unreadable_files_of_unknown_series")
+    for sn, miss in sorted(bad.items()):
+        g = good.get(sn, []); miss = sorted(set(miss)); n = len(g) + len(miss)
+        r = dict(n_slices=n, n_missing=len(miss), missing_instances=miss)
+        inst = np.array([h["instance"] for _, h in g]) if g else np.array([])
+        reason = ""
+        if not enabled: reason = "incomplete (repair not requested)"
+        elif len(g) < 3: reason = "fewer than 3 readable slices"
+        elif any(h["phase"] for _, h in g): reason = "phase series (not interpolated)"
+        elif len(miss) / n > max_frac: reason = f"{len(miss)}/{n} slices missing (> {max_frac:.0%})"
+        elif _runs(miss, inst.tolist()) > max_run: reason = f"{_runs(miss, inst.tolist())} consecutive slices missing (> {max_run})"
+        elif len(set(inst.tolist())) != len(inst) or any(h["ipp"] is None for _, h in g):
+            reason = "duplicate instance numbers / no slice positions (multi-volume?)"
+        if not reason:
+            P = np.array([h["ipp"] for _, h in g]); A = np.c_[np.ones(len(inst)), inst]
+            coef, *_ = np.linalg.lstsq(A, P, rcond=None); dev = float(np.abs(A @ coef - P).max())
+            r["position_fit_max_dev_mm"] = round(dev, 4)
+            if dev > tol_mm: reason = f"slice positions not linear in instance number (max deviation {dev:.2f} mm)"
+        if reason:
+            for f, _ in g: os.remove(f)
+            r["status"] = "removed"; r["reason"] = reason
+            flags.append(f"series{sn}_{'incomplete' if not enabled else 'unrepairable'}_{len(miss)}of{n}")
+            rep["series"][str(sn)] = r; continue
+        locs = [(h["instance"], h["loc"]) for _, h in g if h["loc"] is not None]
+        lc = np.polyfit([a for a, _ in locs], [b for _, b in locs], 1) if len(locs) >= 2 else None
+        by_inst = {h["instance"]: f for f, h in g}; keys = np.array(sorted(by_inst))
+        cache = {}
+        def arr(i):
+            if i not in cache: cache[i] = pydicom.dcmread(by_inst[i]).pixel_array.astype(np.float64)
+            return cache[i]
+        for m in miss:
+            lo, hi = keys[keys < m], keys[keys > m]
+            if len(lo) and len(hi):
+                a, b = int(lo[-1]), int(hi[0]); w = (m - a) / (b - a); px = (1 - w) * arr(a) + w * arr(b); src = a if w <= 0.5 else b
+            else:
+                src = int(lo[-1]) if len(lo) else int(hi[0]); px = arr(src)
+            ds = pydicom.dcmread(by_inst[src])
+            dt = ds.pixel_array.dtype
+            info = np.iinfo(dt) if np.issubdtype(dt, np.integer) else None
+            px = np.clip(np.rint(px), info.min, info.max) if info else px
+            ds.PixelData = px.astype(dt).tobytes()
+            ds.InstanceNumber = int(m)
+            ds.ImagePositionPatient = [f"{v:.6f}" for v in (coef[0] + coef[1] * m)]
+            if lc is not None and "SliceLocation" in ds: ds.SliceLocation = f"{np.polyval(lc, m):.6f}"
+            uid = generate_uid(); ds.SOPInstanceUID = uid
+            if hasattr(ds, "file_meta"): ds.file_meta.MediaStorageSOPInstanceUID = uid
+            ds.ImageComments = "cSS pipeline: interpolated slice"
+            ds.save_as(os.path.join(staged_dir, f"interp_s{sn}_i{m:05d}.dcm"))
+        r["status"] = "repaired"; r["interpolated"] = miss
+        flags.append(f"series{sn}_repaired_{len(miss)}of{n}_interpolated")
+        rep["series"][str(sn)] = r
+    return flags, rep
+````
 
 ## scripts/eval_synthetic.py
 
-```python
+````python
 #!/usr/bin/env python3
 """Score detector output against synthetic truth.  usage: eval_synthetic.py P005S
 Reports sensitivity, worst rank, how many NON-lesion candidates (real veins/artifacts
@@ -2360,11 +3866,200 @@ auc = float(np.mean(pairs)) if pairs else (1.0 if best else 0.0)
 print(f"\n  sensitivity: {len(best)}/{n} = {100*len(best)/max(n,1):.0f}%   worst rank #{worst}")
 print(f"  non-lesion candidates ranked above the worst lesion: {above}   ranking AUC: {auc:.2f}")
 print(f"RESULT found={len(best)} total={n} worst={worst} above={above} auc={auc:.3f} ncand={len(all_c)}")
-```
+````
+
+## scripts/evaluate.py
+
+````python
+#!/usr/bin/env python3
+"""Patient-grouped evaluation of the detector against expert labels (v4.18; protocol after VALDO / CenSynCMB 2026:
+per-patient counts, patient bootstrap, stratified by protocol). Reads labels/, never changes them.
+usage: evaluate.py [--split test|dev|all] [--source consensus|reader:NAME] [--k 5,10,20] [--boot 1000] [--seed 1]
+                   [--by field_T,sequence,slice_group] [--tag NAME]
+Reference standard, per study (labels/study_meta.csv gives split and patient status):
+  cSS lesions = objects called cSS (labels/consensus.csv, or one reader's latest session in candidate_labels.csv)
+                among shown candidates AND excluded objects (sheets made with --include-excluded),
+                + reader-outlined missed cSS (labels/missed_lesions.csv; outlines within 5 mm across readers count once)
+  detected    = the lesion is a SHOWN candidate in the current detector output (matched by cand_uid fingerprint);
+                its rank = cand_id. Missed lesions are split by why: excluded (rule id) / dropped / not generated.
+  false positive = shown candidate called anything but cSS or uncertain; 'uncertain' calls are counted apart.
+Reported (with 95 % patient-bootstrap intervals): lesion sensitivity (all shown and top-k), patient sensitivity
+(cSS-positive patients with >= 1 lesion shown), false positives per scan and per cSS-NEGATIVE scan, uncertain per
+scan; a FROC table (rank cut-off -> sensitivity vs mean FP per scan); a per-study table; strata from --by.
+Labels that no longer match the current detector output (re-run after labelling) are reported, not guessed.
+Writes review/evaluation_<tag>.json, _patients.csv, _froc.csv. Default split is TEST: dev studies were used to
+design the rules, so their numbers are optimistic by construction."""
+import sys, os, json, argparse, numpy as np, pandas as pd
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from css_common import base as _base, cand_uid, label_class
+
+ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+ap.add_argument("--split", default="test", choices=["test", "dev", "all"])
+ap.add_argument("--source", default="consensus"); ap.add_argument("--k", default="5,10,20")
+ap.add_argument("--boot", type=int, default=1000); ap.add_argument("--seed", type=int, default=1)
+ap.add_argument("--by", default=""); ap.add_argument("--tag", default="")
+a = ap.parse_args(); B = _base(); L = f"{B}/labels"
+KS = [int(x) for x in a.k.split(",") if x]
+tag = a.tag or f"{a.split}_{a.source.replace(':', '-')}"
+
+meta = pd.read_csv(f"{L}/study_meta.csv", dtype=str)
+if a.split != "all": meta = meta[meta.split == a.split]
+if not len(meta): sys.exit(f"no studies with split '{a.split}' in labels/study_meta.csv")
+
+if a.source == "consensus":
+    lab = pd.read_csv(f"{L}/consensus.csv")
+    pend = lab[lab.method == "pending"]; lab = lab[lab.method != "pending"]
+    lab = lab.assign(cls=lab.consensus_class)
+elif a.source.startswith("reader:"):
+    rd = a.source.split(":", 1)[1]; lab = pd.read_csv(f"{L}/candidate_labels.csv")
+    lab = lab[lab.reader_id == rd]
+    if not len(lab): sys.exit(f"no labels from reader {rd}")
+    lab = lab[lab.session == lab.groupby("study_id").session.transform("max")]
+    pend = lab.iloc[0:0]; lab = lab.assign(cls=lab.label.map(label_class))
+else:
+    sys.exit("--source consensus or reader:NAME")
+mp = f"{L}/missed_lesions.csv"
+missed = pd.read_csv(mp) if os.path.exists(mp) else pd.DataFrame(columns=["study_id"])
+
+rows, warn = [], []
+for _, st in meta.iterrows():
+    s = st.study_id; cp, xp = f"{B}/review/{s}_candidates.csv", f"{B}/review/{s}_excluded.csv"
+    if not os.path.exists(cp): warn.append(f"{s}: no detector output - skipped"); continue
+    c = pd.read_csv(cp); x = pd.read_csv(xp) if os.path.exists(xp) else pd.DataFrame(columns=c.columns)
+    uid_rank = {cand_uid(s, r): int(r.cand_id) for _, r in c.iterrows()}
+    uid_rule = {cand_uid(s, r): str(r.get("rule_version", r.get("reason", ""))) for _, r in x.iterrows()}
+    ls = lab[lab.study_id == s]
+    lesions, fp_ranks, unc_ranks, stale = [], [], [], 0
+    seen_shown = set()
+    for _, r in ls.iterrows():
+        u = r.cand_uid
+        if u in uid_rank:
+            rk = uid_rank[u]; seen_shown.add(rk)
+            if r.cls == "cSS": lesions.append(dict(fate="shown", rank=rk))
+            elif r.cls == "uncertain": unc_ranks.append(rk)
+            else: fp_ranks.append(rk)
+        elif u in uid_rule:
+            if r.cls == "cSS": lesions.append(dict(fate="excluded", rank=None, why=uid_rule[u]))
+        else:
+            stale += 1
+    unlabelled = sorted(set(uid_rank.values()) - seen_shown)
+    # reader-outlined missed lesions (fates from label_missed.py), outlines from several readers counted once
+    ms = missed[missed.study_id == s] if len(missed) else missed
+    kept = []
+    for _, r in ms.iterrows():
+        p = np.array([r.vox_i, r.vox_j, r.vox_k], float)
+        if any(np.linalg.norm(p - q) <= 5.0 for q in kept): continue
+        kept.append(p)
+        f = str(r.fate)
+        if f == "shown":
+            ob = int(r.obj_id) if pd.notna(r.obj_id) else None
+            if ob is not None and any(l_["rank"] == ob for l_ in lesions): continue    # already counted
+            lesions.append(dict(fate="shown", rank=ob))
+            if ob in fp_ranks: fp_ranks.remove(ob)                 # it overlaps real cSS: not a false positive
+        elif f == "excluded": lesions.append(dict(fate="excluded", rank=None, why=str(r.rule_version)))
+        else: lesions.append(dict(fate=f, rank=None, why=str(r.reason)))
+    row = dict(study_id=s, split=st.split, css_status=st.get("css_status"), n_candidates=len(c),
+               n_ref_lesions=len(lesions), n_detected=sum(l_["fate"] == "shown" for l_ in lesions),
+               n_lost_excluded=sum(l_["fate"] == "excluded" for l_ in lesions),
+               n_lost_dropped=sum(l_["fate"] == "dropped" for l_ in lesions),
+               n_lost_not_generated=sum(l_["fate"] == "not generated" for l_ in lesions),
+               n_fp=len(fp_ranks), n_uncertain=len(unc_ranks), n_unlabelled=len(unlabelled), n_stale_labels=stale,
+               n_pending=int((pend.study_id == s).sum()) if len(pend) else 0,
+               lesion_ranks=";".join(str(l_["rank"]) for l_ in lesions if l_["fate"] == "shown"),
+               fp_ranks=";".join(map(str, sorted(fp_ranks))),
+               lost=";".join(f"{l_['fate']}:{l_.get('why', '')}" for l_ in lesions if l_["fate"] != "shown"))
+    for k in KS:
+        row[f"det_top{k}"] = sum(1 for l_ in lesions if l_["fate"] == "shown" and l_["rank"] is not None and l_["rank"] <= k)
+        row[f"fp_top{k}"] = sum(1 for rk in fp_ranks if rk <= k)
+    for col in ("field_T", "sequence", "vendor", "voxel_mm", "slice_mm", "qc_status", "anatomy"):
+        row[col] = st.get(col)
+    try: sm = float(st.get("slice_mm"))
+    except (TypeError, ValueError): sm = np.nan
+    row["slice_group"] = "unknown" if np.isnan(sm) else ("<=1.2 mm" if sm <= 1.2 else ("<=2 mm" if sm <= 2.0 else ">2 mm"))
+    if stale: warn.append(f"{s}: {stale} label(s) match no current candidate/excluded object (detector re-run after labelling?)")
+    if unlabelled: warn.append(f"{s}: {len(unlabelled)} shown candidate(s) without a label - neither TP nor FP")
+    # v5.1: what the detector did with every generated object in this study (review/ID_manifest.json fates)
+    _mf = f"{B}/review/{s}_manifest.json"
+    _f = (json.load(open(_mf)).get("detect", {}).get("fates") or {}) if os.path.exists(_mf) else {}
+    row.update(obj_generated=_f.get("objects"), obj_dropped=sum((_f.get("dropped_by_gate") or {}).values()) if _f else None,
+               obj_excluded=sum((_f.get("excluded_by_rule") or {}).values()) if _f else None,
+               obj_shown=_f.get("shown"), obj_qc_blocked=_f.get("qc_blocked"))
+    rows.append(row)
+P = pd.DataFrame(rows)
+if not len(P): sys.exit("no evaluable studies\n" + "\n".join(warn))
+
+def metrics(d):
+    ref = d.n_ref_lesions.sum(); pos = d[d.n_ref_lesions > 0]; neg = d[d.css_status == "neg"]
+    m = dict(n_studies=len(d), n_ref_lesions=int(ref),
+             lesion_sens=d.n_detected.sum() / ref if ref else np.nan,
+             patient_sens=float((pos.n_detected > 0).mean()) if len(pos) else np.nan,
+             fp_per_scan=float(d.n_fp.mean()), fp_per_neg_scan=float(neg.n_fp.mean()) if len(neg) else np.nan,
+             uncertain_per_scan=float(d.n_uncertain.mean()))
+    for k in KS:
+        m[f"sens_top{k}"] = d[f"det_top{k}"].sum() / ref if ref else np.nan
+        m[f"fp_per_scan_top{k}"] = float(d[f"fp_top{k}"].mean())
+    return m
+
+def boot(d, rng):
+    out = {}
+    if len(d) < 2: return out
+    bs = [metrics(d.iloc[rng.integers(0, len(d), len(d))]) for _ in range(a.boot)]
+    for key in bs[0]:
+        v = np.array([b_[key] for b_ in bs], float); v = v[np.isfinite(v)]
+        if len(v) and key not in ("n_studies", "n_ref_lesions"):
+            out[key] = [round(float(np.percentile(v, 2.5)), 3), round(float(np.percentile(v, 97.5)), 3)]
+    return out
+
+rng = np.random.default_rng(a.seed)
+overall = metrics(P); ci = boot(P, rng)
+# FROC: rank cut-off k -> pooled lesion sensitivity vs mean FP per scan (ranks are per study)
+maxk = int(P.n_candidates.max())
+froc = []
+for k in range(1, maxk + 1):
+    det = sum(sum(1 for t in str(r.lesion_ranks).split(";") if t not in ("", "None") and int(t) <= k) for _, r in P.iterrows())
+    fp = np.mean([sum(1 for t in str(r.fp_ranks).split(";") if t and int(t) <= k) for _, r in P.iterrows()])
+    froc.append(dict(top_k=k, lesion_sens=det / overall["n_ref_lesions"] if overall["n_ref_lesions"] else np.nan,
+                     fp_per_scan=float(fp)))
+strata = {}
+for col in [c_ for c_ in a.by.split(",") if c_]:
+    if col not in P: warn.append(f"--by {col}: not a column"); continue
+    strata[col] = {str(g): dict(metrics(d), ci=boot(d, rng)) for g, d in P.groupby(P[col].astype(str))}
+
+os.makedirs(f"{B}/review", exist_ok=True)
+P.to_csv(f"{B}/review/evaluation_{tag}_patients.csv", index=False)
+pd.DataFrame(froc).to_csv(f"{B}/review/evaluation_{tag}_froc.csv", index=False)
+json.dump(dict(split=a.split, source=a.source, overall=overall, ci95=ci, strata=strata, warnings=warn,
+               pending_adjudication=int(len(pend)), boot=a.boot, seed=a.seed,
+               note="patient-grouped; research software; dev-split numbers are optimistic (rules were tuned on them)"),
+          open(f"{B}/review/evaluation_{tag}.json", "w"), indent=2, default=float)
+
+f = lambda v: "n/a" if v is None or (isinstance(v, float) and not np.isfinite(v)) else (f"{v:.2f}" if isinstance(v, float) else str(v))
+fci = lambda k_: f" [{ci[k_][0]:.2f}-{ci[k_][1]:.2f}]" if k_ in ci else ""
+print(f"evaluation ({a.split} split, reference: {a.source}): {overall['n_studies']} studies, {overall['n_ref_lesions']} reference cSS lesions")
+if a.split != "test": print("  NOTE: not the test split - these numbers are optimistic (rules were designed on dev studies)")
+if overall["n_studies"] < 10: print(f"  NOTE: only {overall['n_studies']} studies - intervals are wide and unstable")
+print(f"  lesion sensitivity (all shown)  {f(overall['lesion_sens'])}{fci('lesion_sens')}")
+for k in KS:
+    print(f"  lesion sensitivity, top {k:<3d}     {f(overall[f'sens_top{k}'])}{fci(f'sens_top{k}')}   FP per scan in top {k}: "
+          f"{f(overall[f'fp_per_scan_top{k}'])}{fci(f'fp_per_scan_top{k}')}")
+print(f"  patient sensitivity             {f(overall['patient_sens'])}{fci('patient_sens')}")
+print(f"  false positives per scan        {f(overall['fp_per_scan'])}{fci('fp_per_scan')}   per cSS-negative scan "
+      f"{f(overall['fp_per_neg_scan'])}{fci('fp_per_neg_scan')}   uncertain per scan {f(overall['uncertain_per_scan'])}")
+lost = P[["n_lost_excluded", "n_lost_dropped", "n_lost_not_generated"]].sum()
+print(f"  lesions not shown: {int(lost.n_lost_excluded)} excluded by a rule, {int(lost.n_lost_dropped)} dropped at a gate, "
+      f"{int(lost.n_lost_not_generated)} never generated (details: lost column of the patient table)")
+for col, gr in strata.items():
+    for g, m in gr.items():
+        print(f"  [{col} = {g}] studies {m['n_studies']}, lesions {m['n_ref_lesions']}, sensitivity {f(m['lesion_sens'])}, "
+              f"FP per scan {f(m['fp_per_scan'])}")
+for w in warn: print("  WARNING:", w)
+if len(pend): print(f"  WARNING: {len(pend)} object(s) still pending adjudication - left out")
+print(f"-> review/evaluation_{tag}.json, _patients.csv, _froc.csv")
+````
 
 ## scripts/expert_import.py
 
-```python
+````python
 #!/usr/bin/env python3
 """Import an expert's answers from the blinded sheet (expert_sheet.py) as REFERENCE calls.
 usage: expert_import.py SUBJECT READER --css 3,17,40 [--vein 1,2] [--ich 9] [--unsure 5]
@@ -2459,11 +4154,11 @@ if "--score" in sys.argv:
     cmd = [sys.executable, f"{base}/scripts/mark_css.py", subj, ",".join(map(str, css)) or "none"]
     if ich: cmd += ["--ich", ",".join(map(str, ich))]
     subprocess.run(cmd, check=True)
-```
+````
 
 ## scripts/expert_sheet.py
 
-```python
+````python
 #!/usr/bin/env python3
 """Blinded picture sheet of all candidates for an expert reader -> review/ID_expert_sheet.pdf
 usage: expert_sheet.py SUBJECT [--top N] [--seed 1] [--include-excluded] [--vessel-overlay]
@@ -2601,11 +4296,151 @@ with PdfPages(out) as pdf:
 print(f"{subj}: expert sheet with {len(nums)} objects ({sum(1 for v in sheet.values() if v[0] == 'excluded')} "
       f"excluded mixed in) -> {out}\n"
       f"      key (do NOT give to the expert): {base}/review/{subj}_expert_key.csv")
-```
+````
+
+## scripts/export_candidates.py
+
+````python
+#!/usr/bin/env python3
+"""Export every candidate as images for external review (v5.2.8). Research software.
+usage: export_candidates.py --ids M02,M03,... [--excluded] [--fov-mm 40] [--out review/candidate_export]
+       [--zip review/candidate_export.zip]
+Output (one folder per patient, one folder per candidate, then one zip):
+  ID/overview.png              whole-head projections + axial montage (same as qc_figures.py)
+  ID/cand_NN/candidate.png     axial / coronal / sagittal close-ups of the SWI with the object outline (red),
+                               brain-mask edge (yellow); the reader's call and the tier are in the title
+  ID/cand_NN/info.txt          the same facts as text
+  ID/excl_NN/excluded.png      with --excluded: the same for objects removed by an exclusion rule
+  summary.csv                  one row per candidate: pipeline tier and reason, reader's call, accepted or not,
+                               volume, slices, region, folder
+  excluded.csv                 one row per excluded object: rule, region, volume (no reader call)
+  README.txt                   what is in the zip
+Contains study codes only (no names, MRNs or DICOM headers). Reads only; changes no result."""
+import sys, os, argparse, zipfile, datetime, warnings, numpy as np, pandas as pd
+from scipy import ndimage as ndi
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+warnings.simplefilter("ignore", pd.errors.PerformanceWarning)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from css_common import base as _base
+from qc_figures import load, window, objects, short_rule, rule_colour, overview, show, outline, plane
+
+
+def reader_calls(B, s):
+    """{cand_id: call} from review/ID_calls.csv (written by review_css.py / mark_css.py); {} if missing"""
+    p = f"{B}/review/{s}_calls.csv"
+    if not os.path.exists(p): return {}
+    d = pd.read_csv(p)
+    call = next((c for c in ("call", "label", "decision") if c in d.columns), None)
+    if call is None or "cand_id" not in d.columns: return {}
+    return {int(r.cand_id): str(r[call]) for _, r in d.iterrows()}
+
+
+def render(I, Mk, m, vox, fov_mm, title, path, dpi):
+    ijk = np.argwhere(m); com = ijk.mean(0)
+    c = ijk[np.argmin(((ijk - com) ** 2).sum(1))]                 # a voxel OF the object
+    r_ = np.maximum((fov_mm / 2 / vox).astype(int), 4)
+    lo = np.maximum(c - r_, 0); hi = np.minimum(c + r_ + 1, I.shape)
+    crop = tuple(slice(a, b) for a, b in zip(lo, hi)); cc = c - lo
+    fig, axs = plt.subplots(1, 3, figsize=(9, 3.4))
+    for j, (ax_, nm) in enumerate(((2, "axial"), (1, "coronal"), (0, "sagittal"))):
+        img = plane(I[crop], ax_, cc[ax_]); mm = plane(m[crop], ax_, cc[ax_]); mk = plane(Mk[crop], ax_, cc[ax_])
+        asp = {2: vox[1] / vox[0], 1: vox[2] / vox[0], 0: vox[2] / vox[1]}[ax_]
+        show(axs[j], img, asp, nm); outline(axs[j], mk, "yellow", lw=0.8); outline(axs[j], mm, "red", lw=1.3)
+    fig.suptitle(title, fontsize=8)
+    fig.subplots_adjust(left=0.02, right=0.98, top=0.8, bottom=0.03, wspace=0.06)
+    fig.savefig(path, dpi=dpi); plt.close(fig)
+
+
+def export_patient(B, s, root, include_excl, fov_mm, dpi):
+    folder = os.path.join(root, s); os.makedirs(folder, exist_ok=True)
+    swi = f"{B}/data/{s}_swi.nii"
+    if not os.path.exists(swi) or not os.path.exists(f"{B}/review/{s}_candidates.csv"):
+        print(f"{s}: no detection output - skipped"); return [], []
+    I, vox = load(swi); I = I.astype(np.float32)
+    mp = f"{B}/work/{s}_brainmask.nii.gz"
+    Mk = load(mp)[0] > 0 if os.path.exists(mp) else ndi.binary_fill_holes(I > 0)
+    In = window(I, Mk)
+    overview(B, s, folder)
+    calls = reader_calls(B, s)
+    C, dc = objects(B, s, "candidates")
+    rows = []
+    for _, r in dc.sort_values("oid").iterrows():
+        cid = int(r.oid); m = C == cid
+        if not m.any(): continue
+        call = calls.get(cid, "")
+        accepted = int(r.get("accept", 0) or 0) if not call else int(call == "cSS")
+        cdir = os.path.join(folder, f"cand_{cid:02d}"); os.makedirs(cdir, exist_ok=True)
+        tier = r.get("review_priority_rank", ""); reason = str(r.get("review_priority_reason", ""))
+        region = str(r.get("region", "")); vol = float(r.get("volume_mm3", 0)); nsl = r.get("n_slices", "")
+        title = (f"{s}  candidate {cid}  |  {r.get('hemi', '')} {region.replace('ctx-', '')}  |  {vol:.0f} mm3, {nsl} slices  |  "
+                 f"tier {tier}: {reason[:70]}\nreader call: {call or 'not decided'}   (red = object, yellow = brain-mask edge, "
+                 f"{fov_mm:.0f} mm field, image left = subject left)")
+        render(In, Mk, m, vox, fov_mm, title, os.path.join(cdir, "candidate.png"), dpi)
+        with open(os.path.join(cdir, "info.txt"), "w") as f:
+            f.write(f"study {s}, candidate {cid}\nhemisphere {r.get('hemi', '')}, region {region}\n"
+                    f"volume {vol:.1f} mm3, slices {nsl}, score_v4 {r.get('score_v4', '')}\n"
+                    f"pipeline tier {tier}: {reason}\nreader call {call or 'not decided'}\n"
+                    f"accepted as cSS {accepted}\nmimic class {r.get('mimic_class', '')}, artifact zone {r.get('artifact_zone', '')}\n")
+        rows.append(dict(study_id=s, cand_id=cid, folder=f"{s}/cand_{cid:02d}", hemi=r.get("hemi", ""), region=region,
+                         volume_mm3=round(vol, 1), n_slices=nsl, score_v4=r.get("score_v4", ""),
+                         pipeline_tier=tier, pipeline_reason=reason, reader_call=call, accepted_cSS=accepted,
+                         mimic_class=r.get("mimic_class", ""), artifact_zone=r.get("artifact_zone", "")))
+    erows = []
+    if include_excl:
+        X, dx = objects(B, s, "excluded")
+        for _, r in dx.sort_values("oid").iterrows() if len(dx) else []:
+            eid = int(r.oid); m = X == eid
+            if not m.any(): continue
+            edir = os.path.join(folder, f"excl_{eid:02d}"); os.makedirs(edir, exist_ok=True)
+            reason = str(r.get("reason", "")); region = str(r.get("region", "")); vol = float(r.get("volume_mm3", 0))
+            title = (f"{s}  EXCLUDED object {eid}  |  {r.get('hemi', '')} {region.replace('ctx-', '')}  |  {vol:.0f} mm3\n"
+                     f"removed by rule: {reason[:110]}   (red = object, yellow = brain-mask edge, {fov_mm:.0f} mm field)")
+            render(In, Mk, m, vox, fov_mm, title, os.path.join(edir, "excluded.png"), dpi)
+            erows.append(dict(study_id=s, excl_id=eid, folder=f"{s}/excl_{eid:02d}", hemi=r.get("hemi", ""), region=region,
+                              volume_mm3=round(vol, 1), removed_by=reason))
+    print(f"{s}: {len(rows)} candidates" + (f", {len(erows)} excluded" if include_excl else "") + " -> images written")
+    return rows, erows
+
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--ids", required=True, help="comma-separated study codes, e.g. M02,M03,M04")
+    ap.add_argument("--excluded", action="store_true"); ap.add_argument("--fov-mm", type=float, default=40.0)
+    ap.add_argument("--dpi", type=int, default=80)
+    ap.add_argument("--out", default=""); ap.add_argument("--zip", default="")
+    a = ap.parse_args(); B = _base()
+    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+    root = a.out or f"{B}/review/candidate_export"
+    zpath = a.zip or f"{B}/review/candidate_export_{stamp}.zip"
+    os.makedirs(root, exist_ok=True)
+    ids = [s.strip() for s in a.ids.split(",") if s.strip()]
+    allc, alle = [], []
+    for s in ids:
+        c, e = export_patient(B, s, root, a.excluded, a.fov_mm, a.dpi)
+        allc += c; alle += e
+    pd.DataFrame(allc).to_csv(os.path.join(root, "summary.csv"), index=False)
+    if a.excluded: pd.DataFrame(alle).to_csv(os.path.join(root, "excluded.csv"), index=False)
+    with open(os.path.join(root, "README.txt"), "w") as f:
+        f.write(f"Candidate export {stamp}. Patients: {', '.join(ids)}. Study codes only; no names, MRNs or DICOM headers.\n"
+                "summary.csv: one row per candidate. pipeline_tier / pipeline_reason = the detector's own tier;\n"
+                "reader_call = the reader's decision (cSS, Vein, Normal, Artifact, Near ICH, Unsure); accepted_cSS = 1 if cSS.\n"
+                "ID/overview.png: whole head, brain-mask edge, all candidates and excluded objects.\n"
+                "ID/cand_NN/candidate.png: close-up of one candidate in three planes.\n"
+                + ("excluded.csv / ID/excl_NN: objects removed by an exclusion rule (no reader call).\n" if a.excluded else "")
+                + "Research software. Images are for review of the detector, not for diagnosis.\n")
+    n = 0
+    with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
+        for dp, _, fn in os.walk(root):
+            for f in sorted(fn):
+                full = os.path.join(dp, f); z.write(full, os.path.relpath(full, root)); n += 1
+    print(f"-> {zpath}  ({n} files, {os.path.getsize(zpath) / 1e6:.1f} MB; {len(allc)} candidates from {len(ids)} patients)")
+````
 
 ## scripts/export_review.py
 
-```python
+````python
 #!/usr/bin/env python3
 """Print top-N candidates as tab-separated rows for pasting into the workbook
 ('Candidate Review', column A).   usage: export_review.py P006 40 | pbcopy"""
@@ -2619,11 +4454,11 @@ cols = ["cand_id", "hemi", "region", "label", "volume_mm3", "n_slices", "elongat
         "vox_i", "vox_j", "vox_k"]
 for _, r in df.iterrows():
     print(subj + "\t" + "\t".join(str(r[c]) for c in cols))
-```
+````
 
 ## scripts/feature_report.py
 
-```python
+````python
 #!/usr/bin/env python3
 """Compare candidate features between calls (cSS vs Vein/Normal/Artifact) across all reviewed subjects.
 usage: feature_report.py [--source expert|reader]
@@ -2678,11 +4513,11 @@ for f in feats:
     print(f"{f:18s} " + " ".join(f"{med.get(k, np.nan):8.2f}" for k in ["cSS", "Vein", "Normal"]) +
           f" {med.get('Artifact', np.nan):9.2f}   {a:5.2f}{tag}")
 print("\nAUC near 0.5 = no help; >0.75 = higher in cSS; <0.25 = lower in cSS.")
-```
+````
 
 ## scripts/label_missed.py
 
-```python
+````python
 #!/usr/bin/env python3
 """Record cSS that the detector did NOT show (needed to measure sensitivity, not just precision).
 usage: label_missed.py SUBJECT READER [--mask path.nii.gz] [--session N]
@@ -2783,11 +4618,87 @@ for r in rows:
           + f"  extent {r['extent_mm']} mm  vox {r['vox_i']} {r['vox_j']} {r['vox_k']}")
 if f.get("shown"):
     print("  note: 'shown' outlines are covered by a numbered candidate - check that number's call instead")
-```
+````
+
+## scripts/make_swi.py
+
+````python
+#!/usr/bin/env python3
+"""Build an SWI image from gradient-echo MAGNITUDE + PHASE (v4.18) - for datasets that store the raw GRE
+(e.g. OpenNeuro ds000221 / MPI-Leipzig LEMON: acq-mag_GRE + acq-phase_GRE) instead of a processed SWI.
+usage: make_swi.py MAG.nii.gz PHASE.nii.gz OUT_swi.nii.gz [--sigma-mm 4] [--power 4] [--phase-sign auto|+1|-1]
+                   [--hp-out OUT_hpphase.nii.gz]
+Standard SWI processing (Haacke 2004): phase -> radians, homodyne high-pass per axial slice
+(angle(z * conj(lowpass z)), Gaussian low-pass sigma --sigma-mm, wrap-safe; the same filter the reviewer
+uses), a phase mask that darkens PARAMAGNETIC voxels (veins, haemosiderin) linearly to 0 at pi, and
+SWI = magnitude x mask^power. Nothing else is changed: the output keeps the magnitude's grid and affine.
+
+Phase sign: which sign is paramagnetic differs between vendors and reconstructions. With --phase-sign auto
+(default) it is read from the image: paramagnetic voxels are also dark on the magnitude at this TE, so the
+sign of the median high-pass phase of the darkest-for-their-neighbourhood brain voxels is used. The
+evidence is printed; if it is weak the script stops and asks for --phase-sign. Check the result once per
+protocol: veins must be DARKER on the SWI than on the magnitude (calcium is not darkened).
+Research software, not for clinical reading."""
+import sys, os, argparse, numpy as np, nibabel as nib
+from scipy import ndimage as ndi
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from css_common import phase_to_radians, homodyne_highpass
+
+ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+ap.add_argument("mag"); ap.add_argument("phase"); ap.add_argument("out")
+ap.add_argument("--sigma-mm", type=float, default=4.0); ap.add_argument("--power", type=int, default=4)
+ap.add_argument("--phase-sign", default="auto"); ap.add_argument("--hp-out", default="")
+a = ap.parse_args()
+
+mi, pi_ = nib.load(a.mag), nib.load(a.phase)
+if mi.shape[:3] != pi_.shape[:3] or not np.allclose(mi.affine, pi_.affine, atol=1e-3):
+    sys.exit("magnitude and phase are not on the same grid - they must come from the same acquisition")
+M = np.asarray(mi.dataobj, np.float32); P = np.asarray(pi_.dataobj, np.float32)
+if M.ndim == 4 or P.ndim == 4:
+    sys.exit("4-D (multi-echo) input: pass one echo (e.g. the longest usable TE) as 3-D images")
+vox = np.array(mi.header.get_zooms()[:3], float)
+si = int(np.argmax(np.abs(mi.affine[2, :3])))          # superior-inferior array axis: slice-wise filter
+P, unit = phase_to_radians(P)                            # scanner units (e.g. -4096..4095) -> radians
+# homodyne high-pass, slice by slice in the plane perpendicular to the S-I axis (v5.0: shared with the detector)
+HP = homodyne_highpass(P, vox, si, a.sigma_mm)
+
+# brain-ish mask for the sign estimate: bright magnitude, eroded away from the head edge
+thr = 0.15 * float(np.percentile(M[M > 0], 99)) if (M > 0).any() else 0.0
+head = ndi.binary_fill_holes(M > thr)
+lab, n = ndi.label(head)
+if n: head = lab == (np.argmax(np.bincount(lab.ravel())[1:]) + 1)
+core = ndi.binary_erosion(head, iterations=max(1, int(round(10 / vox.min()))))
+if a.phase_sign == "auto":
+    rel = M / (ndi.gaussian_filter(M, 3.0 / vox) + 1e-6)
+    dark = core & (rel < 0.75) & (np.abs(HP) > 0.2)
+    if dark.sum() < 200:
+        sys.exit(f"too few dark brain voxels ({int(dark.sum())}) to read the phase sign - give --phase-sign +1 or -1")
+    med = float(np.median(HP[dark])); frac = float((np.sign(HP[dark]) == np.sign(med)).mean())
+    if abs(med) < 0.05 or frac < 0.6:
+        sys.exit(f"phase sign unclear (median {med:+.2f} rad, {frac:.0%} agree) - give --phase-sign +1 or -1")
+    sign = 1 if med > 0 else -1
+    how = f"auto: dark-on-magnitude voxels median high-pass phase {med:+.2f} rad, {frac:.0%} same sign, n={int(dark.sum())}"
+else:
+    sign = int(a.phase_sign); how = "given"
+    if sign not in (1, -1): sys.exit("--phase-sign must be auto, +1 or -1")
+
+# phase mask: paramagnetic side (sign) goes linearly from 1 at 0 to 0 at pi
+para = sign * HP
+mask = np.where(para > 0, np.clip(1.0 - para / np.pi, 0.0, 1.0), 1.0).astype(np.float32)
+S = (M * mask ** a.power).astype(np.float32)
+out = nib.Nifti1Image(S, mi.affine, mi.header); out.set_data_dtype(np.float32)
+nib.save(out, a.out)
+if a.hp_out:
+    nib.save(nib.Nifti1Image(HP, mi.affine), a.hp_out)
+red = float(1 - np.median(S[core & (mask < 0.9)] / (M[core & (mask < 0.9)] + 1e-6))) if (core & (mask < 0.9)).any() else 0.0
+print(f"{os.path.basename(a.out)}: SWI = magnitude x phase-mask^{a.power}; phase {unit}; high-pass sigma {a.sigma_mm} mm "
+      f"in-plane (S-I axis {si}); paramagnetic sign {sign:+d} ({how}); {(core & (mask < 0.9)).mean() if core.any() else 0:.1%} "
+      f"of brain voxels darkened, median by {red:.0%}")
+````
 
 ## scripts/make_synthetic.py
 
-```python
+````python
 #!/usr/bin/env python3
 """Insert synthetic cSS (and optional synthetic vein decoys) into a presumed cSS-negative host -> {HOST}S.
 usage: make_synthetic.py HOST [n_lesions=8] [depth=0.6] [seed=1] [--tram 0.4] [--veins 4] [--radial 2]
@@ -3079,11 +4990,11 @@ for i in range(1, len(seeds) + 1):
     ks = np.unique(np.argwhere(m)[:, 2]); c0 = np.argwhere(m).mean(0).round().astype(int)
     print(f"  lesion {i}: {lut.get(lab, lab)!s:30s} slices {ks.min()}-{ks.max()}  vox {c0[0]} {c0[1]} {c0[2]}"
           f"  {m.sum() * np.prod(vox):.0f} mm3")
-```
+````
 
 ## scripts/mark_css.py
 
-```python
+````python
 #!/usr/bin/env python3
 """Mark reviewed candidates and score.
 usage: mark_css.py SUBJECT 1,4,9 [--ich 3,7] [--reviewed 1-40 list]     (use 'none' when no cSS)
@@ -3115,11 +5026,420 @@ df.to_csv(csv, index=False)
 print(f"{subj}: accepted {len(ids)} of {len(df)} candidates {ids if ids else ''}"
       + (f"; near-ICH (not scored) {ich}" if ich else ""))
 subprocess.run([sys.executable, f"{base}/scripts/score_css.py", subj], check=True)
-```
+````
+
+## scripts/mimic_rules.py
+
+````python
+"""Mimic evidence for detect_css.py (v5.0, Layer 1). Imported, not run on its own.
+
+Three published cSS mimics, each measured per candidate (Charidimou AJNR 2016; mimics review, Clin Neuroradiol 2020):
+
+  calcification (Sturge-Weber, calcifying angiopathy)   phase: DIAMAGNETIC; cSS / veins are paramagnetic
+  acute convexity SAH / cortical vein thrombosis        FLAIR: bright sulcal CSF / bright adjacent cortex
+  cluster of lobar microbleeds                          shape: several separate compact parenchymal blobs in one object
+
+Columns (detect_css.py appends them to candidates AND excluded):
+  mimic_score   0-1, the strongest of the three pieces of evidence below (0 = none); NOT a probability
+  mimic_class   none / calcification / acute / thrombosis / mixed / mb_cluster
+  mimic_reason  human-readable evidence
+  phase_z       approximate t-statistic of the candidate's fitted susceptibility from the phase (> 0 paramagnetic,
+                < 0 diamagnetic); NaN without a usable phase image
+  phase_r       correlation of the observed filtered phase with the dipole pattern a PARAMAGNETIC object of this
+                candidate's own shape would make (-1..1)
+  mb_cluster_n  separate compact parenchymal blobs in the dark support (>= 3 -> microbleed cluster)
+
+WHY THE PHASE RULE FITS A DIPOLE PATTERN instead of reading the sign of the median phase: the phase inside a thin
+sheet or tube depends on its orientation to B0. In css_common.susceptibility_signal (the pipeline's own forward
+model), a paramagnetic sheet lying flat to B0 has median filtered phase -0.94 rad and a vertical one +2.09 rad; a
+paramagnetic tube perpendicular to B0 -0.54 rad (tests/check_mimic.py). A sign-of-median rule would call real cSS on
+horizontal cortex "calcium". Fitting the pattern a paramagnetic object of the candidate's own shape would produce
+takes the orientation into account. The scanner's sign convention is fitted the same way on the vessel map (veins are
+paramagnetic), so no vendor table is needed.
+
+Limits (research software, thresholds NOT validated on labelled data):
+  - phase_z treats noise as independent within ~2 voxels; real phase noise and nearby veins make it optimistic.
+  - background fields that survive the 4 mm high-pass are noise here. Calcium next to a large vein can be missed.
+  - FLAIR thresholds (z > 3) are the detector's existing flair_bright / flair_ctx_bright cut-offs (v4.x), not
+    re-derived. Acute cSAH and cSS co-exist in CAA: FLAIR evidence is a SOFT penalty only, never an exclusion.
+  - laminar cortical necrosis and haemorrhagic infarct are not handled (no DWI / T1 hyperintensity feature).
+Only with CSS_USE_MIMIC=1 does any of this change the output: score x 0.5 for FLAIR evidence, exclusion E10
+(calcification, mimic_score >= 0.7) and E11 (microbleed cluster, mimic_score >= 0.5). Default: recorded only."""
+import os, numpy as np, nibabel as nib
+from scipy import ndimage as ndi
+from css_common import phase_to_radians, homodyne_highpass, fresh
+
+HP_SIGMA_MM = 4.0          # same high-pass as make_swi.py
+FIT_SHELL_VOX = 2          # phase fit region = this many voxels around the candidate (inside the brain)
+WRAP_RAD = 2.5             # observed |filtered phase| above this may be wrapped: not used in the fit
+BOX_MARGIN_MM = 12.0       # forward-model box around the candidate
+CORR_VOX = 2.0             # assumed noise correlation length (voxels per axis) for phase_z
+CONV_MIN_T = 3.0           # scanner sign convention must be fitted at least this clearly, else the phase rule is off
+CALC_Z, CALC_R = -3.0, -0.2
+FLAIR_Z = 3.0              # = flair_bright / flair_ctx_bright in detect_css.py
+MB_MIN_DIAM_MM, MB_DIAM_MM, MB_MIN_VOX, MB_MAX_ASPECT, MB_PARENCHYMA = 2.0, 6.0, 2, 2.5, 0.5
+MB_MIN_N = 3
+
+
+def dipole_field(chi, vox, affine, pad=16):
+    """field perturbation (ppm of B0) of susceptibility map chi: the same unit-dipole kernel as
+    css_common.susceptibility_signal, D(k) = 1/3 - (k.b0)^2/|k|^2, B0 = world z through the affine; lean memory
+    (broadcast frequencies, complex64) so a whole-brain fit fits on a laptop"""
+    c = np.pad(np.asarray(chi, np.float32), pad)
+    vox = np.asarray(vox, float)
+    R = np.asarray(affine, float)[:3, :3] / vox[None, :]
+    b0 = R.T @ np.array([0.0, 0.0, 1.0]); b0 /= np.linalg.norm(b0)
+    f = [np.fft.fftfreq(n, d=v).astype(np.float32) for n, v in zip(c.shape, vox)]
+    kx, ky, kz = f[0][:, None, None], f[1][None, :, None], f[2][None, None, :]
+    k2 = kx ** 2 + ky ** 2 + kz ** 2
+    kb = kx * b0[0] + ky * b0[1] + kz * b0[2]
+    with np.errstate(invalid="ignore", divide="ignore"):
+        D = (np.float32(1 / 3) - np.where(k2 > 0, kb ** 2 / k2, 0)).astype(np.float32)
+    D[0, 0, 0] = 0
+    from scipy import fft as sfft                                  # keeps complex64 (numpy.fft upcasts)
+    out = np.real(sfft.ifftn(sfft.fftn(c.astype(np.complex64), workers=-1) * D, workers=-1)).astype(np.float32)
+    return out[pad:-pad, pad:-pad, pad:-pad]
+
+
+def highpass_linear(field, vox, si, sigma_mm=HP_SIGMA_MM):
+    """the linear (small-phase) equivalent of homodyne_highpass, applied to a predicted field"""
+    sig = [0.0 if ax == si else sigma_mm / vox[ax] for ax in range(3)]
+    return field - ndi.gaussian_filter(field, sig)
+
+
+def fit_amplitude(obs, pred, n_corr=CORR_VOX ** 3):
+    """least-squares a in obs = a * pred over the given voxels -> (a, t, r); t uses n / n_corr effective samples"""
+    obs = np.asarray(obs, float); pred = np.asarray(pred, float)
+    ss = float((pred ** 2).sum())
+    if len(obs) < 10 or ss <= 0: return np.nan, np.nan, np.nan
+    a = float((obs * pred).sum() / ss)
+    res = obs - a * pred
+    # var(a) = sigma^2 / sum(pred^2) for independent noise; noise correlated over n_corr voxels inflates it n_corr-fold
+    se = float(np.sqrt((res ** 2).sum() / max(len(obs) - 1, 1)) * np.sqrt(n_corr / ss))
+    r = float(np.corrcoef(obs, pred)[0, 1]) if obs.std() > 0 and pred.std() > 0 else np.nan
+    return a, (a / se if se > 0 else np.nan), r
+
+
+def flair_rule(fz, fcz):
+    """FLAIR evidence -> (score 0-1, class, reason). fz = sulcal-CSF FLAIR z, fcz = adjacent-cortex FLAIR z
+    (detect_css.py flair_csf_z / flair_ctx_z; NaN without FLAIR)"""
+    s = lambda z: float(np.clip(0.5 + (z - FLAIR_Z) / 6.0, 0, 1)) if np.isfinite(z) and z > FLAIR_Z else 0.0
+    sc, sx = s(fz), s(fcz)
+    if sc and sx: return max(sc, sx), "mixed", f"FLAIR bright sulcal CSF (z {fz:.1f}) and cortex (z {fcz:.1f})"
+    if sc: return sc, "acute", f"FLAIR bright sulcal CSF (z {fz:.1f}): acute convexity SAH?"
+    if sx: return sx, "thrombosis", f"FLAIR bright adjacent cortex (z {fcz:.1f}): cortical vein thrombosis?"
+    return 0.0, "none", ""
+
+
+def mb_cluster_rule(mask, tissue, vox):
+    """candidate support (crop) -> (score, n, reason). Counts SEPARATE dark blobs: connected components (26-neighbour)
+    of the support that are microbleed-like - small (equivalent diameter MB_MIN_DIAM_MM..MB_DIAM_MM), compact
+    (longest / shortest extent in mm <= MB_MAX_ASPECT, at least MB_MIN_VOX voxels across in two directions) and mostly
+    surrounded by parenchyma (>= MB_PARENCHYMA of a 1-voxel shell in labelled tissue, AJNR 2016). >= MB_MIN_N blobs
+    -> cluster. A cSS band (tram-track or single bank) is one elongated component and is never counted.
+    v5.1: no erosion. v5.0 eroded the support once; that split the irregular dark support of a tram-track into compact
+    fragments and flagged true cSS lesion 3 of PH3 as a microbleed cluster (E11 then excluded it with
+    CSS_USE_MIMIC=1). Limit: microbleeds that touch each other form one elongated component and are not counted."""
+    vox = np.asarray(vox, float); s3 = np.ones((3, 3, 3), bool)
+    lab, n = ndi.label(mask, structure=s3)
+    good = 0
+    for i, sl in enumerate(ndi.find_objects(lab), 1):
+        if sl is None: continue
+        nv = np.array([s_.stop - s_.start for s_ in sl]); ext = nv * vox
+        if np.sort(nv)[-2] < MB_MIN_VOX or ext.max() / ext.min() > MB_MAX_ASPECT: continue
+        piece = lab == i
+        diam = float((6 * piece.sum() * np.prod(vox) / np.pi) ** (1 / 3))
+        if not (MB_MIN_DIAM_MM <= diam < MB_DIAM_MM): continue
+        shell = ndi.binary_dilation(piece, structure=s3) & ~mask
+        if shell.any() and tissue[shell].mean() >= MB_PARENCHYMA: good += 1
+    if good >= MB_MIN_N:
+        return float(min(1.0, 0.5 + 0.1 * (good - MB_MIN_N))), good, f"{good} separate compact parenchymal blobs: microbleed cluster?"
+    return 0.0, good, ""
+
+
+class MimicRejector:
+    """Per-scan state (filtered phase, scanner sign convention) + evaluate() per candidate."""
+
+    def __init__(self, base, subj, swi, brain, vox, si, ves=None):
+        self.vox = np.asarray(vox, float); self.si = si; self.aff = swi.affine; self.brain = brain
+        self.hp = None; self.conv = 0; self.phase_note = "no phase image (data/ID_phase.nii.gz)"
+        p = f"{base}/data/{subj}_phase.nii.gz"
+        if not os.path.exists(p): return
+        swi_p = f"{base}/data/{subj}_swi.nii"
+        ph = nib.load(p)
+        if ph.shape[:3] != swi.shape[:3] or not np.allclose(ph.affine, swi.affine, atol=1e-3):
+            self.phase_note = "phase image is not on the SWI grid - phase rule off"; return
+        if not fresh(p, swi_p):
+            self.phase_note = "phase image is older than the SWI - phase rule off (re-import with --phase)"; return
+        P, unit = phase_to_radians(np.asarray(ph.dataobj, np.float32))
+        if P.ndim == 4: self.phase_note = "4-D phase - phase rule off"; return
+        self.hp = homodyne_highpass(P, self.vox, si, HP_SIGMA_MM)
+        self.hp[~brain] = 0
+        # scanner sign convention: veins are paramagnetic -> fit the dipole pattern of the whole vessel map
+        if ves is None or ves.sum() < 200:
+            self.hp = None; self.phase_note = "vessel map too small to fit the phase sign convention - phase rule off"; return
+        pred = highpass_linear(dipole_field(ves.astype(np.float32), self.vox, self.aff), self.vox, si)
+        a, t, r = fit_amplitude(self.hp[ves], pred[ves])
+        self.conv_t, self.conv_r = t, r
+        if not np.isfinite(t) or abs(t) < CONV_MIN_T:
+            self.hp = None
+            self.phase_note = f"phase sign convention unclear on the vessel map (t {t:.1f}) - phase rule off"; return
+        self.conv = 1 if a > 0 else -1
+        self.phase_note = f"phase used ({unit}); paramagnetic sign {self.conv:+d} fitted on the vessel map (t {t:.1f}, r {r:.2f})"
+
+    def phase_evidence(self, mm, pad):
+        """-> (phase_z, phase_r) for the candidate mask mm (crop at slices pad); NaN without phase"""
+        if self.hp is None: return np.nan, np.nan
+        m = int(np.ceil(BOX_MARGIN_MM / self.vox.min()))
+        idx = np.argwhere(mm) + [s.start for s in pad]
+        lo = np.maximum(idx.min(0) - m, 0); hi = np.minimum(idx.max(0) + m + 1, self.hp.shape)
+        box = tuple(slice(a, b) for a, b in zip(lo, hi))
+        cm = np.zeros(tuple(hi - lo), bool); q = idx - lo; cm[tuple(q.T)] = True
+        aff = self.aff.copy(); aff[:3, 3] = (self.aff @ np.r_[lo, 1])[:3]
+        pred = highpass_linear(dipole_field(cm.astype(np.float32), self.vox, aff), self.vox, self.si)
+        # fit on the shell AROUND the candidate: inside a strong deposit the phase wraps past pi (a paramagnetic sheet
+        # flat to B0 at 0.5 ppm reaches 5.5 rad at 3 T, TE 20 ms) and the homodyne filter folds it to the wrong sign;
+        # the field outside is weaker. Voxels already near +-pi are left out as possibly wrapped.
+        shell = ndi.binary_dilation(cm, iterations=FIT_SHELL_VOX) & ~cm & self.brain[box]
+        reg = shell & (np.abs(self.hp[box]) < WRAP_RAD)
+        a, t, r = fit_amplitude(self.hp[box][reg], pred[reg])
+        # v5.1.2: share of the shell usable for the fit (not possibly wrapped) and polarity consistency = share of
+        # informative fit voxels whose observed phase sign agrees with the fitted pattern
+        self._valid = float(reg.sum() / max(shell.sum(), 1))
+        inf = reg & (np.abs(pred) > 0.1 * np.abs(pred[reg]).max()) if reg.any() and np.abs(pred[reg]).max() > 0 else reg
+        self._polar = float((np.sign(self.hp[box][inf]) == np.sign(a * pred[inf])).mean()) if inf.any() and np.isfinite(a) else np.nan
+        return (self.conv * t if np.isfinite(t) else np.nan), (self.conv * r if np.isfinite(r) else np.nan)
+
+    def evaluate(self, mm, pad, tissue_pad, fz, fcz, dark_pad=None):
+        """one candidate -> dict of the mimic columns. dark_pad: dark voxels (detector z < Z_LOW) in the same crop.
+        The microbleed rule looks at the dark voxels within 2 voxels of the candidate, not at the candidate mask
+        itself: the detector's mask is the ridge-filtered (thinned) dark region, in which round microbleeds no
+        longer look round (PHM phantom: a row of 4 microbleeds became one candidate with 0 countable blobs)."""
+        self._valid, self._polar = np.nan, np.nan
+        pz, pr = self.phase_evidence(mm, pad)
+        support = mm if dark_pad is None else (mm | (ndi.binary_dilation(mm, iterations=2) & dark_pad))
+        calc = 0.0; why = []
+        if np.isfinite(pz) and pz <= CALC_Z and np.isfinite(pr) and pr <= CALC_R:
+            calc = float(min(1.0, 0.7 + 0.05 * (CALC_Z - pz)))
+            why.append(f"diamagnetic on phase (phase_z {pz:.1f}, r {pr:.2f}): calcification?")
+        fs, fcls, fwhy = flair_rule(fz, fcz)
+        ms, mn, mwhy = mb_cluster_rule(support, tissue_pad, self.vox)
+        if fwhy: why.append(fwhy)
+        if mwhy: why.append(mwhy)
+        cls, sc = max((("calcification", calc), (fcls, fs), ("mb_cluster", ms)), key=lambda t: t[1])
+        return dict(mimic_score=round(sc, 2), mimic_class=cls if sc > 0 else "none", mimic_reason="; ".join(why),
+                    phase_z=round(pz, 2) if np.isfinite(pz) else np.nan,
+                    phase_r=round(pr, 2) if np.isfinite(pr) else np.nan, mb_cluster_n=int(mn),
+                    phase_valid_frac=round(self._valid, 2) if np.isfinite(self._valid) else np.nan,
+                    phase_polarity_frac=round(self._polar, 2) if np.isfinite(self._polar) else np.nan,
+                    _flair_class=fcls)
+````
+
+## scripts/mp2rage_robust.py
+
+````python
+#!/usr/bin/env python3
+"""MP2RAGE background clean-up before FreeSurfer (v4.18): the 'robust combination' of O'Brien et al. 2014
+(PLoS One 9:e99676) as implemented by J. Marques (RobustCombination.m), from MAGNITUDE images.
+usage: mp2rage_robust.py UNI.nii.gz INV1.nii.gz INV2.nii.gz OUT_T1.nii.gz [--lambda auto|1|5|...]
+The MP2RAGE UNI image has salt-and-pepper noise outside the head (division of two noisy signals). recon-all
+then fails to strip dura / background (LEMON P201: 'extra large defect ... dura has not been removed from
+wm.mgz', topology fixing aborted). The robust combination adds a noise term beta to the UNI formula:
+      UNI_r = (INV1 * INV2 - beta) / (INV1^2 + INV2^2 + 2 beta),   beta = lambda * mean(INV2 noise)^2
+which leaves the brain (high INV2 signal) unchanged and pushes the background to -0.5 (black). INV1's sign
+(lost in magnitude images) is recovered from UNI: INV1 = the root of UNI = INV1 INV2 / (INV1^2 + INV2^2) that
+is closer to the measured |INV1|. --lambda auto (v4.18.2): the smallest of 1, 2, 4 ... 128 that leaves < 5 % of the
+background band 5-20 mm outside the head brighter than 25 % of the brain, without changing the brain (r >= 0.95). Output is scaled to 0..4095 like a scanner UNI. Prints the
+correlation with the original UNI inside the head (should stay > 0.95)."""
+import sys, argparse, numpy as np, nibabel as nib
+from scipy import ndimage as ndi
+
+ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+ap.add_argument("uni"); ap.add_argument("inv1"); ap.add_argument("inv2"); ap.add_argument("out")
+ap.add_argument("--lambda", dest="lam", default="auto")
+a = ap.parse_args()
+iu, i1, i2 = (nib.load(p) for p in (a.uni, a.inv1, a.inv2))
+if not (iu.shape[:3] == i1.shape[:3] == i2.shape[:3]) or not (np.allclose(iu.affine, i1.affine, atol=1e-2)
+                                                             and np.allclose(iu.affine, i2.affine, atol=1e-2)):
+    sys.exit("UNI, INV1 and INV2 must be on the same grid (same MP2RAGE acquisition)")
+U = np.asarray(iu.dataobj, np.float64); A1 = np.abs(np.asarray(i1.dataobj, np.float64)); A2 = np.abs(np.asarray(i2.dataobj, np.float64))
+# UNI to [-0.5, 0.5]
+if U.max() > 1.5:
+    lo, hi = (0.0, 4095.0) if U.min() >= 0 and U.max() <= 4096 else (float(U.min()), float(U.max()))
+    u = (U - lo) / (hi - lo) - 0.5
+else:
+    u = U - 0.5 if U.min() >= 0 else U
+u = np.clip(u, -0.5, 0.5)
+# INV1 sign from UNI: u (i1^2 + i2^2) = i1 i2  ->  u i1^2 - i2 i1 + u i2^2 = 0
+with np.errstate(invalid="ignore", divide="ignore"):
+    disc = np.sqrt(np.clip(A2 ** 2 - 4 * u * u * A2 ** 2, 0, None))
+    r_pos = np.where(np.abs(u) > 1e-6, (A2 + disc) / (2 * u), 0.0)
+    r_neg = np.where(np.abs(u) > 1e-6, (A2 - disc) / (2 * u), 0.0)
+I1 = np.where(np.abs(np.abs(r_pos) - A1) < np.abs(np.abs(r_neg) - A1), r_pos, r_neg)
+I1 = np.where(np.isfinite(I1), I1, 0.0)
+# v4.18.2: noise from the background band 5-20 mm OUTSIDE the head (INV2 has a clean head outline). The image border
+# is often zero-padded / defaced (LEMON: border noise 10 -> lambda 1, speckle left around the skull and neck).
+from skimage.filters import threshold_otsu
+vox = np.array(iu.header.get_zooms()[:3], float)
+pos = A2[A2 > 0]
+head = A2 > threshold_otsu(pos) * 0.5
+head = ndi.binary_closing(head, iterations=2); head = ndi.binary_fill_holes(head)
+lab, n = ndi.label(head)
+if n: head = lab == (np.argmax(np.bincount(lab.ravel())[1:]) + 1)
+d_out = ndi.distance_transform_edt(~head, sampling=vox)
+shell = (d_out > 5) & (d_out <= 20) & (A2 > 0)
+if shell.sum() < 1000:                                    # tiny field of view: fall back to everything outside
+    shell = (d_out > 2) & (A2 > 0)
+noise = float(np.mean(A2[shell])) if shell.any() else float(np.percentile(pos, 1))
+core = ndi.binary_erosion(head, iterations=max(1, int(round(10 / vox.min()))))
+if not core.any(): core = head
+ref = (u[core] + 0.5) * 4095
+def robust(lam):
+    b = lam * noise ** 2
+    return (I1 * A2 - b) / (I1 ** 2 + A2 ** 2 + 2 * b)
+lams = [1, 2, 4, 8, 16, 32, 64, 128] if a.lam == "auto" else [float(a.lam)]
+prev = None
+for lam in lams:
+    out_l = np.clip((robust(lam) + 0.5) * 4095, 0, 4095)
+    hm = float(np.median(out_l[core]))
+    speck = float((out_l[shell] > 0.25 * hm).mean()) if shell.any() else 0.0
+    rc = float(np.corrcoef(out_l[core], ref)[0, 1])
+    if rc < 0.95 and prev is not None:                    # brain contrast would change: keep the previous lambda
+        lam, out, speck, ok = prev; break
+    out, ok = out_l, speck < 0.05
+    prev = (lam, out_l, speck, ok)
+    if ok: break
+bd = shell
+c = float(np.corrcoef(out[core], ref)[0, 1])
+img = nib.Nifti1Image(out.astype(np.float32), iu.affine, iu.header); img.set_data_dtype(np.float32)
+nib.save(img, a.out)
+print(f"{a.out}: robust MP2RAGE combination, lambda {lam:g} (background noise {noise:.1f}, band 5-20 mm outside the head); "
+      f"speckle left in that band {speck:.1%} (was {float(((u[shell] + 0.5) * 4095 > 0.25 * np.median(ref)).mean()):.1%}); "
+      f"correlation with the original UNI inside the brain {c:.3f}" + ("" if ok else "  WARNING: background still speckled"))
+if c < 0.95: print("WARNING: brain contrast changed (correlation < 0.95) - check the image before recon-all")
+````
+
+## scripts/rank_candidates.py
+
+````python
+#!/usr/bin/env python3
+"""Apply the trained ranking model to one study (v5.0, Layer 3).
+usage: rank_candidates.py SUBJECT [--model review/ranker_model.json] [--allow-training-study]
+Adds two columns at the END of review/ID_candidates.csv (replaced if present; nothing else changes - cand_id and
+the existing score / score_v4 order stay, so both rankings are visible):
+  score_model   model output 0-1 (NOT a calibrated probability of cSS)
+  rank_model    1 = highest score_model
+Features the model needs but this study lacks are filled with the training median (named in the output).
+Refuses a study the model was trained on (its ranking would be optimistic) unless --allow-training-study.
+CSS_QC_STRICT=1 and case QC low_confidence_review (review/ID_qc.json): score_model x 0.8 (a soft penalty that
+keeps the order within the case; it matters only when candidates of several cases are pooled).
+run_css.sh calls this only when the model exists and the study is not in the test split; a test-split study is
+scored by running this script by hand with the frozen model. Research software, not for clinical use."""
+import sys, os, json, argparse, numpy as np, pandas as pd
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from css_common import base as _base, FP, use_derived, sha256
+from train_ranker import add_missing
+
+ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+ap.add_argument("subject"); ap.add_argument("--model", default="")
+ap.add_argument("--allow-training-study", action="store_true")
+a = ap.parse_args(); B = _base(); s = a.subject
+mp = a.model or f"{B}/review/ranker_model.json"
+if not os.path.exists(mp): sys.exit(f"no model ({mp}) - train one with train_ranker.py first")
+M = json.load(open(mp))
+if s in M.get("training_studies", []) and not a.allow_training_study:
+    sys.exit(f"{s} was used to train {os.path.basename(mp)} - its model ranking would be optimistic "
+             f"(--allow-training-study to rank anyway)")
+# v5.1 stale-model checks: labels changed since the fit, or this study detected by a different detector build
+strict = os.environ.get("CSS_QC_STRICT") == "1"
+warn = []
+lp = M.get("label_file")
+if lp and os.path.exists(lp) and M.get("label_sha256") and sha256(lp) != M["label_sha256"]:
+    warn.append(f"labels ({os.path.basename(lp)}) changed since the model was fitted - re-run train_ranker.py")
+_mp = f"{B}/review/{s}_manifest.json"
+_b = str((json.load(open(_mp)).get("detect", {}).get("environment", {}) or {}).get("build", "unknown")) if os.path.exists(_mp) else "unknown"
+if M.get("detector_builds") and _b not in M["detector_builds"]:
+    warn.append(f"{s} was detected with build {_b}, the model was trained on outputs of {', '.join(M['detector_builds'])}")
+for w_ in warn: print(("ERROR: " if strict else "warning: ") + w_)
+if warn and strict: sys.exit("CSS_QC_STRICT=1: stale model - not ranked")
+cp = f"{B}/review/{s}_candidates.csv"
+if not os.path.exists(cp): sys.exit(f"no {cp} - run detect_css.py {s} first")
+d = pd.read_csv(cp).drop(columns=["score_model", "rank_model"], errors="ignore")
+if not len(d):
+    print(f"{s}: no candidates - nothing to rank"); d.assign(score_model=[], rank_model=[]).to_csv(cp, index=False); sys.exit(0)
+X = pd.DataFrame(index=d.index)
+sp = f"{B}/review/{s}_surface_features.csv"
+sf = pd.read_csv(sp).drop(columns=["list", "obj_id"], errors="ignore").drop_duplicates(FP) \
+    if use_derived(sp, [f"{B}/review/{s}_candidates.nii.gz"], "surface features") else None
+full = add_missing(d.merge(sf, on=FP, how="left", suffixes=("", "_surf")) if sf is not None else d)
+missing = [f for f in M["features"] if f not in full.columns]
+for f in M["features"]: X[f] = pd.to_numeric(full[f], errors="coerce").values if f in full.columns else np.nan
+Xv = X.values.astype(float); med = np.array(M["impute_median"])
+Xv = np.where(np.isfinite(Xv), Xv, med)
+t = ((Xv - np.array(M["mean"])) / np.array(M["sd"])) @ np.array(M["weights"]) + M["bias"]
+sc = 1 / (1 + np.exp(-t))
+note = ""
+qp = f"{B}/review/{s}_qc.json"
+if os.environ.get("CSS_QC_STRICT") == "1" and os.path.exists(qp) and json.load(open(qp)).get("status") == "low_confidence_review":
+    sc = sc * 0.8; note = "  [QC low_confidence_review: score_model x0.8, CSS_QC_STRICT=1]"
+d["score_model"] = np.round(sc, 4)
+d["rank_model"] = pd.Series(sc).rank(ascending=False, method="first").astype(int).values
+d.to_csv(cp, index=False)
+order = d.sort_values("rank_model").cand_id.astype(int).tolist()
+print(f"{s}: model ranking added (score_model, rank_model) - model fitted {M.get('fitted_at')} on "
+      f"{M.get('n_patients')} patients, LOPO AUC {M.get('lopo_auc')} vs {M.get('baseline')} {M.get('baseline_auc')}{note}")
+print(f"   order by model (cand_id): {order[:15]}{' ...' if len(order) > 15 else ''}")
+if missing: print(f"   filled with the training median (not in this study's output): {', '.join(missing)}")
+````
+
+## scripts/redetect.py
+
+````python
+#!/usr/bin/env python3
+"""Re-run ONLY the detection on studies that are already prepared. Research software; expert review required.
+usage: redetect.py M12,M13,M14,M15 [--v53] [--dry-run]
+No skull-stripping, no FreeSurfer, no registration: it reuses data/ID_swi.nii and the label files in work/ that
+run_css.sh made, and runs detect_css.py (then surface_features.py when recon-all surfaces exist), one study at a
+time. A few minutes and about 2 GB of memory per study.
+  --v53      detect with CSS_V53=1 (cortex-outline zone, skull / midline / extent / orbitofrontal rules, 6 mm merge)
+  --dry-run  only list what would be done
+Before each study the current review/ID_candidates.*, ID_excluded.*, ID_calls*.csv and ID_missed.csv are copied to
+review/backup_<date_time>/. Calls are re-attached to the new list by candidate fingerprint; a call whose candidate
+changed shape (e.g. merged by v5.3) is NOT carried over and that candidate must be read again - the reviewer says
+how many. For studies that were already read, run v53_compare.py first: it changes nothing in the project."""
+import sys, os, glob, shutil, subprocess, time
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from css_common import base as _base
+a = sys.argv[1:]
+if not a or a[0].startswith("-"): sys.exit(__doc__)
+B = _base(); S = os.path.dirname(os.path.abspath(__file__)); v53 = "--v53" in a; dry = "--dry-run" in a
+stamp = time.strftime("%Y%m%d_%H%M"); bk = f"{B}/review/backup_{stamp}"; ok = []; bad = []
+for sid in [s for s in a[0].split(",") if s]:
+    need = [f"{B}/data/{sid}_swi.nii", f"{B}/work/{sid}_seg_swispace.nii.gz"]
+    miss = [f for f in need if not os.path.exists(f)]
+    if miss:
+        print(f"{sid}: NOT prepared ({', '.join(os.path.basename(f) for f in miss)} missing) - run run_css.sh for it first"); bad.append(sid); continue
+    t1 = os.path.exists(f"{B}/work/{sid}_t1seg_swispace.nii.gz")
+    print(f"{sid}: detect {'with v5.3' if v53 else '(v5.2 rules)'}; anatomy {'T1' if t1 else 'SWI-only' + (' - v5.3 will switch itself off' if v53 else '')}", flush=True)
+    if dry: continue
+    files = [f for pat in (f"{sid}_candidates.*", f"{sid}_excluded.*", f"{sid}_calls*.csv", f"{sid}_missed.csv", f"{sid}_surface_features.csv")
+             for f in glob.glob(f"{B}/review/{pat}")]
+    if files:
+        os.makedirs(bk, exist_ok=True)
+        for f in files: shutil.copy2(f, bk)
+    env = dict(os.environ, CSS_V53="1" if v53 else "0")
+    r = subprocess.run([sys.executable, f"{S}/detect_css.py", sid], env=env)
+    if r.returncode: print(f"{sid}: detect_css.py stopped with exit code {r.returncode} (see the message above)"); bad.append(sid); continue
+    if os.path.exists(f"{B}/subjects/{sid}/surf/lh.pial") and os.path.exists(f"{S}/surface_features.py"):
+        if subprocess.run([sys.executable, f"{S}/surface_features.py", sid], env=env).returncode: print(f"{sid}: surface_features.py failed (detection is complete)")
+    ok.append(sid)
+print(f"\ndone: {', '.join(ok) or 'none'}" + (f"   NOT done: {', '.join(bad)}" if bad else "") + (f"\nprevious lists and calls: {bk}" if ok and os.path.isdir(bk) else "")
+      + ("\nread them with:  python scripts/review_web.py " + ",".join(ok) if ok else ""))
+````
 
 ## scripts/review_css.py
 
-```python
+````python
 #!/usr/bin/env python3
 """Interactive cSS review: shows each suspected candidate, you agree or disagree.
 usage: review_css.py SUBJECT [--top N] [--redo] [--by-tier | --by-priority | --by-model | --by-legacy]
@@ -3363,11 +5683,538 @@ cmd = [sys.executable, f"{base}/scripts/mark_css.py", subj, ",".join(map(str, ac
 if ich: cmd += ["--ich", ",".join(map(str, ich))]
 subprocess.run(cmd, check=False)
 print(f"decisions saved: {calls_csv}")
-```
+````
+
+## scripts/review_web.py
+
+````python
+#!/usr/bin/env python3
+"""Interactive cSS reviewer in the browser (v5.4). Research software; expert review required.
+usage: review_web.py M12[,M13,...] [--port 8765] [--no-browser] [--reviewer "NAME"]
+Starts a server on this computer only (127.0.0.1) and opens the page: a scrollable three-plane viewer (wheel =
+slices, Ctrl+wheel or = / - = zoom, right-drag = window / level), the detector's outlines, an evidence meter, the
+decision keys (Y cSS, V vein, N normal cortex, A artifact, U unsure, H near ICH), comments, missed-cSS marks, a
+ruler, a magnifier and a darkness probe; menu bar and right-click menu. Press ? in the page for all keys. Stop the server with Ctrl+C in the Terminal.
+
+Every decision is saved the moment it is made:
+  review/ID_calls.csv              the active reviewer's calls (same format as review_css.py -> mark / score unchanged)
+  review/ID_calls_<reviewer>.csv   that reviewer's calls with comment and time
+  review/ID_review_log.csv         append-only log of every action (reviewer, time, call, comment, meter value shown)
+  review/ID_missed.csv             cSS the detector missed, drawn as a rectangle or with the pen on one slice (centre in
+                                   voxel + mm coordinates, plane, slice, outline points, reviewer, note, and what the
+                                   detector did there). Reported next to the score; NOT counted in the 0-4 score.
+  review/reviewers.json            names entered so far and the last one used
+
+The meter is NOT a probability. It is css_evidence / (css_evidence + vein_evidence) from detect_css.py, lowered for
+the review-priority tiers 2-4 and for the v5.3 skull / midline measures (or the trained model's score when
+rank_candidates.py has written score_model). It has not been validated against expert labels, and showing it
+before the reader decides can bias the call: use the K key (hide) for any read that is used to test the detector.
+No data leaves the computer; no packages beyond the pipeline's own are needed."""
+import sys, os, json, re, time, threading, subprocess, webbrowser, shutil
+import numpy as np, nibabel as nib, pandas as pd
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
+from scipy import ndimage as ndi
+HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
+from css_common import base as _base, save_calls, FP
+
+B = _base()
+CALLS = ["cSS", "Vein", "Normal", "Artifact", "Unsure", "Near ICH"]
+SEQ_NAMES = {"swi": "SWI", "flair": "FLAIR", "t1": "T1", "t2": "T2", "phase": "Phase (filtered)"}
+LOCK = threading.Lock()
+slug = lambda s: re.sub(r"[^A-Za-z0-9]+", "_", s.strip()).strip("_") or "reviewer"
+now = lambda: time.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def ai_opinion(r):
+    """candidate row -> dict(score 0-1, band, suspect, reason, source). Rule-based, not validated."""
+    f = lambda k, d=np.nan: float(r[k]) if k in r and pd.notna(r[k]) else d
+    if np.isfinite(f("score_model")):
+        s = float(np.clip(f("score_model"), 0, 1)); src = "trained ranking model (score_model)"
+    else:
+        ce, ve = f("css_evidence", 0.5), f("vein_evidence", 0.5)
+        s = ce / max(ce + ve, 1e-6); src = "rule-based evidence (not a probability)"
+    tier = int(f("review_priority_rank", 1)); treason = str(r.get("review_priority_reason", "") or "")
+    mimic = ""
+    if f("skull_frac", 0) >= 0.5: mimic = "artifact (dark skull band)"; s *= 0.4
+    elif f("midline_frac", 0) >= 0.5 and f("pial_dist_mm", -1) > 0: mimic = "a midline structure (falx / sinus)"; s *= 0.4
+    elif tier == 4: mimic = "a microbleed" if "microbleed" in treason else "artifact (air-bone zone)"; s *= 0.5
+    elif tier == 3: mimic = "a vein"; s *= 0.6
+    elif tier == 2: mimic = "a mimic (" + treason.split(";")[0] + ")"; s *= 0.8
+    elif tier == 5: mimic = "nothing reliable (case quality insufficient)"; s *= 0.3
+    s = float(np.clip(s, 0, 1)); band = "green" if s >= 0.66 else "yellow" if s >= 0.33 else "red"
+    why = []
+    pd_, tub, tram = f("pial_dist_mm"), f("tube_ratio"), f("tram_frac")
+    if np.isfinite(pd_): why.append("on the cortex surface" if pd_ <= 0.3 else f"{pd_:.1f} mm out in the sulcal CSF")
+    if np.isfinite(tub): why.append("sheet-like" if tub < 0.35 else "tube-like" if tub > 0.45 else "between sheet and tube")
+    if np.isfinite(tram) and tram >= 0.4: why.append("dark on both banks of the sulcus")
+    if f("vessel_wm_mm", 0) >= 4: why.append("continues into the white matter")
+    if f("local_cont_max_mm", 0) >= 10: why.append(f"dark structure runs on for {f('local_cont_max_mm'):.0f} mm")
+    if f("artifact_zone", 0) >= 1: why.append("in an air-bone artifact zone")
+    if f("cmb_like", 0) >= 1: why.append("small and compact")
+    if band == "green": suspect = "I suspect cSS"
+    elif band == "yellow": suspect = "Uncertain: could be cSS" + (f" or {mimic}" if mimic else " or normal dark cortex / a vein")
+    else: suspect = f"I suspect {mimic}" if mimic else "Probably not cSS (weak evidence: vein or normal cortex more likely)"
+    return dict(score=round(s, 2), band=band, suspect=suspect, reason=", ".join(why), source=src, tier=tier)
+
+
+class Study:
+    def __init__(self, sid):
+        self.sid = sid
+        p = f"{B}/data/{sid}_swi.nii"
+        if not os.path.exists(p): raise FileNotFoundError(f"{p} not found")
+        self.native = nib.load(p); self.can = nib.as_closest_canonical(self.native)
+        self.shape = self.can.shape[:3]; self.vox = [float(v) for v in self.can.header.get_zooms()[:3]]
+        # canonical voxel -> native voxel (calls / missed marks are stored in the detector's native indices)
+        self.c2n = np.linalg.inv(self.native.affine) @ self.can.affine
+        self.df = pd.read_csv(f"{B}/review/{sid}_candidates.csv")
+        self.lab = self._grid(f"{B}/review/{sid}_candidates.nii.gz", order=0).astype(np.uint16)
+        self.vols = {}; self.meta_seq = {}
+        I = self.can.get_fdata().astype(np.float32); self._add("swi", I)
+        brain = I > 0; mu, sd = float(np.median(I[brain])), float(1.4826 * np.median(np.abs(I[brain] - np.median(I[brain]))) + 1e-6)
+        self.ref_src = "whole brain"
+        sp = f"{B}/work/{sid}_seg_swispace.nii.gz"
+        if os.path.exists(sp):
+            seg = self._grid(sp, order=0); ctx = ((seg >= 1000) | (seg == 3) | (seg == 42)) & brain
+            if ctx.sum() > 1000:
+                c = np.minimum(I[ctx], np.percentile(I[brain], 99.5)); mu = float(np.median(c))
+                sd = float(1.4826 * np.median(np.abs(c - mu)) + 1e-6); self.ref_src = "cortex"
+        self.mu, self.sd = mu, sd
+        self.paths = {"flair": f"{B}/work/{sid}_flair_swispace.nii.gz", "t1": f"{B}/work/{sid}_t1_swispace.nii.gz",
+                      "t2": f"{B}/work/{sid}_t2_swispace.nii.gz", "phase": f"{B}/data/{sid}_phase.nii.gz"}
+        self._make_t1()
+        self.avail = ["swi"] + [k for k, q in self.paths.items() if os.path.exists(q)]
+        # candidate centres (canonical voxels) from the label volume
+        ids = self.df.cand_id.astype(int).tolist(); self.centre = {}
+        if ids:
+            com = ndi.center_of_mass(self.lab > 0, self.lab, ids)
+            for i, c in zip(ids, com):
+                c = np.round(c).astype(int) if np.all(np.isfinite(c)) else np.array(self.shape) // 2
+                if self.lab[tuple(c)] != i:                      # curved object: nearest own voxel to the centre of mass
+                    pts = np.argwhere(self.lab == i)
+                    if len(pts): c = pts[np.argmin(((pts - c) ** 2).sum(1))]
+                self.centre[i] = [int(v) for v in c]
+        qp = f"{B}/review/{sid}_qc.json"; self.qc = ""
+        if os.path.exists(qp):
+            q = json.load(open(qp))
+            if q.get("status") not in (None, "ok"): self.qc = f"Case QC {q.get('status')}: " + "; ".join(q.get("reasons", []))
+
+    def _grid(self, path, order=1):
+        im = nib.load(path)
+        if im.shape[:3] == self.native.shape[:3] and np.allclose(im.affine, self.native.affine, atol=1e-3):
+            return nib.as_closest_canonical(im).get_fdata().astype(np.float32)
+        from nibabel.processing import resample_from_to
+        return resample_from_to(im, (self.shape, self.can.affine), order=order).get_fdata().astype(np.float32)
+
+    def _make_t1(self):
+        """T1 on the SWI grid for display (once): the same transform prep_anat.sh uses for the labels"""
+        out, lta, sid = self.paths["t1"], f"{B}/work/{self.sid}_swi2t1.lta", self.sid
+        if os.path.exists(out) or not os.path.exists(lta) or not shutil.which("mri_vol2vol"): return
+        targ = next((q for q in (f"{B}/subjects/{sid}/mri/orig.mgz", f"{B}/data/{sid}_t1.nii.gz") if os.path.exists(q)), None)
+        if not targ: return
+        r = subprocess.run(["mri_vol2vol", "--mov", f"{B}/data/{sid}_swi.nii", "--targ", targ, "--lta", lta, "--inv",
+                            "--o", out], capture_output=True, text=True)
+        print(f"{sid}: T1 on the SWI grid " + ("written" if r.returncode == 0 and os.path.exists(out) else "FAILED (T1 not offered)"))
+
+    def _add(self, name, V, signed=False):
+        V = np.nan_to_num(V)
+        if signed: lo, hi = -np.pi, np.pi
+        else:
+            nz = V[V > 0]; lo, hi = 0.0, float(np.percentile(nz, 99.9)) if nz.size else 1.0
+        U = np.clip((V - lo) / max(hi - lo, 1e-6), 0, 1) * 65535
+        nz = U[V != 0] if not signed else U.ravel()
+        w = [float(v) for v in (np.percentile(nz, [1, 99]) if nz.size else (0, 65535))]
+        if signed: w = [65535 * 0.35, 65535 * 0.65]
+        self.vols[name] = U.astype("<u2"); self.meta_seq[name] = dict(lo=lo, hi=hi, win=w, label=SEQ_NAMES[name])
+
+    def volume(self, name):
+        if name not in self.vols:
+            V = self._grid(self.paths[name], order=0 if name == "phase" else 1)
+            if name == "phase":
+                a, b = float(V.min()), float(V.max())
+                if b - a > 2 * np.pi + 0.5: V = (V - a) / (b - a) * 2 * np.pi - np.pi     # scanner units -> radians
+                z = np.exp(1j * V); sg = (4.0 / self.vox[0], 4.0 / self.vox[1], 0)        # homodyne high-pass per slice
+                lp = ndi.gaussian_filter(z.real, sg) + 1j * ndi.gaussian_filter(z.imag, sg)
+                self._add("phase", np.angle(z * np.conj(lp)).astype(np.float32), signed=True)
+            else: self._add(name, V)
+        return self.vols[name]
+
+    # ---------- calls ----------
+    def rpath(self, reviewer): return f"{B}/review/{self.sid}_calls_{slug(reviewer)}.csv"
+
+    def load_calls(self, reviewer):
+        """-> ({cand_id: {call, comment, time}}, note). Matched by fingerprint, so a detector re-run cannot move a call"""
+        p, note = self.rpath(reviewer), ""
+        if not os.path.exists(p):
+            legacy = f"{B}/review/{self.sid}_calls.csv"
+            import glob
+            if os.path.exists(legacy) and not glob.glob(f"{B}/review/{self.sid}_calls_*.csv"):
+                p = legacy; note = "Calls made with the old reviewer were loaded under this name."
+            else: return {}, ""
+        c = pd.read_csv(p)
+        if not len(c) or not all(k in c.columns for k in FP): return {}, note
+        C = self.df[["cand_id"] + FP].to_numpy(float); out = {}; lost = 0
+        for _, r in c.iterrows():
+            d = np.sqrt(((C[:, 1:4] - r[FP[:3]].to_numpy(float)) ** 2).sum(1))
+            dv = np.abs(C[:, 4] - float(r.volume_mm3)) / max(float(r.volume_mm3), 1.0)
+            ok = np.where((d <= 2.0) & (dv <= 0.15))[0]
+            if not len(ok): lost += 1; continue
+            cm = r.get("comment", ""); call = r.get("call", "")
+            out[int(C[ok[d[ok].argmin()], 0])] = dict(call=call if isinstance(call, str) else "",
+                                                     comment=cm if isinstance(cm, str) else "",
+                                                     time=r.get("time") if isinstance(r.get("time"), str) else "")
+        if lost: note += f" {lost} earlier call(s) match no current candidate (detector re-run) and were left out."
+        return out, note.strip()
+
+    def save(self, reviewer, calls, cand_id=None, action="call", ai=None):
+        c = self.df.set_index("cand_id")
+        rows = [dict(cand_id=k, call=v["call"], comment=v.get("comment", ""), reviewer=reviewer, time=v.get("time", ""),
+                     **{f: c.loc[k, f] for f in FP}) for k, v in sorted(calls.items()) if v.get("call") or v.get("comment")]
+        pd.DataFrame(rows, columns=["cand_id", "call", "comment", "reviewer", "time"] + FP).to_csv(self.rpath(reviewer), index=False)
+        save_calls(B, self.sid, self.df, {k: v["call"] for k, v in calls.items() if v.get("call")})
+        if cand_id is not None:
+            v = calls.get(cand_id, {}); lp = f"{B}/review/{self.sid}_review_log.csv"; new = not os.path.exists(lp)
+            with open(lp, "a") as f:
+                if new: f.write("time,reviewer,action,cand_id,call,comment,meter_shown,vox_i,vox_j,vox_k,volume_mm3\n")
+                q = lambda s: '"' + str(s).replace('"', "'").replace("\n", " ") + '"'
+                f.write(",".join([now(), q(reviewer), action, str(cand_id), q(v.get("call", "")), q(v.get("comment", "")),
+                                  "" if ai is None else str(ai)] + [str(c.loc[cand_id, k]) for k in FP]) + "\n")
+
+    # ---------- missed cSS marks ----------
+    MCOLS = ["missed_id", "reviewer", "time", "vox_i", "vox_j", "vox_k", "x_mm", "y_mm", "z_mm", "can_i", "can_j", "can_k",
+             "comment", "plane", "slice", "shape", "points", "detector_fate"]
+
+    def missed(self):
+        p = f"{B}/review/{self.sid}_missed.csv"
+        if not os.path.exists(p): return pd.DataFrame(columns=self.MCOLS)
+        m = pd.read_csv(p, dtype=str).fillna("")
+        for c in self.MCOLS:
+            if c not in m.columns: m[c] = ""
+        for c in ("missed_id", "can_i", "can_j", "can_k", "vox_i", "vox_j", "vox_k"): m[c] = m[c].astype(float).astype(int)
+        return m[self.MCOLS]
+
+    def fate(self, pts):
+        """what the detector did with the marked voxels (+/- 1 voxel): shown / excluded (rule) / below a gate / not generated"""
+        pts = np.clip(np.round(np.asarray(pts, float)).astype(int).reshape(-1, 3), 0, np.array(self.shape) - 1)
+        m = np.zeros(self.shape, bool); m[tuple(pts.T)] = True; m = ndi.binary_dilation(m, iterations=1)
+        out = []
+        ids = np.unique(self.lab[m]); ids = ids[ids > 0]
+        if len(ids): out.append("overlaps shown candidate " + ", ".join(f"#{int(i)}" for i in ids))
+        if not hasattr(self, "_xl"):
+            xp, dp = f"{B}/review/{self.sid}_excluded.nii.gz", f"{B}/work/{self.sid}_dropped.nii.gz"
+            self._xl = self._grid(xp, order=0).astype(int) if os.path.exists(xp) else None
+            self._dl = self._grid(dp, order=0).astype(int) if os.path.exists(dp) else None
+            xc = f"{B}/review/{self.sid}_excluded.csv"; self._xr = {}
+            if os.path.exists(xc):
+                x = pd.read_csv(xc)
+                if len(x) and "excl_id" in x.columns: self._xr = dict(zip(x.excl_id.astype(int), x.reason.astype(str)))
+        if self._xl is not None:
+            for i in np.unique(self._xl[m]):
+                if i > 0: out.append(f"excluded object {int(i)}: {self._xr.get(int(i), '').split(' (')[0]}")
+        if self._dl is not None and (self._dl[m] > 0).any(): out.append("below a generation gate (size / slices / shape)")
+        return "; ".join(out) if out else "not generated by the detector (outside the search zone, not dark enough, or no ridge)"
+
+    def missed_edit(self, reviewer, action, d=None):
+        d = d or {}; m = self.missed()
+        if action == "add":
+            strokes = d.get("strokes") or [[d["ijk"]]]
+            pts = np.array([q for st in strokes for q in st], float)
+            if d.get("shape") == "rect" and len(pts) == 2:                       # fill the rectangle for the fate lookup
+                lo, hi = np.floor(pts.min(0)).astype(int), np.ceil(pts.max(0)).astype(int)
+                g = np.mgrid[lo[0]:hi[0] + 1, lo[1]:hi[1] + 1, lo[2]:hi[2] + 1].reshape(3, -1).T; fp = g[:: max(1, len(g) // 4000)]
+            else: fp = pts
+            ijk = pts.mean(0) if len(pts) > 1 else np.array(d["ijk"], float)
+            n = (self.c2n @ np.r_[ijk, 1.0])[:3]; w = (self.can.affine @ np.r_[ijk, 1.0])[:3]
+            m.loc[len(m)] = [int(m.missed_id.max()) + 1 if len(m) else 1, reviewer, now(), *[int(round(v)) for v in n],
+                             *[str(round(float(v), 1)) for v in w], *[int(round(v)) for v in ijk], str(d.get("comment", ""))[:300],
+                             str(d.get("plane", "")), str(d.get("slice", "")), str(d.get("shape", "point")),
+                             json.dumps([[[round(float(c), 1) for c in q] for q in st] for st in strokes]), self.fate(fp)]
+        elif action == "delete": m = m[m.missed_id != int(d["id"])]
+        elif action == "comment": m.loc[m.missed_id == int(d["id"]), "comment"] = str(d.get("comment", ""))[:300]
+        m.to_csv(f"{B}/review/{self.sid}_missed.csv", index=False)
+        return m.to_dict("records")
+
+
+STUDIES = {}; IDS = []
+def study(sid):
+    if sid not in IDS: raise KeyError(sid)
+    with LOCK:
+        if sid not in STUDIES:
+            STUDIES.clear(); print(f"loading {sid} ...", flush=True); STUDIES[sid] = Study(sid)     # one study in memory
+        return STUDIES[sid]
+
+def reviewers(add=None):
+    p = f"{B}/review/reviewers.json"; d = dict(names=[], last="")
+    if os.path.exists(p):
+        try: d = json.load(open(p))
+        except Exception: pass
+    if add and add.strip():
+        add = add.strip(); d["names"] = [add] + [n for n in d["names"] if n != add]; d["last"] = add
+        json.dump(d, open(p, "w"), indent=1)
+    return d
+
+def meta(sid, reviewer):
+    s = study(sid); calls, note = s.load_calls(reviewer) if reviewer else ({}, "")
+    cands = []
+    for _, r in s.df.iterrows():
+        i = int(r.cand_id); g = lambda k: (None if pd.isna(r[k]) else (float(r[k]) if not isinstance(r[k], str) else r[k])) if k in r else None
+        cands.append(dict(id=i, hemi=r.hemi, region=str(r.region).replace("ctx-lh-", "").replace("ctx-rh-", ""),
+                          volume=float(r.volume_mm3), centre=s.centre.get(i, [v // 2 for v in s.shape]), ai=ai_opinion(r),
+                          feat={k: g(k) for k in ("darkness_z", "pial_dist_mm", "tube_ratio", "tram_frac", "extent_mm", "n_slices",
+                                                  "css_evidence", "vein_evidence", "score")}))
+    return dict(study=sid, studies=IDS, shape=list(s.shape), vox=s.vox, cands=cands, calls=calls, note=note, qc=s.qc,
+                seqs=[dict(key=k, **{a: b for a, b in s.meta_seq.get(k, dict(label=SEQ_NAMES[k])).items()}) for k in s.avail],
+                missing_seqs=[SEQ_NAMES[k] for k in ("flair", "t1", "t2", "phase") if k not in s.avail],
+                ref=dict(mu=s.mu, sd=s.sd, src=s.ref_src), missed=s.missed().to_dict("records"), reviewers=reviewers(),
+                call_names=CALLS)
+
+
+class H(BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def _send(self, body, ctype="application/json", code=200):
+        if not isinstance(body, (bytes, bytearray, memoryview)): body = json.dumps(body, default=str).encode()
+        self.send_response(code); self.send_header("Content-Type", ctype); self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(body)
+    def do_GET(self):
+        u = urlparse(self.path); q = {k: v[0] for k, v in parse_qs(u.query).items()}
+        try:
+            if u.path == "/": return self._send(open(os.path.join(HERE, "review_web.html"), "rb").read(), "text/html; charset=utf-8")
+            if u.path == "/api/meta": return self._send(meta(q.get("study") or IDS[0], q.get("reviewer", "")))
+            if u.path == "/api/vol":
+                s = study(q["study"]); return self._send(s.volume(q.get("seq", "swi")).tobytes(order="F"), "application/octet-stream")
+            if u.path == "/api/seqmeta":
+                s = study(q["study"]); s.volume(q["seq"]); return self._send(s.meta_seq[q["seq"]])
+            if u.path == "/api/labels": return self._send(study(q["study"]).lab.astype("<u2").tobytes(order="F"), "application/octet-stream")
+            self._send(dict(error="not found"), code=404)
+        except Exception as e:
+            self._send(dict(error=f"{type(e).__name__}: {e}"), code=500)
+    def do_POST(self):
+        u = urlparse(self.path)
+        try:
+            d = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+            if u.path == "/api/reviewer": return self._send(reviewers(d.get("name", "")))
+            s = study(d["study"]); rev = (d.get("reviewer") or "").strip()
+            if not rev: return self._send(dict(error="Enter the reviewer name first (upper right)."), code=400)
+            if u.path == "/api/call":
+                with LOCK:
+                    calls, _ = s.load_calls(rev); cid = int(d["cand_id"]); cur = calls.get(cid, dict(call="", comment=""))
+                    if "call" in d:
+                        if d["call"] not in CALLS + [""]: return self._send(dict(error="unknown call"), code=400)
+                        cur["call"] = d["call"]; cur["time"] = now()
+                    if "comment" in d: cur["comment"] = str(d["comment"])[:500]
+                    calls[cid] = cur
+                    if not cur.get("call") and not cur.get("comment"): calls.pop(cid)
+                    s.save(rev, calls, cid, d.get("action", "call"), d.get("meter"))
+                return self._send(dict(ok=True, calls=calls, saved=now()))
+            if u.path == "/api/missed":
+                with LOCK: m = s.missed_edit(rev, d["action"], d)
+                return self._send(dict(ok=True, missed=m, saved=now()))
+            if u.path == "/api/finish":
+                calls, _ = s.load_calls(rev); c = {k: v["call"] for k, v in calls.items() if v.get("call")}
+                acc = sorted(k for k, v in c.items() if v == "cSS"); ich = sorted(k for k, v in c.items() if v == "Near ICH")
+                with LOCK: s.save(rev, calls)
+                cmd = [sys.executable, f"{HERE}/mark_css.py", s.sid, ",".join(map(str, acc)) or "none", "--reviewed",
+                       ",".join(map(str, sorted(c))) or "none"] + (["--ich", ",".join(map(str, ich))] if ich else [])
+                r = subprocess.run(cmd, capture_output=True, text=True, env=dict(os.environ, CSS_BASE=B, PYTHONWARNINGS="ignore"))
+                return self._send(dict(ok=r.returncode == 0, text=(r.stdout + ("\n" + r.stderr[-1500:] if r.returncode else "")).strip(),
+                                       counts={k: sum(v == k for v in c.values()) for k in CALLS}, unread=len(s.df) - len(c),
+                                       missed=s.missed().to_dict("records")))
+            self._send(dict(error="not found"), code=404)
+        except Exception as e:
+            self._send(dict(error=f"{type(e).__name__}: {e}"), code=500)
+
+
+if __name__ == "__main__":
+    a = sys.argv[1:]
+    if not a or a[0].startswith("-"): sys.exit(__doc__)
+    IDS = [s for s in a[0].split(",") if s]
+    port = int(a[a.index("--port") + 1]) if "--port" in a else 8765
+    if "--reviewer" in a: reviewers(a[a.index("--reviewer") + 1])
+    for sid in IDS:
+        for f in (f"{B}/data/{sid}_swi.nii", f"{B}/review/{sid}_candidates.csv", f"{B}/review/{sid}_candidates.nii.gz"):
+            if not os.path.exists(f): sys.exit(f"{sid}: {f} not found - run the detection first")
+    for p in range(port, port + 20):
+        try: srv = ThreadingHTTPServer(("127.0.0.1", p), H); break
+        except OSError: continue
+    else: sys.exit(f"no free port between {port} and {port + 19}")
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    print(f"cSS reviewer for {', '.join(IDS)}: {url}   (this computer only; Ctrl+C here to stop)", flush=True)
+    study(IDS[0])
+    if "--no-browser" not in a: threading.Timer(0.5, lambda: webbrowser.open(url)).start()
+    try: srv.serve_forever()
+    except KeyboardInterrupt: print("\nstopped; all decisions were saved as they were made")
+````
+
+## scripts/robustness.py
+
+````python
+#!/usr/bin/env python3
+"""How stable is the detector when the SAME scan looks a little different? (v4.18, idea from BrainIAC's
+perturbation test). Runs detect_css.py on perturbed copies of one subject and compares each run with an
+unperturbed copy. Changes nothing in the subject's own outputs; reported only.
+usage: robustness.py SUBJECT [--perturb copy,inplane:0.86,slice:2.0,bias:0.3,noise:0.05,gamma:0.8,gamma:1.25,shift:0]
+                             [--old OLD_candidates.nii.gz --ids 3,4,5] [--match-mm 5] [--top 10] [--keep]
+Perturbations (applied inside the brain only, background stays 0):
+  copy           unperturbed copy: the reference every other run is compared with (same inputs: no FLAIR,
+                 no drawn ICH - copies never use them)
+  inplane:MM     resample in-plane to MM voxels (anti-aliased when coarser) - another protocol
+  slice:MM       resample the slice axis to MM slices
+  bias:C         smooth multiplicative bias field exp(C * f), f in [-1, 1] across the brain
+  noise:F        Gaussian noise, SD = F x the median brain intensity
+  gamma:G        contrast change: I_max (I / I_max)^G
+  shift:AXIS     image moved 1 voxel along array AXIS against unchanged labels (1-voxel misregistration)
+Per run: candidates, excluded, reference candidates found again (centroid within --match-mm, one-to-one),
+new candidates, Spearman correlation of scores of matched candidates, top-k overlap, and - with --old/--ids,
+e.g. P006's v3 map - how many known lesions are still shown (as check_known.py).
+Writes review/ID_robustness.csv. Copies are named ID_R<k>; their files are removed unless --keep.
+Each run is a full detection: on a real scan expect several minutes per perturbation."""
+import signal; signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+import argparse, glob, os, re, shutil, subprocess, sys, numpy as np, pandas as pd, nibabel as nib
+from scipy import ndimage as ndi
+from scipy.spatial import cKDTree
+from scipy.stats import spearmanr
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from css_common import base as _base
+
+ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+ap.add_argument("subject")
+ap.add_argument("--perturb", default="copy,inplane:0.86,slice:2.0,bias:0.3,noise:0.05,gamma:0.8,gamma:1.25,shift:0")
+ap.add_argument("--old", default=""); ap.add_argument("--ids", default="")
+ap.add_argument("--match-mm", type=float, default=5.0); ap.add_argument("--top", type=int, default=10)
+ap.add_argument("--keep", action="store_true"); ap.add_argument("--seed", type=int, default=1)
+a = ap.parse_args(); subj = a.subject; base = _base(); S = os.path.dirname(os.path.abspath(__file__))
+py = sys.executable
+
+def run(*args):
+    r = subprocess.run([py, *args], capture_output=True, text=True)
+    if r.returncode: print(r.stdout[-600:], r.stderr[-1500:]); sys.exit("step failed: " + " ".join(args))
+    return r.stdout
+
+swi = nib.load(f"{base}/data/{subj}_swi.nii"); I0 = swi.get_fdata().astype(np.float32); A0 = swi.affine
+vox0 = np.array(swi.header.get_zooms()[:3], float)
+brain0 = I0 > 0
+t1 = f"{base}/work/{subj}_t1seg_swispace.nii.gz"
+lab_src = t1 if os.path.exists(t1) and os.path.getmtime(t1) >= os.path.getmtime(f"{base}/data/{subj}_swi.nii") \
+    else f"{base}/synthseg/{subj}_seg.nii.gz"
+use_t1 = lab_src == t1
+rng = np.random.default_rng(a.seed)
+
+def regrid(I, brain, new_vox):
+    """resample to new voxel sizes on the same field of view (linear image, nearest mask); Gaussian
+    anti-aliasing along axes that get coarser (FWHM^2 difference, FWHM = voxel size)"""
+    new_vox = np.asarray(new_vox, float); f = new_vox / vox0
+    sig = np.sqrt(np.clip(new_vox ** 2 - vox0 ** 2, 0, None)) / 2.355 / vox0
+    Is = ndi.gaussian_filter(I, sig) if (sig > 0).any() else I
+    shape = np.maximum(1, np.round(np.array(I.shape) / f)).astype(int)
+    # new voxel j has its centre at old index (j + 0.5) * f - 0.5 (same outer edges)
+    off = 0.5 * f - 0.5
+    In = ndi.affine_transform(Is, np.diag(f), offset=off, output_shape=tuple(shape), order=1, mode="nearest")
+    Bn = ndi.affine_transform(brain.astype(np.float32), np.diag(f), offset=off, output_shape=tuple(shape),
+                              order=0, mode="constant") > 0.5
+    An = A0.copy(); An[:3, :3] = A0[:3, :3] * f[None, :]; An[:3, 3] = A0[:3, :3] @ off + A0[:3, 3]
+    return np.where(Bn, np.clip(In, 1e-3, None), 0).astype(np.float32), An
+
+def perturb(kind, val):
+    I, A = I0.copy(), A0.copy(); b = brain0
+    med = float(np.median(I0[b]))
+    if kind == "copy":
+        pass
+    elif kind == "inplane":
+        I, A = regrid(I0, b, [val, val, vox0[2]])
+    elif kind == "slice":
+        I, A = regrid(I0, b, [vox0[0], vox0[1], val])
+    elif kind == "bias":
+        c = np.argwhere(b); lo, hi = c.min(0), c.max(0)
+        g = [np.linspace(-1, 1, n) for n in I0.shape]
+        w = rng.normal(size=3); w /= np.linalg.norm(w)
+        # smooth field: random direction ramp + a gentle quadratic, scaled to [-1, 1] inside the brain
+        X = np.meshgrid(*[(gi - gi[(l + h) // 2]) for gi, l, h in zip(g, lo, hi)], indexing="ij")
+        fld = w[0] * X[0] + w[1] * X[1] + w[2] * X[2] + 0.5 * (X[0] ** 2 + X[1] ** 2 - X[2] ** 2)
+        fb = fld[b]; fld = 2 * (fld - fb.min()) / (fb.max() - fb.min() + 1e-9) - 1
+        I = np.where(b, I0 * np.exp(val * fld), 0)
+    elif kind == "noise":
+        I = np.where(b, np.clip(I0 + rng.normal(0, val * med, I0.shape), 1e-3, None), 0)
+    elif kind == "gamma":
+        mx = float(I0[b].max()); I = np.where(b, mx * (np.clip(I0, 0, None) / mx) ** val, 0)
+    elif kind == "shift":
+        ax = int(val); I = np.roll(I0, 1, axis=ax)
+        sl = [slice(None)] * 3; sl[ax] = 0; I[tuple(sl)] = 0
+    else:
+        sys.exit(f"unknown perturbation {kind}")
+    return I.astype(np.float32), A
+
+def world(df, A):
+    if not len(df): return np.zeros((0, 3))
+    return (A @ np.c_[df[["vox_i", "vox_j", "vox_k"]].values, np.ones(len(df))].T)[:3].T
+
+def known_kept(name):
+    if not (a.old and a.ids): return np.nan
+    old = nib.load(os.path.expanduser(a.old))
+    cand = nib.load(f"{base}/review/{name}_candidates.nii.gz")
+    from nibabel.processing import resample_from_to
+    O = resample_from_to(old, cand, order=0).get_fdata().astype(int)
+    C = cand.get_fdata().astype(int); k = 0
+    for i in [int(x) for x in a.ids.split(",") if x.strip()]:
+        m = ndi.binary_dilation(O == i, iterations=2)
+        k += int(bool(set(np.unique(C[m])) - {0}))
+    return k
+
+def cleanup(name):
+    for p in glob.glob(f"{base}/*/{name}_*"):
+        if os.path.isfile(p): os.remove(p)
+
+items = [(p.split(":")[0], float(p.split(":")[1]) if ":" in p else 0.0) for p in a.perturb.split(",") if p]
+if items[0][0] != "copy": items = [("copy", 0.0)] + items
+print(f"{subj}: robustness - {len(items)} detection runs on perturbed copies (anatomy {'T1' if use_t1 else 'SWI-only'}; "
+      f"copies never use FLAIR or a drawn ICH mask)", flush=True)
+rows, ref = [], None
+for k, (kind, val) in enumerate(items):
+    name = f"{subj}_R{k}"; label = kind if kind == "copy" else f"{kind}:{val:g}"
+    I, A = perturb(kind, val)
+    nib.save(nib.Nifti1Image(I, A), f"{base}/data/{name}_swi.nii")
+    os.makedirs(f"{base}/work", exist_ok=True); os.makedirs(f"{base}/synthseg", exist_ok=True)
+    shutil.copy(lab_src, f"{base}/work/{name}_t1seg_swispace.nii.gz" if use_t1 else f"{base}/synthseg/{name}_seg.nii.gz")
+    run(f"{S}/align_seg.py", name)
+    st = subprocess.run([py, f"{S}/detect_css.py", name], capture_output=True, text=True)
+    if st.returncode:
+        print(f"  {label:12s} detection failed / stopped: {st.stdout.strip().splitlines()[-1] if st.stdout.strip() else st.stderr[-300:]}")
+        rows.append(dict(perturbation=label, status="failed")); continue
+    c = pd.read_csv(f"{base}/review/{name}_candidates.csv"); x = pd.read_csv(f"{base}/review/{name}_excluded.csv")
+    w = world(c, A)
+    r = dict(perturbation=label, status="ok", voxel_mm=" x ".join(f"{v:.2f}" for v in nib.load(f"{base}/data/{name}_swi.nii").header.get_zooms()[:3]),
+             candidates=len(c), excluded=len(x), known_kept=known_kept(name))
+    if ref is None:
+        ref = (c, w); r.update(found_again=len(c), new=0, spearman=1.0, top_overlap=min(a.top, len(c)))
+    else:
+        rc, rw = ref; pairs = []
+        if len(rc) and len(c):
+            d, j = cKDTree(w).query(rw)
+            used = set()
+            for i_ in np.argsort(d):                       # one-to-one, closest pairs first
+                if d[i_] <= a.match_mm and j[i_] not in used:
+                    pairs.append((i_, j[i_])); used.add(j[i_])
+        r["found_again"] = len(pairs); r["new"] = len(c) - len(pairs)
+        if len(pairs) >= 3:
+            s1 = rc.score.values[[p[0] for p in pairs]]; s2 = c.score.values[[p[1] for p in pairs]]
+            r["spearman"] = round(float(spearmanr(s1, s2).correlation), 2)
+        else:
+            r["spearman"] = np.nan
+        topr = set(range(min(a.top, len(rc)))); topc = set(range(min(a.top, len(c))))
+        r["top_overlap"] = sum(1 for p in pairs if p[0] in topr and p[1] in topc)
+    rows.append(r)
+    print(f"  {label:12s} {r['voxel_mm']:>18s} mm  candidates {r['candidates']:4d}  excluded {r['excluded']:4d}  "
+          f"found again {r['found_again']:4d}/{len(ref[0])}  new {r['new']:4d}  spearman {r['spearman']}  "
+          f"top-{a.top} {r['top_overlap']}" + ("" if np.isnan(r["known_kept"]) else
+                                             f"  known kept {r['known_kept']}/{len(a.ids.split(','))}"), flush=True)
+    if not a.keep: cleanup(name)
+out = pd.DataFrame(rows); out.insert(0, "subject", subj)
+out.to_csv(f"{base}/review/{subj}_robustness.csv", index=False)
+print(f"{subj}: -> review/{subj}_robustness.csv (reported only; the subject's own outputs are unchanged)")
+````
 
 ## scripts/rule_test.py
 
-```python
+````python
 #!/usr/bin/env python3
 """Which single-feature exclusion rule would remove false positives WITHOUT losing known cSS?
 usage: rule_test.py --pos P006 --old OLD_candidates.nii.gz --ids 3,4,5,13,18,19 --neg P011[,P010]
@@ -3449,11 +6296,11 @@ else:
     print("  none - every feature of the false positives overlaps the known lesions")
 print("\nRead with care: few known lesions -> a rule can look safe by chance. Prefer rules that also lose "
       "few synthetic lesions and that make sense radiologically; confirm on the next patients.")
-```
+````
 
 ## scripts/score_css.py
 
-```python
+````python
 #!/usr/bin/env python3
 """Score accepted candidates.  usage: score_css.py SUBJECT [--truth] [--explain]
 --explain: print which sulci each focus lines and why sulci count as adjacent (shared gyrus / touch)
@@ -3827,11 +6674,107 @@ if os.path.exists(_cp):
     if "rank_model" in _c.columns and len(_c):
         _o = _c.sort_values("rank_model").cand_id.astype(int).tolist()
         print(f"  model ranking (rank_candidates.py), top {min(10, len(_o))} by cand_id: {_o[:10]}")
-```
+````
+
+## scripts/split_export.py
+
+````python
+#!/usr/bin/env python3
+"""Split a candidate-export zip (export_candidates.py) into N smaller zips under a size limit. Research software.
+usage: split_export.py EXPORT.zip [--parts 2] [--max-mb 25] [--out DIR]
+Writes EXPORT_part1of2.zip, EXPORT_part2of2.zip, ... Patients are kept whole and balanced by size (largest first,
+into the lightest part). A patient too large for one part is split by candidate folder; its overview.png goes with
+its first candidate. Every part keeps README.txt (with the part's patients) and gets summary.csv / excluded.csv
+filtered to its own folders. Nothing is lost: the script checks that every file lands in exactly one part.
+Exits with an error (and writes no zips) if the parts do not fit --max-mb: try --parts 3."""
+import sys, os, io, zipfile, argparse, pandas as pd
+
+ROOT_FILES = ("README.txt", "summary.csv", "excluded.csv")
+
+
+def build_units(zin, max_bytes):
+    """(name, [member files], compressed bytes): one unit per patient, split by candidate if it is too large"""
+    size = {i.filename: i.compress_size for i in zin.infolist() if not i.is_dir()}
+    by_pat = {}
+    for n in size:
+        if n in ROOT_FILES: continue
+        p = n.split("/")
+        if len(p) >= 2: by_pat.setdefault(p[0], []).append(n)
+    units = []
+    for pat, files in sorted(by_pat.items()):
+        total = sum(size[f] for f in files)
+        if total <= max_bytes:
+            units.append((pat, files, total)); continue
+        groups = {}
+        for f in files:
+            key = "/".join(f.split("/")[:2]) if f.count("/") >= 2 else f"{pat}/overview"
+            groups.setdefault(key, []).append(f)
+        ov = groups.pop(f"{pat}/overview", [])
+        for i, (key, fs) in enumerate(sorted(groups.items())):
+            if i == 0: fs = fs + ov                         # overview.png travels with the first candidate
+            units.append((key, fs, sum(size[f] for f in fs)))
+    return units, size
+
+
+def pack(units, parts):
+    bins = [{"files": [], "size": 0, "units": []} for _ in range(parts)]
+    for name, files, sz in sorted(units, key=lambda u: -u[2]):
+        b = min(bins, key=lambda b: b["size"])
+        b["files"] += files; b["size"] += sz; b["units"].append(name)
+    return bins
+
+
+def write_part(zin, b, path, idx, parts):
+    folders = {"/".join(f.split("/")[:2]) for f in b["files"] if f.count("/") >= 2}
+    pats = sorted({f.split("/")[0] for f in b["files"]})
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zo:
+        for f in b["files"]:
+            zo.writestr(f, zin.read(f))
+        for name in ("summary.csv", "excluded.csv"):
+            if name in zin.namelist():
+                df = pd.read_csv(io.BytesIO(zin.read(name)), dtype=str)
+                zo.writestr(name, df[df["folder"].isin(folders)].to_csv(index=False))
+        readme = zin.read("README.txt").decode() if "README.txt" in zin.namelist() else ""
+        zo.writestr("README.txt", readme + f"\nPART {idx} of {parts}: patients {', '.join(pats)}; "
+                                           f"{len(folders)} candidate/excluded folders.\n")
+    return os.path.getsize(path), pats, len(folders)
+
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("zip"); ap.add_argument("--parts", type=int, default=2)
+    ap.add_argument("--max-mb", type=float, default=25.0, help="limit per part (the upload limit is 30 MB)")
+    ap.add_argument("--out", default="")
+    a = ap.parse_args()
+    if a.parts < 2: sys.exit("--parts must be 2 or more")
+    out_dir = a.out or os.path.dirname(os.path.abspath(a.zip)); os.makedirs(out_dir, exist_ok=True)
+    base = os.path.splitext(os.path.basename(a.zip))[0]
+    max_bytes = a.max_mb * 1e6
+    with zipfile.ZipFile(a.zip) as zin:
+        units, size = build_units(zin, max_bytes)
+        bins = pack(units, a.parts)
+        expected = sorted(f for f in size if f not in ROOT_FILES)
+        placed = sorted(f for b in bins for f in b["files"])
+        if placed != expected: sys.exit("internal check failed: an image would be lost or duplicated - nothing written")
+        too_big = [i for i, b in enumerate(bins) if b["size"] > max_bytes]
+        if too_big:
+            sys.exit(f"parts {[i + 1 for i in too_big]} still exceed {a.max_mb:g} MB (compressed estimate) - use --parts 3 "
+                     f"(or a larger --parts) and run again; nothing written")
+        report = []
+        for i, b in enumerate(bins, 1):
+            path = os.path.join(out_dir, f"{base}_part{i}of{a.parts}.zip")
+            real, pats, nfold = write_part(zin, b, path, i, a.parts)
+            status = "OK" if real <= 30e6 else "TOO BIG for upload - use --parts 3"
+            line = f"part {i} of {a.parts}: {path}  {real / 1e6:.1f} MB  patients {', '.join(pats)}  ({nfold} folders)  {status}"
+            print(line); report.append(line)
+        with open(os.path.join(out_dir, f"{base}_split_report.txt"), "w") as f:
+            f.write("\n".join(report) + "\n")
+        print(f"all {len(expected)} files placed exactly once; report: {os.path.join(out_dir, base + '_split_report.txt')}")
+````
 
 ## scripts/stress_test.py
 
-```python
+````python
 #!/usr/bin/env python3
 """Synthetic stress test across several host scans.
 usage: stress_test.py --detector detect_css.py --tag v3 [--hosts P001,P002,P003,P004,P005]
@@ -3973,11 +6916,11 @@ if feats:
             print(f"  {f:18s} cSS median {L.median():7.2f} | others median {N.median():7.2f} | AUC {auc(L, N):.2f}"
                   + (f" | vs decoy veins {auc(L, V):.2f} (n={len(V)})" if len(V) else "")
                   + (f" | vs surface veins {auc(L, Vs):.2f} (n={len(Vs)})" if len(Vs) else ""))
-```
+````
 
 ## scripts/study_meta.py
 
-```python
+````python
 #!/usr/bin/env python3
 """Study-level reference and metadata -> labels/study_meta.csv (one row per study).
 usage: study_meta.py SUBJECT --status pos|neg|uncertain [--ref-L 0-2 --ref-R 0-2] [--split dev|test]
@@ -4048,11 +6991,202 @@ out = pd.concat([old[old.study_id != subj], pd.DataFrame([row])], ignore_index=T
 out.to_csv(path, index=False)
 print(f"{subj}: status {row.get('css_status', '?')}, split {row.get('split', 'unassigned')}, "
       f"ref {row.get('ref_multifocality_0_4', '?')}/4, QC {row.get('qc_status', '?')} -> {path}")
-```
+````
+
+## scripts/surface_aligned_patch.py
+
+````python
+#!/usr/bin/env python3
+"""Surface-aligned multimodal patches per detector object (v5.2, master plan Stage 2). Research software.
+usage: surface_aligned_patch.py SUBJECT [--lists candidates,excluded] [--ids 3,7] [--size-mm 24,12,8]
+                                [--spacing-mm 0.5,0.5,0.5]
+For every object of review/ID_candidates|excluded.nii.gz a patch of fixed PHYSICAL size is sampled in a right-handed
+frame at the object:
+  u  the object's long axis (PCA, world mm) projected into the cortical tangent plane
+  v  cross(n, u): across the surface
+  n  outward pial normal (from tissue toward CSF): gradient of work/ID_pial_sd.nii.gz (detect_css.py), mapped to world
+     coordinates with the inverse transpose of the affine (oblique data included), smoothed over 1 mm. The sign is
+     checked against the labels (tissue must lie on the -n side); a reversed map is flipped and recorded.
+Channels (each sampled on the same world grid, linear interpolation, NaN outside the image):
+  swi    data/ID_swi.nii                         required
+  phase  data/ID_phase.nii.gz                    optional; used only if on the SWI grid and newer than the SWI
+  flair  work/ID_flair_swispace.nii.gz           optional; newer than the SWI
+  labels work/ID_seg_swispace.nii.gz             optional; nearest neighbour; newer than the SWI
+A missing or stale channel is NOT zero-filled: it is absent from the file, valid_<ch> is all False and the reason is
+in the metadata. Intensity channels are valid only inside the image AND inside the brain mask (SWI > 0), so outside-
+brain zeros never enter patch features. Objects with < 3 voxels are skipped with a reason.
+Writes review/ID_patches/<list>_<id>.npz (image_<ch>, valid, valid_<ch>, world_grid_mm, center_world_mm, center_ijk,
+u_world, v_world, n_world, metadata_json) and review/ID_patches.csv (one row per object, also the skipped ones).
+Library entry: extract_patch(images, pial, mask, ...) on nibabel images (each channel sampled through its OWN affine;
+the CLI only passes channels already on the SWI grid)."""
+import sys, os, json, argparse, numpy as np, nibabel as nib, pandas as pd
+from scipy import ndimage as ndi
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from css_common import base as _base, cand_uid, stale_against, build_id
+
+PATCH_SCHEMA = "css-patch/1.0"
+
+
+def unit(x, eps=1e-8):
+    n = float(np.linalg.norm(x))
+    if n < eps: raise ValueError("near-zero vector")
+    return x / n
+
+
+def to_world(aff, ijk):
+    x = np.asarray(ijk, float).reshape(-1, 3)
+    return (aff @ np.c_[x, np.ones(len(x))].T).T[:, :3].reshape(np.asarray(ijk).shape)
+
+
+def to_voxel(aff, xyz):
+    x = np.asarray(xyz, float).reshape(-1, 3)
+    return (np.linalg.inv(aff) @ np.c_[x, np.ones(len(x))].T).T[:, :3].reshape(np.asarray(xyz).shape)
+
+
+def world_normal(pial_sd, aff, ijk, vox, half_mm=6.0):
+    """outward unit normal at voxel ijk: gradient of the (1 mm smoothed) signed distance in a local crop, as a world
+    covector (inverse transpose of the affine's linear part)"""
+    r = np.ceil(half_mm / np.asarray(vox)).astype(int); c = np.round(ijk).astype(int)
+    lo = np.maximum(c - r, 0); hi = np.minimum(c + r + 1, pial_sd.shape)
+    crop = ndi.gaussian_filter(pial_sd[tuple(slice(a, b) for a, b in zip(lo, hi))].astype(np.float64), 1.0 / np.asarray(vox))
+    g = np.array([np.gradient(crop, axis=a)[tuple(c - lo)] for a in range(3)])        # per voxel index
+    return unit(np.linalg.inv(np.asarray(aff, float)[:3, :3]).T @ g)
+
+
+def frame(mask, pial_sd, aff, vox, tissue=None):
+    ijk = np.argwhere(mask)
+    if len(ijk) < 3: raise ValueError(f"object has {len(ijk)} voxels (< 3)")
+    c_ijk = ijk.mean(0); near = ijk[np.argmin(np.linalg.norm(ijk - c_ijk, axis=1))]   # a voxel OF the object
+    n = world_normal(pial_sd, aff, near, vox); flipped = False
+    if tissue is not None:                                           # the labels decide which side is tissue
+        side = lambda t: ndi.map_coordinates(tissue.astype(np.float32), to_voxel(aff, to_world(aff, near) + t * n).reshape(3, 1), order=0)[0]
+        if side(+1.5) > 0.5 and side(-1.5) < 0.5: n, flipped = -n, True
+    P = to_world(aff, ijk); C = P - P.mean(0)
+    u = np.linalg.eigh(C.T @ C / max(len(P) - 1, 1))[1][:, -1]
+    u = u - (u @ n) * n
+    if np.linalg.norm(u) < 1e-5:
+        e = np.eye(3)[np.argmin(np.abs(n))]; u = e - (e @ n) * n
+    u = unit(u)
+    if u[np.argmax(np.abs(u))] < 0: u = -u
+    v = unit(np.cross(n, u)); u = unit(np.cross(v, n))
+    return dict(center_ijk=c_ijk, center_world=to_world(aff, c_ijk), u=u, v=v, n=n, normal_flipped=flipped,
+                pial_sd_at_center_mm=float(pial_sd[tuple(np.round(c_ijk).astype(int))]))
+
+
+def grid(fr, size_mm, spacing_mm):
+    ax = [(np.arange(int(round(s / d)) + 1) - int(round(s / d)) / 2) * d for s, d in zip(size_mm, spacing_mm)]
+    U, V, N = np.meshgrid(*ax, indexing="ij")
+    return fr["center_world"] + U[..., None] * fr["u"] + V[..., None] * fr["v"] + N[..., None] * fr["n"]
+
+
+def sample(img_data, aff, xyz, order=1):
+    co = np.moveaxis(to_voxel(aff, xyz), -1, 0)
+    vals = ndi.map_coordinates(img_data, co, order=order, mode="constant", cval=np.nan, prefilter=False).astype(np.float32)
+    inside = ndi.map_coordinates(np.ones(img_data.shape, np.float32), co, order=0, mode="constant", cval=0) > 0.5
+    return vals, inside
+
+
+_ARR = {}
+
+
+def _arr(img):
+    """float32 array of a nibabel image, loaded once per image object"""
+    if id(img) not in _ARR: _ARR[id(img)] = (img, np.asarray(img.dataobj, np.float32))
+    return _ARR[id(img)][1]
+
+
+def extract_patch(images, pial, mask, size_mm=(24, 12, 8), spacing_mm=(0.5, 0.5, 0.5), obj_id=None, labels=None,
+                  brain=None):
+    """one surface-aligned patch.
+    images: {channel: nibabel image}; pial: signed pial distance image (mm, + outward); mask: object label image
+    (obj_id selects one object, None = every non-zero voxel); labels: optional segmentation image (tissue side check);
+    brain: optional brain mask on the SWI grid (default: filled SWI > 0). Intensity channels are valid only inside
+    their image and inside the brain; 'labels' only inside its image.
+    -> dict(shape, channels, arrays {image_<ch>}, valids {valid_<ch>}, valid (= valid_swi, else any channel), frame, grid)
+    raises ValueError for an object of < 3 voxels"""
+    aff = pial.affine; vox = np.array(pial.header.get_zooms()[:3], float)
+    M = _arr(mask); m = (M == obj_id) if obj_id is not None else (M > 0)
+    tissue = None
+    if labels is not None: L = _arr(labels); tissue = (L > 0) & (L != 24)
+    fr = frame(m, _arr(pial), aff, vox, tissue)
+    G = grid(fr, size_mm, spacing_mm)
+    brain_s = None
+    if "swi" in images:
+        if brain is None: brain = ndi.binary_fill_holes(_arr(images["swi"]) > 0)
+        brain_s = sample(brain.astype(np.float32), images["swi"].affine, G, order=0)[0] > 0.5
+    arrays, valids = {}, {}
+    for name, img in images.items():
+        vals, inside = sample(_arr(img), img.affine, G, 0 if name == "labels" else 1)
+        ok = inside & np.isfinite(vals)
+        if name != "labels" and brain_s is not None: ok &= brain_s
+        arrays[f"image_{name}"] = vals; valids[f"valid_{name}"] = ok
+    valid = valids["valid_swi"] if "valid_swi" in valids else np.any(list(valids.values()), axis=0)
+    return dict(shape=tuple(G.shape[:3]), channels=sorted(images), arrays=arrays, valids=valids, valid=valid, grid=G,
+                frame=dict(u_world=fr["u"], v_world=fr["v"], n_world=fr["n"], center_world=fr["center_world"],
+                           center_ijk=fr["center_ijk"], normal_flipped=fr["normal_flipped"],
+                           pial_sd_at_center_mm=fr["pial_sd_at_center_mm"]))
+
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("subject"); ap.add_argument("--lists", default="candidates,excluded"); ap.add_argument("--ids", default="")
+    ap.add_argument("--size-mm", default="24,12,8"); ap.add_argument("--spacing-mm", default="0.5,0.5,0.5")
+    a = ap.parse_args(); s = a.subject; B = _base()
+    size = [float(x) for x in a.size_mm.split(",")]; spc = [float(x) for x in a.spacing_mm.split(",")]
+    swi_p, psd_p = f"{B}/data/{s}_swi.nii", f"{B}/work/{s}_pial_sd.nii.gz"
+    if not os.path.exists(psd_p): sys.exit(f"{psd_p} missing - re-run detect_css.py {s} (v5.2 writes it)")
+    if stale_against(psd_p, [swi_p]): sys.exit(f"{psd_p} is older than the SWI - re-run detect_css.py {s}")
+    swi = nib.load(swi_p); aff = swi.affine
+    brain = ndi.binary_fill_holes(_arr(swi) > 0); psd_img = nib.load(psd_p)
+    chans, missing = {"swi": swi}, {}
+    for name, p in (("phase", f"{B}/data/{s}_phase.nii.gz"), ("flair", f"{B}/work/{s}_flair_swispace.nii.gz"),
+                    ("labels", f"{B}/work/{s}_seg_swispace.nii.gz")):
+        if not os.path.exists(p): missing[name] = "absent"; continue
+        im = nib.load(p)
+        if im.shape[:3] != swi.shape[:3] or not np.allclose(im.affine, aff, atol=1e-3): missing[name] = "not on the SWI grid"; continue
+        if stale_against(p, [swi_p]): missing[name] = "older than the SWI"; continue
+        chans[name] = im
+    out_dir = f"{B}/review/{s}_patches"; os.makedirs(out_dir, exist_ok=True)
+    ids = {int(x) for x in a.ids.split(",") if x.strip()}
+    rows = []
+    for lst in [x for x in a.lists.split(",") if x]:
+        mp, cp = f"{B}/review/{s}_{lst}.nii.gz", f"{B}/review/{s}_{lst}.csv"
+        if not (os.path.exists(mp) and os.path.exists(cp)): continue
+        M_img = nib.load(mp); d = pd.read_csv(cp)
+        idc = "cand_id" if lst == "candidates" else "excl_id"
+        for _, r in d.iterrows():
+            oid = int(r[idc])
+            if ids and oid not in ids: continue
+            row = dict(study_id=s, list=lst, obj_id=oid, cand_uid=cand_uid(s, r), patch_path="", status="skipped", skip_reason="")
+            try:
+                P = extract_patch(chans, psd_img, M_img, size, spc, obj_id=oid, labels=chans.get("labels"), brain=brain)
+            except ValueError as e:
+                row["skip_reason"] = str(e); rows.append(row); continue
+            fr, G, arrays, valids, valid = P["frame"], P["grid"], P["arrays"], P["valids"], P["valid"]
+            for name in missing: valids[f"valid_{name}"] = np.zeros(G.shape[:3], bool)
+            meta = dict(schema=PATCH_SCHEMA, subject=s, list=lst, obj_id=oid, cand_uid=row["cand_uid"], size_mm=size,
+                        spacing_mm=spc, axis_semantics={"0": "u_along_candidate", "1": "v_across_surface", "2": "n_outward"},
+                        normal_sign="positive_outward_toward_csf", normal_flipped=fr["normal_flipped"],
+                        pial_sd_at_center_mm=fr["pial_sd_at_center_mm"], channels=sorted(chans), missing_channels=missing,
+                        build=build_id(), research_only=True)
+            path = f"{out_dir}/{lst}_{oid}.npz"
+            np.savez_compressed(path, **arrays, **valids, valid=valid, world_grid_mm=G.astype(np.float32),
+                                center_world_mm=fr["center_world"], center_ijk=fr["center_ijk"], u_world=fr["u_world"],
+                                v_world=fr["v_world"], n_world=fr["n_world"], metadata_json=json.dumps(meta))
+            row.update(patch_path=os.path.relpath(path, B), status="ok", channels=";".join(sorted(chans)),
+                       missing_channels=";".join(f"{k}:{v}" for k, v in missing.items()),
+                       valid_frac_swi=round(float(valid.mean()), 3), normal_flipped=int(fr["normal_flipped"]),
+                       pial_sd_at_center_mm=round(fr["pial_sd_at_center_mm"], 2))
+            rows.append(row)
+    pd.DataFrame(rows).to_csv(f"{B}/review/{s}_patches.csv", index=False)
+    ok = sum(r["status"] == "ok" for r in rows)
+    print(f"{s}: {ok} surface-aligned patches ({size} mm, spacing {spc} mm) -> {out_dir}; {len(rows) - ok} skipped; "
+          f"channels {sorted(chans)}" + (f"; missing {missing}" if missing else "") + "  [research software]")
+````
 
 ## scripts/surface_features.py
 
-```python
+````python
 #!/usr/bin/env python3
 """Pial-surface (geodesic) features for candidates AND excluded objects - recon-all route only (v4.16).
 usage: surface_features.py SUBJECT [--surface-xfm tkras_to_swi.txt] [--near-mm 3] [--reach-mm 25] [--force]
@@ -4249,178 +7383,11 @@ json.dump(dict(subject=subj, transform_source=tsrc, label_agreement_mm=checks, t
                near_mm=a.near_mm, reach_mm=a.reach_mm, note="recorded only; not validated"),
           open(f"{base}/review/{subj}_surface_features.json", "w"), indent=2)
 print(f"{subj}: surface features for {len(rows)} objects -> {base}/review/{subj}_surface_features.csv")
-```
-
-## scripts/robustness.py
-
-```python
-#!/usr/bin/env python3
-"""How stable is the detector when the SAME scan looks a little different? (v4.18, idea from BrainIAC's
-perturbation test). Runs detect_css.py on perturbed copies of one subject and compares each run with an
-unperturbed copy. Changes nothing in the subject's own outputs; reported only.
-usage: robustness.py SUBJECT [--perturb copy,inplane:0.86,slice:2.0,bias:0.3,noise:0.05,gamma:0.8,gamma:1.25,shift:0]
-                             [--old OLD_candidates.nii.gz --ids 3,4,5] [--match-mm 5] [--top 10] [--keep]
-Perturbations (applied inside the brain only, background stays 0):
-  copy           unperturbed copy: the reference every other run is compared with (same inputs: no FLAIR,
-                 no drawn ICH - copies never use them)
-  inplane:MM     resample in-plane to MM voxels (anti-aliased when coarser) - another protocol
-  slice:MM       resample the slice axis to MM slices
-  bias:C         smooth multiplicative bias field exp(C * f), f in [-1, 1] across the brain
-  noise:F        Gaussian noise, SD = F x the median brain intensity
-  gamma:G        contrast change: I_max (I / I_max)^G
-  shift:AXIS     image moved 1 voxel along array AXIS against unchanged labels (1-voxel misregistration)
-Per run: candidates, excluded, reference candidates found again (centroid within --match-mm, one-to-one),
-new candidates, Spearman correlation of scores of matched candidates, top-k overlap, and - with --old/--ids,
-e.g. P006's v3 map - how many known lesions are still shown (as check_known.py).
-Writes review/ID_robustness.csv. Copies are named ID_R<k>; their files are removed unless --keep.
-Each run is a full detection: on a real scan expect several minutes per perturbation."""
-import signal; signal.signal(signal.SIGPIPE, signal.SIG_DFL)
-import argparse, glob, os, re, shutil, subprocess, sys, numpy as np, pandas as pd, nibabel as nib
-from scipy import ndimage as ndi
-from scipy.spatial import cKDTree
-from scipy.stats import spearmanr
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from css_common import base as _base
-
-ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument("subject")
-ap.add_argument("--perturb", default="copy,inplane:0.86,slice:2.0,bias:0.3,noise:0.05,gamma:0.8,gamma:1.25,shift:0")
-ap.add_argument("--old", default=""); ap.add_argument("--ids", default="")
-ap.add_argument("--match-mm", type=float, default=5.0); ap.add_argument("--top", type=int, default=10)
-ap.add_argument("--keep", action="store_true"); ap.add_argument("--seed", type=int, default=1)
-a = ap.parse_args(); subj = a.subject; base = _base(); S = os.path.dirname(os.path.abspath(__file__))
-py = sys.executable
-
-def run(*args):
-    r = subprocess.run([py, *args], capture_output=True, text=True)
-    if r.returncode: print(r.stdout[-600:], r.stderr[-1500:]); sys.exit("step failed: " + " ".join(args))
-    return r.stdout
-
-swi = nib.load(f"{base}/data/{subj}_swi.nii"); I0 = swi.get_fdata().astype(np.float32); A0 = swi.affine
-vox0 = np.array(swi.header.get_zooms()[:3], float)
-brain0 = I0 > 0
-t1 = f"{base}/work/{subj}_t1seg_swispace.nii.gz"
-lab_src = t1 if os.path.exists(t1) and os.path.getmtime(t1) >= os.path.getmtime(f"{base}/data/{subj}_swi.nii") \
-    else f"{base}/synthseg/{subj}_seg.nii.gz"
-use_t1 = lab_src == t1
-rng = np.random.default_rng(a.seed)
-
-def regrid(I, brain, new_vox):
-    """resample to new voxel sizes on the same field of view (linear image, nearest mask); Gaussian
-    anti-aliasing along axes that get coarser (FWHM^2 difference, FWHM = voxel size)"""
-    new_vox = np.asarray(new_vox, float); f = new_vox / vox0
-    sig = np.sqrt(np.clip(new_vox ** 2 - vox0 ** 2, 0, None)) / 2.355 / vox0
-    Is = ndi.gaussian_filter(I, sig) if (sig > 0).any() else I
-    shape = np.maximum(1, np.round(np.array(I.shape) / f)).astype(int)
-    # new voxel j has its centre at old index (j + 0.5) * f - 0.5 (same outer edges)
-    off = 0.5 * f - 0.5
-    In = ndi.affine_transform(Is, np.diag(f), offset=off, output_shape=tuple(shape), order=1, mode="nearest")
-    Bn = ndi.affine_transform(brain.astype(np.float32), np.diag(f), offset=off, output_shape=tuple(shape),
-                              order=0, mode="constant") > 0.5
-    An = A0.copy(); An[:3, :3] = A0[:3, :3] * f[None, :]; An[:3, 3] = A0[:3, :3] @ off + A0[:3, 3]
-    return np.where(Bn, np.clip(In, 1e-3, None), 0).astype(np.float32), An
-
-def perturb(kind, val):
-    I, A = I0.copy(), A0.copy(); b = brain0
-    med = float(np.median(I0[b]))
-    if kind == "copy":
-        pass
-    elif kind == "inplane":
-        I, A = regrid(I0, b, [val, val, vox0[2]])
-    elif kind == "slice":
-        I, A = regrid(I0, b, [vox0[0], vox0[1], val])
-    elif kind == "bias":
-        c = np.argwhere(b); lo, hi = c.min(0), c.max(0)
-        g = [np.linspace(-1, 1, n) for n in I0.shape]
-        w = rng.normal(size=3); w /= np.linalg.norm(w)
-        # smooth field: random direction ramp + a gentle quadratic, scaled to [-1, 1] inside the brain
-        X = np.meshgrid(*[(gi - gi[(l + h) // 2]) for gi, l, h in zip(g, lo, hi)], indexing="ij")
-        fld = w[0] * X[0] + w[1] * X[1] + w[2] * X[2] + 0.5 * (X[0] ** 2 + X[1] ** 2 - X[2] ** 2)
-        fb = fld[b]; fld = 2 * (fld - fb.min()) / (fb.max() - fb.min() + 1e-9) - 1
-        I = np.where(b, I0 * np.exp(val * fld), 0)
-    elif kind == "noise":
-        I = np.where(b, np.clip(I0 + rng.normal(0, val * med, I0.shape), 1e-3, None), 0)
-    elif kind == "gamma":
-        mx = float(I0[b].max()); I = np.where(b, mx * (np.clip(I0, 0, None) / mx) ** val, 0)
-    elif kind == "shift":
-        ax = int(val); I = np.roll(I0, 1, axis=ax)
-        sl = [slice(None)] * 3; sl[ax] = 0; I[tuple(sl)] = 0
-    else:
-        sys.exit(f"unknown perturbation {kind}")
-    return I.astype(np.float32), A
-
-def world(df, A):
-    if not len(df): return np.zeros((0, 3))
-    return (A @ np.c_[df[["vox_i", "vox_j", "vox_k"]].values, np.ones(len(df))].T)[:3].T
-
-def known_kept(name):
-    if not (a.old and a.ids): return np.nan
-    old = nib.load(os.path.expanduser(a.old))
-    cand = nib.load(f"{base}/review/{name}_candidates.nii.gz")
-    from nibabel.processing import resample_from_to
-    O = resample_from_to(old, cand, order=0).get_fdata().astype(int)
-    C = cand.get_fdata().astype(int); k = 0
-    for i in [int(x) for x in a.ids.split(",") if x.strip()]:
-        m = ndi.binary_dilation(O == i, iterations=2)
-        k += int(bool(set(np.unique(C[m])) - {0}))
-    return k
-
-def cleanup(name):
-    for p in glob.glob(f"{base}/*/{name}_*"):
-        if os.path.isfile(p): os.remove(p)
-
-items = [(p.split(":")[0], float(p.split(":")[1]) if ":" in p else 0.0) for p in a.perturb.split(",") if p]
-if items[0][0] != "copy": items = [("copy", 0.0)] + items
-print(f"{subj}: robustness - {len(items)} detection runs on perturbed copies (anatomy {'T1' if use_t1 else 'SWI-only'}; "
-      f"copies never use FLAIR or a drawn ICH mask)", flush=True)
-rows, ref = [], None
-for k, (kind, val) in enumerate(items):
-    name = f"{subj}_R{k}"; label = kind if kind == "copy" else f"{kind}:{val:g}"
-    I, A = perturb(kind, val)
-    nib.save(nib.Nifti1Image(I, A), f"{base}/data/{name}_swi.nii")
-    os.makedirs(f"{base}/work", exist_ok=True); os.makedirs(f"{base}/synthseg", exist_ok=True)
-    shutil.copy(lab_src, f"{base}/work/{name}_t1seg_swispace.nii.gz" if use_t1 else f"{base}/synthseg/{name}_seg.nii.gz")
-    run(f"{S}/align_seg.py", name)
-    st = subprocess.run([py, f"{S}/detect_css.py", name], capture_output=True, text=True)
-    if st.returncode:
-        print(f"  {label:12s} detection failed / stopped: {st.stdout.strip().splitlines()[-1] if st.stdout.strip() else st.stderr[-300:]}")
-        rows.append(dict(perturbation=label, status="failed")); continue
-    c = pd.read_csv(f"{base}/review/{name}_candidates.csv"); x = pd.read_csv(f"{base}/review/{name}_excluded.csv")
-    w = world(c, A)
-    r = dict(perturbation=label, status="ok", voxel_mm=" x ".join(f"{v:.2f}" for v in nib.load(f"{base}/data/{name}_swi.nii").header.get_zooms()[:3]),
-             candidates=len(c), excluded=len(x), known_kept=known_kept(name))
-    if ref is None:
-        ref = (c, w); r.update(found_again=len(c), new=0, spearman=1.0, top_overlap=min(a.top, len(c)))
-    else:
-        rc, rw = ref; pairs = []
-        if len(rc) and len(c):
-            d, j = cKDTree(w).query(rw)
-            used = set()
-            for i_ in np.argsort(d):                       # one-to-one, closest pairs first
-                if d[i_] <= a.match_mm and j[i_] not in used:
-                    pairs.append((i_, j[i_])); used.add(j[i_])
-        r["found_again"] = len(pairs); r["new"] = len(c) - len(pairs)
-        if len(pairs) >= 3:
-            s1 = rc.score.values[[p[0] for p in pairs]]; s2 = c.score.values[[p[1] for p in pairs]]
-            r["spearman"] = round(float(spearmanr(s1, s2).correlation), 2)
-        else:
-            r["spearman"] = np.nan
-        topr = set(range(min(a.top, len(rc)))); topc = set(range(min(a.top, len(c))))
-        r["top_overlap"] = sum(1 for p in pairs if p[0] in topr and p[1] in topc)
-    rows.append(r)
-    print(f"  {label:12s} {r['voxel_mm']:>18s} mm  candidates {r['candidates']:4d}  excluded {r['excluded']:4d}  "
-          f"found again {r['found_again']:4d}/{len(ref[0])}  new {r['new']:4d}  spearman {r['spearman']}  "
-          f"top-{a.top} {r['top_overlap']}" + ("" if np.isnan(r["known_kept"]) else
-                                             f"  known kept {r['known_kept']}/{len(a.ids.split(','))}"), flush=True)
-    if not a.keep: cleanup(name)
-out = pd.DataFrame(rows); out.insert(0, "subject", subj)
-out.to_csv(f"{base}/review/{subj}_robustness.csv", index=False)
-print(f"{subj}: -> review/{subj}_robustness.csv (reported only; the subject's own outputs are unchanged)")
-```
+````
 
 ## scripts/surface_overlay.py
 
-```python
+````python
 #!/usr/bin/env python3
 """Show candidates and excluded objects on the FreeSurfer surface, in freeview (recon-all route; v4.16).
 usage: surface_overlay.py SUBJECT [--color-by list|expert] [--reader NAME] [--session N]
@@ -4556,960 +7523,73 @@ print("view:  freeview -viewport 3d " + " ".join(
     f"-f {sdir}/{subj}/surf/{h}.{sv}:annot={files[h][0]}:overlay={files[h][1]}:overlay_threshold=0.5,999"
     for h in ("lh", "rh")))
 print("       (annotation = colours; the overlay holds object ids: + candidate, - excluded; click a vertex to read it)")
-```
+````
 
-## tests/check_v418.py
+## scripts/swi_mask_from_t1.py
 
-```python
-"""v4.18 checks: ridge scales in mm, mirror lookup restricted to the brain, skeleton length with diagonal steps.
-usage: check_v418.py    (needs PH1 and PH3 detected in $CSS_BASE)"""
-import os, sys, json, numpy as np, pandas as pd
-B = os.environ["CSS_BASE"]; sys.path.insert(0, f"{B}/scripts")
-from css_common import skeleton_length
-def fail(m): print("FAIL:", m); sys.exit(1)
-
-# 1. skeleton length: straight, diagonal, L-corner (no double count at the corner)
-z = np.zeros((20, 20), bool)
-a = z.copy(); a[5, 2:12] = 1
-b = z.copy(); b[np.arange(10), np.arange(10)] = 1
-c = z.copy(); c[5, 2:8] = 1; c[5:10, 7] = 1
-got = [skeleton_length(a, (0.5, 0.5)), skeleton_length(b, (0.5, 0.5)), skeleton_length(c, (1, 1))]
-want = [4.5, 9 * np.hypot(0.5, 0.5), 9.0]
-if not np.allclose(got, want): fail(f"skeleton length {got} != {want}")
-print(f"   skeleton length: straight {got[0]:.2f}, diagonal {got[1]:.2f} (old rule {10 * 0.5:.2f}), corner {got[2]:.1f} mm")
-
-# 2. ridge scales: the same mm on every protocol (PH1 0.5 mm, PH3 0.8 mm in-plane)
-for s, inpl in (("PH1", 0.5), ("PH3", 0.8)):
-    p = json.load(open(f"{B}/review/{s}_manifest.json"))["detect"]["parameters"]
-    if not np.allclose(np.array(p["sato_sigmas_px"]) * inpl, p["sato_sigmas_mm"], atol=0.01):
-        fail(f"{s}: sato px {p['sato_sigmas_px']} x {inpl} mm != {p['sato_sigmas_mm']} mm")
-    print(f"   {s}: ridge sigma {p['sato_sigmas_mm']} mm = {p['sato_sigmas_px']} px")
-
-# 3. mirror: a fraction in [0, 1] or NaN (most mirror points outside the brain), never forced dark by background
-m = pd.concat([pd.read_csv(f"{B}/review/PH3_{k}.csv") for k in ("candidates", "excluded")]).mirror_dark_frac
-if ((m < 0) | (m > 1)).any(): fail("mirror_dark_frac outside [0, 1]")
-print(f"   PH3 mirror_dark_frac: {int(m.isna().sum())} NaN, median {m.median():.2f}")
-# 4. end types on synthetic geometry: a 10 mm candidate whose far end stops / runs on / forks / reaches the midline
-import css_vessel as cv, nibabel as nib
-sh = (80, 60, 8); vx = (0.5, 0.5, 0.5)
-for kind in ("stops", "runs_on", "branches", "midline"):
-    cm = np.zeros(sh, bool); ves = np.zeros(sh, bool); mid = np.zeros(sh, bool)
-    cm[10:30, 30, 4] = True
-    if kind != "stops": ves[31:60, 30, 4] = True
-    if kind == "branches":
-        for k in range(16): ves[45 + k, 30 + k, 4] = True; ves[45 + k, 30 - k, 4] = True
-    if kind == "midline": mid[55:] = True
-    o = cv.local_tracking(cm, ves, vx, 20.0, dark=np.zeros(sh, bool), midline=mid)
-    if (o["end_type_max"], o["end_type_min"]) != (kind, "stops"): fail(f"end type {kind}: {o['end_type_max']}/{o['end_type_min']}")
-print("   end types: stops / runs_on / branches / midline recovered on synthetic geometry")
-
-# 5. review tier on PH3 (phantom only - not a validation): every true lesion in tier 1
-c = pd.read_csv(f"{B}/review/PH3_candidates.csv")
-C = nib.load(f"{B}/review/PH3_candidates.nii.gz").get_fdata().astype(int)
-t = nib.load(f"{B}/work/PH3_truth.nii.gz").get_fdata() > 0
-c["truth"] = [t[C == i].mean() > 0.2 for i in c.cand_id]
-if (c[c.truth].review_tier != 1).any(): fail(f"PH3 true lesion in tier 2: {c[c.truth & (c.review_tier != 1)].cand_id.tolist()}")
-print(f"   PH3 tiers: lesions {c[c.truth].review_tier.tolist()}, others {c[~c.truth].review_tier.tolist()}")
-# 6. radius (half-width) along the centre line: 1 / 3 / 5-voxel-wide bands at 0.5 mm -> 0.25 / 0.75 / 1.25 mm
-from css_common import radius_profile
-got = []
-for w in (1, 3, 5):
-    m = np.zeros((40, 40, 3), bool); m[10:30, 20 - w // 2: 21 + w // 2, 1] = True
-    got.append(float(np.median(radius_profile(m, (0.5, 0.5, 1.0)))))
-if not np.allclose(got, [0.25, 0.75, 1.25]): fail(f"radius profile {got}")
-cols = ["cand_radius_med_mm", "cand_radius_p95_mm", "cand_radius_cv", "net_radius_med_mm", "net_radius_p95_mm"]
-if not set(cols) <= set(c.columns): fail("radius columns missing")
-print(f"   radius: bands {got} mm; PH3 lesions median {c[c.truth].cand_radius_med_mm.median():.2f} mm, "
-      f"others {c[~c.truth].cand_radius_med_mm.median():.2f} mm (phantom only)")
-# 7. robustness.py: an identity perturbation (gamma 1) must reproduce the copy exactly; copies are cleaned up
-import subprocess, glob
-r = subprocess.run([sys.executable, f"{B}/scripts/robustness.py", "PH3", "--perturb", "copy,gamma:1.0,shift:0",
-                    "--old", f"{B}/work/PH3_truth.nii.gz", "--ids", "1,2,3,4,5,6"], capture_output=True, text=True)
-if r.returncode: print(r.stdout[-800:], r.stderr[-1500:]); fail("robustness.py failed")
-rb = pd.read_csv(f"{B}/review/PH3_robustness.csv").set_index("perturbation")
-g, c0 = rb.loc["gamma:1"], rb.loc["copy"]
-if not (g.candidates == c0.candidates == g.found_again and g.new == 0 and g.spearman == 1.0):
-    fail(f"identity perturbation changed the result: {g.to_dict()}")
-if glob.glob(f"{B}/*/PH3_R*"): fail("robustness copies not cleaned up")
-print(f"   robustness: copy {int(c0.candidates)} candidates, gamma 1 identical; 1-voxel shift -> {int(rb.loc['shift:0'].candidates)} "
-      f"candidates, {int(rb.loc['shift:0'].found_again)}/{int(c0.candidates)} found again (phantom)")
-print("RESULT v4.18 OK")
-```
-
-## scripts/make_swi.py
-
-```python
+````python
 #!/usr/bin/env python3
-"""Build an SWI image from gradient-echo MAGNITUDE + PHASE (v4.18) - for datasets that store the raw GRE
-(e.g. OpenNeuro ds000221 / MPI-Leipzig LEMON: acq-mag_GRE + acq-phase_GRE) instead of a processed SWI.
-usage: make_swi.py MAG.nii.gz PHASE.nii.gz OUT_swi.nii.gz [--sigma-mm 4] [--power 4] [--phase-sign auto|+1|-1]
-                   [--hp-out OUT_hpphase.nii.gz]
-Standard SWI processing (Haacke 2004): phase -> radians, homodyne high-pass per axial slice
-(angle(z * conj(lowpass z)), Gaussian low-pass sigma --sigma-mm, wrap-safe; the same filter the reviewer
-uses), a phase mask that darkens PARAMAGNETIC voxels (veins, haemosiderin) linearly to 0 at pi, and
-SWI = magnitude x mask^power. Nothing else is changed: the output keeps the magnitude's grid and affine.
-
-Phase sign: which sign is paramagnetic differs between vendors and reconstructions. With --phase-sign auto
-(default) it is read from the image: paramagnetic voxels are also dark on the magnitude at this TE, so the
-sign of the median high-pass phase of the darkest-for-their-neighbourhood brain voxels is used. The
-evidence is printed; if it is weak the script stops and asks for --phase-sign. Check the result once per
-protocol: veins must be DARKER on the SWI than on the magnitude (calcium is not darkened).
-Research software, not for clinical reading."""
+"""Skull-strip the SWI with the T1 brain labels instead of SynthStrip (v5.2.5). Research software.
+usage: swi_mask_from_t1.py SUBJECT [--dilate-mm 5]
+Why: SynthStrip peaked at 31 GB (T1) and 64 GB (SWI) on the user's 36 GB Mac and froze it. With a T1, run_css.sh now
+imports the SWI whole-head; prep_anat.sh registers T1 / FLAIR to it (bbregister or mri_coreg on whole-head images)
+and puts the T1 labels on the SWI grid (work/ID_t1seg_swispace.nii.gz). This script then
+  mask = every labelled voxel (brain, ventricles, cerebellum, brainstem), holes filled, grown by --dilate-mm, largest
+         connected piece, holes filled again. Default 5 mm: detect_css.py ignores a 3 mm rim inside the mask edge, so
+         candidates keep 2 mm of CSF beyond the label boundary (cSS lies on the cortical surface; known P006 cSS have
+         pial_dist <= -0.57 mm); dark objects further out in the CSF fall into the rim (veins, not cSS)
+and writes work/ID_brainmask.nii.gz, the masked SWI (data/ID_swi.nii, rewritten in place with its ORIGINAL modification
+time, so files derived from it are not marked stale) and the masked FLAIR on the SWI grid (if present, same rule).
+A mask volume outside 900-2300 cm3 is reported (registration or label problem): check in freeview before reading."""
 import sys, os, argparse, numpy as np, nibabel as nib
 from scipy import ndimage as ndi
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from css_common import phase_to_radians, homodyne_highpass
-
-ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument("mag"); ap.add_argument("phase"); ap.add_argument("out")
-ap.add_argument("--sigma-mm", type=float, default=4.0); ap.add_argument("--power", type=int, default=4)
-ap.add_argument("--phase-sign", default="auto"); ap.add_argument("--hp-out", default="")
-a = ap.parse_args()
-
-mi, pi_ = nib.load(a.mag), nib.load(a.phase)
-if mi.shape[:3] != pi_.shape[:3] or not np.allclose(mi.affine, pi_.affine, atol=1e-3):
-    sys.exit("magnitude and phase are not on the same grid - they must come from the same acquisition")
-M = np.asarray(mi.dataobj, np.float32); P = np.asarray(pi_.dataobj, np.float32)
-if M.ndim == 4 or P.ndim == 4:
-    sys.exit("4-D (multi-echo) input: pass one echo (e.g. the longest usable TE) as 3-D images")
-vox = np.array(mi.header.get_zooms()[:3], float)
-si = int(np.argmax(np.abs(mi.affine[2, :3])))          # superior-inferior array axis: slice-wise filter
-P, unit = phase_to_radians(P)                            # scanner units (e.g. -4096..4095) -> radians
-# homodyne high-pass, slice by slice in the plane perpendicular to the S-I axis (v5.0: shared with the detector)
-HP = homodyne_highpass(P, vox, si, a.sigma_mm)
-
-# brain-ish mask for the sign estimate: bright magnitude, eroded away from the head edge
-thr = 0.15 * float(np.percentile(M[M > 0], 99)) if (M > 0).any() else 0.0
-head = ndi.binary_fill_holes(M > thr)
-lab, n = ndi.label(head)
-if n: head = lab == (np.argmax(np.bincount(lab.ravel())[1:]) + 1)
-core = ndi.binary_erosion(head, iterations=max(1, int(round(10 / vox.min()))))
-if a.phase_sign == "auto":
-    rel = M / (ndi.gaussian_filter(M, 3.0 / vox) + 1e-6)
-    dark = core & (rel < 0.75) & (np.abs(HP) > 0.2)
-    if dark.sum() < 200:
-        sys.exit(f"too few dark brain voxels ({int(dark.sum())}) to read the phase sign - give --phase-sign +1 or -1")
-    med = float(np.median(HP[dark])); frac = float((np.sign(HP[dark]) == np.sign(med)).mean())
-    if abs(med) < 0.05 or frac < 0.6:
-        sys.exit(f"phase sign unclear (median {med:+.2f} rad, {frac:.0%} agree) - give --phase-sign +1 or -1")
-    sign = 1 if med > 0 else -1
-    how = f"auto: dark-on-magnitude voxels median high-pass phase {med:+.2f} rad, {frac:.0%} same sign, n={int(dark.sum())}"
-else:
-    sign = int(a.phase_sign); how = "given"
-    if sign not in (1, -1): sys.exit("--phase-sign must be auto, +1 or -1")
-
-# phase mask: paramagnetic side (sign) goes linearly from 1 at 0 to 0 at pi
-para = sign * HP
-mask = np.where(para > 0, np.clip(1.0 - para / np.pi, 0.0, 1.0), 1.0).astype(np.float32)
-S = (M * mask ** a.power).astype(np.float32)
-out = nib.Nifti1Image(S, mi.affine, mi.header); out.set_data_dtype(np.float32)
-nib.save(out, a.out)
-if a.hp_out:
-    nib.save(nib.Nifti1Image(HP, mi.affine), a.hp_out)
-red = float(1 - np.median(S[core & (mask < 0.9)] / (M[core & (mask < 0.9)] + 1e-6))) if (core & (mask < 0.9)).any() else 0.0
-print(f"{os.path.basename(a.out)}: SWI = magnitude x phase-mask^{a.power}; phase {unit}; high-pass sigma {a.sigma_mm} mm "
-      f"in-plane (S-I axis {si}); paramagnetic sign {sign:+d} ({how}); {(core & (mask < 0.9)).mean() if core.any() else 0:.1%} "
-      f"of brain voxels darkened, median by {red:.0%}")
-```
-
-## scripts/run_lemon.sh
-
-```bash
-#!/bin/zsh
-# Batch for OpenNeuro ds000221 (MPI-Leipzig LEMON): healthy volunteers with gradient-echo magnitude + phase,
-# MP2RAGE T1 and 3-D FLAIR. Use: cSS-NEGATIVE CONTROL scans (false positives per scan, robustness) - 'dev' only.
-# usage: run_lemon.sh LEMON_DIR [--download] [--parallel N] [--subjects "sub-010239 sub-010255"] [--summary]
-#   LEMON_DIR   folder with sub-XXXXXX/ses-01/anat/ (created by --download); no spaces in the path
-#   --download  fetch the 4 files per subject from the public OpenNeuro S3 bucket (curl; skips files present)
-#   --parallel  subjects processed at the same time (default 1 since v4.19.1; 2 crashed a laptop)
-#   --threads   CPU threads per subject for recon-all / SynthSeg (default 4; CSS_THREADS)
-#   --subjects  default: the 26 volunteers aged 55-75 with GRE + 3-D FLAIR
-#   --summary   only print the summary table of finished subjects
-#   --force     re-run subjects that already finished (default: skipped, so an interrupted batch can be restarted)
-# Per subject: make_swi.py (magnitude + phase -> SWI); mp2rage_robust.py (UNI + INV1 + INV2 -> T1 with a clean
-#   background: the noisy MP2RAGE background made recon-all fail on P201) -> run_css.sh ID swi --t1 --flair --recon
-#   --phase; if recon-all still fails: the same without --recon (SynthSeg on the T1 + mri_coreg; no surfaces)
-#   -> study_meta.py ID --split dev. IDs P201... are fixed in labels/id_map.csv (study code <-> source id).
-# Logs: logs/ID_run.log. Summary: review/lemon_summary.csv.
-# These volunteers are PRESUMED cSS-negative (community volunteers, not expert-read) - never claim more.
-B=${CSS_BASE:-$HOME/css_project}; SC=$B/scripts
-DEFAULT="sub-010239 sub-010255 sub-010257 sub-010258 sub-010146 sub-010148 sub-010152 sub-010267 sub-010268
-sub-010272 sub-010275 sub-010276 sub-010277 sub-010278 sub-010279 sub-010280 sub-010282 sub-010283 sub-010284
-sub-010285 sub-010286 sub-010287 sub-010288 sub-010289 sub-010290 sub-010291"
-FILES="acq-mag_GRE acq-phase_GRE acq-mp2rage_T1w inv-1_mp2rage inv-2_mp2rage acq-highres_FLAIR"
-URL=https://s3.amazonaws.com/openneuro.org/ds000221
-
-if [ "$1" = "--one" ]; then                      # internal: one subject (run in parallel by xargs)
-  s=$2; ID=$3; p=$LEMON_DIR/$s/ses-01/anat/${s}_ses-01
-  mkdir -p $B/work $B/logs
-  if [ -z "$LEMON_FORCE" ] && grep -q "^== $ID done" $B/logs/${ID}_run.log 2>/dev/null; then
-    echo "SKIP   $ID ($s) - already done (--force to re-run)"; exit 0
-  fi
-  if ( echo "== $ID = $s ($(date))"
-       for f in $(echo $FILES); do [ -s ${p}_${f}.nii.gz ] || { echo "ERROR: missing ${p}_${f}.nii.gz"; exit 1; }; done
-       python $SC/make_swi.py ${p}_acq-mag_GRE.nii.gz ${p}_acq-phase_GRE.nii.gz $B/work/${ID}_gre_swi.nii.gz || exit 1
-       python $SC/mp2rage_robust.py ${p}_acq-mp2rage_T1w.nii.gz ${p}_inv-1_mp2rage.nii.gz ${p}_inv-2_mp2rage.nii.gz \
-         $B/work/${ID}_t1_robust.nii.gz || exit 1
-       ANAT="recon-all"
-       if ! NOVIEW=1 zsh $SC/run_css.sh $ID $B/work/${ID}_gre_swi.nii.gz --t1 $B/work/${ID}_t1_robust.nii.gz \
-              --flair ${p}_acq-highres_FLAIR.nii.gz --recon --phase ${p}_acq-phase_GRE.nii.gz; then
-         echo "== recon-all route failed for $ID - falling back to SynthSeg on the T1 (no surfaces, mri_coreg)"
-         [ -d $B/subjects/$ID ] && mv $B/subjects/$ID $B/subjects/${ID}_failed_$(date +%Y%m%d_%H%M%S)
-         ANAT="SynthSeg fallback (recon-all failed)"
-         NOVIEW=1 zsh $SC/run_css.sh $ID $B/work/${ID}_gre_swi.nii.gz --t1 $B/work/${ID}_t1_robust.nii.gz \
-           --flair ${p}_acq-highres_FLAIR.nii.gz --phase ${p}_acq-phase_GRE.nii.gz || exit 1
-       fi
-       python $SC/study_meta.py $ID --split dev \
-         --note "LEMON ds000221 $s healthy volunteer: PRESUMED cSS-negative, not expert-read; GRE->SWI by make_swi.py; T1 robust MP2RAGE; anatomy $ANAT" || exit 1
-       echo "== $ID done ($(date))" ) > $B/logs/${ID}_run.log 2>&1; then
-    echo "OK     $ID ($s)"
-  else
-    echo "FAILED $ID ($s) - see logs/${ID}_run.log"; tail -3 $B/logs/${ID}_run.log
-  fi
-  exit 0
-fi
-
-L=$1; shift 2>/dev/null || true
-[ -n "$L" ] || { sed -n 2,14p $0; exit 1; }
-DL=0; PAR=1; SUBS=$DEFAULT; SUMONLY=0; export CSS_THREADS=${CSS_THREADS:-4}
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --download) DL=1; shift;;
-    --parallel) PAR=$2; shift 2;;
-    --threads) export CSS_THREADS=$2; shift 2;;
-    --subjects) SUBS=$2; shift 2;;
-    --summary) SUMONLY=1; shift;;
-    --force) export LEMON_FORCE=1; shift;;
-    *) echo "run_lemon.sh: unknown option $1"; exit 1;;
-  esac
-done
-case "$L" in *" "*) echo "ERROR: no spaces in LEMON_DIR please ($L)"; exit 1;; esac
-mkdir -p $L $B/labels $B/logs $B/review
-export LEMON_DIR=$(cd $L && pwd)
-
-# fixed study codes: reuse labels/id_map.csv, append new subjects as the next P2xx
-MAP=$B/labels/id_map.csv
-[ -f $MAP ] || echo "study_id,source_dataset,source_id" > $MAP
-for s in $(echo $SUBS); do
-  if ! grep -q ",ds000221,$s\$" $MAP; then
-    n=$(grep -c ",ds000221," $MAP); printf "P%03d,ds000221,%s\n" $((201 + n)) $s >> $MAP
-  fi
-done
-
-if [ $SUMONLY -eq 0 ]; then
-  if [ $DL -eq 1 ]; then
-    for s in $(echo $SUBS); do for f in $(echo $FILES); do
-      o=$LEMON_DIR/$s/ses-01/anat/${s}_ses-01_${f}.nii.gz; mkdir -p $(dirname $o)
-      [ -s $o ] || curl -fsSL -o $o $URL/$s/ses-01/anat/${s}_ses-01_${f}.nii.gz || { echo "download FAILED: $s $f"; rm -f $o; }
-    done; done
-  fi
-  echo "LEMON: $(echo $SUBS | wc -w | tr -d ' ') subjects, $PAR at a time, $CSS_THREADS threads, low priority (nice); recon-all ~1-3 h each (progress: tail -f $B/logs/<ID>_run.log)"
-  for s in $(echo $SUBS); do echo "$s $(grep ",ds000221,$s\$" $MAP | cut -d, -f1)"; done | xargs -n 2 -P $PAR nice -n 15 zsh $0 --one
-fi
-
-python - "$B" $(echo $SUBS) <<'EOF'
-import sys, os, json, pandas as pd
-B = sys.argv[1]; subs = sys.argv[2:]
-m = pd.read_csv(f"{B}/labels/id_map.csv"); m = m[m.source_dataset == "ds000221"].set_index("source_id")
-rows = []
-for s in subs:
-    if s not in m.index: continue
-    i = m.loc[s, "study_id"]; r = dict(study_id=i, source_id=s)
-    c, x, q = (f"{B}/review/{i}_{k}" for k in ("candidates.csv", "excluded.csv", "qc.json"))
-    if not os.path.exists(c): r["status"] = "not run / failed"; rows.append(r); continue
-    cd = pd.read_csv(c); r.update(status="done", candidates=len(cd), excluded=len(pd.read_csv(x)) if os.path.exists(x) else None)
-    if "review_tier" in cd: r.update(tier1=int((cd.review_tier == 1).sum()), tier2=int((cd.review_tier == 2).sum()))
-    if os.path.exists(q):
-        qq = json.load(open(q)); r.update(qc=qq.get("status"), label_shift_mm=qq.get("label_shift_mm"), anatomy=qq.get("anatomy"))
-    rows.append(r)
-d = pd.DataFrame(rows)
-if len(d):
-    d.to_csv(f"{B}/review/lemon_summary.csv", index=False)
-    print(d.to_string(index=False))
-    ok = d[d.status == "done"]
-    if len(ok):
-        print(f"\ncandidates per PRESUMED-negative scan: median {ok.candidates.median():g}, range {ok.candidates.min():g}-"
-              f"{ok.candidates.max():g} (n={len(ok)}); QC ok in {int((ok.get('qc') == 'ok').sum())}/{len(ok)}. They count as "
-              f"false positives only if an expert confirms the scan is cSS-free.")
-EOF
-```
-
-## tests/check_make_swi.py
-
-```python
-"""v4.18 make_swi.py: synthetic GRE (wrapped background phase, paramagnetic veins, diamagnetic calcium) with
-both phase sign conventions -> sign found automatically, veins darkened, calcium untouched, grid kept.
-usage: check_make_swi.py    (uses $CSS_BASE/work as scratch)"""
-import os, sys, subprocess, numpy as np, nibabel as nib
-from scipy import ndimage as ndi
-B = os.environ["CSS_BASE"]; W = f"{B}/work"; os.makedirs(W, exist_ok=True)
-def fail(m): print("FAIL:", m); sys.exit(1)
-sh = (120, 140, 90); vox = 0.8
-x, y, z = np.meshgrid(*[np.arange(n) for n in sh], indexing="ij")
-head = ((x - 60) / 50) ** 2 + ((y - 70) / 60) ** 2 + ((z - 45) / 38) ** 2 < 1
-rng = np.random.default_rng(0); veins = np.zeros(sh, bool)
-for k in range(15):
-    p0 = np.array([rng.integers(25, 95), rng.integers(25, 115), rng.integers(20, 70)]); d = rng.normal(size=3); d /= np.linalg.norm(d)
-    pts = (p0 + np.outer(np.linspace(0, 25, 200), d)).round().astype(int)
-    ok = np.all((pts >= 0) & (pts < sh), 1); veins[tuple(pts[ok].T)] = True
-veins = ndi.binary_dilation(veins) & head
-calc = (x - 60) ** 2 + (y - 40) ** 2 + (z - 45) ** 2 < 9
-M = np.where(head, 1000.0, 0.0); M[veins] *= 0.6; M[calc] *= 0.6
-M = np.clip(M + rng.normal(0, 20, sh) * head, 0, None)
-aff = np.diag([-vox, vox, -vox, 1.0]); aff[:3, 3] = [50, -50, 40]          # LAI, like LEMON
-for s in (1, -1):
-    bg = 0.08 * (x - 60) + 0.05 * (y - 70) + 0.002 * (z - 45) ** 2          # wraps several times
-    ph = np.angle(np.exp(1j * (bg + s * 1.2 * ndi.gaussian_filter(veins.astype(float), 0.7) / 0.35 - s * 1.2 * calc))) * head
-    nib.save(nib.Nifti1Image(M.astype(np.float32), aff), f"{W}/GRE_mag.nii.gz")
-    nib.save(nib.Nifti1Image(((ph + np.pi) / (2 * np.pi) * 4095 - 2048).astype(np.float32), aff), f"{W}/GRE_pha.nii.gz")
-    r = subprocess.run([sys.executable, f"{B}/scripts/make_swi.py", f"{W}/GRE_mag.nii.gz", f"{W}/GRE_pha.nii.gz",
-                        f"{W}/GRE_swi.nii.gz"], capture_output=True, text=True)
-    if r.returncode: print(r.stdout, r.stderr); fail("make_swi failed")
-    if f"paramagnetic sign {s:+d}" not in r.stdout: fail(f"phase sign {s:+d} not found: {r.stdout}")
-    S = nib.load(f"{W}/GRE_swi.nii.gz")
-    if S.shape != sh or not np.allclose(S.affine, aff): fail("grid / affine changed")
-    S = S.get_fdata(); rv = float(np.median(S[veins] / M[veins].clip(1))); rc = float(np.median(S[calc] / M[calc].clip(1)))
-    if not (rv < 0.3 and rc > 0.95): fail(f"sign {s:+d}: veins x{rv:.2f}, calcium x{rc:.2f}")
-    print(f"   sign {s:+d}: found; veins x{rv:.2f} of magnitude, calcium x{rc:.2f}")
-print("RESULT make_swi OK")
-```
-
-## scripts/evaluate.py
-
-```python
-#!/usr/bin/env python3
-"""Patient-grouped evaluation of the detector against expert labels (v4.18; protocol after VALDO / CenSynCMB 2026:
-per-patient counts, patient bootstrap, stratified by protocol). Reads labels/, never changes them.
-usage: evaluate.py [--split test|dev|all] [--source consensus|reader:NAME] [--k 5,10,20] [--boot 1000] [--seed 1]
-                   [--by field_T,sequence,slice_group] [--tag NAME]
-Reference standard, per study (labels/study_meta.csv gives split and patient status):
-  cSS lesions = objects called cSS (labels/consensus.csv, or one reader's latest session in candidate_labels.csv)
-                among shown candidates AND excluded objects (sheets made with --include-excluded),
-                + reader-outlined missed cSS (labels/missed_lesions.csv; outlines within 5 mm across readers count once)
-  detected    = the lesion is a SHOWN candidate in the current detector output (matched by cand_uid fingerprint);
-                its rank = cand_id. Missed lesions are split by why: excluded (rule id) / dropped / not generated.
-  false positive = shown candidate called anything but cSS or uncertain; 'uncertain' calls are counted apart.
-Reported (with 95 % patient-bootstrap intervals): lesion sensitivity (all shown and top-k), patient sensitivity
-(cSS-positive patients with >= 1 lesion shown), false positives per scan and per cSS-NEGATIVE scan, uncertain per
-scan; a FROC table (rank cut-off -> sensitivity vs mean FP per scan); a per-study table; strata from --by.
-Labels that no longer match the current detector output (re-run after labelling) are reported, not guessed.
-Writes review/evaluation_<tag>.json, _patients.csv, _froc.csv. Default split is TEST: dev studies were used to
-design the rules, so their numbers are optimistic by construction."""
-import sys, os, json, argparse, numpy as np, pandas as pd
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from css_common import base as _base, cand_uid, label_class
-
-ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument("--split", default="test", choices=["test", "dev", "all"])
-ap.add_argument("--source", default="consensus"); ap.add_argument("--k", default="5,10,20")
-ap.add_argument("--boot", type=int, default=1000); ap.add_argument("--seed", type=int, default=1)
-ap.add_argument("--by", default=""); ap.add_argument("--tag", default="")
-a = ap.parse_args(); B = _base(); L = f"{B}/labels"
-KS = [int(x) for x in a.k.split(",") if x]
-tag = a.tag or f"{a.split}_{a.source.replace(':', '-')}"
-
-meta = pd.read_csv(f"{L}/study_meta.csv", dtype=str)
-if a.split != "all": meta = meta[meta.split == a.split]
-if not len(meta): sys.exit(f"no studies with split '{a.split}' in labels/study_meta.csv")
-
-if a.source == "consensus":
-    lab = pd.read_csv(f"{L}/consensus.csv")
-    pend = lab[lab.method == "pending"]; lab = lab[lab.method != "pending"]
-    lab = lab.assign(cls=lab.consensus_class)
-elif a.source.startswith("reader:"):
-    rd = a.source.split(":", 1)[1]; lab = pd.read_csv(f"{L}/candidate_labels.csv")
-    lab = lab[lab.reader_id == rd]
-    if not len(lab): sys.exit(f"no labels from reader {rd}")
-    lab = lab[lab.session == lab.groupby("study_id").session.transform("max")]
-    pend = lab.iloc[0:0]; lab = lab.assign(cls=lab.label.map(label_class))
-else:
-    sys.exit("--source consensus or reader:NAME")
-mp = f"{L}/missed_lesions.csv"
-missed = pd.read_csv(mp) if os.path.exists(mp) else pd.DataFrame(columns=["study_id"])
-
-rows, warn = [], []
-for _, st in meta.iterrows():
-    s = st.study_id; cp, xp = f"{B}/review/{s}_candidates.csv", f"{B}/review/{s}_excluded.csv"
-    if not os.path.exists(cp): warn.append(f"{s}: no detector output - skipped"); continue
-    c = pd.read_csv(cp); x = pd.read_csv(xp) if os.path.exists(xp) else pd.DataFrame(columns=c.columns)
-    uid_rank = {cand_uid(s, r): int(r.cand_id) for _, r in c.iterrows()}
-    uid_rule = {cand_uid(s, r): str(r.get("rule_version", r.get("reason", ""))) for _, r in x.iterrows()}
-    ls = lab[lab.study_id == s]
-    lesions, fp_ranks, unc_ranks, stale = [], [], [], 0
-    seen_shown = set()
-    for _, r in ls.iterrows():
-        u = r.cand_uid
-        if u in uid_rank:
-            rk = uid_rank[u]; seen_shown.add(rk)
-            if r.cls == "cSS": lesions.append(dict(fate="shown", rank=rk))
-            elif r.cls == "uncertain": unc_ranks.append(rk)
-            else: fp_ranks.append(rk)
-        elif u in uid_rule:
-            if r.cls == "cSS": lesions.append(dict(fate="excluded", rank=None, why=uid_rule[u]))
-        else:
-            stale += 1
-    unlabelled = sorted(set(uid_rank.values()) - seen_shown)
-    # reader-outlined missed lesions (fates from label_missed.py), outlines from several readers counted once
-    ms = missed[missed.study_id == s] if len(missed) else missed
-    kept = []
-    for _, r in ms.iterrows():
-        p = np.array([r.vox_i, r.vox_j, r.vox_k], float)
-        if any(np.linalg.norm(p - q) <= 5.0 for q in kept): continue
-        kept.append(p)
-        f = str(r.fate)
-        if f == "shown":
-            ob = int(r.obj_id) if pd.notna(r.obj_id) else None
-            if ob is not None and any(l_["rank"] == ob for l_ in lesions): continue    # already counted
-            lesions.append(dict(fate="shown", rank=ob))
-            if ob in fp_ranks: fp_ranks.remove(ob)                 # it overlaps real cSS: not a false positive
-        elif f == "excluded": lesions.append(dict(fate="excluded", rank=None, why=str(r.rule_version)))
-        else: lesions.append(dict(fate=f, rank=None, why=str(r.reason)))
-    row = dict(study_id=s, split=st.split, css_status=st.get("css_status"), n_candidates=len(c),
-               n_ref_lesions=len(lesions), n_detected=sum(l_["fate"] == "shown" for l_ in lesions),
-               n_lost_excluded=sum(l_["fate"] == "excluded" for l_ in lesions),
-               n_lost_dropped=sum(l_["fate"] == "dropped" for l_ in lesions),
-               n_lost_not_generated=sum(l_["fate"] == "not generated" for l_ in lesions),
-               n_fp=len(fp_ranks), n_uncertain=len(unc_ranks), n_unlabelled=len(unlabelled), n_stale_labels=stale,
-               n_pending=int((pend.study_id == s).sum()) if len(pend) else 0,
-               lesion_ranks=";".join(str(l_["rank"]) for l_ in lesions if l_["fate"] == "shown"),
-               fp_ranks=";".join(map(str, sorted(fp_ranks))),
-               lost=";".join(f"{l_['fate']}:{l_.get('why', '')}" for l_ in lesions if l_["fate"] != "shown"))
-    for k in KS:
-        row[f"det_top{k}"] = sum(1 for l_ in lesions if l_["fate"] == "shown" and l_["rank"] is not None and l_["rank"] <= k)
-        row[f"fp_top{k}"] = sum(1 for rk in fp_ranks if rk <= k)
-    for col in ("field_T", "sequence", "vendor", "voxel_mm", "slice_mm", "qc_status", "anatomy"):
-        row[col] = st.get(col)
-    try: sm = float(st.get("slice_mm"))
-    except (TypeError, ValueError): sm = np.nan
-    row["slice_group"] = "unknown" if np.isnan(sm) else ("<=1.2 mm" if sm <= 1.2 else ("<=2 mm" if sm <= 2.0 else ">2 mm"))
-    if stale: warn.append(f"{s}: {stale} label(s) match no current candidate/excluded object (detector re-run after labelling?)")
-    if unlabelled: warn.append(f"{s}: {len(unlabelled)} shown candidate(s) without a label - neither TP nor FP")
-    # v5.1: what the detector did with every generated object in this study (review/ID_manifest.json fates)
-    _mf = f"{B}/review/{s}_manifest.json"
-    _f = (json.load(open(_mf)).get("detect", {}).get("fates") or {}) if os.path.exists(_mf) else {}
-    row.update(obj_generated=_f.get("objects"), obj_dropped=sum((_f.get("dropped_by_gate") or {}).values()) if _f else None,
-               obj_excluded=sum((_f.get("excluded_by_rule") or {}).values()) if _f else None,
-               obj_shown=_f.get("shown"), obj_qc_blocked=_f.get("qc_blocked"))
-    rows.append(row)
-P = pd.DataFrame(rows)
-if not len(P): sys.exit("no evaluable studies\n" + "\n".join(warn))
-
-def metrics(d):
-    ref = d.n_ref_lesions.sum(); pos = d[d.n_ref_lesions > 0]; neg = d[d.css_status == "neg"]
-    m = dict(n_studies=len(d), n_ref_lesions=int(ref),
-             lesion_sens=d.n_detected.sum() / ref if ref else np.nan,
-             patient_sens=float((pos.n_detected > 0).mean()) if len(pos) else np.nan,
-             fp_per_scan=float(d.n_fp.mean()), fp_per_neg_scan=float(neg.n_fp.mean()) if len(neg) else np.nan,
-             uncertain_per_scan=float(d.n_uncertain.mean()))
-    for k in KS:
-        m[f"sens_top{k}"] = d[f"det_top{k}"].sum() / ref if ref else np.nan
-        m[f"fp_per_scan_top{k}"] = float(d[f"fp_top{k}"].mean())
-    return m
-
-def boot(d, rng):
-    out = {}
-    if len(d) < 2: return out
-    bs = [metrics(d.iloc[rng.integers(0, len(d), len(d))]) for _ in range(a.boot)]
-    for key in bs[0]:
-        v = np.array([b_[key] for b_ in bs], float); v = v[np.isfinite(v)]
-        if len(v) and key not in ("n_studies", "n_ref_lesions"):
-            out[key] = [round(float(np.percentile(v, 2.5)), 3), round(float(np.percentile(v, 97.5)), 3)]
-    return out
-
-rng = np.random.default_rng(a.seed)
-overall = metrics(P); ci = boot(P, rng)
-# FROC: rank cut-off k -> pooled lesion sensitivity vs mean FP per scan (ranks are per study)
-maxk = int(P.n_candidates.max())
-froc = []
-for k in range(1, maxk + 1):
-    det = sum(sum(1 for t in str(r.lesion_ranks).split(";") if t not in ("", "None") and int(t) <= k) for _, r in P.iterrows())
-    fp = np.mean([sum(1 for t in str(r.fp_ranks).split(";") if t and int(t) <= k) for _, r in P.iterrows()])
-    froc.append(dict(top_k=k, lesion_sens=det / overall["n_ref_lesions"] if overall["n_ref_lesions"] else np.nan,
-                     fp_per_scan=float(fp)))
-strata = {}
-for col in [c_ for c_ in a.by.split(",") if c_]:
-    if col not in P: warn.append(f"--by {col}: not a column"); continue
-    strata[col] = {str(g): dict(metrics(d), ci=boot(d, rng)) for g, d in P.groupby(P[col].astype(str))}
-
-os.makedirs(f"{B}/review", exist_ok=True)
-P.to_csv(f"{B}/review/evaluation_{tag}_patients.csv", index=False)
-pd.DataFrame(froc).to_csv(f"{B}/review/evaluation_{tag}_froc.csv", index=False)
-json.dump(dict(split=a.split, source=a.source, overall=overall, ci95=ci, strata=strata, warnings=warn,
-               pending_adjudication=int(len(pend)), boot=a.boot, seed=a.seed,
-               note="patient-grouped; research software; dev-split numbers are optimistic (rules were tuned on them)"),
-          open(f"{B}/review/evaluation_{tag}.json", "w"), indent=2, default=float)
-
-f = lambda v: "n/a" if v is None or (isinstance(v, float) and not np.isfinite(v)) else (f"{v:.2f}" if isinstance(v, float) else str(v))
-fci = lambda k_: f" [{ci[k_][0]:.2f}-{ci[k_][1]:.2f}]" if k_ in ci else ""
-print(f"evaluation ({a.split} split, reference: {a.source}): {overall['n_studies']} studies, {overall['n_ref_lesions']} reference cSS lesions")
-if a.split != "test": print("  NOTE: not the test split - these numbers are optimistic (rules were designed on dev studies)")
-if overall["n_studies"] < 10: print(f"  NOTE: only {overall['n_studies']} studies - intervals are wide and unstable")
-print(f"  lesion sensitivity (all shown)  {f(overall['lesion_sens'])}{fci('lesion_sens')}")
-for k in KS:
-    print(f"  lesion sensitivity, top {k:<3d}     {f(overall[f'sens_top{k}'])}{fci(f'sens_top{k}')}   FP per scan in top {k}: "
-          f"{f(overall[f'fp_per_scan_top{k}'])}{fci(f'fp_per_scan_top{k}')}")
-print(f"  patient sensitivity             {f(overall['patient_sens'])}{fci('patient_sens')}")
-print(f"  false positives per scan        {f(overall['fp_per_scan'])}{fci('fp_per_scan')}   per cSS-negative scan "
-      f"{f(overall['fp_per_neg_scan'])}{fci('fp_per_neg_scan')}   uncertain per scan {f(overall['uncertain_per_scan'])}")
-lost = P[["n_lost_excluded", "n_lost_dropped", "n_lost_not_generated"]].sum()
-print(f"  lesions not shown: {int(lost.n_lost_excluded)} excluded by a rule, {int(lost.n_lost_dropped)} dropped at a gate, "
-      f"{int(lost.n_lost_not_generated)} never generated (details: lost column of the patient table)")
-for col, gr in strata.items():
-    for g, m in gr.items():
-        print(f"  [{col} = {g}] studies {m['n_studies']}, lesions {m['n_ref_lesions']}, sensitivity {f(m['lesion_sens'])}, "
-              f"FP per scan {f(m['fp_per_scan'])}")
-for w in warn: print("  WARNING:", w)
-if len(pend): print(f"  WARNING: {len(pend)} object(s) still pending adjudication - left out")
-print(f"-> review/evaluation_{tag}.json, _patients.csv, _froc.csv")
-```
-
-## tests/check_physics.py
-
-```python
-"""v4.18 physics-based synthetic lesions: dipole field (css_common.susceptibility_signal) against analytic values,
-then make_synthetic.py --physics on PH1: blooming grows with TE, calcium has the opposite phase, lesions detected.
-usage: check_physics.py    (needs PH1 from phantom.py, aligned, in $CSS_BASE)"""
-import os, sys, re, shutil, subprocess, numpy as np, nibabel as nib, pandas as pd
-B = os.environ["CSS_BASE"]; S = f"{B}/scripts"; py = sys.executable
-sys.path.insert(0, S)
-from css_common import susceptibility_signal, GAMMA_HZ_T
-def fail(m): print("FAIL:", m); sys.exit(1)
-def run(*a):
-    r = subprocess.run([py, *a], capture_output=True, text=True)
-    if r.returncode: print(r.stdout[-600:], r.stderr[-1500:]); fail("step failed: " + " ".join(a))
-    return r.stdout
-
-# 1. analytic checks: long cylinder inside field = chi (3 cos^2 th - 1) / 6; sphere outside: + along B0, - across
-sh, vox, aff = (80, 80, 80), (0.5, 0.5, 0.5), np.diag([0.5, 0.5, 0.5, 1.0])
-k = 2 * np.pi * GAMMA_HZ_T * 3.0 * 0.02 * 1e-6
-for name, sl, th in (("parallel", (slice(39, 41), slice(39, 41), slice(5, 75)), 0.0),
-                     ("perpendicular", (slice(5, 75), slice(39, 41), slice(39, 41)), np.pi / 2)):
-    chi = np.zeros(sh); chi[sl] = 0.45
-    ph, _ = susceptibility_signal(chi, vox, aff, 3.0, 0.02)
-    want = k * 0.45 * (3 * np.cos(th) ** 2 - 1) / 6; got = float(np.median(ph[sl]))
-    if abs(got - want) > 0.1 * abs(want): fail(f"cylinder {name}: phase {got:.2f} vs analytic {want:.2f}")
-x, y, z = np.meshgrid(*[np.arange(80)] * 3, indexing="ij")
-chi = np.zeros(sh); chi[(x - 40) ** 2 + (y - 40) ** 2 + (z - 40) ** 2 < 9] = 1.0
-ph, _ = susceptibility_signal(chi, vox, aff, 3.0, 0.02)
-if not (ph[40, 40, 46] > 0 > ph[46, 40, 40] and abs(ph[40, 40, 46] / ph[46, 40, 40] + 2) < 0.4):
-    fail(f"sphere dipole pattern {ph[40, 40, 46]:.2f} / {ph[46, 40, 40]:.2f} (expect ratio -2)")
-# B0 follows the affine: the same cylinder stored with axes swapped (array axis 0 = scanner z) reads parallel
-aff2 = np.zeros((4, 4)); aff2[0, 2] = aff2[1, 1] = aff2[2, 0] = 0.5; aff2[3, 3] = 1
-chi = np.zeros(sh); chi[5:75, 39:41, 39:41] = 0.45
-ph, _ = susceptibility_signal(chi, vox, aff2, 3.0, 0.02)
-if abs(float(np.median(ph[5:75, 39:41, 39:41])) - k * 0.45 / 3) > 0.1 * k * 0.45 / 3: fail("B0 direction not taken from the affine")
-print(f"   dipole model: cylinders match the analytic field (within 10 %), sphere pattern +2:-1, B0 from the affine")
-
-# 2. make_synthetic --physics on PH1: TE dependence, calcium phase sign, detection
-shutil.copy(f"{B}/synthseg/PH1_seg.nii.gz", f"{B}/synthseg/PH1S_seg.nii.gz")
-I = nib.load(f"{B}/data/PH1_swi.nii").get_fdata(); res = {}
-for te in (10, 40):
-    run(f"{S}/make_synthetic.py", "PH1", "8", "0.6", "1", "--physics", "--te-ms", str(te), "--calcium", "2", "--veins", "4")
-    Sx = nib.load(f"{B}/data/PH1S_swi.nii").get_fdata(); t = nib.load(f"{B}/work/PH1S_truth.nii.gz").get_fdata() > 0
-    v = nib.load(f"{B}/work/PH1S_veins.nii.gz").get_fdata().astype(int); ph = nib.load(f"{B}/work/PH1S_dphase.nii.gz").get_fdata()
-    kd = pd.read_csv(f"{B}/work/PH1S_vein_kinds.csv").set_index("vein_id").kind
-    ca = np.isin(v, [i for i, x in kd.items() if x == "calcium"])
-    if not ca.any(): fail("no calcium decoys inserted")
-    res[te] = dict(bloom=int(((Sx < 0.8 * I) & (I > 0) & ~t & (v == 0)).sum()), ca_phase=float(np.median(ph[ca])),
-                   lesion=float(np.median(Sx[t] / I[t])))
-if not res[40]["bloom"] > 1.5 * res[10]["bloom"]: fail(f"blooming does not grow with TE: {res}")
-if not (res[10]["ca_phase"] < 0 and res[40]["lesion"] < res[10]["lesion"]): fail(f"calcium phase / TE darkening wrong: {res}")
-run(f"{S}/make_synthetic.py", "PH1", "8", "0.6", "1", "--physics", "--calcium", "2", "--veins", "4", "--surface-veins", "2")
-run(f"{S}/align_seg.py", "PH1S"); run(f"{S}/detect_css.py", "PH1S")
-r = re.search(r"found=(\d+) total=(\d+)", run(f"{S}/eval_synthetic.py", "PH1S"))
-if int(r.group(1)) < 6: fail(f"physics lesions: only {r.group(1)}/{r.group(2)} found")
-print(f"   physics lesions on PH1: darkened voxels outside objects TE 10 ms {res[10]['bloom']} -> TE 40 ms {res[40]['bloom']}; "
-      f"calcium phase {res[10]['ca_phase']:+.2f} rad (diamagnetic); found {r.group(1)}/{r.group(2)} at TE 20 ms")
-print("RESULT physics OK")
-```
-
-## tests/check_evaluate.py
-
-```python
-"""v4.18 evaluate.py on hand-made label tables with known answers (no images needed).
-usage: check_evaluate.py    (writes into $CSS_BASE/eval_check/)"""
-import os, sys, json, subprocess, pandas as pd, numpy as np
-B0 = os.environ["CSS_BASE"]; B = f"{B0}/eval_check"; S = f"{B0}/scripts"
-def fail(m): print("FAIL:", m); sys.exit(1)
-for d in ("review", "labels"): os.makedirs(f"{B}/{d}", exist_ok=True)
-def cands(s, n, off=0):
-    return pd.DataFrame(dict(cand_id=range(1, n + 1), vox_i=[10 * i + off for i in range(1, n + 1)], vox_j=20, vox_k=5,
-                             volume_mm3=30.0, score=np.linspace(2, 1, n)))
-uid = lambda s, r: f"{s}:{int(r.vox_i)}:{int(r.vox_j)}:{int(r.vox_k)}:{float(r.volume_mm3):g}"
-cons = []
-def lab(s, r, cls, lst="candidate", oid=None):
-    cons.append(dict(study_id=s, cand_uid=uid(s, r), list=lst, obj_id=oid or int(r.get("cand_id", 0) or 0), readers="A+B",
-                     adjudicator="", consensus_label=cls, consensus_class=cls, method="agreement"))
-# S1 (test, positive): ranks 1 and 4 cSS, 2 vein, 3 uncertain, 5 unlabelled; one EXCLUDED object called cSS
-c1 = cands("S1", 5); c1.to_csv(f"{B}/review/S1_candidates.csv", index=False)
-x1 = cands("S1", 1, off=3).rename(columns={"cand_id": "excl_id"}).assign(rule_version="E7@v4.12")
-x1.to_csv(f"{B}/review/S1_excluded.csv", index=False)
-for rk, cls in ((1, "cSS"), (2, "other_vein"), (3, "uncertain"), (4, "cSS")): lab("S1", c1.iloc[rk - 1], cls)
-lab("S1", x1.iloc[0], "cSS", "excluded", 1)
-# S2 (test, negative): 3 candidates, all veins; plus a stale label (no matching object)
-c2 = cands("S2", 3); c2.to_csv(f"{B}/review/S2_candidates.csv", index=False)
-pd.DataFrame(columns=["excl_id"]).to_csv(f"{B}/review/S2_excluded.csv", index=False)
-for rk in (1, 2, 3): lab("S2", c2.iloc[rk - 1], "other_vein")
-cons.append(dict(study_id="S2", cand_uid="S2:1:1:1:9", list="candidate", obj_id=9, readers="A+B", adjudicator="",
-                 consensus_label="cSS", consensus_class="cSS", method="agreement"))
-# S3 (dev): must not appear in the test evaluation
-c3 = cands("S3", 2); c3.to_csv(f"{B}/review/S3_candidates.csv", index=False)
-lab("S3", c3.iloc[0], "cSS")
-pd.DataFrame(cons).to_csv(f"{B}/labels/consensus.csv", index=False)
-# missed outlines in S1: one never generated (two readers, 2 voxels apart = one lesion), one on shown rank 2 (the 'vein')
-pd.DataFrame([dict(study_id="S1", reader_id="A", vox_i=100, vox_j=100, vox_k=5, fate="not generated", obj_id=np.nan, rule_version="", reason="not dark"),
-              dict(study_id="S1", reader_id="B", vox_i=101, vox_j=101, vox_k=5, fate="not generated", obj_id=np.nan, rule_version="", reason="not dark"),
-              dict(study_id="S1", reader_id="A", vox_i=20, vox_j=20, vox_k=5, fate="shown", obj_id=2, rule_version="", reason="")]
-             ).to_csv(f"{B}/labels/missed_lesions.csv", index=False)
-pd.DataFrame([dict(study_id="S1", css_status="pos", split="test", slice_mm="1.2"),
-              dict(study_id="S2", css_status="neg", split="test", slice_mm="2.0"),
-              dict(study_id="S3", css_status="pos", split="dev", slice_mm="1.2")]).to_csv(f"{B}/labels/study_meta.csv", index=False)
-r = subprocess.run([sys.executable, f"{S}/evaluate.py", "--k", "1,2", "--boot", "200", "--by", "slice_group"],
-                   capture_output=True, text=True, env=dict(os.environ, CSS_BASE=B))
-if r.returncode: print(r.stdout, r.stderr); fail("evaluate.py failed")
-o = json.load(open(f"{B}/review/evaluation_test_consensus.json"))["overall"]
-want = dict(n_studies=2, n_ref_lesions=5, lesion_sens=0.6, sens_top1=0.2, sens_top2=0.4, patient_sens=1.0,
-            fp_per_scan=1.5, fp_per_neg_scan=3.0, uncertain_per_scan=0.5, fp_per_scan_top2=1.0)
-bad = {k: (o[k], v) for k, v in want.items() if abs(o[k] - v) > 1e-9}
-if bad: print(r.stdout); fail(f"metrics (got, want): {bad}")
-if "S2: 1 label(s) match no current" not in r.stdout or "S1: 1 shown candidate(s) without a label" not in r.stdout:
-    fail("stale / unlabelled warnings missing")
-fr = pd.read_csv(f"{B}/review/evaluation_test_consensus_froc.csv")
-if not (fr.lesion_sens.is_monotonic_increasing and fr.fp_per_scan.is_monotonic_increasing): fail("FROC not monotone")
-print("   " + "\n   ".join(l for l in r.stdout.splitlines()[:6]))
-print("RESULT evaluate OK")
-```
-
-## scripts/mp2rage_robust.py
-
-```python
-#!/usr/bin/env python3
-"""MP2RAGE background clean-up before FreeSurfer (v4.18): the 'robust combination' of O'Brien et al. 2014
-(PLoS One 9:e99676) as implemented by J. Marques (RobustCombination.m), from MAGNITUDE images.
-usage: mp2rage_robust.py UNI.nii.gz INV1.nii.gz INV2.nii.gz OUT_T1.nii.gz [--lambda auto|1|5|...]
-The MP2RAGE UNI image has salt-and-pepper noise outside the head (division of two noisy signals). recon-all
-then fails to strip dura / background (LEMON P201: 'extra large defect ... dura has not been removed from
-wm.mgz', topology fixing aborted). The robust combination adds a noise term beta to the UNI formula:
-      UNI_r = (INV1 * INV2 - beta) / (INV1^2 + INV2^2 + 2 beta),   beta = lambda * mean(INV2 noise)^2
-which leaves the brain (high INV2 signal) unchanged and pushes the background to -0.5 (black). INV1's sign
-(lost in magnitude images) is recovered from UNI: INV1 = the root of UNI = INV1 INV2 / (INV1^2 + INV2^2) that
-is closer to the measured |INV1|. --lambda auto (v4.18.2): the smallest of 1, 2, 4 ... 128 that leaves < 5 % of the
-background band 5-20 mm outside the head brighter than 25 % of the brain, without changing the brain (r >= 0.95). Output is scaled to 0..4095 like a scanner UNI. Prints the
-correlation with the original UNI inside the head (should stay > 0.95)."""
-import sys, argparse, numpy as np, nibabel as nib
-from scipy import ndimage as ndi
-
-ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument("uni"); ap.add_argument("inv1"); ap.add_argument("inv2"); ap.add_argument("out")
-ap.add_argument("--lambda", dest="lam", default="auto")
-a = ap.parse_args()
-iu, i1, i2 = (nib.load(p) for p in (a.uni, a.inv1, a.inv2))
-if not (iu.shape[:3] == i1.shape[:3] == i2.shape[:3]) or not (np.allclose(iu.affine, i1.affine, atol=1e-2)
-                                                             and np.allclose(iu.affine, i2.affine, atol=1e-2)):
-    sys.exit("UNI, INV1 and INV2 must be on the same grid (same MP2RAGE acquisition)")
-U = np.asarray(iu.dataobj, np.float64); A1 = np.abs(np.asarray(i1.dataobj, np.float64)); A2 = np.abs(np.asarray(i2.dataobj, np.float64))
-# UNI to [-0.5, 0.5]
-if U.max() > 1.5:
-    lo, hi = (0.0, 4095.0) if U.min() >= 0 and U.max() <= 4096 else (float(U.min()), float(U.max()))
-    u = (U - lo) / (hi - lo) - 0.5
-else:
-    u = U - 0.5 if U.min() >= 0 else U
-u = np.clip(u, -0.5, 0.5)
-# INV1 sign from UNI: u (i1^2 + i2^2) = i1 i2  ->  u i1^2 - i2 i1 + u i2^2 = 0
-with np.errstate(invalid="ignore", divide="ignore"):
-    disc = np.sqrt(np.clip(A2 ** 2 - 4 * u * u * A2 ** 2, 0, None))
-    r_pos = np.where(np.abs(u) > 1e-6, (A2 + disc) / (2 * u), 0.0)
-    r_neg = np.where(np.abs(u) > 1e-6, (A2 - disc) / (2 * u), 0.0)
-I1 = np.where(np.abs(np.abs(r_pos) - A1) < np.abs(np.abs(r_neg) - A1), r_pos, r_neg)
-I1 = np.where(np.isfinite(I1), I1, 0.0)
-# v4.18.2: noise from the background band 5-20 mm OUTSIDE the head (INV2 has a clean head outline). The image border
-# is often zero-padded / defaced (LEMON: border noise 10 -> lambda 1, speckle left around the skull and neck).
-from skimage.filters import threshold_otsu
-vox = np.array(iu.header.get_zooms()[:3], float)
-pos = A2[A2 > 0]
-head = A2 > threshold_otsu(pos) * 0.5
-head = ndi.binary_closing(head, iterations=2); head = ndi.binary_fill_holes(head)
-lab, n = ndi.label(head)
-if n: head = lab == (np.argmax(np.bincount(lab.ravel())[1:]) + 1)
-d_out = ndi.distance_transform_edt(~head, sampling=vox)
-shell = (d_out > 5) & (d_out <= 20) & (A2 > 0)
-if shell.sum() < 1000:                                    # tiny field of view: fall back to everything outside
-    shell = (d_out > 2) & (A2 > 0)
-noise = float(np.mean(A2[shell])) if shell.any() else float(np.percentile(pos, 1))
-core = ndi.binary_erosion(head, iterations=max(1, int(round(10 / vox.min()))))
-if not core.any(): core = head
-ref = (u[core] + 0.5) * 4095
-def robust(lam):
-    b = lam * noise ** 2
-    return (I1 * A2 - b) / (I1 ** 2 + A2 ** 2 + 2 * b)
-lams = [1, 2, 4, 8, 16, 32, 64, 128] if a.lam == "auto" else [float(a.lam)]
-prev = None
-for lam in lams:
-    out_l = np.clip((robust(lam) + 0.5) * 4095, 0, 4095)
-    hm = float(np.median(out_l[core]))
-    speck = float((out_l[shell] > 0.25 * hm).mean()) if shell.any() else 0.0
-    rc = float(np.corrcoef(out_l[core], ref)[0, 1])
-    if rc < 0.95 and prev is not None:                    # brain contrast would change: keep the previous lambda
-        lam, out, speck, ok = prev; break
-    out, ok = out_l, speck < 0.05
-    prev = (lam, out_l, speck, ok)
-    if ok: break
-bd = shell
-c = float(np.corrcoef(out[core], ref)[0, 1])
-img = nib.Nifti1Image(out.astype(np.float32), iu.affine, iu.header); img.set_data_dtype(np.float32)
-nib.save(img, a.out)
-print(f"{a.out}: robust MP2RAGE combination, lambda {lam:g} (background noise {noise:.1f}, band 5-20 mm outside the head); "
-      f"speckle left in that band {speck:.1%} (was {float(((u[shell] + 0.5) * 4095 > 0.25 * np.median(ref)).mean()):.1%}); "
-      f"correlation with the original UNI inside the brain {c:.3f}" + ("" if ok else "  WARNING: background still speckled"))
-if c < 0.95: print("WARNING: brain contrast changed (correlation < 0.95) - check the image before recon-all")
-```
-
-## tests/check_mp2rage.py
-
-```python
-"""v4.18 mp2rage_robust.py: synthetic MP2RAGE (signed INV1, complex noise) -> background noise removed, brain kept.
-usage: check_mp2rage.py    (scratch files in $CSS_BASE/work)"""
-import os, sys, subprocess, numpy as np, nibabel as nib
-B = os.environ["CSS_BASE"]; W = f"{B}/work"; os.makedirs(W, exist_ok=True)
-def fail(m): print("FAIL:", m); sys.exit(1)
-rng = np.random.default_rng(0); sh = (100, 110, 90)
-x, y, z = np.meshgrid(*[np.arange(n) for n in sh], indexing="ij")
-e = lambda a, b, c: ((x - 50) / a) ** 2 + ((y - 55) / b) ** 2 + ((z - 45) / c) ** 2 < 1
-head, brain, wm = e(40, 45, 38), e(32, 37, 30), e(20, 24, 18)
-i1 = np.where(head, -200.0, 0.0); i1[brain] = -80; i1[wm] = 150          # INV1 sign flips with T1
-i2 = np.where(head, 600.0, 0.0); i2[brain] = 700; i2[wm] = 800
-n = lambda v: v + rng.normal(0, 20, sh) + 1j * rng.normal(0, 20, sh)
-c1, c2 = n(i1), n(i2)
-uni = np.real(c1 * np.conj(c2)) / (np.abs(c1) ** 2 + np.abs(c2) ** 2)
-pad = np.zeros(sh, bool); pad[8:-8, 8:-8, 8:-8] = True       # LEMON-like zero-padded / defaced border (v4.18.2)
-for name, v in (("uni", np.round((uni + 0.5) * 4095)), ("inv1", np.abs(c1)), ("inv2", np.abs(c2))):
-    nib.save(nib.Nifti1Image((v * pad).astype(np.float32), np.eye(4)), f"{W}/MP2_{name}.nii.gz")
-r = subprocess.run([sys.executable, f"{B}/scripts/mp2rage_robust.py", *(f"{W}/MP2_{k}.nii.gz" for k in ("uni", "inv1", "inv2")),
-                    f"{W}/MP2_robust.nii.gz"], capture_output=True, text=True)
-if r.returncode: print(r.stdout, r.stderr); fail("mp2rage_robust failed")
-U = nib.load(f"{W}/MP2_uni.nii.gz").get_fdata(); O = nib.load(f"{W}/MP2_robust.nii.gz").get_fdata()
-from scipy import ndimage as ndi
-band = (ndi.distance_transform_edt(~head) > 5) & (ndi.distance_transform_edt(~head) <= 15) & pad
-hm = np.median(U[wm])
-bg_before, bg_after = (U[band] > 0.25 * hm).mean(), (O[band] > 0.25 * hm).mean()
-cor = float(np.corrcoef(U[brain], O[brain])[0, 1])
-if not (bg_after < 0.05 and bg_before > 0.3 and cor > 0.95 and abs(np.median(O[wm]) - np.median(U[wm])) < 0.10 * np.median(U[wm])):
-    fail(f"speckle {bg_before:.2f} -> {bg_after:.3f}, brain r {cor:.3f}, wm {np.median(O[wm]):.0f} vs {np.median(U[wm]):.0f}; {r.stdout.strip()}")
-print(f"   robust MP2RAGE (zero-padded border): speckle 5-15 mm outside the head {bg_before:.0%} -> {bg_after:.1%}, "
-      f"brain correlation {cor:.3f}, white matter within 10 %; {r.stdout.strip().split('; ')[0].split(': ')[-1]}")
-print("RESULT mp2rage OK")
-```
-
-## scripts/mimic_rules.py
-
-```python
-"""Mimic evidence for detect_css.py (v5.0, Layer 1). Imported, not run on its own.
-
-Three published cSS mimics, each measured per candidate (Charidimou AJNR 2016; mimics review, Clin Neuroradiol 2020):
-
-  calcification (Sturge-Weber, calcifying angiopathy)   phase: DIAMAGNETIC; cSS / veins are paramagnetic
-  acute convexity SAH / cortical vein thrombosis        FLAIR: bright sulcal CSF / bright adjacent cortex
-  cluster of lobar microbleeds                          shape: several separate compact parenchymal blobs in one object
-
-Columns (detect_css.py appends them to candidates AND excluded):
-  mimic_score   0-1, the strongest of the three pieces of evidence below (0 = none); NOT a probability
-  mimic_class   none / calcification / acute / thrombosis / mixed / mb_cluster
-  mimic_reason  human-readable evidence
-  phase_z       approximate t-statistic of the candidate's fitted susceptibility from the phase (> 0 paramagnetic,
-                < 0 diamagnetic); NaN without a usable phase image
-  phase_r       correlation of the observed filtered phase with the dipole pattern a PARAMAGNETIC object of this
-                candidate's own shape would make (-1..1)
-  mb_cluster_n  separate compact parenchymal blobs in the dark support (>= 3 -> microbleed cluster)
-
-WHY THE PHASE RULE FITS A DIPOLE PATTERN instead of reading the sign of the median phase: the phase inside a thin
-sheet or tube depends on its orientation to B0. In css_common.susceptibility_signal (the pipeline's own forward
-model), a paramagnetic sheet lying flat to B0 has median filtered phase -0.94 rad and a vertical one +2.09 rad; a
-paramagnetic tube perpendicular to B0 -0.54 rad (tests/check_mimic.py). A sign-of-median rule would call real cSS on
-horizontal cortex "calcium". Fitting the pattern a paramagnetic object of the candidate's own shape would produce
-takes the orientation into account. The scanner's sign convention is fitted the same way on the vessel map (veins are
-paramagnetic), so no vendor table is needed.
-
-Limits (research software, thresholds NOT validated on labelled data):
-  - phase_z treats noise as independent within ~2 voxels; real phase noise and nearby veins make it optimistic.
-  - background fields that survive the 4 mm high-pass are noise here. Calcium next to a large vein can be missed.
-  - FLAIR thresholds (z > 3) are the detector's existing flair_bright / flair_ctx_bright cut-offs (v4.x), not
-    re-derived. Acute cSAH and cSS co-exist in CAA: FLAIR evidence is a SOFT penalty only, never an exclusion.
-  - laminar cortical necrosis and haemorrhagic infarct are not handled (no DWI / T1 hyperintensity feature).
-Only with CSS_USE_MIMIC=1 does any of this change the output: score x 0.5 for FLAIR evidence, exclusion E10
-(calcification, mimic_score >= 0.7) and E11 (microbleed cluster, mimic_score >= 0.5). Default: recorded only."""
-import os, numpy as np, nibabel as nib
-from scipy import ndimage as ndi
-from css_common import phase_to_radians, homodyne_highpass, fresh
-
-HP_SIGMA_MM = 4.0          # same high-pass as make_swi.py
-FIT_SHELL_VOX = 2          # phase fit region = this many voxels around the candidate (inside the brain)
-WRAP_RAD = 2.5             # observed |filtered phase| above this may be wrapped: not used in the fit
-BOX_MARGIN_MM = 12.0       # forward-model box around the candidate
-CORR_VOX = 2.0             # assumed noise correlation length (voxels per axis) for phase_z
-CONV_MIN_T = 3.0           # scanner sign convention must be fitted at least this clearly, else the phase rule is off
-CALC_Z, CALC_R = -3.0, -0.2
-FLAIR_Z = 3.0              # = flair_bright / flair_ctx_bright in detect_css.py
-MB_MIN_DIAM_MM, MB_DIAM_MM, MB_MIN_VOX, MB_MAX_ASPECT, MB_PARENCHYMA = 2.0, 6.0, 2, 2.5, 0.5
-MB_MIN_N = 3
+from css_common import base as _base
 
 
-def dipole_field(chi, vox, affine, pad=16):
-    """field perturbation (ppm of B0) of susceptibility map chi: the same unit-dipole kernel as
-    css_common.susceptibility_signal, D(k) = 1/3 - (k.b0)^2/|k|^2, B0 = world z through the affine; lean memory
-    (broadcast frequencies, complex64) so a whole-brain fit fits on a laptop"""
-    c = np.pad(np.asarray(chi, np.float32), pad)
-    vox = np.asarray(vox, float)
-    R = np.asarray(affine, float)[:3, :3] / vox[None, :]
-    b0 = R.T @ np.array([0.0, 0.0, 1.0]); b0 /= np.linalg.norm(b0)
-    f = [np.fft.fftfreq(n, d=v).astype(np.float32) for n, v in zip(c.shape, vox)]
-    kx, ky, kz = f[0][:, None, None], f[1][None, :, None], f[2][None, None, :]
-    k2 = kx ** 2 + ky ** 2 + kz ** 2
-    kb = kx * b0[0] + ky * b0[1] + kz * b0[2]
-    with np.errstate(invalid="ignore", divide="ignore"):
-        D = (np.float32(1 / 3) - np.where(k2 > 0, kb ** 2 / k2, 0)).astype(np.float32)
-    D[0, 0, 0] = 0
-    from scipy import fft as sfft                                  # keeps complex64 (numpy.fft upcasts)
-    out = np.real(sfft.ifftn(sfft.fftn(c.astype(np.complex64), workers=-1) * D, workers=-1)).astype(np.float32)
-    return out[pad:-pad, pad:-pad, pad:-pad]
+def brain_mask(labels, vox, dilate_mm):
+    m = ndi.binary_fill_holes(labels > 0)
+    if dilate_mm > 0:
+        m = ndi.distance_transform_edt(~m, sampling=vox) <= dilate_mm
+    lab, n = ndi.label(m)
+    if n > 1: m = lab == (np.argmax(np.bincount(lab.ravel())[1:]) + 1)
+    return ndi.binary_fill_holes(m)
 
 
-def highpass_linear(field, vox, si, sigma_mm=HP_SIGMA_MM):
-    """the linear (small-phase) equivalent of homodyne_highpass, applied to a predicted field"""
-    sig = [0.0 if ax == si else sigma_mm / vox[ax] for ax in range(3)]
-    return field - ndi.gaussian_filter(field, sig)
+def mask_in_place(path, m):
+    """multiply the image by the mask, keep header, dtype and modification time"""
+    st = os.stat(path); im = nib.load(path); a = np.asanyarray(im.dataobj)
+    out = np.where(m.reshape(m.shape + (1,) * (a.ndim - 3)), a, 0).astype(a.dtype)
+    nib.save(nib.Nifti1Image(out, im.affine, im.header), path)
+    os.utime(path, (st.st_atime, st.st_mtime))
 
 
-def fit_amplitude(obs, pred, n_corr=CORR_VOX ** 3):
-    """least-squares a in obs = a * pred over the given voxels -> (a, t, r); t uses n / n_corr effective samples"""
-    obs = np.asarray(obs, float); pred = np.asarray(pred, float)
-    ss = float((pred ** 2).sum())
-    if len(obs) < 10 or ss <= 0: return np.nan, np.nan, np.nan
-    a = float((obs * pred).sum() / ss)
-    res = obs - a * pred
-    # var(a) = sigma^2 / sum(pred^2) for independent noise; noise correlated over n_corr voxels inflates it n_corr-fold
-    se = float(np.sqrt((res ** 2).sum() / max(len(obs) - 1, 1)) * np.sqrt(n_corr / ss))
-    r = float(np.corrcoef(obs, pred)[0, 1]) if obs.std() > 0 and pred.std() > 0 else np.nan
-    return a, (a / se if se > 0 else np.nan), r
-
-
-def flair_rule(fz, fcz):
-    """FLAIR evidence -> (score 0-1, class, reason). fz = sulcal-CSF FLAIR z, fcz = adjacent-cortex FLAIR z
-    (detect_css.py flair_csf_z / flair_ctx_z; NaN without FLAIR)"""
-    s = lambda z: float(np.clip(0.5 + (z - FLAIR_Z) / 6.0, 0, 1)) if np.isfinite(z) and z > FLAIR_Z else 0.0
-    sc, sx = s(fz), s(fcz)
-    if sc and sx: return max(sc, sx), "mixed", f"FLAIR bright sulcal CSF (z {fz:.1f}) and cortex (z {fcz:.1f})"
-    if sc: return sc, "acute", f"FLAIR bright sulcal CSF (z {fz:.1f}): acute convexity SAH?"
-    if sx: return sx, "thrombosis", f"FLAIR bright adjacent cortex (z {fcz:.1f}): cortical vein thrombosis?"
-    return 0.0, "none", ""
-
-
-def mb_cluster_rule(mask, tissue, vox):
-    """candidate support (crop) -> (score, n, reason). Counts SEPARATE dark blobs: connected components (26-neighbour)
-    of the support that are microbleed-like - small (equivalent diameter MB_MIN_DIAM_MM..MB_DIAM_MM), compact
-    (longest / shortest extent in mm <= MB_MAX_ASPECT, at least MB_MIN_VOX voxels across in two directions) and mostly
-    surrounded by parenchyma (>= MB_PARENCHYMA of a 1-voxel shell in labelled tissue, AJNR 2016). >= MB_MIN_N blobs
-    -> cluster. A cSS band (tram-track or single bank) is one elongated component and is never counted.
-    v5.1: no erosion. v5.0 eroded the support once; that split the irregular dark support of a tram-track into compact
-    fragments and flagged true cSS lesion 3 of PH3 as a microbleed cluster (E11 then excluded it with
-    CSS_USE_MIMIC=1). Limit: microbleeds that touch each other form one elongated component and are not counted."""
-    vox = np.asarray(vox, float); s3 = np.ones((3, 3, 3), bool)
-    lab, n = ndi.label(mask, structure=s3)
-    good = 0
-    for i, sl in enumerate(ndi.find_objects(lab), 1):
-        if sl is None: continue
-        nv = np.array([s_.stop - s_.start for s_ in sl]); ext = nv * vox
-        if np.sort(nv)[-2] < MB_MIN_VOX or ext.max() / ext.min() > MB_MAX_ASPECT: continue
-        piece = lab == i
-        diam = float((6 * piece.sum() * np.prod(vox) / np.pi) ** (1 / 3))
-        if not (MB_MIN_DIAM_MM <= diam < MB_DIAM_MM): continue
-        shell = ndi.binary_dilation(piece, structure=s3) & ~mask
-        if shell.any() and tissue[shell].mean() >= MB_PARENCHYMA: good += 1
-    if good >= MB_MIN_N:
-        return float(min(1.0, 0.5 + 0.1 * (good - MB_MIN_N))), good, f"{good} separate compact parenchymal blobs: microbleed cluster?"
-    return 0.0, good, ""
-
-
-class MimicRejector:
-    """Per-scan state (filtered phase, scanner sign convention) + evaluate() per candidate."""
-
-    def __init__(self, base, subj, swi, brain, vox, si, ves=None):
-        self.vox = np.asarray(vox, float); self.si = si; self.aff = swi.affine; self.brain = brain
-        self.hp = None; self.conv = 0; self.phase_note = "no phase image (data/ID_phase.nii.gz)"
-        p = f"{base}/data/{subj}_phase.nii.gz"
-        if not os.path.exists(p): return
-        swi_p = f"{base}/data/{subj}_swi.nii"
-        ph = nib.load(p)
-        if ph.shape[:3] != swi.shape[:3] or not np.allclose(ph.affine, swi.affine, atol=1e-3):
-            self.phase_note = "phase image is not on the SWI grid - phase rule off"; return
-        if not fresh(p, swi_p):
-            self.phase_note = "phase image is older than the SWI - phase rule off (re-import with --phase)"; return
-        P, unit = phase_to_radians(np.asarray(ph.dataobj, np.float32))
-        if P.ndim == 4: self.phase_note = "4-D phase - phase rule off"; return
-        self.hp = homodyne_highpass(P, self.vox, si, HP_SIGMA_MM)
-        self.hp[~brain] = 0
-        # scanner sign convention: veins are paramagnetic -> fit the dipole pattern of the whole vessel map
-        if ves is None or ves.sum() < 200:
-            self.hp = None; self.phase_note = "vessel map too small to fit the phase sign convention - phase rule off"; return
-        pred = highpass_linear(dipole_field(ves.astype(np.float32), self.vox, self.aff), self.vox, si)
-        a, t, r = fit_amplitude(self.hp[ves], pred[ves])
-        self.conv_t, self.conv_r = t, r
-        if not np.isfinite(t) or abs(t) < CONV_MIN_T:
-            self.hp = None
-            self.phase_note = f"phase sign convention unclear on the vessel map (t {t:.1f}) - phase rule off"; return
-        self.conv = 1 if a > 0 else -1
-        self.phase_note = f"phase used ({unit}); paramagnetic sign {self.conv:+d} fitted on the vessel map (t {t:.1f}, r {r:.2f})"
-
-    def phase_evidence(self, mm, pad):
-        """-> (phase_z, phase_r) for the candidate mask mm (crop at slices pad); NaN without phase"""
-        if self.hp is None: return np.nan, np.nan
-        m = int(np.ceil(BOX_MARGIN_MM / self.vox.min()))
-        idx = np.argwhere(mm) + [s.start for s in pad]
-        lo = np.maximum(idx.min(0) - m, 0); hi = np.minimum(idx.max(0) + m + 1, self.hp.shape)
-        box = tuple(slice(a, b) for a, b in zip(lo, hi))
-        cm = np.zeros(tuple(hi - lo), bool); q = idx - lo; cm[tuple(q.T)] = True
-        aff = self.aff.copy(); aff[:3, 3] = (self.aff @ np.r_[lo, 1])[:3]
-        pred = highpass_linear(dipole_field(cm.astype(np.float32), self.vox, aff), self.vox, self.si)
-        # fit on the shell AROUND the candidate: inside a strong deposit the phase wraps past pi (a paramagnetic sheet
-        # flat to B0 at 0.5 ppm reaches 5.5 rad at 3 T, TE 20 ms) and the homodyne filter folds it to the wrong sign;
-        # the field outside is weaker. Voxels already near +-pi are left out as possibly wrapped.
-        shell = ndi.binary_dilation(cm, iterations=FIT_SHELL_VOX) & ~cm & self.brain[box]
-        reg = shell & (np.abs(self.hp[box]) < WRAP_RAD)
-        a, t, r = fit_amplitude(self.hp[box][reg], pred[reg])
-        # v5.1.2: share of the shell usable for the fit (not possibly wrapped) and polarity consistency = share of
-        # informative fit voxels whose observed phase sign agrees with the fitted pattern
-        self._valid = float(reg.sum() / max(shell.sum(), 1))
-        inf = reg & (np.abs(pred) > 0.1 * np.abs(pred[reg]).max()) if reg.any() and np.abs(pred[reg]).max() > 0 else reg
-        self._polar = float((np.sign(self.hp[box][inf]) == np.sign(a * pred[inf])).mean()) if inf.any() and np.isfinite(a) else np.nan
-        return (self.conv * t if np.isfinite(t) else np.nan), (self.conv * r if np.isfinite(r) else np.nan)
-
-    def evaluate(self, mm, pad, tissue_pad, fz, fcz, dark_pad=None):
-        """one candidate -> dict of the mimic columns. dark_pad: dark voxels (detector z < Z_LOW) in the same crop.
-        The microbleed rule looks at the dark voxels within 2 voxels of the candidate, not at the candidate mask
-        itself: the detector's mask is the ridge-filtered (thinned) dark region, in which round microbleeds no
-        longer look round (PHM phantom: a row of 4 microbleeds became one candidate with 0 countable blobs)."""
-        self._valid, self._polar = np.nan, np.nan
-        pz, pr = self.phase_evidence(mm, pad)
-        support = mm if dark_pad is None else (mm | (ndi.binary_dilation(mm, iterations=2) & dark_pad))
-        calc = 0.0; why = []
-        if np.isfinite(pz) and pz <= CALC_Z and np.isfinite(pr) and pr <= CALC_R:
-            calc = float(min(1.0, 0.7 + 0.05 * (CALC_Z - pz)))
-            why.append(f"diamagnetic on phase (phase_z {pz:.1f}, r {pr:.2f}): calcification?")
-        fs, fcls, fwhy = flair_rule(fz, fcz)
-        ms, mn, mwhy = mb_cluster_rule(support, tissue_pad, self.vox)
-        if fwhy: why.append(fwhy)
-        if mwhy: why.append(mwhy)
-        cls, sc = max((("calcification", calc), (fcls, fs), ("mb_cluster", ms)), key=lambda t: t[1])
-        return dict(mimic_score=round(sc, 2), mimic_class=cls if sc > 0 else "none", mimic_reason="; ".join(why),
-                    phase_z=round(pz, 2) if np.isfinite(pz) else np.nan,
-                    phase_r=round(pr, 2) if np.isfinite(pr) else np.nan, mb_cluster_n=int(mn),
-                    phase_valid_frac=round(self._valid, 2) if np.isfinite(self._valid) else np.nan,
-                    phase_polarity_frac=round(self._polar, 2) if np.isfinite(self._polar) else np.nan,
-                    _flair_class=fcls)
-```
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("subject"); ap.add_argument("--dilate-mm", type=float, default=5.0)
+    a = ap.parse_args(); s = a.subject; B = _base()
+    swi_p, lab_p = f"{B}/data/{s}_swi.nii", f"{B}/work/{s}_t1seg_swispace.nii.gz"
+    for p in (swi_p, lab_p):
+        if not os.path.exists(p): sys.exit(f"{s}: {p} missing - prep_anat.sh must run first (T1 labels on the SWI grid)")
+    swi, L = nib.load(swi_p), nib.load(lab_p)
+    if L.shape[:3] != swi.shape[:3] or not np.allclose(L.affine, swi.affine, atol=1e-3):
+        sys.exit(f"{s}: T1 labels are not on the SWI grid - re-run prep_anat.sh")
+    vox = np.array(swi.header.get_zooms()[:3], float)
+    m = brain_mask(np.asanyarray(L.dataobj), vox, a.dilate_mm)
+    cc = float(m.sum() * vox.prod() / 1000)
+    nib.save(nib.Nifti1Image(m.astype(np.uint8), swi.affine), f"{B}/work/{s}_brainmask.nii.gz")
+    mask_in_place(swi_p, m)
+    fl = f"{B}/work/{s}_flair_swispace.nii.gz"
+    done = ["SWI"]
+    if os.path.exists(fl) and nib.load(fl).shape[:3] == m.shape: mask_in_place(fl, m); done.append("FLAIR")
+    warn = "" if 900 <= cc <= 2300 else f"  WARNING: unusual brain volume - check {s} in freeview before reading"
+    print(f"{s}: brain mask from the T1 labels (+{a.dilate_mm:g} mm) {cc:.0f} cm3 -> {' + '.join(done)} skull-stripped, "
+          f"work/{s}_brainmask.nii.gz (no SynthStrip){warn}")
+````
 
 ## scripts/train_ranker.py
 
-```python
+````python
 #!/usr/bin/env python3
 """Fit the candidate ranking model on expert labels (v5.0, Layer 3) -> review/ranker_model.json.
 usage: train_ranker.py [--split dev] [--source consensus|reader:NAME] [--l2 1.0] [--min-patients 3] [--boot 500]
@@ -5739,84 +7819,1390 @@ if __name__ == "__main__":
     card = write_card(model, os.path.join(os.path.dirname(out), "ranker_model_card.md"))
     print(f"model card -> {card} (model hash {model['model_hash'][:12]})")
     print(f"-> {out}   (apply: rank_candidates.py SUBJECT; never trained on test-split studies)")
-```
+````
 
-## scripts/rank_candidates.py
+## scripts/v53_compare.py
 
-```python
+````python
 #!/usr/bin/env python3
-"""Apply the trained ranking model to one study (v5.0, Layer 3).
-usage: rank_candidates.py SUBJECT [--model review/ranker_model.json] [--allow-training-study]
-Adds two columns at the END of review/ID_candidates.csv (replaced if present; nothing else changes - cand_id and
-the existing score / score_v4 order stay, so both rankings are visible):
-  score_model   model output 0-1 (NOT a calibrated probability of cSS)
-  rank_model    1 = highest score_model
-Features the model needs but this study lacks are filled with the training median (named in the output).
-Refuses a study the model was trained on (its ranking would be optimistic) unless --allow-training-study.
-CSS_QC_STRICT=1 and case QC low_confidence_review (review/ID_qc.json): score_model x 0.8 (a soft penalty that
-keeps the order within the case; it matters only when candidates of several cases are pooled).
-run_css.sh calls this only when the model exists and the study is not in the test split; a test-split study is
-scored by running this script by hand with the frozen model. Research software, not for clinical use."""
-import sys, os, json, argparse, numpy as np, pandas as pd
+"""v5.3 acceptance test against the saved reader calls. Research software; expert review required.
+usage: v53_compare.py M02,M03,...  [--keep]
+For every study it copies data/ID_* and work/ID_* into $CSS_BASE/v53_eval/ (the main project is NOT touched: the
+current candidates, calls and scores stay as they are), runs detect_css.py there with CSS_V53=1 and reports, per
+reader call, what happened to each candidate of the current list:
+  shown     its voxels are in a shown v5.3 candidate (id listed)     excluded  in an excluded object (rule listed)
+  dropped   below a generation gate                                 gone      not generated any more (outside the zone)
+Summary = the acceptance table of docs/PLAN_v5.3_from_M02-M11.md. Writes review/v53_compare.csv and
+review/v53_compare_summary.txt. One study at a time (memory). --keep leaves v53_eval/ in place for freeview.
+The reader's calls are the reference; they are not expert lesion labels."""
+import sys, os, shutil, subprocess, glob, numpy as np, pandas as pd, nibabel as nib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from css_common import base as _base, FP, use_derived, sha256
-from train_ranker import add_missing
+from css_common import base as _base, load_calls
 
-ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument("subject"); ap.add_argument("--model", default="")
-ap.add_argument("--allow-training-study", action="store_true")
-a = ap.parse_args(); B = _base(); s = a.subject
-mp = a.model or f"{B}/review/ranker_model.json"
-if not os.path.exists(mp): sys.exit(f"no model ({mp}) - train one with train_ranker.py first")
-M = json.load(open(mp))
-if s in M.get("training_studies", []) and not a.allow_training_study:
-    sys.exit(f"{s} was used to train {os.path.basename(mp)} - its model ranking would be optimistic "
-             f"(--allow-training-study to rank anyway)")
-# v5.1 stale-model checks: labels changed since the fit, or this study detected by a different detector build
-strict = os.environ.get("CSS_QC_STRICT") == "1"
-warn = []
-lp = M.get("label_file")
-if lp and os.path.exists(lp) and M.get("label_sha256") and sha256(lp) != M["label_sha256"]:
-    warn.append(f"labels ({os.path.basename(lp)}) changed since the model was fitted - re-run train_ranker.py")
-_mp = f"{B}/review/{s}_manifest.json"
-_b = str((json.load(open(_mp)).get("detect", {}).get("environment", {}) or {}).get("build", "unknown")) if os.path.exists(_mp) else "unknown"
-if M.get("detector_builds") and _b not in M["detector_builds"]:
-    warn.append(f"{s} was detected with build {_b}, the model was trained on outputs of {', '.join(M['detector_builds'])}")
-for w_ in warn: print(("ERROR: " if strict else "warning: ") + w_)
-if warn and strict: sys.exit("CSS_QC_STRICT=1: stale model - not ranked")
-cp = f"{B}/review/{s}_candidates.csv"
-if not os.path.exists(cp): sys.exit(f"no {cp} - run detect_css.py {s} first")
-d = pd.read_csv(cp).drop(columns=["score_model", "rank_model"], errors="ignore")
-if not len(d):
-    print(f"{s}: no candidates - nothing to rank"); d.assign(score_model=[], rank_model=[]).to_csv(cp, index=False); sys.exit(0)
-X = pd.DataFrame(index=d.index)
-sp = f"{B}/review/{s}_surface_features.csv"
-sf = pd.read_csv(sp).drop(columns=["list", "obj_id"], errors="ignore").drop_duplicates(FP) \
-    if use_derived(sp, [f"{B}/review/{s}_candidates.nii.gz"], "surface features") else None
-full = add_missing(d.merge(sf, on=FP, how="left", suffixes=("", "_surf")) if sf is not None else d)
-missing = [f for f in M["features"] if f not in full.columns]
-for f in M["features"]: X[f] = pd.to_numeric(full[f], errors="coerce").values if f in full.columns else np.nan
-Xv = X.values.astype(float); med = np.array(M["impute_median"])
-Xv = np.where(np.isfinite(Xv), Xv, med)
-t = ((Xv - np.array(M["mean"])) / np.array(M["sd"])) @ np.array(M["weights"]) + M["bias"]
-sc = 1 / (1 + np.exp(-t))
-note = ""
-qp = f"{B}/review/{s}_qc.json"
-if os.environ.get("CSS_QC_STRICT") == "1" and os.path.exists(qp) and json.load(open(qp)).get("status") == "low_confidence_review":
-    sc = sc * 0.8; note = "  [QC low_confidence_review: score_model x0.8, CSS_QC_STRICT=1]"
-d["score_model"] = np.round(sc, 4)
-d["rank_model"] = pd.Series(sc).rank(ascending=False, method="first").astype(int).values
-d.to_csv(cp, index=False)
-order = d.sort_values("rank_model").cand_id.astype(int).tolist()
-print(f"{s}: model ranking added (score_model, rank_model) - model fitted {M.get('fitted_at')} on "
-      f"{M.get('n_patients')} patients, LOPO AUC {M.get('lopo_auc')} vs {M.get('baseline')} {M.get('baseline_auc')}{note}")
-print(f"   order by model (cand_id): {order[:15]}{' ...' if len(order) > 15 else ''}")
-if missing: print(f"   filled with the training median (not in this study's output): {', '.join(missing)}")
-```
+ids = [s for s in sys.argv[1].split(",") if s] if len(sys.argv) > 1 and not sys.argv[1].startswith("-") else []
+if not ids: sys.exit(__doc__)
+keep = "--keep" in sys.argv
+B = _base(); E = f"{B}/v53_eval"; S = os.path.dirname(os.path.abspath(__file__))
+for d in ("data", "work", "review", "results"): os.makedirs(f"{E}/{d}", exist_ok=True)
+rows = []; notes = []
+for sid in ids:
+    cp, lp = f"{B}/review/{sid}_candidates.csv", f"{B}/review/{sid}_candidates.nii.gz"
+    if not (os.path.exists(cp) and os.path.exists(lp)):
+        notes.append(f"{sid}: no current candidates - skipped"); continue
+    old = pd.read_csv(cp); calls, warn = load_calls(B, sid, old)
+    if warn: notes.append(warn)
+    for sub in ("data", "work"):
+        for f in glob.glob(f"{B}/{sub}/{sid}_*"):
+            if os.path.isfile(f): shutil.copy2(f, f"{E}/{sub}/{os.path.basename(f)}")      # copy2 keeps the mtimes
+    r = subprocess.run([sys.executable, f"{S}/detect_css.py", sid], env=dict(os.environ, CSS_BASE=E, CSS_V53="1"),
+                       capture_output=True, text=True)
+    open(f"{E}/review/{sid}_detect.log", "w").write(r.stdout + r.stderr)
+    if r.returncode or "v5.3 ACTIVE" not in r.stdout:
+        notes.append(f"{sid}: v5.3 detection did not run (exit {r.returncode}; see v53_eval/review/{sid}_detect.log) - "
+                     + ("needs T1 anatomy" if "needs T1 anatomy" in r.stdout else "check the log")); continue
+    L0 = np.asanyarray(nib.load(lp).dataobj).astype(np.int32)
+    L1 = np.asanyarray(nib.load(f"{E}/review/{sid}_candidates.nii.gz").dataobj).astype(np.int32)
+    X1 = np.asanyarray(nib.load(f"{E}/review/{sid}_excluded.nii.gz").dataobj).astype(np.int32)
+    D1 = np.asanyarray(nib.load(f"{E}/work/{sid}_dropped.nii.gz").dataobj).astype(np.int32)
+    new = pd.read_csv(f"{E}/review/{sid}_candidates.csv"); xd = pd.read_csv(f"{E}/review/{sid}_excluded.csv")
+    tier = dict(zip(new.cand_id, new.review_priority_rank)) if len(new) else {}
+    why = dict(zip(xd.excl_id, xd.reason)) if len(xd) else {}
+    for _, c in old.iterrows():
+        m = L0 == int(c.cand_id); n = int(m.sum())
+        if not n: continue
+        sh = np.bincount(L1[m]); ex = np.bincount(X1[m]); dr = int((D1[m] > 0).sum())
+        n_sh, n_ex = n - int(sh[0]), n - int(ex[0])
+        fate = max((("shown", n_sh), ("excluded", n_ex), ("dropped", dr), ("gone", n - n_sh - n_ex - dr)), key=lambda t: t[1])[0]
+        if n_sh >= max(3, 0.1 * n): fate = "shown"                 # any real overlap with a shown candidate counts
+        nid = int(np.argmax(sh[1:]) + 1) if n_sh else 0; xid = int(np.argmax(ex[1:]) + 1) if n_ex else 0
+        rows.append(dict(study_id=sid, cand_id=int(c.cand_id), reader_call=calls.get(int(c.cand_id), ""), hemi=c.hemi,
+                         region=c.region, volume_mm3=c.volume_mm3, old_tier=c.get("review_priority_rank", np.nan),
+                         fate=fate, shown_frac=round(n_sh / n, 2), new_cand_id=nid if fate == "shown" else "",
+                         new_tier=tier.get(nid, "") if fate == "shown" else "",
+                         excluded_reason=str(why.get(xid, "")).split(":")[0] if fate == "excluded" else ""))
+    notes.append(f"{sid}: {len(old)} candidates now -> {len(new)} with v5.3 ({len(xd)} excluded)")
+    print(notes[-1], flush=True)
+    if not keep:
+        for sub in ("data", "work"):
+            for f in glob.glob(f"{E}/{sub}/{sid}_*"): os.remove(f)
+if not rows: sys.exit("\n".join(notes) + "\nnothing to compare")
+d = pd.DataFrame(rows); d.to_csv(f"{B}/review/v53_compare.csv", index=False)
+out = ["v5.3 acceptance test (reference = the reader's saved calls)", ""] + notes + [""]
+out.append(pd.crosstab(d.reader_call.replace("", "(not read)"), d.fate, margins=True).to_string()); out.append("")
+css = d[d.reader_call == "cSS"]
+if len(css):
+    kept = css[css.fate == "shown"]
+    out.append(f"cSS calls still shown: {len(kept)} / {len(css)}")
+    for _, r in css[css.fate != "shown"].iterrows():
+        out.append(f"   LOST {r.study_id}-{r.cand_id} ({r.region}, {r.volume_mm3:.0f} mm3): {r.fate} {r.excluded_reason}")
+    n_new = kept.groupby("study_id").new_cand_id.nunique().sum()
+    out.append(f"cSS calls shown: {len(kept)} old candidates -> {n_new} v5.3 candidates (fewer = duplicates merged)")
+    out.append(f"cSS calls in tier 3: now {(css.old_tier == 3).sum()}, v5.3 {(kept.new_tier == 3).sum()}")
+    mixed = d[d.fate == "shown"].groupby(["study_id", "new_cand_id"]).reader_call.agg(lambda s: sorted(set(s)))
+    bad = mixed[mixed.apply(lambda s: "cSS" in s and len(s) > 1)]
+    out.append(f"v5.3 candidates that join a cSS call with another call: {len(bad)}")
+    for (sid, nid), s in bad.items(): out.append(f"   {sid} new #{nid}: {', '.join(x or '(not read)' for x in s)}")
+for call in ("Artifact", "Normal", "Vein"):
+    a = d[d.reader_call == call]
+    if len(a): out.append(f"{call} still shown: {(a.fate == 'shown').sum()} / {len(a)}")
+out.append(""); out.append("Patient scores are not recomputed here: read the v5.3 candidates before any score is compared.")
+open(f"{B}/review/v53_compare_summary.txt", "w").write("\n".join(out) + "\n")
+print("\n".join(out)); print(f"\nwrote {B}/review/v53_compare.csv and v53_compare_summary.txt")
+````
+
+## scripts/review_web.html
+
+````html
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>cSS Reviewer</title>
+<style>
+:root{--bg:#14161a;--panel:#1e2127;--line:#30353d;--text:#e6e8eb;--mut:#9aa1ab;--acc:#4c9aff;--vp:#000}
+:root[data-theme=light]{--bg:#f3f4f6;--panel:#fff;--line:#d5d9df;--text:#1c2026;--mut:#5d6672;--acc:#1f6feb;--vp:#000}
+:root[data-theme=blue]{--bg:#0f2233;--panel:#17324a;--line:#28506f;--text:#d7e6f2;--mut:#8fb0c8;--acc:#7cc4ff;--vp:#03101a}
+*{box-sizing:border-box}html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--text);font:14px/1.35 -apple-system,"Segoe UI",Helvetica,Arial,sans-serif;display:flex;flex-direction:column;overflow:hidden;user-select:none}
+button,select,input{font:inherit;color:var(--text)}
+.top{display:flex;align-items:center;gap:12px;padding:7px 14px;background:var(--panel);border-bottom:1px solid var(--line)}
+.top b{font-size:17px;white-space:nowrap}.mut{color:var(--mut)}.sm{font-size:12px}.sp{flex:1}
+select,input[type=text]{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:5px 8px;user-select:text}
+.prog{width:140px;height:6px;background:var(--line);border-radius:3px;flex:none}.prog div{height:100%;background:var(--acc);border-radius:3px;width:0}
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}.seg button{border:0;background:none;padding:5px 11px;color:var(--mut);cursor:pointer}.seg button.on{background:var(--acc);color:#fff}
+.btn{border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:5px 11px;cursor:pointer;white-space:nowrap}.btn:hover{border-color:var(--acc)}.btn.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+.mbar{display:flex;gap:2px;padding:2px 10px;background:var(--panel);border-bottom:1px solid var(--line);font-size:13.5px}
+.mbar span{padding:4px 10px;border-radius:6px;cursor:default}.mbar span:hover,.mbar span.on{background:var(--acc);color:#fff}
+.menu{position:fixed;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:5px;box-shadow:0 10px 30px rgba(0,0,0,.5);font-size:13.5px;z-index:50;min-width:215px}
+.menu div{padding:6px 10px;border-radius:6px;display:flex;gap:8px;align-items:center;cursor:default;white-space:nowrap}.menu div:hover,.menu div.hi{background:var(--acc);color:#fff}
+.menu div.dis{opacity:.45;pointer-events:none}.menu hr{border:0;border-top:1px solid var(--line);margin:4px 2px}
+.menu .k{margin-left:auto;padding-left:18px;color:var(--mut);font:12px Menlo,Consolas,monospace}.menu div:hover .k,.menu .hi .k{color:#fff}.menu .ck{width:14px;text-align:center;flex:none}
+.main{flex:1;display:flex;gap:10px;padding:10px;min-height:0}
+.views{flex:1;display:flex;gap:10px;min-width:0;position:relative}.side{display:flex;flex-direction:column;gap:10px;width:34%}
+.vp{position:relative;background:var(--vp);border:1px solid var(--line);border-radius:6px;overflow:hidden;flex:1;min-height:0}
+.vp.act{border-color:var(--acc)}.vp canvas.img{position:absolute;inset:0;width:100%;height:100%;display:block}
+.vp .o{position:absolute;color:#ffd866;font:12px Menlo,Consolas,monospace;text-shadow:0 0 3px #000,0 0 3px #000;pointer-events:none}
+.tl{left:8px;top:6px}.tr{right:8px;top:6px}.bl{left:8px;bottom:6px}.br{right:8px;bottom:6px}
+.ol{left:6px;top:50%}.or{right:6px;top:50%}.ot{top:22px;left:50%}.ob{bottom:22px;left:50%}
+#lens{position:fixed;width:200px;height:200px;border-radius:50%;border:2px solid #ffd866;box-shadow:0 4px 18px rgba(0,0,0,.7);pointer-events:none;display:none;z-index:30}
+.drawbar{position:absolute;left:12px;top:30px;display:none;gap:6px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px 8px;font-size:13px;align-items:center;z-index:6;box-shadow:0 6px 20px rgba(0,0,0,.4)}
+.drawbar.show{display:flex}.drawbar .btn{padding:4px 9px}.drawbar .btn.on{background:#35d0ff;color:#002;border-color:#35d0ff;font-weight:700}.drawbar .save{background:#2e9d4a;color:#fff;border-color:#2e9d4a}
+.drawbar input{width:170px;font-size:12.5px;border-radius:13px;padding:4px 10px}
+.panel{width:372px;display:flex;flex-direction:column;gap:8px;min-height:0}
+.tabs{display:flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;flex:none}.tabs button{flex:1;border:0;background:none;padding:6px 4px;color:var(--mut);font-weight:600;font-size:13px;cursor:pointer}.tabs button.on{background:var(--acc);color:#fff}
+.tab{display:none;flex-direction:column;gap:8px;overflow-y:auto;min-height:0;flex:1}.tab.on{display:flex}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 11px}.h{font-weight:700;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center}
+#gauge{display:block;width:176px;margin:0 auto}.panel .btn,.panel .b{font-size:13px;padding:6px 7px}
+.band{display:flex;justify-content:space-between;font-size:12px;font-weight:600;margin-top:-4px}
+.say{margin:8px 0 5px;padding:7px 9px;border-left:3px solid var(--mut);background:var(--bg);border-radius:4px;user-select:text}
+.dec{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}.b{border:1px solid var(--line);border-radius:8px;display:flex;gap:8px;align-items:center;background:var(--bg);cursor:pointer;text-align:left}
+.b:hover{border-color:var(--acc)}.b.on{font-weight:700}
+kbd{font:600 12px Menlo,Consolas,monospace;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:1px 6px;background:var(--panel);color:var(--text);white-space:nowrap}
+#comment{width:100%;margin-top:8px;height:30px;border-radius:15px;padding:4px 14px;font-size:12.5px}#comment::placeholder{color:var(--mut);opacity:.8}
+.saved{margin-top:6px;font-size:13px;min-height:18px}.ok{color:#3aa655}.err{color:#e05555}
+.row{display:flex;align-items:center;gap:8px;margin:7px 0}.row>span:first-child{width:104px;flex:none;white-space:nowrap}.row input[type=range]{flex:1;min-width:0;accent-color:var(--acc)}
+.tools{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}.tools.t4{grid-template-columns:repeat(5,1fr)}.tools.t4 .btn{display:flex;flex-direction:column;align-items:center;gap:3px;white-space:normal;padding:5px 2px;font-size:12.5px}
+#readout{font:12.5px Menlo,Consolas,monospace;min-height:18px;white-space:pre-wrap;margin-top:6px}
+table.cmp{width:100%;border-collapse:collapse;font-size:13px}table.cmp td,table.cmp th{padding:5px 5px;border-bottom:1px solid var(--line);text-align:left}table.cmp th{color:var(--mut);font-weight:600}
+table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cmp tr.cur td{background:var(--bg)}
+.pill{padding:1px 8px;border-radius:9px;color:#fff;font-size:12px;font-weight:600;white-space:nowrap}
+.miss{display:flex;gap:6px;align-items:center;margin:5px 0}.miss input{flex:1;min-width:0;font-size:12.5px}
+.strip{display:flex;gap:5px;padding:6px 14px;background:var(--panel);border-top:1px solid var(--line);overflow-x:auto;flex:none}
+.chip{min-width:30px;text-align:center;padding:3px 6px;border-radius:6px;border:1px solid var(--line);cursor:pointer;font:600 12px Menlo,monospace;flex:none;background:var(--bg)}
+.chip.cur{outline:2px solid var(--acc);outline-offset:1px}
+.keys{display:flex;gap:16px;align-items:center;padding:6px 14px;background:var(--panel);border-top:1px solid var(--line);font-size:12.5px;white-space:nowrap;overflow:hidden;flex:none}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:40}.modal.show{display:flex}
+.dlg{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 22px;max-width:940px;max-height:88vh;overflow:auto;user-select:text}
+.dlg h2{margin:0 0 8px}.dlg h3{margin:14px 0 4px}.dlg td{padding:3px 14px 3px 0;vertical-align:top}.dlg pre{background:var(--bg);padding:10px;border-radius:8px;white-space:pre-wrap;font-size:12.5px}
+.banner{background:#7a5b00;color:#fff;padding:5px 14px;font-size:13px;display:none}
+</style></head><body>
+<div class="top"><b>cSS Reviewer</b>
+ <select id="study" title="Study"></select>
+ <span class="mut" id="candinfo"></span><div class="prog"><div id="progbar"></div></div><span class="mut" id="progtxt"></span><span class="sp"></span>
+ <div class="seg" id="themes" title="Theme (T)"><button data-t="light">Light</button><button data-t="dark">Dark</button><button data-t="blue">Blue</button></div>
+ <span class="mut">Reviewer</span><input type="text" id="reviewer" list="revlist" placeholder="your name" style="width:150px" autocomplete="off"><datalist id="revlist"></datalist>
+</div>
+<div class="mbar" id="mbar"><span data-m="file">File</span><span data-m="edit">Edit</span><span data-m="view">View</span><span data-m="cand">Candidate</span><span data-m="tools">Tools</span><span data-m="help">Help</span></div>
+<div class="banner" id="banner"></div>
+<div class="main">
+ <div class="views" id="views">
+  <div class="drawbar" id="drawbar"><b style="color:#35d0ff">Mark missed cSS</b><button class="btn" id="dRect" title="rectangle (W switches)">&#9645; Rectangle</button><button class="btn" id="dPen" title="free-hand pen (W switches)">&#9998; Pen</button>
+   <button class="btn" id="dUndo" title="remove the last stroke (Backspace)">Undo stroke</button><input type="text" id="dNote" placeholder="note (optional)" maxlength="300"><button class="btn save" id="dSave">Save <kbd>&crarr;</kbd></button><button class="btn" id="dCancel">Cancel <kbd>Esc</kbd></button></div>
+  <div class="vp" id="vp0"><canvas class="img"></canvas><div class="o tl"></div><div class="o tr"></div><div class="o bl"></div><div class="o br"></div><div class="o ol">R</div><div class="o or">L</div><div class="o ot">A</div><div class="o ob">P</div></div>
+  <div class="side">
+   <div class="vp" id="vp1"><canvas class="img"></canvas><div class="o tl"></div><div class="o tr"></div><div class="o bl"></div><div class="o br"></div><div class="o ol">R</div><div class="o or">L</div><div class="o ot">S</div><div class="o ob">I</div></div>
+   <div class="vp" id="vp2"><canvas class="img"></canvas><div class="o tl"></div><div class="o tr"></div><div class="o bl"></div><div class="o br"></div><div class="o ol">A</div><div class="o or">P</div><div class="o ot">S</div><div class="o ob">I</div></div>
+  </div>
+ </div>
+ <div class="panel">
+  <div class="tabs" id="tabs"><button data-tab="viewer" title="F1">Viewer</button><button data-tab="cands" title="F2">Candidates</button><button data-tab="calls" title="F3">Calls summary</button></div>
+  <div class="tab" id="tab-viewer">
+   <div class="card" id="aicard"><div class="h"><span>AI evidence for cSS</span><span class="mut sm">hide <kbd>K</kbd></span></div>
+    <div id="aibody"><svg id="gauge" viewBox="0 0 220 122"></svg>
+    <div class="band"><span style="color:#d64545">not cSS</span><span style="color:#c99a1c">uncertain</span><span style="color:#3aa655">cSS likely</span></div>
+    <div class="say" id="aisay"></div><div class="mut sm" id="aisrc"></div></div></div>
+   <div class="card"><div class="h"><span>Your decision</span><span class="mut sm" id="curcall"></span></div>
+    <div class="dec" id="dec"></div>
+    <input type="text" id="comment" placeholder="Add a comment…  (C)" maxlength="500" autocomplete="off">
+    <div class="saved" id="saved"></div></div>
+   <div class="card"><div class="h">Image</div>
+    <div class="row"><span>Sequence <kbd>S</kbd></span><select id="seq" style="flex:1"></select></div>
+    <div class="row"><span>Zoom <kbd>+</kbd> <kbd>-</kbd></span><input type="range" id="zoom" min="0" max="100" value="0"><span class="mut" id="zoomv" style="width:38px"></span></div>
+    <div class="row"><span>Contrast</span><input type="range" id="win" min="1" max="100"><span class="mut" id="winv" style="width:38px"></span></div>
+    <div class="row"><span>Brightness</span><input type="range" id="lev" min="0" max="100"><span class="mut" id="levv" style="width:38px"></span></div>
+    <div class="tools">
+     <button class="btn" id="tMark" title="show / hide the marking of this candidate">Marking <kbd>M</kbd></button><button class="btn" id="tOther" title="show / hide the other candidates' markings">Others <kbd>O</kbd></button>
+     <button class="btn" id="tMip" title="minimum-intensity slab, axial view">minIP <kbd>I</kbd></button><button class="btn" id="tAuto" title="open the next unread candidate after a decision">Auto-next <kbd>G</kbd></button>
+     <button class="btn" id="bReset">Reset <kbd>R</kbd></button><button class="btn" id="bCentre">Centre <kbd>F</kbd></button></div>
+    <div class="mut sm" id="seqnote" style="margin-top:6px"></div></div>
+   <div class="card">
+    <div class="tools t4"><button class="btn tool" data-tool="nav" title="pan / crosshair">Navigate <kbd>Esc</kbd></button><button class="btn" id="tMag" title="magnifier lens under the mouse">Magnifier <kbd>B</kbd></button><button class="btn tool" data-tool="dark" title="darkness probe: click a point">Darkness <kbd>D</kbd></button>
+     <button class="btn tool" data-tool="ruler" title="measure a distance: drag">Ruler <kbd>L</kbd></button><button class="btn tool" data-tool="miss" title="mark a cSS the detector missed">Missed <kbd>X</kbd></button></div>
+    <div id="readout" class="mut"></div></div>
+  </div>
+  <div class="tab" id="tab-cands"><div class="card"><div class="h"><span>Candidates</span><span class="mut sm">click to open</span></div><table class="cmp" id="candtable"></table></div>
+   <div class="card"><div class="h"><span>Missed cSS marks</span><span class="mut sm">add with <kbd>X</kbd></span></div><div id="misslist"></div></div></div>
+  <div class="tab" id="tab-calls"><div class="card"><div class="h"><span id="cmptitle">AI vs reviewer</span><button class="btn" id="bDiffer" title="show only the candidates where you and the meter differ">Only differ</button></div><table class="cmp" id="cmptable"></table></div>
+   <div class="card"><div class="h">Summary</div><div id="cmpsum"></div>
+    <div class="tools" style="margin-top:8px"><button class="btn" id="bScore">Score <kbd>Q</kbd></button><button class="btn" id="bExport">Export CSV <kbd>E</kbd></button><button class="btn" id="bUnread">Next unread <kbd>J</kbd></button></div>
+    <div class="mut sm" style="margin-top:6px">The meter is rule-based and not validated: "differ" shows where you and it disagree, not who is right.</div></div></div>
+ </div>
+</div>
+<div class="strip" id="strip"></div>
+<div class="keys"><span><kbd>wheel</kbd> <kbd>&uarr;</kbd> <kbd>&darr;</kbd> slices</span><span><kbd class="modk">Ctrl</kbd>+<kbd>wheel</kbd> / <kbd>+</kbd> <kbd>-</kbd> zoom</span><span><kbd>right-drag</kbd> contrast / brightness</span><span><kbd>right-click</kbd> menu</span><span><kbd>drag</kbd> pan</span><span><kbd>&larr;</kbd> <kbd>&rarr;</kbd> candidate</span><span><kbd>Z</kbd> undo</span><span><kbd>?</kbd> all keys</span><span class="sp"></span><span class="mut">Research software &middot; expert review required</span></div>
+<canvas id="lens"></canvas>
+
+<div class="modal" id="help"><div class="dlg">
+ <h2>How to use the reviewer</h2>
+ <p><b>The reading.</b> Each candidate is a dark structure the detector found near the cortex. Scroll through it in the three planes, compare with the other sequences, then give one decision. The decision is saved at once; the next unread candidate opens (Auto-next, <kbd>G</kbd>). When all are read, press <kbd>Q</kbd> for the summary and the 0&ndash;4 score. Everything is also in the menu bar and in the right-click menu on the image.</p>
+ <table><tr><td><kbd>Y</kbd> cSS</td><td>curvilinear dark lining of the cortical surface / sulcus</td></tr>
+ <tr><td><kbd>V</kbd> Vein</td><td>tube that continues beyond the candidate, branches, or runs into the white matter or a sinus</td></tr>
+ <tr><td><kbd>N</kbd> Normal cortex</td><td>naturally dark cortex or sulcus, nothing abnormal</td></tr>
+ <tr><td><kbd>A</kbd> Artifact</td><td>skull, air&ndash;bone interface, motion, mask edge</td></tr>
+ <tr><td><kbd>U</kbd> Unsure</td><td>cannot decide; counted as <i>not</i> cSS in the score and listed for re-reading</td></tr>
+ <tr><td><kbd>H</kbd> Near ICH</td><td>siderosis connected to a lobar haemorrhage; reported but not scored</td></tr></table>
+ <h3>The AI meter</h3>
+ <p>The needle shows a number from 0 to 1: <span style="color:#d64545"><b>red</b> below 0.33</span> (the detector suspects a vein, artifact or normal cortex), <span style="color:#c99a1c"><b>yellow</b> 0.33&ndash;0.66</span> (uncertain), <span style="color:#3aa655"><b>green</b> 0.66 and above</span> (suspects cSS). The line under it says what it suspects and why.<br>
+ <b>It is not a probability and has not been validated.</b> It is the detector's rule-based evidence (shape, position on the cortex, both banks, vessel continuation), lowered when its vein / artifact rules fire. Use it as a second opinion only: the decision is yours. Seeing it before you decide can bias you &mdash; hide it with <kbd>K</kbd> for any reading that is used to test the detector. The <b>Calls summary</b> tab (<kbd>F3</kbd>) lists the meter next to your calls: "agree" = you called cSS and it is green, or you called something else and it is red; yellow counts as neither.</p>
+ <h3>Keys</h3>
+ <table>
+ <tr><td><kbd>wheel</kbd> or <kbd>&uarr;</kbd> <kbd>&darr;</kbd></td><td>scroll slices in the view under the mouse (<kbd>PgUp</kbd> <kbd>PgDn</kbd> = 5 slices)</td><td><kbd>&larr;</kbd> <kbd>&rarr;</kbd></td><td>previous / next candidate</td></tr>
+ <tr><td><kbd class="modk">Ctrl</kbd>+<kbd>wheel</kbd>, pinch, <kbd>+</kbd> <kbd>=</kbd> <kbd>-</kbd></td><td>zoom in / out (the same keys on Mac and Windows)</td><td><kbd>J</kbd></td><td>next unread candidate</td></tr>
+ <tr><td><kbd>drag</kbd></td><td>pan &nbsp; (<kbd>click</kbd> = move the crosshair, all views follow)</td><td><kbd>Z</kbd></td><td>undo the last decision</td></tr>
+ <tr><td><kbd>right-drag</kbd> or <kbd>Shift</kbd>+<kbd>drag</kbd></td><td>contrast (left&ndash;right) and brightness (up&ndash;down)</td><td><kbd>Backspace</kbd></td><td>clear this candidate's decision</td></tr>
+ <tr><td><kbd>right-click</kbd></td><td>menu on the image</td><td><kbd>C</kbd></td><td>write a comment (<kbd>Enter</kbd> saves, <kbd>Esc</kbd> leaves)</td></tr>
+ <tr><td><kbd>[</kbd> <kbd>]</kbd> &nbsp; <kbd>;</kbd> <kbd>'</kbd></td><td>brightness down / up &nbsp; contrast lower / higher</td><td><kbd>Q</kbd></td><td>summary and score</td></tr>
+ <tr><td><kbd>R</kbd> &nbsp; <kbd>F</kbd></td><td>reset the view &nbsp; centre on the candidate</td><td><kbd>E</kbd></td><td>export the AI vs reviewer table (CSV)</td></tr>
+ <tr><td><kbd>M</kbd> &nbsp; <kbd>O</kbd></td><td>show / hide this candidate's marking &nbsp; the other markings</td><td><kbd>F1</kbd> <kbd>F2</kbd> <kbd>F3</kbd></td><td>right panel: viewer / candidates / calls summary</td></tr>
+ <tr><td><kbd>B</kbd></td><td>magnifier lens (2.5&times;) under the mouse</td><td><kbd>T</kbd></td><td>next theme (light / dark / blue)</td></tr>
+ <tr><td><kbd>I</kbd></td><td>minIP slab (about 8 mm), axial view: veins become continuous tubes</td><td><kbd>K</kbd></td><td>show / hide the AI meter</td></tr>
+ <tr><td><kbd>S</kbd>, <kbd>1</kbd>&ndash;<kbd>5</kbd></td><td>next sequence / choose a sequence</td><td><kbd>G</kbd></td><td>auto-next after a decision on / off</td></tr>
+ <tr><td><kbd>D</kbd> &nbsp; <kbd>L</kbd></td><td>darkness probe: click &nbsp; ruler: drag (mm)</td><td><kbd>?</kbd></td><td>this help</td></tr>
+ <tr><td><kbd>X</kbd></td><td>mark a missed cSS (see below)</td><td><kbd>Esc</kbd></td><td>back to navigation / close a menu or window</td></tr></table>
+ <h3>Marking a cSS the detector missed</h3>
+ <p>Press <kbd>X</kbd> (or right-click &rarr; <i>Mark a missed cSS here</i>). A small bar appears: draw a <b>rectangle</b> around the lesion (default) or trace it with the <b>pen</b> (<kbd>W</kbd> switches; several pen strokes are allowed, <kbd>Backspace</kbd> removes the last one). Type a note if you wish, then <b>Save</b> (<kbd>Enter</kbd>); <kbd>Esc</kbd> cancels. Mark the one slice where the lesion is clearest. Saved marks are listed in the <b>Candidates</b> tab with what the detector did at that place (shown, excluded by a rule, below a size gate, or not generated). They are reported next to the score but are <b>not counted</b> in the 0&ndash;4 score.</p>
+ <h3>Other tools</h3>
+ <p><b>Darkness probe</b>: mean signal of the 3 &times; 3 voxels under the click, as a percentage of the normal cortex and in standard deviations below it (candidates start at about &minus;2.5 SD). <b>Ruler</b>: drag a line, length in mm. <b>Magnifier</b>: a lens follows the mouse. Sequences that are not listed were not imported for this patient.</p>
+ <p class="mut">Everything is stored on this computer in the project's <code>review</code> folder, with the reviewer name and time. Close with <kbd>Esc</kbd>.</p>
+</div></div>
+<div class="modal" id="summary"><div class="dlg" style="min-width:560px"><h2>Summary</h2><div id="sumbody"></div><p class="mut">Close with <kbd>Esc</kbd>.</p></div></div>
+
+<script>
+"use strict";
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const MAC=/Mac|iPhone|iPad/.test(navigator.platform||navigator.userAgent), MOD=MAC?"⌘":"Ctrl";
+$$(".modk").forEach(e=>e.textContent=MOD);
+const CALLKEYS={y:"cSS",v:"Vein",n:"Normal",a:"Artifact",u:"Unsure",h:"Near ICH"};
+const CALLLBL={cSS:"cSS",Vein:"Vein",Normal:"Normal cortex",Artifact:"Artifact",Unsure:"Unsure","Near ICH":"Near ICH"};
+const CALLCOL={cSS:"#2e9d4a",Vein:"#3b82e0",Normal:"#8a8f98",Artifact:"#e07a1f",Unsure:"#c9a400","Near ICH":"#9b4fc0"};
+const BANDCOL={green:"#3aa655",yellow:"#c99a1c",red:"#d64545"};
+const LS=(k,d)=>{try{const v=localStorage.getItem("css_"+k);return v===null?d:JSON.parse(v)}catch(e){return d}};
+const LSS=(k,v)=>{try{localStorage.setItem("css_"+k,JSON.stringify(v))}catch(e){}};
+const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let M=null, VOL=null, LAB=null, seq="swi", vols={}, seqmeta={};
+let nx,ny,nz,vox, cur=[0,0,0], ctr=[0,0,0], zoom=1, wl=[0,65535], lut=new Uint8Array(65536);
+let ci=0, calls={}, undo=[], tool="nav", ruler=null, probe=null, missed=[], draft=null, shape="rect", onlyDiffer=false;
+let showMark=LS("mark",true), showOther=LS("other",true), mip=false, autoNext=LS("auto",true), showAI=LS("ai",true), mag=false, hover=0, mouse=null;
+const MAGF=2.5;
+// views: h = horizontal source axis, v = vertical, s = slice axis; displayed flipped (radiological: patient right on screen left)
+const VIEWS=[{h:0,v:1,s:2,name:"Axial"},{h:0,v:2,s:1,name:"Coronal"},{h:1,v:2,s:0,name:"Sagittal"}];
+const vps=[0,1,2].map(i=>{const el=$("#vp"+i);return {el,cv:el.querySelector("canvas"),off:document.createElement("canvas"),E:[[],[]]}});
+
+function theme(t){document.documentElement.dataset.theme=t;LSS("theme",t);$$("#themes button").forEach(b=>b.classList.toggle("on",b.dataset.t===t))}
+function setLut(){const lo=wl[0],hi=Math.max(wl[1],lo+1);for(let i=0;i<65536;i++){const v=(i-lo)/(hi-lo);lut[i]=v<=0?0:v>=1?255:(v*255)|0}}
+function geom(k){const V=VIEWS[k],c=vps[k].cv,W=c.clientWidth,H=c.clientHeight,d=[nx,ny,nz];
+  const fit=Math.min(W/(d[V.h]*vox[V.h]),H/(d[V.v]*vox[V.v]))*zoom,sx=fit*vox[V.h],sy=fit*vox[V.v];
+  const ox=W/2-(d[V.h]-1-ctr[V.h]+0.5)*sx, oy=H/2-(d[V.v]-1-ctr[V.v]+0.5)*sy;return {V,W,H,sx,sy,ox,oy,nh:d[V.h],nv:d[V.v]}}
+function toVoxF(k,mx,my){const g=geom(k);const p=cur.slice();p[g.V.h]=g.nh-0.5-(mx-g.ox)/g.sx;p[g.V.v]=g.nv-0.5-(my-g.oy)/g.sy;
+  const d=[nx,ny,nz];for(let a=0;a<3;a++)p[a]=Math.max(0,Math.min(d[a]-1,p[a]));return p}
+function toVox(k,mx,my){return toVoxF(k,mx,my).map(Math.round)}
+function toScr(k,p){const g=geom(k);return [g.ox+(g.nh-1-p[g.V.h]+0.5)*g.sx, g.oy+(g.nv-1-p[g.V.v]+0.5)*g.sy]}
+const IDX=(i,j,k)=>i+nx*(j+ny*k);
+function strokeEdges(x,g,E,scale){ for(const [q,L] of E.entries()){ if(!L.length)continue; x.strokeStyle=q?"rgba(255,200,60,.85)":"#ff4646"; x.lineWidth=(q?1.2:1.8)/scale; x.lineJoin="round"; x.beginPath();
+    for(let n=0;n<L.length;n+=4){x.moveTo(g.ox+L[n]*g.sx,g.oy+L[n+1]*g.sy);x.lineTo(g.ox+L[n+2]*g.sx,g.oy+L[n+3]*g.sy)} x.stroke() } }
+function drawShape(x,k,type,strokes,label,dash){ x.strokeStyle="#35d0ff"; x.fillStyle="rgba(53,208,255,.12)"; x.lineWidth=2.2; x.setLineDash(dash?[7,4]:[]);
+  let lx=null,ly=0;
+  if(type==="rect"&&strokes[0]&&strokes[0].length===2){const [a,b]=toScr(k,strokes[0][0]),[c,d]=toScr(k,strokes[0][1]); x.fillRect(a,b,c-a,d-b); x.strokeRect(a,b,c-a,d-b); lx=Math.min(a,c); ly=Math.min(b,d)-6}
+  else for(const st of strokes){ if(!st.length)continue; x.beginPath(); st.forEach((p,i)=>{const [a,b]=toScr(k,p); if(i)x.lineTo(a,b); else {x.moveTo(a,b); if(lx===null){lx=a+8;ly=b-8}}}); if(st.length===1){const [a,b]=toScr(k,st[0]);x.arc(a,b,8,0,6.3)} x.stroke() }
+  x.setLineDash([]); if(label&&lx!==null){x.fillStyle="#35d0ff";x.font="12px Menlo,monospace";x.fillText(label,lx,ly)} }
+function render(k){ if(!VOL)return; const g=geom(k),V=g.V,vp=vps[k],nh=g.nh,nv=g.nv;
+  const off=vp.off; if(off.width!==nh||off.height!==nv){off.width=nh;off.height=nv}
+  const octx=off.getContext("2d"),img=octx.createImageData(nh,nv),D=new Uint32Array(img.data.buffer);
+  const E=[[],[]]; vp.E=E;
+  const st=[1,nx,nx*ny],sh=st[V.h],sv=st[V.v],ss=st[V.s],s0=cur[V.s]*ss;
+  const curId=M.cands.length?M.cands[ci].id:-1, slab=(mip&&k===0&&seq!=="phase")?Math.max(1,Math.round(4/vox[2])):0;
+  for(let y=0;y<nv;y++){const vv=(nv-1-y)*sv; for(let x=0;x<nh;x++){const b=(nh-1-x)*sh+vv, p=b+s0; let val=VOL[p];
+      if(slab){for(let q=Math.max(0,cur[2]-slab);q<=Math.min(nz-1,cur[2]+slab);q++){const w=VOL[b+q*ss];if(w<val&&w>0)val=w}}
+      const gv=lut[val]; D[y*nh+x]=0xff000000|(gv<<16)|(gv<<8)|gv;
+      if(LAB){const l=LAB[p]; if(l&&((l===curId&&showMark)||(l!==curId&&showOther))){
+        const L=E[l===curId?0:1];     // screen-left neighbour = source +h, screen-top neighbour = source +v (views are flipped)
+        if(x===0||LAB[p+sh]!==l)L.push(x,y,x,y+1); if(x===nh-1||LAB[p-sh]!==l)L.push(x+1,y,x+1,y+1);
+        if(y===0||LAB[p+sv]!==l)L.push(x,y,x+1,y); if(y===nv-1||LAB[p-sv]!==l)L.push(x,y+1,x+1,y+1);}}}}
+  octx.putImageData(img,0,0);
+  const c=vp.cv,dpr=window.devicePixelRatio||1; if(c.width!==Math.round(g.W*dpr)||c.height!==Math.round(g.H*dpr)){c.width=Math.round(g.W*dpr);c.height=Math.round(g.H*dpr)}
+  const x=c.getContext("2d"); x.setTransform(dpr,0,0,dpr,0,0); x.fillStyle="#000"; x.fillRect(0,0,g.W,g.H);
+  x.imageSmoothingEnabled=true; x.imageSmoothingQuality="high"; x.drawImage(off,g.ox,g.oy,nh*g.sx,nv*g.sy);
+  strokeEdges(x,g,E,1);
+  const [cx,cy]=toScr(k,cur); x.strokeStyle="rgba(120,200,255,.35)"; x.lineWidth=1; x.beginPath(); x.moveTo(0,cy);x.lineTo(g.W,cy);x.moveTo(cx,0);x.lineTo(cx,g.H);x.stroke();
+  for(const m of missed){ const p=[m.can_i,m.can_j,m.can_k];
+    if(m.pts&&+m.plane===k){ if(+m.slice===cur[V.s]) drawShape(x,k,m.shape,m.pts,"missed "+m.missed_id,false) }
+    else if(Math.abs(p[V.s]-cur[V.s])*vox[V.s]<=2.5){const [a,b]=toScr(k,p);x.strokeStyle="#35d0ff";x.lineWidth=2;x.beginPath();x.arc(a,b,9,0,6.3);x.stroke();
+      x.fillStyle="#35d0ff";x.font="12px Menlo,monospace";x.fillText("missed "+m.missed_id,a+12,b+4)} }
+  if(draft&&draft.k===k&&draft.s===cur[V.s]) drawShape(x,k,draft.type,draft.strokes,"new mark · not saved",true);
+  if(ruler&&ruler.k===k&&ruler.s===cur[V.s]){const [a,b]=toScr(k,ruler.a),[e,f]=toScr(k,ruler.b);x.strokeStyle="#7CFC9A";x.lineWidth=2;x.beginPath();x.moveTo(a,b);x.lineTo(e,f);x.stroke();
+      x.fillStyle="#7CFC9A";x.font="13px Menlo,monospace";x.fillText(ruler.mm.toFixed(1)+" mm",e+8,f-6)}
+  if(probe&&probe.k===k&&probe.p[V.s]===cur[V.s]){const [a,b]=toScr(k,probe.p);x.strokeStyle="#ffb000";x.lineWidth=2;x.strokeRect(a-1.5*g.sx,b-1.5*g.sy,3*g.sx,3*g.sy)}
+  const o=vp.el.querySelectorAll(".o"); const sm=seqmeta[seq]||{};
+  o[0].textContent=V.name+" · "+(sm.label||seq)+(slab?" · minIP "+Math.round((2*slab+1)*vox[2])+" mm":"");
+  o[1].textContent="Slice "+(cur[V.s]+1)+" / "+[nx,ny,nz][V.s];
+  o[2].textContent="C "+Math.round(101-(wl[1]-wl[0])/655.35)+" · B "+Math.round(100-(wl[0]+wl[1])/2/655.35);
+  o[3].textContent="Zoom "+zoom.toFixed(1)+"×";
+}
+function drawLens(){ const L=$("#lens"); if(!mag||!mouse||!VOL||$(".menu")){L.style.display="none";return}
+  const k=mouse.k,vp=vps[k],g=geom(k),r=vp.cv.getBoundingClientRect(),R=100,dpr=window.devicePixelRatio||1;
+  if(L.width!==2*R*dpr){L.width=L.height=2*R*dpr}
+  L.style.display="block"; L.style.left=(r.left+mouse.x-R)+"px"; L.style.top=(r.top+mouse.y-R)+"px";
+  const x=L.getContext("2d"); x.setTransform(dpr,0,0,dpr,0,0); x.fillStyle="#000"; x.fillRect(0,0,2*R,2*R); x.save();
+  x.translate(R-mouse.x*MAGF,R-mouse.y*MAGF); x.scale(MAGF,MAGF); x.imageSmoothingEnabled=true; x.imageSmoothingQuality="high";
+  x.drawImage(vp.off,g.ox,g.oy,g.nh*g.sx,g.nv*g.sy); strokeEdges(x,g,vp.E,MAGF); x.restore();
+  x.fillStyle="#ffd866"; x.font="11px Menlo,monospace"; x.fillText(MAGF+"×",R-10,2*R-10) }
+let raf=0; function draw(){ if(raf)return; raf=requestAnimationFrame(()=>{raf=0;for(let k=0;k<3;k++)render(k);syncSliders();drawLens()}) }
+function syncSliders(){ $("#zoom").value=Math.log(zoom)/Math.log(12)*100; $("#zoomv").textContent=zoom.toFixed(1)+"×";
+  const w=(wl[1]-wl[0])/655.35,l=100-(wl[0]+wl[1])/2/655.35; $("#win").value=101-Math.max(1,Math.min(100,w)); $("#winv").textContent=Math.round(101-w); $("#lev").value=l; $("#levv").textContent=Math.round(l) }
+function setWL(w,l){ w=Math.max(0.5,Math.min(100,w)); l=Math.max(0,Math.min(100,l)); const c=(100-l)*655.35; wl=[c-w*655.35/2,c+w*655.35/2]; setLut(); draw() }
+function getWL(){ return [(wl[1]-wl[0])/655.35, 100-(wl[0]+wl[1])/2/655.35] }
+function resetView(){ zoom=1; ctr=[(nx-1)/2,(ny-1)/2,(nz-1)/2]; wl=seqmeta[seq].win.slice(); setLut(); draw() }
+function setZoom(z){ zoom=Math.max(1,Math.min(12,z)); draw() }
+
+// ---------- data ----------
+async function api(path,body){ const r=await fetch(path,body?{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}:{}); const j=await r.json(); if(!r.ok||j.error)throw new Error(j.error||r.statusText); return j }
+async function loadVol(s){ if(!vols[s]){ status("loading "+s+" ..."); const r=await fetch(`/api/vol?study=${M.study}&seq=${s}`); vols[s]=new Uint16Array(await r.arrayBuffer());
+    if(!seqmeta[s]||!seqmeta[s].win) seqmeta[s]=await api(`/api/seqmeta?study=${M.study}&seq=${s}`); status("") } return vols[s] }
+async function setSeq(s){ if(!M.seqs.some(q=>q.key===s))return; VOL=await loadVol(s); seq=s; $("#seq").value=s; wl=seqmeta[s].win.slice(); setLut(); draw() }
+function nextSeq(){const i=M.seqs.findIndex(s=>s.key===seq);setSeq(M.seqs[(i+1)%M.seqs.length].key)}
+function reviewer(){ return $("#reviewer").value.trim() }
+function setMissed(m){ missed=(m||[]).map(r=>{let pts=null; try{pts=r.points?JSON.parse(r.points):null}catch(e){} return Object.assign({},r,{pts:(pts&&r.plane!==""&&r.shape!=="point")?pts:null})}); renderMissed() }
+async function loadStudy(sid){ status("loading study ...");
+  M=await api(`/api/meta?study=${sid||""}&reviewer=${encodeURIComponent(reviewer())}`); [nx,ny,nz]=M.shape; vox=M.vox; vols={}; seqmeta={}; M.seqs.forEach(s=>seqmeta[s.key]=s);
+  $("#study").innerHTML=M.studies.map(s=>`<option ${s===M.study?"selected":""}>${esc(s)}</option>`).join("");
+  $("#seq").innerHTML=M.seqs.map((s,i)=>`<option value="${s.key}">${s.label}  (${i+1})</option>`).join("");
+  $("#revlist").innerHTML=M.reviewers.names.map(n=>`<option value="${esc(n)}">`).join("");
+  if(!reviewer()&&M.reviewers.last){ $("#reviewer").value=M.reviewers.last; M=await api(`/api/meta?study=${M.study}&reviewer=${encodeURIComponent(reviewer())}`) }
+  calls=M.calls||{}; undo=[]; draft=null;
+  const b=$("#banner"); const msg=[M.qc,M.note].filter(Boolean).join("  ·  "); $("#seqnote").textContent=M.missing_seqs.length?("Not imported for this patient: "+M.missing_seqs.join(", ")):""; b.textContent=msg; b.style.display=msg?"block":"none";
+  const lr=await fetch(`/api/labels?study=${M.study}`); LAB=new Uint16Array(await lr.arrayBuffer());
+  seq="swi"; VOL=await loadVol("swi"); ctr=[(nx-1)/2,(ny-1)/2,(nz-1)/2]; wl=seqmeta.swi.win.slice(); setLut();
+  buildStrip(); setMissed(M.missed); const first=M.cands.findIndex(c=>!(calls[c.id]&&calls[c.id].call)); go(first<0?0:first); status("");
+  if(!reviewer()) status("Enter your name (upper right) before the first decision.",true) }
+function status(t,err){ const s=$("#saved"); s.textContent=t||""; s.className="saved "+(err?"err":"ok") }
+
+// ---------- candidates ----------
+const callOf=c=>(calls[c.id]||{}).call||"";
+function verdict(c){ const call=callOf(c),b=c.ai.band; if(!call)return "not read"; if(call==="Unsure")return "you unsure"; if(b==="yellow")return "AI unsure";
+  const css=call==="cSS"; return (css&&b==="green")||(!css&&b==="red")?"agree":"differ" }
+function pill(t,c){return `<span class="pill" style="background:${c}">${esc(t)}</span>`}
+function buildStrip(){ $("#strip").innerHTML=M.cands.map((c,i)=>`<div class="chip" data-i="${i}" title="${c.hemi} ${esc(c.region)}">${c.id}</div>`).join("")||'<span class="mut">No candidates in this study.</span>'; paintLists() }
+function paintLists(){ let n=0; $$("#strip .chip").forEach((e,i)=>{const call=callOf(M.cands[i]); if(call)n++; e.style.background=call?CALLCOL[call]:""; e.style.color=call?"#fff":""; e.classList.toggle("cur",i===ci)});
+  $("#progbar").style.width=(M.cands.length?100*n/M.cands.length:0)+"%"; $("#progtxt").textContent=n+" of "+M.cands.length+" read";
+  const e=$("#strip .cur"); if(e)e.scrollIntoView({block:"nearest",inline:"nearest"});
+  $("#candtable").innerHTML="<tr><th>#</th><th>Side · region</th><th>mm³</th><th>Your call</th></tr>"+M.cands.map((c,i)=>{const call=callOf(c),cm=(calls[c.id]||{}).comment;
+    return `<tr class="r ${i===ci?"cur":""}" data-i="${i}"><td><b>${c.id}</b></td><td>${c.hemi} · ${esc(c.region)}${cm?` <span class="mut" title="${esc(cm)}">✎</span>`:""}</td><td>${Math.round(c.volume)}</td><td>${call?pill(CALLLBL[call],CALLCOL[call]):'<span class="mut">—</span>'}</td></tr>`}).join("");
+  const T={}; ["cSS","not cSS","unsure","not read"].forEach(r=>T[r]={green:0,yellow:0,red:0}); let ag=0,df=0;
+  const rows=M.cands.map((c,i)=>{const call=callOf(c),v=verdict(c); const row=!call?"not read":call==="cSS"?"cSS":call==="Unsure"?"unsure":"not cSS"; T[row][c.ai.band]++; if(v==="agree")ag++; if(v==="differ")df++;
+    if(onlyDiffer&&v!=="differ")return ""; const sus=c.ai.band==="green"?"cSS":c.ai.band==="yellow"?"uncertain":c.ai.suspect.replace(/^I suspect /,"").replace(/^Probably not cSS.*/,"not cSS");
+    return `<tr class="r ${i===ci?"cur":""}" data-i="${i}"><td><b>${c.id}</b></td><td>${pill(c.ai.score.toFixed(2),BANDCOL[c.ai.band])}</td><td>${esc(sus)}</td><td>${call?pill(CALLLBL[call],CALLCOL[call]):'<span class="mut">—</span>'}</td><td class="${v==="differ"?"err":"mut"}">${v}</td></tr>`}).join("");
+  $("#cmptitle").textContent="AI vs reviewer · "+M.study+(onlyDiffer?" · only differ":"");
+  $("#cmptable").innerHTML="<tr><th>#</th><th>AI meter</th><th>AI suspects</th><th>Your call</th><th></th></tr>"+(rows||'<tr><td colspan="5" class="mut">nothing to show</td></tr>');
+  $("#cmpsum").innerHTML=`<table class="cmp"><tr><th></th><th>AI green</th><th>AI yellow</th><th>AI red</th></tr>`+Object.entries(T).map(([r,t])=>`<tr><td>${r==="not read"?"Not read":"You: "+r}</td><td>${r==="not cSS"&&t.green?`<b class="err">${t.green}</b>`:t.green}</td><td>${t.yellow}</td><td>${r==="cSS"&&t.red?`<b class="err">${t.red}</b>`:t.red}</td></tr>`).join("")+`</table>
+   <div style="margin-top:8px">Read <b>${n} of ${M.cands.length}</b> · agree <b>${ag}</b> · differ <b>${df}</b> · missed cSS marked <b>${missed.length}</b></div>`;
+  $("#bDiffer").classList.toggle("on",onlyDiffer) }
+function gauge(a){ const P=t=>[110-90*Math.cos(Math.PI*t),105-90*Math.sin(Math.PI*t)], arc=(a0,a1,c)=>{const [x0,y0]=P(a0),[x1,y1]=P(a1);return `<path d="M${x0},${y0} A90,90 0 0 1 ${x1},${y1}" stroke="${c}" stroke-width="16" fill="none"/>`};
+  const nxp=110-72*Math.cos(Math.PI*a.score), nyp=105-72*Math.sin(Math.PI*a.score);
+  $("#gauge").innerHTML=arc(0,.33,"#d64545")+arc(.335,.66,"#e0b030")+arc(.665,1,"#3aa655")+`<line x1="110" y1="105" x2="${nxp}" y2="${nyp}" stroke="var(--text)" stroke-width="4" stroke-linecap="round"/><circle cx="110" cy="105" r="7" fill="var(--text)"/>
+   <text x="14" y="120" font-size="10" fill="var(--mut)">0</text><text x="194" y="120" font-size="10" fill="var(--mut)">1.0</text><text x="110" y="78" text-anchor="middle" font-size="26" font-weight="700" fill="var(--text)">${a.score.toFixed(2)}</text>`;
+  const s=$("#aisay"); s.style.borderLeftColor=BANDCOL[a.band]; s.innerHTML=`<b>${esc(a.suspect)}</b>`+(a.reason?`: ${esc(a.reason)}.`:"."); $("#aisrc").textContent=a.source+" · not validated" }
+function go(i,keepView){ if(!M.cands.length){paintLists();draw();return} ci=Math.max(0,Math.min(M.cands.length-1,i)); const c=M.cands[ci]; cur=c.centre.slice(); if(!keepView){ctr=cur.slice(); zoom=Math.max(zoom,3)}
+  ruler=null; probe=null; if(tool!=="miss")$("#readout").textContent="";
+  $("#candinfo").textContent=`Candidate ${ci+1} of ${M.cands.length} · #${c.id} · ${c.hemi==="L"?"left":"right"} ${c.region} · ${Math.round(c.volume)} mm³`;
+  gauge(c.ai); paintDecision(); paintLists(); draw() }
+function paintDecision(){ const c=M.cands[ci]; if(!c)return; const st=calls[c.id]||{}; $$("#dec .b").forEach(b=>{const on=b.dataset.call===st.call; b.classList.toggle("on",on); b.style.borderColor=on?CALLCOL[st.call]:""; b.style.background=on?CALLCOL[st.call]+"33":""});
+  $("#curcall").textContent=st.call?("saved: "+CALLLBL[st.call]):"not read yet"; if(document.activeElement!==$("#comment")) $("#comment").value=st.comment||"" }
+const firstUnread=from=>{const n=M.cands.findIndex((x,j)=>j>from&&!callOf(x)); return n<0?M.cands.findIndex(x=>!callOf(x)):n};
+async function decide(call,isUndo){ const c=M.cands[ci]; if(!c)return; if(!reviewer()){status("Enter your name (upper right) first.",true);$("#reviewer").focus();return}
+  const prev=callOf(c); if(!isUndo)undo.push({i:ci,prev});
+  try{ const r=await api("/api/call",{study:M.study,reviewer:reviewer(),cand_id:c.id,call,action:isUndo?"undo":(call?"call":"clear"),meter:showAI?c.ai.score:""}); calls=r.calls; status("✓ Saved automatically · "+r.saved.slice(11));
+    paintDecision(); paintLists();
+    if(call&&!isUndo&&autoNext){ const m=firstUnread(ci); if(m>=0)setTimeout(()=>go(m),180); else setTimeout(summary,250) } }
+  catch(e){ status("NOT SAVED: "+e.message,true) } }
+async function saveComment(){ const c=M.cands[ci]; if(!c)return; const t=$("#comment").value; if(((calls[c.id]||{}).comment||"")===t)return; if(!reviewer()){status("Enter your name first.",true);return}
+  try{ const r=await api("/api/call",{study:M.study,reviewer:reviewer(),cand_id:c.id,comment:t,action:"comment"}); calls=r.calls; status("✓ Comment saved · "+r.saved.slice(11)); paintLists() }catch(e){status("NOT SAVED: "+e.message,true)} }
+function doUndo(){ const u=undo.pop(); if(!u){status("Nothing to undo.");return} go(u.i,false); decide(u.prev,true) }
+function nextUnread(){ const m=firstUnread(ci); if(m>=0)go(m); else status("All candidates are read.") }
+async function summary(){ if(!reviewer()){status("Enter your name first.",true);return} $("#sumbody").innerHTML="<p>Saving and scoring ...</p>"; $("#summary").classList.add("show");
+  try{ const r=await api("/api/finish",{study:M.study,reviewer:reviewer()});
+    const rows=Object.entries(r.counts).map(([k,v])=>`<tr><td><span style="color:${CALLCOL[k]}">●</span> ${CALLLBL[k]}</td><td><b>${v}</b></td></tr>`).join("");
+    const ms=r.missed.length?`<h3>Missed cSS marked (not counted in the score)</h3><table>`+r.missed.map(m=>`<tr><td><b>${m.missed_id}</b></td><td>${esc(m.reviewer)}</td><td>${esc(m.comment)}</td><td class="mut">${esc(m.detector_fate)}</td></tr>`).join("")+"</table>":"";
+    $("#sumbody").innerHTML=`<p><b>${esc(M.study)}</b> · reviewer <b>${esc(reviewer())}</b></p><table>${rows}<tr><td>Not read</td><td><b>${r.unread}</b></td></tr><tr><td>Missed cSS marked</td><td><b>${r.missed.length}</b></td></tr></table>`
+      +(r.unread?`<p class="err">${r.unread} candidate(s) not read: the score below is a lower bound.</p>`:"")+`<h3>Score</h3><pre>${esc(r.text||"")}</pre>`+ms }
+  catch(e){ $("#sumbody").innerHTML=`<p class="err">${esc(e.message)}</p>` } }
+function exportCsv(){ const q=s=>'"'+String(s==null?"":s).replace(/"/g,'""')+'"';
+  const lines=[["study","reviewer","cand_id","hemi","region","volume_mm3","ai_meter","ai_band","ai_suspects","reviewer_call","comment","agreement"].join(",")]
+    .concat(M.cands.map(c=>[M.study,reviewer(),c.id,c.hemi,c.region,c.volume,c.ai.score,c.ai.band,c.ai.suspect,callOf(c),(calls[c.id]||{}).comment||"",verdict(c)].map(q).join(",")));
+  const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([lines.join("\n")+"\n"],{type:"text/csv"})); a.download=`${M.study}_ai_vs_${reviewer().replace(/\W+/g,"_")||"reviewer"}.csv`; a.click(); status("Exported "+a.download) }
+function setTab(t){ $$("#tabs button").forEach(b=>b.classList.toggle("on",b.dataset.tab===t)); $$(".tab").forEach(e=>e.classList.toggle("on",e.id==="tab-"+t)); LSS("tab",t); draw() }
+
+// ---------- missed cSS ----------
+function renderMissed(){ $("#misslist").innerHTML=missed.length?missed.map(m=>`<div class="miss"><button class="btn" data-go="${m.missed_id}" title="go to it">${m.missed_id}</button><input type="text" data-mid="${m.missed_id}" value="${esc(m.comment)}" placeholder="note (${esc(m.reviewer)})"><button class="btn" data-del="${m.missed_id}" title="delete">×</button></div><div class="mut sm" style="margin:-2px 0 6px 2px">${esc(m.shape||"point")} · ${esc(m.detector_fate||"")}</div>`).join(""):'<span class="mut sm">None. Press X, draw a rectangle or trace with the pen, then Save.</span>'; if(M)paintLists() }
+async function missedApi(body){ if(!reviewer()){status("Enter your name first.",true);return false} try{ const r=await api("/api/missed",Object.assign({study:M.study,reviewer:reviewer()},body)); setMissed(r.missed); draw(); status("✓ Saved · "+r.saved.slice(11)); return true }catch(e){status("NOT SAVED: "+e.message,true);return false} }
+function setShape(s){ shape=s; $("#dRect").classList.toggle("on",s==="rect"); $("#dPen").classList.toggle("on",s==="pen"); if(draft&&draft.type!==s){draft=null;draw()} }
+async function saveDraft(){ if(!draft||!draft.strokes.length||(draft.type==="rect"&&draft.strokes[0].length<2)){$("#readout").textContent="Draw the missed cSS first.";return}
+  const ok=await missedApi({action:"add",plane:draft.k,slice:draft.s,shape:draft.type,strokes:draft.strokes,comment:$("#dNote").value}); if(ok){draft=null;$("#dNote").value="";$("#readout").textContent="Missed cSS saved. Draw another, or Esc to finish.";draw()} }
+function cancelDraft(){ draft=null; $("#dNote").value=""; setTool("nav") }
+function undoStroke(){ if(draft){draft.strokes.pop(); if(!draft.strokes.length)draft=null; draw()} }
+
+// ---------- tools ----------
+function setTool(t){ tool=t; if(t!=="miss")draft=null; $$(".tool").forEach(b=>b.classList.toggle("on",b.dataset.tool===t)); vps.forEach(v=>v.cv.style.cursor=t==="nav"?"grab":"crosshair");
+  $("#drawbar").classList.toggle("show",t==="miss"); if(t==="miss")setShape(shape);
+  $("#readout").textContent={nav:"",dark:"Darkness probe: click a point.",ruler:"Ruler: drag a line.",miss:"Missed cSS: draw on the slice where it is clearest, then Save."}[t]; draw() }
+function doProbe(k,p){ const V=VIEWS[k],d=[nx,ny,nz]; let s=0,n=0; for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const q=p.slice();q[V.h]+=a;q[V.v]+=b; if(q[V.h]<0||q[V.v]<0||q[V.h]>=d[V.h]||q[V.v]>=d[V.v])continue; s+=VOL[IDX(q[0],q[1],q[2])];n++}
+  const m=seqmeta[seq],raw=m.lo+(s/n/65535)*(m.hi-m.lo); probe={k,p}; let t=`${m.label} signal ${raw.toFixed(seq==="phase"?2:0)} (3×3 mean)`;
+  if(seq==="swi"){const z=(raw-M.ref.mu)/M.ref.sd; t+=`\n${Math.round(100*raw/M.ref.mu)} % of normal ${M.ref.src}  ·  ${z>=0?"+":""}${z.toFixed(1)} SD`+(z<=-2.5?"  (dark: detector range)":z<=-2?"  (borderline dark)":"  (not dark)")}
+  else if(seq==="phase") t+=" rad"; $("#readout").textContent=t; draw() }
+vps.forEach((vp,k)=>{ const c=vp.cv; let st=null; const pos=e=>{const r=c.getBoundingClientRect();return [e.clientX-r.left,e.clientY-r.top]};
+  c.addEventListener("mouseenter",()=>{hover=k;vps.forEach((v,j)=>v.el.classList.toggle("act",j===k))});
+  c.addEventListener("mousemove",e=>{const [x,y]=pos(e);mouse={k,x,y}; if(mag)drawLens()});
+  c.addEventListener("mouseleave",()=>{mouse=null;drawLens()});
+  c.addEventListener("contextmenu",e=>e.preventDefault());
+  c.addEventListener("wheel",e=>{ e.preventDefault(); if(!VOL)return; if(e.ctrlKey||e.metaKey){setZoom(zoom*Math.exp(-e.deltaY*(e.deltaMode?0.05:0.004)));return} if(Math.abs(e.deltaY)<1)return; step(k,e.deltaY>0?-1:1) },{passive:false});
+  c.addEventListener("mousedown",e=>{ if(!VOL)return; e.preventDefault(); closeMenus(); if(document.activeElement&&document.activeElement.blur)document.activeElement.blur(); const [mx,my]=pos(e);
+    st={b:e.button,x:e.clientX,y:e.clientY,moved:false,ctr:ctr.slice(),wl:getWL(),p0:toVox(k,mx,my),wlmode:e.button===2||(e.button===0&&e.shiftKey&&tool==="nav")||(e.button===0&&e.ctrlKey&&MAC),menu:e.button===2||(e.button===0&&e.ctrlKey&&MAC)};
+    if(st.wlmode)return;
+    if(e.button===0&&tool==="ruler"){ruler={k,s:cur[VIEWS[k].s],a:st.p0,b:st.p0,mm:0}}
+    if(e.button===0&&tool==="miss"){ const s=cur[VIEWS[k].s],p=toVoxF(k,mx,my); if(!draft||draft.k!==k||draft.s!==s||draft.type!==shape||shape==="rect")draft={k,s,type:shape,strokes:[]};
+      draft.strokes.push(shape==="rect"?[p,p]:[p]); draw() } });
+  window.addEventListener("mousemove",e=>{ if(!st)return; const dx=e.clientX-st.x,dy=e.clientY-st.y; if(Math.abs(dx)+Math.abs(dy)>3)st.moved=true; const g=geom(k),[mx,my]=pos(e);
+    if(st.wlmode){ if(st.moved)setWL(st.wl[0]-dx*0.15,st.wl[1]-dy*0.15) }
+    else if(st.b===0&&tool==="ruler"&&ruler){ ruler.b=toVox(k,mx,my); const V=g.V; ruler.mm=Math.hypot((ruler.b[V.h]-ruler.a[V.h])*vox[V.h],(ruler.b[V.v]-ruler.a[V.v])*vox[V.v]); $("#readout").textContent="Length "+ruler.mm.toFixed(1)+" mm"; draw() }
+    else if(st.b===0&&tool==="miss"&&draft){ const s=draft.strokes[draft.strokes.length-1],p=toVoxF(k,mx,my); if(draft.type==="rect")s[1]=p; else s.push(p); draw() }
+    else if(st.b===0&&tool==="nav"&&st.moved){ ctr=st.ctr.slice(); ctr[g.V.h]=st.ctr[g.V.h]+dx/g.sx; ctr[g.V.v]=st.ctr[g.V.v]+dy/g.sy; draw() } });
+  window.addEventListener("mouseup",e=>{ if(!st)return; const s=st; st=null;
+    if(s.wlmode){ if(s.menu&&!s.moved)ctxMenu(e.clientX,e.clientY,k,s.p0); return } if(s.b!==0)return;
+    if(tool==="dark"){doProbe(k,s.p0)}
+    else if(tool==="miss"&&draft){ const t=draft.strokes[draft.strokes.length-1]; if(draft.type==="rect"&&!s.moved){draft=null;draw()} else if(draft.type==="rect"){const V=VIEWS[k]; $("#readout").textContent=`Rectangle ${(Math.abs(t[1][V.h]-t[0][V.h])*vox[V.h]).toFixed(0)} × ${(Math.abs(t[1][V.v]-t[0][V.v])*vox[V.v]).toFixed(0)} mm · Enter = save`} }
+    else if(tool==="nav"&&!s.moved){ cur=s.p0; draw() } });
+});
+function step(k,d){ const V=VIEWS[k],n=[nx,ny,nz][V.s]; cur[V.s]=Math.max(0,Math.min(n-1,cur[V.s]+d)); draw() }
+
+// ---------- actions, menu bar, right-click menu ----------
+function tog(){ $("#tMark").classList.toggle("on",showMark); $("#tOther").classList.toggle("on",showOther); $("#tMip").classList.toggle("on",mip); $("#tAuto").classList.toggle("on",autoNext); $("#tMag").classList.toggle("on",mag); $("#aibody").style.display=showAI?"":"none"; LSS("mark",showMark);LSS("other",showOther);LSS("auto",autoNext);LSS("ai",showAI); draw() }
+const A={
+ summary:{l:"Summary and score",k:"Q",f:summary}, exportcsv:{l:"Export AI vs reviewer (CSV)",k:"E",f:exportCsv},
+ undo:{l:"Undo last decision",k:"Z",f:doUndo}, clear:{l:"Clear this decision",k:"⌫",f:()=>decide("")}, comment:{l:"Add a comment",k:"C",f:()=>{setTab("viewer");setTimeout(()=>$("#comment").focus(),0)}},
+ mark:{l:"Show this marking",k:"M",f:()=>{showMark=!showMark;tog()},on:()=>showMark}, other:{l:"Show other markings",k:"O",f:()=>{showOther=!showOther;tog()},on:()=>showOther},
+ mag:{l:"Magnifier",k:"B",f:()=>{mag=!mag;tog()},on:()=>mag}, mip:{l:"minIP slab",k:"I",f:()=>{mip=!mip;tog()},on:()=>mip}, ai:{l:"Show the AI meter",k:"K",f:()=>{showAI=!showAI;tog()},on:()=>showAI},
+ zin:{l:"Zoom in",k:"+",f:()=>setZoom(zoom*1.2)}, zout:{l:"Zoom out",k:"-",f:()=>setZoom(zoom/1.2)}, reset:{l:"Reset view",k:"R",f:resetView}, centre:{l:"Centre on candidate",k:"F",f:()=>go(ci)},
+ tviewer:{l:"Panel: viewer",k:"F1",f:()=>setTab("viewer")}, tcands:{l:"Panel: candidates",k:"F2",f:()=>setTab("cands")}, tcalls:{l:"Panel: calls summary",k:"F3",f:()=>setTab("calls")},
+ prev:{l:"Previous candidate",k:"←",f:()=>go(ci-1)}, next:{l:"Next candidate",k:"→",f:()=>go(ci+1)}, unread:{l:"Next unread",k:"J",f:nextUnread},
+ auto:{l:"Auto-next after a decision",k:"G",f:()=>{autoNext=!autoNext;tog();status("Auto-next "+(autoNext?"on":"off"))},on:()=>autoNext},
+ nav:{l:"Navigate (pan / crosshair)",k:"Esc",f:()=>setTool("nav"),on:()=>tool==="nav"}, dark:{l:"Darkness probe",k:"D",f:()=>setTool(tool==="dark"?"nav":"dark"),on:()=>tool==="dark"},
+ ruler:{l:"Ruler",k:"L",f:()=>setTool(tool==="ruler"?"nav":"ruler"),on:()=>tool==="ruler"}, miss:{l:"Mark a missed cSS…",k:"X",f:()=>setTool(tool==="miss"?"nav":"miss"),on:()=>tool==="miss"},
+ help:{l:"Keys and reading rules",k:"?",f:()=>$("#help").classList.toggle("show")} };
+Object.entries(CALLKEYS).forEach(([k,c])=>A["call_"+k]={l:"Decide: "+CALLLBL[c],k:k.toUpperCase(),f:()=>decide(c),on:()=>M&&M.cands[ci]&&callOf(M.cands[ci])===c});
+const seqItems=()=>M.seqs.map((s,i)=>({l:s.label,k:String(i+1),f:()=>setSeq(s.key),on:()=>seq===s.key})).concat(M.missing_seqs.map(n=>({l:n+" (not imported)",dis:true})));
+const themeItems=()=>["light","dark","blue"].map(t=>({l:t==="blue"?"Eye-preserving blue":t[0].toUpperCase()+t.slice(1),f:()=>theme(t),on:()=>document.documentElement.dataset.theme===t}));
+const studyItems=()=>M.studies.map(s=>({l:s,f:()=>loadStudy(s),on:()=>s===M.study}));
+const MENUS={ file:()=>[{sub:"Open study",items:studyItems},"-","summary","exportcsv"], edit:()=>["undo","clear","comment"],
+ view:()=>["mark","other","mag","mip","ai","-",{sub:"Sequence",items:seqItems},{sub:"Theme",items:themeItems},"-","zin","zout","reset","centre","-","tviewer","tcands","tcalls"],
+ cand:()=>["prev","next","unread","-","call_y","call_v","call_n","call_a","call_u","call_h","-","auto"], tools:()=>["nav","mag","dark","ruler","miss"], help:()=>["help"] };
+function closeMenus(){ $$(".menu").forEach(m=>m.remove()); $$("#mbar span").forEach(s=>s.classList.remove("on")); drawLens() }
+function openMenu(items,x,y,level){ $$(".menu").forEach(m=>{if(+m.dataset.level>=level)m.remove()});
+  const m=document.createElement("div"); m.className="menu"; m.dataset.level=level;
+  for(const it0 of items){ if(it0==="-"){m.appendChild(document.createElement("hr"));continue} const it=typeof it0==="string"?A[it0]:it0; const d=document.createElement("div");
+    d.innerHTML=`<span class="ck">${it.on&&it.on()?"✓":""}</span><span>${esc(it.sub||it.l)}</span><span class="k">${it.sub?"▸":esc(it.k||"")}</span>`; if(it.dis)d.className="dis";
+    const unhi=()=>$$(".menu div.hi").forEach(e=>{if(e.parentNode===m)e.classList.remove("hi")});
+    if(it.sub){ const open=()=>{unhi();d.classList.add("hi");const r=d.getBoundingClientRect();openMenu(it.items(),r.right-2,r.top-5,level+1)}; d.addEventListener("mouseenter",open); d.addEventListener("click",e=>{e.stopPropagation();open()}) }
+    else { d.addEventListener("mouseenter",()=>{$$(".menu").forEach(q=>{if(+q.dataset.level>level)q.remove()});unhi()}); d.addEventListener("click",e=>{e.stopPropagation();closeMenus();it.f()}) }
+    m.appendChild(d) }
+  document.body.appendChild(m); const r=m.getBoundingClientRect(); m.style.left=Math.max(4,Math.min(x,innerWidth-r.width-6))+"px"; m.style.top=Math.max(4,Math.min(y,innerHeight-r.height-6))+"px"; return m }
+function ctxMenu(x,y,k,p){ closeMenus(); $("#lens").style.display="none";
+  openMenu(["mark","other","mag","mip","-",{sub:"Sequence",items:seqItems},{l:"Mark a missed cSS here…",k:"X",f:()=>{cur[VIEWS[k].s]=p[VIEWS[k].s];setTool("miss")}},"dark","ruler","-","centre","reset"],x,y,0) }
+$$("#mbar span").forEach(s=>{ const open=()=>{closeMenus();s.classList.add("on");const r=s.getBoundingClientRect();openMenu(MENUS[s.dataset.m](),r.left,r.bottom+2,0)};
+  s.addEventListener("click",e=>{e.stopPropagation(); if(s.classList.contains("on"))closeMenus(); else open()}); s.addEventListener("mouseenter",()=>{if($("#mbar span.on")&&!s.classList.contains("on"))open()}) });
+window.addEventListener("mousedown",e=>{ if(!e.target.closest(".menu")&&!e.target.closest("#mbar"))closeMenus() });
+
+// ---------- controls ----------
+$("#dec").innerHTML=Object.entries(CALLKEYS).map(([k,c])=>`<button class="b" data-call="${c}"><kbd>${k.toUpperCase()}</kbd>${CALLLBL[c]}</button>`).join("");
+$("#dec").addEventListener("click",e=>{const b=e.target.closest(".b"); if(b)decide(b.dataset.call)});
+$("#strip").addEventListener("click",e=>{const d=e.target.dataset.i; if(d!==undefined)go(+d)});
+for(const id of ["#candtable","#cmptable"]) $(id).addEventListener("click",e=>{const r=e.target.closest("tr.r"); if(r)go(+r.dataset.i)});
+$$("#themes button").forEach(b=>b.onclick=()=>theme(b.dataset.t));
+$$("#tabs button").forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+$$(".tool").forEach(b=>b.onclick=()=>setTool(b.dataset.tool));
+$("#seq").onchange=e=>{setSeq(e.target.value);e.target.blur()};
+$("#study").onchange=e=>{loadStudy(e.target.value);e.target.blur()};
+$("#zoom").oninput=e=>setZoom(Math.pow(12,e.target.value/100));
+$("#win").oninput=e=>setWL(101-e.target.value,getWL()[1]); $("#lev").oninput=e=>setWL(getWL()[0],+e.target.value);
+$("#tMark").onclick=A.mark.f; $("#tOther").onclick=A.other.f; $("#tMip").onclick=A.mip.f; $("#tAuto").onclick=A.auto.f; $("#tMag").onclick=A.mag.f;
+$("#bReset").onclick=resetView; $("#bCentre").onclick=()=>go(ci); $("#bScore").onclick=summary; $("#bExport").onclick=exportCsv; $("#bUnread").onclick=nextUnread;
+$("#bDiffer").onclick=()=>{onlyDiffer=!onlyDiffer;paintLists()};
+$("#dRect").onclick=()=>setShape("rect"); $("#dPen").onclick=()=>setShape("pen"); $("#dUndo").onclick=undoStroke; $("#dSave").onclick=saveDraft; $("#dCancel").onclick=cancelDraft;
+$("#misslist").addEventListener("click",e=>{const d=e.target.dataset; if(d.del)missedApi({action:"delete",id:+d.del}); if(d.go){const m=missed.find(x=>x.missed_id==d.go); if(m){cur=[m.can_i,m.can_j,m.can_k]; if(m.pts){cur[VIEWS[+m.plane].s]=+m.slice} ctr=cur.slice();draw()}}});
+$("#misslist").addEventListener("change",e=>{const d=e.target.dataset; if(d.mid)missedApi({action:"comment",id:+d.mid,comment:e.target.value})});
+$$(".modal").forEach(m=>m.addEventListener("click",e=>{if(e.target===m)m.classList.remove("show")}));
+$("#comment").addEventListener("blur",saveComment);
+$("#reviewer").addEventListener("change",async()=>{ const n=reviewer(); if(!n)return; await api("/api/reviewer",{name:n}); await loadStudy(M.study); status("Reviewer: "+n) });
+window.addEventListener("resize",draw);
+window.addEventListener("keydown",e=>{ const tag=(e.target.tagName||"").toLowerCase(), typing=tag==="input"&&e.target.type==="text";
+  if(e.key==="Escape"){ if($(".menu")){closeMenus();return} if(typing){e.target.blur();return} if($(".modal.show")){$$(".modal").forEach(m=>m.classList.remove("show"));return} if(tool==="miss"){cancelDraft();return} setTool("nav"); ruler=null;probe=null;draw(); return }
+  if(typing){ if(e.key==="Enter"){ if(e.target.id==="dNote"){e.target.blur();saveDraft()} else e.target.blur() } return }
+  if(e.altKey||((e.metaKey||e.ctrlKey)&&!["=","-","+","_"].includes(e.key)))return; if(!M)return;
+  const k=e.key.length===1?e.key.toLowerCase():e.key; let used=true;
+  if(tool==="miss"&&k==="Enter")saveDraft(); else if(tool==="miss"&&k==="w")setShape(shape==="rect"?"pen":"rect"); else if(tool==="miss"&&(k==="Backspace"||k==="Delete"))undoStroke();
+  else if(CALLKEYS[k])decide(CALLKEYS[k]);
+  else if(k==="ArrowRight")go(ci+1); else if(k==="ArrowLeft")go(ci-1); else if(k==="j")nextUnread();
+  else if(k==="ArrowUp")step(hover,1); else if(k==="ArrowDown")step(hover,-1); else if(k==="PageUp")step(hover,5); else if(k==="PageDown")step(hover,-5);
+  else if(k==="="||k==="+"||e.code==="NumpadAdd")setZoom(zoom*1.2); else if(k==="-"||k==="_"||e.code==="NumpadSubtract")setZoom(zoom/1.2);
+  else if(k==="[")setWL(getWL()[0],getWL()[1]-2); else if(k==="]")setWL(getWL()[0],getWL()[1]+2);
+  else if(k===";")setWL(getWL()[0]*1.1,getWL()[1]); else if(k==="'")setWL(getWL()[0]/1.1,getWL()[1]);
+  else if(k==="r")resetView(); else if(k==="f")go(ci);
+  else if(k==="m")A.mark.f(); else if(k==="o")A.other.f(); else if(k==="i")A.mip.f(); else if(k==="g")A.auto.f(); else if(k==="k")A.ai.f(); else if(k==="b")A.mag.f();
+  else if(k==="s")nextSeq(); else if(/^[1-5]$/.test(k)){const s=M.seqs[+k-1]; if(s)setSeq(s.key)}
+  else if(k==="t"){const t=["light","dark","blue"];theme(t[(t.indexOf(document.documentElement.dataset.theme)+1)%3])}
+  else if(k==="d")A.dark.f(); else if(k==="l")A.ruler.f(); else if(k==="x")A.miss.f();
+  else if(k==="c")A.comment.f(); else if(k==="z")doUndo(); else if(k==="Backspace"||k==="Delete")decide("");
+  else if(k==="q")summary(); else if(k==="e")exportCsv(); else if(k==="F1")setTab("viewer"); else if(k==="F2")setTab("cands"); else if(k==="F3")setTab("calls");
+  else if(k==="?"||k==="/")A.help.f(); else used=false;
+  if(used)e.preventDefault() });
+theme(LS("theme","dark")); setTab(LS("tab","viewer")); setTool("nav"); tog();
+loadStudy("").catch(e=>status("Could not load: "+e.message,true));
+</script></body></html>
+````
+
+## tests/run_tests.sh
+
+````bash
+#!/bin/bash
+# Self-test with a synthetic phantom brain - no patient data, no FreeSurfer needed.
+# usage: bash tests/run_tests.sh      (from the package root, inside the 'css' conda env)
+# Shell flow of run_css.sh / prep_anat.sh with stubbed FreeSurfer: bash tests/test_shell.sh
+set -e
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+T=$(mktemp -d); export CSS_BASE=$T FREESURFER_HOME=$T/fs CSS_REVIEW_TEST=1
+mkdir -p $T/data $T/synthseg $T/work $T/review $T/results $T/fs $T/scripts
+cp $ROOT/scripts/*.py $T/scripts/
+printf '0 Unknown 0 0 0 0\n2 Left-Cerebral-White-Matter 245 245 245 0\n24 CSF 60 60 60 0\n41 Right-Cerebral-White-Matter 245 245 245 0\n1022 ctx-lh-postcentral 220 20 20 0\n1028 ctx-lh-superiorfrontal 20 220 160 0\n2022 ctx-rh-postcentral 220 20 20 0\n2028 ctx-rh-superiorfrontal 20 220 160 0\n' > $T/fs/FreeSurferColorLUT.txt
+S=$T/scripts
+echo "== phantoms";            python $ROOT/tests/phantom.py PH1 1; python $ROOT/tests/phantom.py PH2 2
+echo "== align";               python $S/align_seg.py PH1; python $S/align_seg.py PH2
+echo "== detect (clean)";      python $S/detect_css.py PH1 | head -1
+echo "== export";              python $S/export_review.py PH1 3
+echo "== synthetic lesions";   python $S/make_synthetic.py PH1 8 0.6 1 | head -1
+cp $T/synthseg/PH1_seg.nii.gz $T/synthseg/PH1S_seg.nii.gz; python $S/align_seg.py PH1S > /dev/null
+python $S/detect_css.py PH1S | head -1
+R=$(python $S/eval_synthetic.py PH1S | grep RESULT); echo "$R"
+FOUND=$(echo "$R" | sed -E 's/.*found=([0-9]+).*/\1/')
+[ "$FOUND" -ge 4 ] || { echo "FAIL: sensitivity too low ($FOUND/8)"; exit 1; }
+echo "== scoring with truth";  python $S/score_css.py PH1S --truth > $T/score_test.log; grep -A2 "cSS multifocality" $T/score_test.log
+echo "== interactive reviewer (headless test mode)"; python $S/review_css.py PH1S --top 8 --redo > $T/review_test.log; grep "cSS multifocality" $T/review_test.log
+echo "== calls survive a detector re-run (fingerprint matching)"
+cp $T/review/PH1S_candidates.csv $T/old_cand.csv
+python $S/detect_css.py PH1S -2.3 80 3 > /dev/null
+python - "$T" <<'PYEOF'
+import sys, pandas as pd; sys.path.insert(0, sys.argv[1] + "/scripts")
+from css_common import load_calls, FP
+b = sys.argv[1]; old = pd.read_csv(b + "/old_cand.csv"); new = pd.read_csv(b + "/review/PH1S_candidates.csv")
+raw = pd.read_csv(b + "/review/PH1S_calls.csv"); calls, warn = load_calls(b, "PH1S", new)
+for cid, call in calls.items():          # every re-attached call must sit on the same lesion as before
+    r = raw[raw.call == call]; n = new.set_index("cand_id").loc[cid]
+    assert (((r[FP[:3]] - n[FP[:3]].astype(float)) ** 2).sum(axis=1) ** .5 <= 2).any(), (cid, call)
+print(f"   {len(calls)}/{len(raw)} calls re-attached by fingerprint" + (f"; {warn}" if warn else ""))
+PYEOF
+python $S/detect_css.py PH1S > /dev/null
+echo "== feature report";      python $S/feature_report.py | head -3
+echo "== stress test (small)"; python $S/stress_test.py --hosts PH1,PH2 --depths 0.6 --seeds 1 --tag test | grep -A2 SUMMARY
+python $S/stress_test.py --hosts PH1 --depths 0.6 --seeds 1 --tag test_legacy --legacy | grep -A1 SUMMARY
+echo "== v4 phantom: tram-track / convexity cSS vs tubular & surface veins, ICH, sulcal scoring"
+python $ROOT/tests/phantom_v4.py PH3 1; python $S/align_seg.py PH3 > /dev/null
+python $S/detect_css.py PH3 | head -1
+python $ROOT/tests/check_v4.py PH3 | tail -3
+echo "== surface measure + agreement statistics (van Harten 2023)"
+python $S/score_css.py PH3 --truth | grep "cortical surface covered" || { echo "FAIL: surface measure"; exit 1; }
+cp -R $T/review $T/sessA; cp -R $T/review $T/sessB
+python $S/score_css.py PH1S --truth > /dev/null; cp $T/review/css_scores.csv $T/sessA/; cp $T/review/css_scores.csv $T/sessB/
+python $S/agreement.py --a $T/sessA --b $T/sessB | grep -q "ICC(A,1) 1.000" || { echo "FAIL: agreement on identical sessions"; exit 1; }
+echo "   identical sessions -> ICC 1.000"
+echo "== rule_test (known lesions vs a negative scan)"
+python $S/rule_test.py --pos PH3 --old $T/work/PH3_truth.nii.gz --ids 1,2,3,4,5,6 --neg PH1 | grep -q "known cSS (PH3)" || { echo "FAIL: rule_test"; exit 1; }
+python $S/score_css.py PH3 --truth > $T/score_v4.log
+grep -q "3/4" $T/score_v4.log && grep -q "sulcal (Destrieux)" $T/score_v4.log || { cat $T/score_v4.log; echo "FAIL: sulcal score on PH3 should be 3/4 (L1 + R2)"; exit 1; }
+grep -A3 "cSS multifocality" $T/score_v4.log
+echo "== reviewer with a phase image (calcium vs blood-product panel)"
+python - "$T" <<'PYEOF'
+import sys, numpy as np, nibabel as nib
+b = sys.argv[1]; r = nib.load(b + "/data/PH3_swi.nii")
+ph = np.random.default_rng(0).integers(-4096, 4096, r.shape).astype(np.int16)   # scanner-unit phase
+nib.save(nib.Nifti1Image(ph, r.affine), b + "/data/PH3_phase.nii.gz")
+PYEOF
+CSS_REVIEW_TEST=1 python $S/review_css.py PH3 --top 2 --redo > /dev/null && [ -s $T/review/PH3_review_preview.png ] && echo "   phase panel rendered"
+rm $T/data/PH3_phase.nii.gz
+python $S/score_css.py PH3 --truth > $T/score_v4.log
+echo "== ICH rule in sulci (Charidimou 2017): reader-drawn ICH -> left foci next to it excluded"
+cp $T/work/PH3_ich_truth.nii.gz $T/work/PH3_ich.nii.gz
+python $S/score_css.py PH3 --truth > $T/score_ich.log; rm $T/work/PH3_ich.nii.gz
+grep -q "2/4" $T/score_ich.log && grep -q "EXCLUDED" $T/score_ich.log || { cat $T/score_ich.log; echo "FAIL: ICH sulcal rule"; exit 1; }
+grep "ICH rule" $T/score_ich.log
+echo "== Boston v2.0 cSS count by gyri: all foci -> >=2; left only (2 adjacent gyri) -> 1"
+grep -q "Boston v2.0 cSS count: >=2" $T/score_v4.log || { cat $T/score_v4.log; echo "FAIL: Boston v2.0 >=2"; exit 1; }
+python -c "import pandas as pd,sys; p=sys.argv[1]+'/review/PH3_candidates.csv'; d=pd.read_csv(p); d.loc[d.hemi=='R','accept']=0; d.to_csv(p,index=False)" $T
+python $S/score_css.py PH3 > $T/score_b2.log
+grep -q "Boston v2.0 cSS count: 1 focus" $T/score_b2.log || { cat $T/score_b2.log; echo "FAIL: Boston v2.0 single focus"; exit 1; }
+grep "Boston" $T/score_v4.log $T/score_b2.log
+echo "== expert sheet (blinded PDF) + import of the expert's letters"
+python $S/detect_css.py PH3 > /dev/null
+python $S/expert_sheet.py PH3 | head -1
+[ -s $T/review/PH3_expert_sheet.pdf ] || { echo "FAIL: no expert sheet"; exit 1; }
+python - "$T" <<'PYEOF'
+import sys, pandas as pd, nibabel as nib, numpy as np
+b = sys.argv[1]; key = pd.read_csv(b + "/review/PH3_expert_key.csv")
+truth = nib.load(b + "/work/PH3_truth.nii.gz").get_fdata() > 0
+cand = nib.load(b + "/review/PH3_candidates.nii.gz").get_fdata().astype(int)
+letters = " ".join(f"{n}{'C' if (truth[cand == c]).mean() > 0.2 else 'V'}" for n, c in zip(key.sheet_no, key.cand_id))
+open(b + "/letters.txt", "w").write(letters)
+PYEOF
+python $S/expert_import.py PH3 expertA --letters "$(cat $T/letters.txt)" --score | grep -E "expert|multifocality"
+python - "$T" <<'PYEOF'
+import sys, pandas as pd, nibabel as nib
+b = sys.argv[1]; e = pd.read_csv(b + "/review/PH3_expert_expertA.csv")
+want = open(b + "/letters.txt").read().count("C")
+assert (e.call == "cSS").sum() == want, (e.call.value_counts(), want)   # every C mapped back to its candidate
+print("   expert calls mapped back to the right candidates")
+PYEOF
+python $S/feature_report.py | head -2
+echo "== normal anatomy: a dark line on the cerebellum must be excluded, cSS lesions kept"
+python $ROOT/tests/phantom_infra.py; python $S/align_seg.py PH4 > /dev/null
+python $S/detect_css.py PH4 | head -1
+python $S/check_known.py PH4 --old $T/work/PH3_truth.nii.gz --ids 1,2,3,4,5,6 | tail -1 | grep -q "6 of 6" \
+  || { python $S/check_known.py PH4 --old $T/work/PH3_truth.nii.gz --ids 1,2,3,4,5,6; echo "FAIL: cSS lost on PH4"; exit 1; }
+python $S/check_known.py PH4 --old $T/work/PH4_infra_line.nii.gz --ids 1 | head -1
+python $S/check_known.py PH4 --old $T/work/PH4_infra_line.nii.gz --ids 1 | head -1 | grep -q "kept" \
+  && { echo "FAIL: cerebellar line still shown as a candidate"; exit 1; }
+echo "== partial-coverage slab (bottom cut off) with T1 anatomy: skull-base rules must switch off"
+python - "$T" <<'PYEOF'
+import sys, numpy as np, nibabel as nib
+b = sys.argv[1]; img = nib.load(b + "/data/PH3_swi.nii"); I = img.get_fdata().astype(np.float32)
+seg = nib.load(b + "/work/PH3_seg_swispace.nii.gz").get_fdata().astype(np.int32)
+I[:, :, :30] = 0; seg[:, :, :30] = 0                      # slab starts in the middle of the brain
+nib.save(nib.Nifti1Image(I, img.affine), b + "/data/PH5_swi.nii")
+nib.save(nib.Nifti1Image(seg, img.affine), b + "/synthseg/PH5_seg.nii.gz")
+nib.save(nib.Nifti1Image(seg, img.affine), b + "/work/PH5_t1seg_swispace.nii.gz")   # pretend T1 labels
+PYEOF
+python $S/align_seg.py PH5 > /dev/null
+python $S/detect_css.py PH5 | head -2 | tee $T/ph5.log
+grep -q "anatomy T1" $T/ph5.log && grep -q "cut off at the bottom" $T/ph5.log || { echo "FAIL: coverage / anatomy detection"; exit 1; }
+grep -q "skull base" $T/ph5.log && { echo "FAIL: skull-base rule active on a cut-off slab"; exit 1; }
+echo "== T1 anatomy on the cerebellum phantom: position rules active, cSS kept"
+cp $T/synthseg/PH4_seg.nii.gz $T/work/PH4_t1seg_swispace.nii.gz; python $S/align_seg.py PH4 > /dev/null
+python $S/detect_css.py PH4 | head -2
+python $S/check_known.py PH4 --old $T/work/PH3_truth.nii.gz --ids 1,2,3,4,5,6 | tail -1 | grep -q "6 of 6" || { echo "FAIL: cSS lost (T1 mode)"; exit 1; }
+python $S/check_known.py PH4 --old $T/work/PH4_infra_line.nii.gz --ids 1 | head -1 | grep -q "kept" && { echo "FAIL: cerebellar line kept (T1 mode)"; exit 1; }
+echo "== v4.14 case QC, generation-gate log, extent at the volume edge, CSV column contract"
+python $ROOT/tests/check_qc.py | tee $T/qc.log | grep -v "^RESULT"
+grep -q "RESULT qc OK" $T/qc.log || { echo "FAIL: v4.14 QC checks"; exit 1; }
+echo "== v4.17 Stage 2: recon-all CSF labels, Hessian at the mask edge, E8 needs T1, stale inputs, manifest"
+python $ROOT/tests/check_stage2.py | tee $T/stage2.log | grep -v "^RESULT"
+python $ROOT/tests/check_v418.py | tee $T/v418.log | grep -v "^RESULT"
+python $ROOT/tests/check_make_swi.py | tee $T/mkswi.log | grep -v "^RESULT"
+python $ROOT/tests/check_mp2rage.py | tee $T/mp2.log | grep -v "^RESULT"
+grep -q "^RESULT mp2rage OK" $T/mp2.log || { echo "FAIL: mp2rage"; exit 1; }
+python $ROOT/tests/check_physics.py | tee $T/physics.log | grep -v "^RESULT"
+python $ROOT/tests/check_evaluate.py | tee $T/evaluate.log | grep -v "^RESULT"
+grep -q "^RESULT evaluate OK" $T/evaluate.log || { echo "FAIL: evaluate"; exit 1; }
+grep -q "^RESULT physics OK" $T/physics.log || { echo "FAIL: physics synthetic lesions"; exit 1; }
+grep -q "^RESULT make_swi OK" $T/mkswi.log || { echo "FAIL: make_swi"; exit 1; }
+grep -q "^RESULT v4.18 OK" $T/v418.log || { echo "FAIL: v4.18 checks"; exit 1; }
+grep -q "RESULT stage2 OK" $T/stage2.log || { echo "FAIL: v4.17 Stage 2 checks"; exit 1; }
+echo "== v4.15 expert labels: excluded objects on the sheet, fine codes, missed lesions, study metadata"
+python $ROOT/tests/check_labels.py | tee $T/labels.log | grep -v "^RESULT"
+grep -q "RESULT labels OK" $T/labels.log || { echo "FAIL: v4.15 label checks"; exit 1; }
+echo "== v4.17 two-reader consensus, adjudication, kappa"
+python $ROOT/tests/check_consensus.py | tee $T/consensus.log | grep -v "^RESULT"
+grep -q "RESULT consensus OK" $T/consensus.log || { echo "FAIL: v4.17 consensus checks"; exit 1; }
+echo "== v4.19.2 regional + contralateral reference (dark gyrus vs focal cSS)"
+python $ROOT/tests/check_region.py | tee $T/region.log | grep -E "^PH"
+grep -q "RESULT region OK" $T/region.log || { cat $T/region.log; echo "FAIL: v4.19.2 region checks"; exit 1; }
+echo "== v5.0 mimic layer (phase dipole fit, microbleed cluster, FLAIR; E10/E11 opt-in), QC strict, ranker"
+python $ROOT/tests/check_mimic.py | tee $T/mimic.log | grep -E "^(why not|scanner|microbleed|FLAIR|phase_z|CSS_USE)"
+grep -q "RESULT mimic OK" $T/mimic.log || { cat $T/mimic.log; echo "FAIL: v5.0 mimic checks"; exit 1; }
+python $ROOT/tests/check_qc_strict.py | tee $T/qcs.log | grep -vE "^RESULT"
+grep -q "RESULT qc_strict OK" $T/qcs.log || { cat $T/qcs.log; echo "FAIL: v5.0 QC strict checks"; exit 1; }
+python $ROOT/tests/check_ranker.py | tee $T/rank.log | grep -vE "^RESULT"
+grep -q "RESULT ranker OK" $T/rank.log || { cat $T/rank.log; echo "FAIL: v5.0 ranker checks"; exit 1; }
+echo "== v4.16 surface-following branching vein draining to a sinus (PH6): vein tracking + pial-surface features"
+python $ROOT/tests/phantom_surfvein.py; python $S/align_seg.py PH6 > /dev/null
+python $ROOT/tests/check_surfvein.py | tee $T/surfvein.log | grep -E "^(vein tracking|surface features)"
+grep -q "RESULT surfvein OK" $T/surfvein.log || { cat $T/surfvein.log; echo "FAIL: v4.16 surface-vein checks"; exit 1; }
+echo "== v5.1 fate invariant, CSF label 0/24, axis swap, obliquity, stale inputs, mimic layer costs no true lesion"
+python $ROOT/tests/check_v51.py | tee $T/v51.log | grep -vE "^RESULT"
+grep -q "RESULT v51 OK" $T/v51.log || { cat $T/v51.log; echo "FAIL: v5.1 checks"; exit 1; }
+echo "== v5.1.1 per-piece evidence / mixed objects, valid-sample fractions, missing inputs, label schema"
+python $ROOT/tests/check_v511.py | tee $T/v511.log | grep -vE "^RESULT"
+grep -q "RESULT v511 OK" $T/v511.log || { cat $T/v511.log; echo "FAIL: v5.1.1 checks"; exit 1; }
+echo "== v5.1.2 feature-spec families: units and phantom directions"
+python $ROOT/tests/check_v512.py | tee $T/v512.log | grep -vE "^RESULT"
+grep -q "RESULT v512 OK" $T/v512.log || { cat $T/v512.log; echo "FAIL: v5.1.2 checks"; exit 1; }
+echo "== v5.1.3 review-priority tiers (reading order only)"
+python $ROOT/tests/check_v513.py | tee $T/v513.log | grep -vE "^RESULT"
+grep -q "RESULT v513 OK" $T/v513.log || { cat $T/v513.log; echo "FAIL: v5.1.3 checks"; exit 1; }
+echo "== v5.2 surface-aligned patches, patch classifier, shared model code (nested LOPO, fold skipping, provenance)"
+python $ROOT/tests/check_v52.py | tee $T/v52.log | grep -vE "^RESULT"
+grep -q "RESULT v52 OK" $T/v52.log || { cat $T/v52.log; echo "FAIL: v5.2 checks"; exit 1; }
+echo "== v5.2.1 cohort import (series choice) and patient-level grade comparison"
+python $ROOT/tests/check_cohort.py | tee $T/cohort.log | grep -vE "^RESULT"
+grep -q "RESULT cohort OK" $T/cohort.log || { cat $T/cohort.log; echo "FAIL: v5.2.1 cohort checks"; exit 1; }
+echo "== v5.2.2 broken DICOM exports: unreadable files isolated, missing slices interpolated (opt-in)"
+python $ROOT/tests/check_dicom_repair.py | tee $T/repair.log | grep -vE "^RESULT"
+grep -q "RESULT repair OK" $T/repair.log || { cat $T/repair.log; echo "FAIL: v5.2.2 repair checks"; exit 1; }
+echo "== v5.2.5 SWI skull-stripped with the T1 labels (no SynthStrip): same detections on PH3"
+python $ROOT/tests/check_swi_mask.py | tee $T/swimask.log | grep -vE "^RESULT"
+grep -q "RESULT swimask OK" $T/swimask.log || { cat $T/swimask.log; echo "FAIL: v5.2.5 SWI mask checks"; exit 1; }
+echo "== v5.2 architecture contracts (user-supplied verify_updated_architecture.py)"
+python $ROOT/tests/verify_updated_architecture.py > $T/arch.log 2>&1 || true; grep -E "^(PASS|SKIP|FAIL) " $T/arch.log || true
+grep -q "  FAIL: 0" $T/arch.log || { cat $T/arch.log; echo "FAIL: architecture contracts"; exit 1; }
+echo "== v4.16 surface overlay for freeview (detector list / expert calls, Destrieux sulcus per object)"
+python $ROOT/tests/check_overlay.py | tee $T/overlay.log | grep -v "^RESULT"
+grep -q "RESULT overlay OK" $T/overlay.log || { echo "FAIL: v4.16 overlay checks"; exit 1; }
+echo "== stress test on a host with T1 anatomy (PH4)"
+python $S/stress_test.py --hosts PH4 --depths 0.6 --seeds 1 --tag t1host | grep -E "anatomy|darkness"
+echo "== v5.3 (CSS_V53=1): cortex-outline zone, skull band / extent / midline rules, second merge pass, tiers"
+python $ROOT/tests/check_v53.py | tee $T/v53.log | grep -v "^RESULT"
+grep -q "RESULT v53 OK" $T/v53.log || { echo "FAIL: v5.3 checks"; exit 1; }
+echo "== v5.4 browser reviewer server (review_web.py): calls, comments, missed marks, reviewer names"
+python $ROOT/tests/check_review_web.py | tee $T/rweb.log | grep -v "^RESULT"
+grep -q "RESULT review_web OK" $T/rweb.log || { echo "FAIL: review_web checks"; exit 1; }
+echo; echo "ALL TESTS PASSED  (temp dir $T)"
+````
+
+## tests/test_shell.sh
+
+````bash
+#!/bin/bash
+# Shell-flow test for run_css.sh + prep_anat.sh with STUBBED FreeSurfer tools and python
+# (checks argument parsing, which tools run in which order, and the re-use / staleness logic).
+# usage: bash tests/test_shell.sh        Uses real zsh if installed, else bash as a stand-in.
+set -e
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+T=$(mktemp -d); mkdir -p $T/bin $T/base/scripts; cp $ROOT/scripts/*.py $ROOT/scripts/*.sh $T/base/scripts/
+cat > $T/bin/fsstub <<'EOS'
+#!/bin/bash
+n=$(basename $0); echo "$n $*" >> $STUBLOG
+out=""; in=""; targ=""
+while [ $# -gt 0 ]; do case "$1" in
+  -o|--o) out=$2; shift 2;; -i|--i|--mov) [ -z "$in" ] && in=$2; shift 2;; --targ) targ=$2; shift 2;;
+  --reg) touch $2; shift 2;;
+  -s) [ "$n" = recon-all ] && mkdir -p $SUBJECTS_DIR/$2/mri && touch $SUBJECTS_DIR/$2/mri/aparc+aseg.mgz $SUBJECTS_DIR/$2/mri/aparc.a2009s+aseg.mgz; shift 2;;
+  *) [ "$n" = mri_convert ] && { [ -z "$in" ] && in=$1 || out=$1; }; shift;; esac; done
+[ -n "$out" ] && [ -n "$in" ] && cp "$in" "$out" 2>/dev/null || true
+EOS
+chmod +x $T/bin/fsstub
+for t in mri_convert mri_synthstrip mri_synthseg mri_coreg mri_vol2vol bbregister recon-all freeview; do ln -s fsstub $T/bin/$t; done
+# python stub: logs the call; v5.0 test hooks: STUB_DETECT_RC = exit code of detect_css.py, STUB_SPLIT = what the
+# split lookup in run_css.sh (python -c ...) prints
+cat > $T/bin/python <<'EOS'
+#!/bin/bash
+echo "python $(basename $1) ${*:2}" >> $STUBLOG
+[ "$1" = "-c" ] && [ -n "$STUB_SPLIT" ] && echo "$STUB_SPLIT"
+[ "$(basename $1)" = detect_css.py ] && [ -n "$STUB_DETECT_RC" ] && exit $STUB_DETECT_RC
+exit 0
+EOS
+chmod +x $T/bin/python; cp $T/bin/python $T/bin/python.std
+command -v zsh >/dev/null || { printf '#!/bin/bash\nexec bash "$@"\n' > $T/bin/zsh; chmod +x $T/bin/zsh; echo "(zsh not installed: using bash as a stand-in)"; }
+echo swi > $T/swi.nii; echo t1 > $T/t1.nii; echo fl > $T/fl.nii
+export PATH=$T/bin:$PATH STUBLOG=$T/log CSS_BASE=$T/base NOVIEW=1 SUBJECTS_DIR=/somewhere/else  # must be ignored
+SH="zsh"
+fail() { echo "FAIL: $1"; cat $T/log; exit 1; }
+seen() { grep -q "$1" $T/log || fail "expected call: $1"; }
+notseen() { ! grep -q "$1" $T/log || fail "unexpected call: $1"; }
+
+echo "== 1. SWI only"
+: > $T/log; $SH $T/base/scripts/run_css.sh P1 $T/swi.nii > /dev/null
+seen "mri_synthstrip -i $T/base/work/P1_raw"; seen "mri_synthseg --i $T/base/data/P1_swi.nii"
+seen "python align_seg.py P1"; seen "python detect_css.py P1 -2.5 85 3"; notseen mri_coreg
+echo "== 2. re-run: SynthSeg re-used"
+: > $T/log; $SH $T/base/scripts/run_css.sh P1 > /dev/null; notseen mri_synthseg; seen "detect_css.py P1"
+echo "== 3. SWI re-imported -> stale SynthSeg is redone"
+sleep 1; : > $T/log; $SH $T/base/scripts/run_css.sh P1 $T/swi.nii > /dev/null; seen "mri_synthseg --i $T/base/data/P1_swi.nii"
+echo "== 4. SWI + T1 + FLAIR (SynthSeg on T1, mri_coreg)"
+: > $T/log; $SH $T/base/scripts/run_css.sh P2 $T/swi.nii --t1 $T/t1.nii --flair $T/fl.nii > /dev/null
+seen "mri_synthseg --i $T/base/data/P2_t1.nii.gz"; seen "mri_coreg --mov $T/base/data/P2_swi.nii --ref $T/base/data/P2_t1.nii.gz"
+seen "mri_vol2vol --mov $T/base/data/P2_swi.nii --targ $T/base/work/P2_t1synthseg.nii.gz --lta $T/base/work/P2_swi2t1.lta --inv --interp nearest"
+seen "mri_coreg --mov $T/base/data/P2_flair.nii.gz --ref $T/base/data/P2_swi.nii"
+seen "mri_vol2vol --mov $T/base/data/P2_flair.nii.gz --targ $T/base/data/P2_swi.nii"
+notseen mri_synthstrip; seen "python swi_mask_from_t1.py P2"     # v5.2.5: with a T1, no SynthStrip at all
+echo "== 4b. CSS_SWI_SKULLSTRIP=synthstrip keeps the old route (SynthStrip on SWI, T1 and FLAIR)"
+: > $T/log; CSS_SWI_SKULLSTRIP=synthstrip $SH $T/base/scripts/run_css.sh P2 $T/swi.nii --t1 $T/t1.nii --flair $T/fl.nii > /dev/null
+seen "mri_synthstrip -i $T/base/work/P2_raw"; seen "mri_coreg --mov $T/base/data/P2_swi.nii --ref $T/base/work/P2_t1_brain"
+seen "mri_coreg --mov $T/base/work/P2_flair_brain.nii.gz --ref $T/base/data/P2_swi.nii"; notseen "swi_mask_from_t1.py"
+notseen "mri_synthseg --i $T/base/data/P2_swi.nii"; notseen recon-all; notseen bbregister
+grep -q '"method": "mri_coreg", "cost": null' $T/base/work/P2_reg.json || fail "registration QC record (mri_coreg)"
+echo "== 5. --recon (recon-all, bbregister, Destrieux)"
+: > $T/log; $SH $T/base/scripts/run_css.sh P3 $T/swi.nii --t1 $T/t1.nii --recon > /dev/null
+seen "recon-all -s P3"; seen "bbregister --s P3 --mov $T/base/data/P3_swi.nii --reg $T/base/work/P3_swi2t1.lta --t2 --init-coreg"
+notseen mri_synthstrip; seen "python swi_mask_from_t1.py P3"; seen "recon-all -s P3 -i $T/base/data/P3_t1.nii.gz -all -no-v8"
+seen "aparc.a2009s+aseg.mgz --lta $T/base/work/P3_swi2t1.lta --inv --interp nearest --o $T/base/work/P3_a2009s_swispace"
+grep -q '"method": "bbregister", "cost": null' $T/base/work/P3_reg.json || fail "registration QC record (bbregister, no mincost)"
+echo "== 6. recon-all already done -> re-used without --recon; bbregister mincost recorded"
+printf '#!/bin/bash\necho "bbregister $*" >> $STUBLOG\necho "0.512 1 2 3" > %s/base/work/P3_swi2t1.lta.mincost\n' $T > $T/bin/bbregister.new
+chmod +x $T/bin/bbregister.new; mv -f $T/bin/bbregister.new $T/bin/bbregister
+: > $T/log; $SH $T/base/scripts/prep_anat.sh P3 --t1 $T/t1.nii > /dev/null; notseen "recon-all"; seen bbregister
+grep -q '"cost": 0.512' $T/base/work/P3_reg.json || fail "bbregister mincost not recorded"
+echo "== 6a. v4.17.2: a missing --t1 file stops prep_anat and run_css before anything runs"
+: > $T/log; out=$($SH $T/base/scripts/prep_anat.sh P3 --t1 PATH_TO_T1 2>&1) && fail "prep_anat accepted a missing T1"
+echo "$out" | grep -q "T1 file not found" || fail "no clear message for a missing T1"; notseen mri_convert
+: > $T/log; $SH $T/base/scripts/run_css.sh P3 --t1 PATH_TO_T1 > /dev/null 2>&1 && fail "run_css went on after prep_anat failed"
+notseen "detect_css.py P3"
+echo "== 6a2. the imported copy data/ID_t1.nii.gz can be given as --t1"
+: > $T/log; $SH $T/base/scripts/prep_anat.sh P2 --t1 $T/base/data/P2_t1.nii.gz > /dev/null
+[ -s $T/base/data/P2_t1.nii.gz ] || fail "re-import of data/P2_t1.nii.gz lost the file"; seen "mri_coreg --mov"
+echo "== 6c. v4.18 run_lemon.sh: GRE -> SWI -> recon route for each subject, fixed P2xx ids, re-run keeps ids"
+for x in sub-1 sub-2 sub-3; do mkdir -p $T/lemon/$x/ses-01/anat; for f in acq-mag_GRE acq-phase_GRE acq-mp2rage_T1w inv-1_mp2rage inv-2_mp2rage acq-highres_FLAIR; do
+  echo $f > $T/lemon/$x/ses-01/anat/${x}_ses-01_${f}.nii.gz; done; done
+printf '#!/bin/bash\necho "python $(basename $1) ${*:2}" >> $STUBLOG\n[ "$(basename $1)" = make_swi.py ] && echo swi > $4\n[ "$(basename $1)" = mp2rage_robust.py ] && echo t1 > $5\nexit 0\n' > $T/bin/python
+: > $T/log; $SH $T/base/scripts/run_lemon.sh $T/lemon --subjects "sub-1 sub-2" --parallel 2 > $T/lemon.out 2>&1
+grep -q "OK     P201 (sub-1)" $T/lemon.out && grep -q "OK     P202 (sub-2)" $T/lemon.out || { cat $T/lemon.out; fail "run_lemon did not finish both subjects"; }
+seen "make_swi.py $T/lemon/sub-1/ses-01/anat/sub-1_ses-01_acq-mag_GRE.nii.gz"; seen "recon-all -s P202"
+seen "bbregister --s P201 --mov $T/base/data/P201_swi.nii"; seen "python detect_css.py P202"; seen "python study_meta.py P201 --split dev"
+seen "python mp2rage_robust.py $T/lemon/sub-1/ses-01/anat/sub-1_ses-01_acq-mp2rage_T1w.nii.gz"
+seen "mri_convert $T/base/work/P201_t1_robust.nii.gz"
+echo "== 6c2. recon-all fails (P203): unfinished subject folder moved aside, SynthSeg fallback on the T1, still OK"
+mkdir -p $T/base/subjects/P203/mri; mv $T/bin/recon-all $T/bin/recon-all.ok
+printf '#!/bin/bash\necho "recon-all $*" >> $STUBLOG\nexit 1\n' > $T/bin/recon-all; chmod +x $T/bin/recon-all
+: > $T/log; $SH $T/base/scripts/run_lemon.sh $T/lemon --subjects "sub-3" > $T/lemon3.out 2>&1
+rm $T/bin/recon-all; mv $T/bin/recon-all.ok $T/bin/recon-all
+grep -q "OK     P203 (sub-3)" $T/lemon3.out || { cat $T/lemon3.out; cat $T/base/logs/P203_run.log; fail "fallback did not finish P203"; }
+grep -q "falling back to SynthSeg" $T/base/logs/P203_run.log || fail "no fallback message"
+seen "mri_synthseg --i $T/base/data/P203_t1.nii.gz"; ls -d $T/base/subjects/P203_failed_* > /dev/null 2>&1 || fail "unfinished folder not kept aside"
+: > $T/log; $SH $T/base/scripts/run_lemon.sh $T/lemon --subjects "sub-2 sub-1" --summary > /dev/null 2>&1
+$SH $T/base/scripts/run_lemon.sh $T/lemon --subjects "sub-1" > $T/lemon2.out 2>&1
+grep -q "SKIP   P201" $T/lemon2.out || { cat $T/lemon2.out; fail "finished subject not skipped on restart"; }
+[ "$(grep -c ds000221 $T/base/labels/id_map.csv)" = 3 ] && grep -q "P201,ds000221,sub-1" $T/base/labels/id_map.csv || fail "id map changed on re-run"
+cp $T/bin/python.std $T/bin/python
+echo "== 6b. --phase is imported for the reviewer"
+echo ph > $T/ph.nii; : > $T/log; $SH $T/base/scripts/run_css.sh P4 $T/swi.nii --phase $T/ph.nii > /dev/null
+seen "mri_convert $T/ph.nii $T/base/data/P4_phase.nii.gz"
+echo "== 8. v5.0: CSS_QC_STRICT exit 3 from detection stops run_css with a message"
+: > $T/log; out=$(STUB_DETECT_RC=3 $SH $T/base/scripts/run_css.sh P1 2>&1) && fail "run_css went on after detect_css exit 3"
+echo "$out" | grep -q "case cannot be scored" || fail "no 'case cannot be scored' message"
+echo "== 8b. v5.0: ranking model applied only to dev-split studies"
+mkdir -p $T/base/review; echo '{}' > $T/base/review/ranker_model.json
+: > $T/log; out=$($SH $T/base/scripts/run_css.sh P1); notseen "rank_candidates.py"
+echo "$out" | grep -q "split is 'unassigned'" || fail "no message for an unassigned split"
+: > $T/log; STUB_SPLIT=test $SH $T/base/scripts/run_css.sh P1 > /dev/null; notseen "rank_candidates.py"
+: > $T/log; STUB_SPLIT=dev $SH $T/base/scripts/run_css.sh P1 > /dev/null; seen "python rank_candidates.py P1"
+rm $T/base/review/ranker_model.json
+: > $T/log; $SH $T/base/scripts/run_css.sh P1 > /dev/null; notseen "rank_candidates.py"; notseen "python -c"
+echo "== 7. batch run_all.sh reaches detection for every subject"
+: > $T/log; $SH $T/base/scripts/run_all.sh P1 P2 > /dev/null || true   # stub python prints no summary
+[ $(grep -c "detect_css.py" $T/log) -eq 2 ] || fail "run_all.sh did not run detection for both subjects"
+echo "SHELL TESTS PASSED"
+````
+
+## tests/check_cohort.py
+
+````python
+"""v5.2.1 checks: cohort.py import (series choice) and compare_grades.py (patient-level agreement), known answers.
+usage: check_cohort.py    (writes into $CSS_BASE/cohort_check/; no FreeSurfer, no DICOM: NIfTI + JSON sidecars)
+1. import: in the SWI folder the processed SWI is chosen, never the minIP or the magnitude; the phase on the same grid
+   goes to --phase, a phase on another grid does not; in the T1 folder the isotropic sagittal 3-D beats a thick axial
+   MPR reformat; a missing FLAIR folder, a 3 mm SWI and a 3 mm-only T1 are flagged; --ids filters.
+2. compare_grades: hand-computed exact agreement, within-1, unweighted / quadratic kappa, mean difference, presence
+   sensitivity / specificity; a patient without a pipeline score is listed (not dropped); a total that is not L + R is
+   flagged; out-of-range grades are refused; --template writes the ids."""
+import os, sys, json, shutil, subprocess, numpy as np, nibabel as nib, pandas as pd
+HERE = os.path.dirname(os.path.abspath(__file__)); S = os.path.join(HERE, "..", "scripts"); sys.path.insert(0, S)
+from css_common import cohen_kappa
+py = sys.executable
+B = f"{os.environ.get('CSS_BASE', '/tmp')}/cohort_check"; C = f"{B}/cohort"
+def fail(m): print("FAIL:", m); sys.exit(1)
+shutil.rmtree(B, ignore_errors=True)
+def series(folder, name, vox, desc, image_type, shape=(20, 20, 10)):
+    os.makedirs(folder, exist_ok=True); aff = np.diag(list(vox) + [1.0])
+    nib.save(nib.Nifti1Image(np.ones(shape, np.float32), aff), f"{folder}/{name}.nii.gz")
+    json.dump(dict(SeriesDescription=desc, ImageType=image_type, EchoTime=0.02), open(f"{folder}/{name}.json", "w"))
+# M01: full set; M02: thick SWI, axial-only T1, no FLAIR, phase on another grid
+series(f"{C}/M01/SWI", "10_SWI_Images", (0.9, 0.9, 1.5), "SWI_Images", ["ORIGINAL", "PRIMARY", "M", "SWI"])
+series(f"{C}/M01/SWI", "11_mIP_Images_SW", (0.9, 0.9, 1.5), "mIP_Images(SW)", ["DERIVED", "PRIMARY", "MNIP"])
+series(f"{C}/M01/SWI", "8_Mag_Images", (0.9, 0.9, 1.5), "Mag_Images", ["ORIGINAL", "PRIMARY", "M", "ND"])
+series(f"{C}/M01/SWI", "9_Pha_Images", (0.9, 0.9, 1.5), "Pha_Images", ["ORIGINAL", "PRIMARY", "P", "ND"])
+series(f"{C}/M01/t1", "3_AX_T1_MPR", (0.5, 0.5, 3.0), "AX T1 MPR", ["DERIVED", "SECONDARY", "MPR"])
+series(f"{C}/M01/t1", "2_T1_MPRAGE_SAG", (1.0, 1.0, 1.0), "T1 MPRAGE SAG", ["ORIGINAL", "PRIMARY", "M"])
+series(f"{C}/M01/Flair", "5_AX_FLAIR_MPR", (0.5, 0.5, 1.0), "AX FLAIR MPR", ["DERIVED", "SECONDARY", "MPR"])
+series(f"{C}/M02/SWI", "4_SWI_Images", (0.9, 0.9, 3.0), "SWI_Images", ["ORIGINAL", "PRIMARY", "M", "SWI"])
+series(f"{C}/M02/SWI", "5_Pha_Images", (0.9, 0.9, 3.0), "Pha_Images", ["ORIGINAL", "PRIMARY", "P"], shape=(20, 20, 5))
+series(f"{C}/M02/T1", "3_AX_T1_MPR", (0.5, 0.5, 3.0), "AX T1 MPR", ["DERIVED", "SECONDARY", "MPR"])
+series(f"{C}/M03/SWI", "4_SWI_Images", (0.9, 0.9, 1.5), "SWI_Images", ["ORIGINAL", "PRIMARY", "M", "SWI"])
+env = dict(os.environ, CSS_BASE=B)
+def run(*a, ok=True):
+    r = subprocess.run([py, *a], capture_output=True, text=True, env=env)
+    if ok and r.returncode: print(r.stdout[-1500:], r.stderr[-1500:]); fail("step failed: " + " ".join(a[:2]))
+    return r
+run(f"{S}/cohort.py", "import", C, "--ids", "M01,M02")
+T = pd.read_csv(f"{B}/review/cohort_import.csv", dtype=str).fillna("").set_index("study_id")
+if list(T.index) != ["M01", "M02"]: fail(f"--ids: {list(T.index)}")
+m1, m2 = T.loc["M01"], T.loc["M02"]
+if not m1.swi.endswith("10_SWI_Images.nii.gz") or m1.swi_kind != "swi" or "/raw/M01/SWI/" not in m1.swi: fail(f"M01 SWI choice {m1.swi}")
+if not m1.phase.endswith("9_Pha_Images.nii.gz"): fail(f"M01 phase {m1.phase}")
+if not m1.t1.endswith("2_T1_MPRAGE_SAG.nii.gz") or m1.t1_vox_mm != "1.00x1.00x1.00": fail(f"M01 T1 {m1.t1} {m1.t1_vox_mm}")
+if not m1.flair.endswith("5_AX_FLAIR_MPR.nii.gz"): fail(f"M01 FLAIR {m1.flair}")
+if m1["flags"] != "": fail(f"M01 flags {m1['flags']}")
+f2 = set(m2["flags"].split(";"))
+if not {"no_flair", "t1_not_3d", "swi_slice_gt_2mm", "phase_not_on_swi_grid", "no_phase"} <= f2 or m2.phase: fail(f"M02 flags {f2}, phase {m2.phase}")
+print("1. import: SWI_Images chosen over mIP / Mag; Pha_Images on the SWI grid -> --phase; sagittal 1 mm iso T1 over the "
+      f"3 mm axial MPR; M02 flagged {sorted(f2)}; --ids honoured")
+# 1b. run: a stub run_css.sh records its arguments; M02 exits 3 (QC insufficient under strict QC)
+os.makedirs(f"{B}/scripts", exist_ok=True)
+open(f"{B}/scripts/run_css.sh", "w").write('echo "$@" > "$CSS_BASE/args_$1.txt"; [ "$1" = M02 ] && exit 3; '
+                                           'mkdir -p "$CSS_BASE/review"; echo x > "$CSS_BASE/review/$1_manifest.json"; '
+                                           'echo x > "$CSS_BASE/review/$1_candidates.csv"; exit 0\n')
+shell = shutil.which("zsh")
+if shell:
+    run(f"{S}/cohort.py", "run")
+    a1 = open(f"{B}/args_M01.txt").read().split()
+    if a1[:2] != ["M01", m1.swi] or ["--t1", m1.t1] != a1[2:4] or "--recon" not in a1 or a1[a1.index("--phase") + 1] != m1.phase \
+            or a1[a1.index("--flair") + 1] != m1.flair: fail(f"run_css arguments {a1}")
+    a2 = open(f"{B}/args_M02.txt").read().split()
+    if "--flair" in a2 or "--phase" in a2: fail(f"M02 arguments {a2}")
+    R = pd.read_csv(f"{B}/review/cohort_run.csv").set_index("study_id")
+    if R.loc["M01", "status"] != "ok" or R.loc["M02", "status"] != "qc_insufficient": fail(f"run statuses {R.status.to_dict()}")
+    r2 = run(f"{S}/cohort.py", "run").stdout
+    if "M01: already detected - skipped" not in r2: fail("re-run did not skip a detected study")
+    print("1b. run: run_css.sh gets SWI, --t1 (sagittal), --flair, --recon, --phase; M02 without FLAIR / phase; exit 3 -> "
+          "qc_insufficient; a detected study is skipped on re-run")
+else:
+    print("1b. run: skipped (zsh not installed)")
+
+# 2. compare_grades on hand-made scores
+os.makedirs(f"{B}/labels", exist_ok=True)
+E = pd.DataFrame(dict(study_id=["M01", "M02", "M03", "M04", "M05", "M06"], expert_L=[0, 1, 2, 0, 1, 2],
+                      expert_R=[0, 1, 2, 1, 0, 2], expert_total=[0, 2, 4, 1, 2, ""]))       # M05 total 2 != 1 + 0
+E.to_csv(f"{B}/labels/expert_grades.csv", index=False)
+Sc = pd.DataFrame(dict(subject=["M01", "M02", "M03", "M04", "M06"], L_score=[0, 1, 1, 0, 2], R_score=[1, 1, 2, 0, 2],
+                       multifocality_0_4=[1, 2, 3, 0, 4], scoring_method="sulcal (Destrieux)", n_candidates=10,
+                       n_unreviewed=[0, 0, 0, 3, 0]))
+Sc.to_csv(f"{B}/review/css_scores.csv", index=False)
+out = run(f"{S}/compare_grades.py", "--boot", "200").stdout
+P = pd.read_csv(f"{B}/results/grade_comparison_patients.csv", dtype={"study_id": str}).set_index("study_id")
+Sm = pd.read_csv(f"{B}/results/grade_comparison_summary.csv").set_index("scale")
+if len(P) != 6 or "no pipeline score" not in P.loc["M05", "flags"] or "expert total != L + R" not in P.loc["M05", "flags"]:
+    fail(f"M05 flags {P.loc['M05', 'flags'] if 'M05' in P.index else 'missing'}")
+if "3 candidates unreviewed" not in P.loc["M04", "flags"]: fail("unreviewed flag")
+a, b = np.array([0, 2, 4, 1, 4]), np.array([1, 2, 3, 0, 4])           # M01, M02, M03, M04, M06 totals
+t = Sm.loc["total"]
+want = dict(n=5, exact_agreement=0.4, within_1=1.0, mean_diff_pipeline_minus_expert=round(float((b - a).mean()), 3),
+            kappa_quadratic=round(cohen_kappa(a, b, range(5), "quadratic"), 3), kappa_unweighted=round(cohen_kappa(a, b, range(5)), 3))
+for k, v in want.items():
+    if abs(float(t[k]) - v) > 1e-9: fail(f"total {k}: {t[k]} vs {v}")
+pr = Sm.loc["cSS present (patient, total > 0)"]
+if (int(pr.tp), int(pr.fn), int(pr.tn), int(pr.fp)) != (3, 1, 0, 1): fail(f"presence counts {pr.tp, pr.fn, pr.tn, pr.fp}")
+hm = Sm.loc["cSS present (hemisphere, score > 0)"]
+# hemispheres (expert>0, pipe>0): L M01 0/0 M02 1/1 M03 1/1 M04 0/0 M06 1/1; R M01 0/1 M02 1/1 M03 1/1 M04 1/0 M06 1/1
+if (int(hm.tp), int(hm.fn), int(hm.tn), int(hm.fp)) != (6, 1, 2, 1): fail(f"hemisphere counts {hm.tp, hm.fn, hm.tn, hm.fp}")
+Cf = pd.read_csv(f"{B}/results/grade_comparison_confusion_total.csv", index_col=0)
+if int(Cf.values.sum()) != 5 or int(Cf.loc[4, "3"]) != 1: fail("confusion matrix")
+print(f"2. compare_grades: total exact {t.exact_agreement:.0%}, within 1 {t.within_1:.0%}, quadratic kappa {t.kappa_quadratic}, "
+      f"mean diff {t.mean_diff_pipeline_minus_expert:+.2f} (hand-computed); presence TP/FN/TN/FP 3/1/0/1, hemispheres 6/1/2/1; "
+      "M05 without a score listed and its total flagged; M04 unreviewed flagged")
+# 2b. the radiologist's own layout, as .xlsx when openpyxl is there (else .csv), and --results-only
+json.dump(dict(field_T=1.5), open(f"{B}/review/M01_score.json", "w"))
+rad = pd.DataFrame({"Patient name": ["M01", "M02", "M03", "M04", "M05", "M06"], "ID": ["T01", "T02", "T03", "T04", "T05", "T06"],
+                    "R css": [0, 1, 2, 1, 0, 2], "l css": [0, 1, 2, 0, 1, 2], "cSS score (0-4)": [0, 2, 4, 1, 2, ""]})
+try:
+    import openpyxl  # noqa: F401
+    rp = f"{B}/labels/radiologist.xlsx"; rad.to_excel(rp, index=False)
+except ImportError:
+    rp = f"{B}/labels/radiologist.csv"; rad.to_csv(rp, index=False)
+run(f"{S}/compare_grades.py", "--expert", rp, "--boot", "50", "--out", f"{B}/results/rad")
+Rr = pd.read_csv(f"{B}/results/rad_results.csv", dtype=str).fillna("").set_index("Patient name")
+if list(Rr.columns[:4]) != ["ID", "R cSS", "L cSS", "cSS score (0-4)"]: fail(f"results columns {list(Rr.columns)}")
+if (Rr.loc["M03", "ID"], Rr.loc["M03", "R cSS"], Rr.loc["M03", "L cSS"], Rr.loc["M03", "cSS score (0-4)"],
+        Rr.loc["M03", "radiologist cSS score (0-4)"], Rr.loc["M03", "agree"]) != ("T03", "2", "1", "3", "4", "no"):
+    fail(f"M03 row {Rr.loc['M03'].to_dict()}")
+if Rr.loc["M02", "agree"] != "yes" or Rr.loc["M05", "cSS score (0-4)"] != "" or Rr.loc["M01", "field (T)"] != "1.5":
+    fail(f"M02 / M05 / M01 rows {Rr.loc[['M01', 'M02', 'M05']].to_dict('records')}")
+S2 = pd.read_csv(f"{B}/results/rad_summary.csv").set_index("scale")
+if abs(float(S2.loc["total", "kappa_quadratic"]) - float(t.kappa_quadratic)) > 1e-9: fail("radiologist layout gives other statistics")
+run(f"{S}/compare_grades.py", "--results-only")
+Ro = pd.read_csv(f"{B}/results/css_results.csv", dtype=str).fillna("")
+if list(Ro.columns[:5]) != ["Patient name", "ID", "R cSS", "L cSS", "cSS score (0-4)"] or len(Ro) != 5 or "radiologist R cSS" in Ro.columns:
+    fail(f"--results-only {list(Ro.columns)} {len(Ro)}")
+print(f"2b. radiologist's sheet as it is ({os.path.basename(rp)}: Patient name / ID / R css / l css / cSS score (0-4)) -> results "
+      "sheet in that layout, pipeline + radiologist + agree, same statistics; --results-only writes the pipeline columns alone")
+pd.DataFrame(dict(study_id=["M07"], expert_L=[3], expert_R=[0])).to_csv(f"{B}/labels/bad.csv", index=False)
+if run(f"{S}/compare_grades.py", "--expert", f"{B}/labels/bad.csv", ok=False).returncode == 0: fail("out-of-range grade accepted")
+os.remove(f"{B}/labels/expert_grades.csv"); run(f"{S}/compare_grades.py", "--template")
+tp = pd.read_csv(f"{B}/labels/expert_grades.csv", dtype=str)
+if tp.study_id.tolist() != ["M01", "M02"]: fail(f"template ids {tp.study_id.tolist()}")
+print("   out-of-range grade refused; --template lists the imported ids")
+print("RESULT cohort OK")
+````
+
+## tests/check_consensus.py
+
+````python
+"""v4.17 checks: Cohen's / weighted kappa, two-reader consensus with adjudication (consensus.py).
+usage: check_consensus.py    (needs PH3 in $CSS_BASE)"""
+import os, sys, json, subprocess, numpy as np, nibabel as nib, pandas as pd
+B = os.environ["CSS_BASE"]; S = f"{B}/scripts"; py = sys.executable
+sys.path.insert(0, S)
+from css_common import cohen_kappa
+def fail(m): print("FAIL:", m); sys.exit(1)
+def run(*a):
+    r = subprocess.run([py, *a], capture_output=True, text=True)
+    if r.returncode: print(r.stdout[-800:], r.stderr[-1500:]); fail("step failed: " + " ".join(a))
+    return r.stdout
+
+# 1. kappa: textbook values
+if abs(cohen_kappa([0, 0, 1, 1], [0, 1, 1, 1]) - 0.5) > 1e-9: fail("Cohen's kappa")
+if abs(cohen_kappa([0, 1, 2, 3, 4], [0, 1, 2, 3, 4], range(5), "quadratic") - 1) > 1e-9: fail("weighted kappa = 1")
+w1 = cohen_kappa([0, 1, 2, 3, 4], [1, 2, 3, 4, 4], range(5), "quadratic")
+w2 = cohen_kappa([0, 1, 2, 3, 4], [4, 3, 2, 1, 0], range(5), "quadratic")
+if not (0.75 < w1 < 1 and w2 < -0.9): fail(f"weighted kappa ordering {w1:.2f} {w2:.2f}")
+print(f"   kappa: textbook 0.50, quadratic-weighted near-miss {w1:.2f}, reversed {w2:.2f}")
+
+# 2. two readers on PH3 (sheet with excluded objects): R2 disagrees on two classes and one fine code
+run(f"{S}/detect_css.py", "PH3"); run(f"{S}/expert_sheet.py", "PH3", "--include-excluded")
+key = pd.read_csv(f"{B}/review/PH3_expert_key.csv")
+tr = nib.load(f"{B}/work/PH3_truth.nii.gz").get_fdata() > 0
+C = nib.load(f"{B}/review/PH3_candidates.nii.gz").get_fdata().astype(int)
+X = nib.load(f"{B}/review/PH3_excluded.nii.gz").get_fdata().astype(int)
+r1 = {}
+for _, r in key.iterrows():
+    m = (C == r.obj_id) if r.list == "candidate" else (X == r.obj_id)
+    r1[int(r.sheet_no)] = "C" if tr[m].mean() > 0.2 else "VC"
+nums = sorted(r1); c_ = [n for n in nums if r1[n] == "C"]; v_ = [n for n in nums if r1[n] == "VC"]
+r2 = dict(r1); r2[c_[0]] = "VS"; r2[v_[0]] = "A"; r2[v_[1]] = "VT"          # 2 class disagreements, 1 fine-code
+for rd, ans in (("readerR1", r1), ("readerR2", r2)):
+    run(f"{S}/expert_import.py", "PH3", rd, "--letters", " ".join(f"{n}{c}" for n, c in ans.items()))
+out = run(f"{S}/consensus.py", "--readers", "readerR1,readerR2", "--subjects", "PH3")
+print("   " + out.strip().replace("\n", "\n   "))
+todo = pd.read_csv(f"{B}/labels/adjudication_todo.csv")
+if len(todo) != 2: fail(f"{len(todo)} pending, expected the 2 class disagreements")
+cons = pd.read_csv(f"{B}/labels/consensus.csv"); cons = cons[cons.study_id == "PH3"]
+fine = cons[(cons.method == "agreement") & (cons.consensus_label == "other_vein")]
+if len(fine) != 1: fail("VC vs VT should agree at class level (other_vein)")
+st = json.load(open(f"{B}/labels/agreement_stats.json"))
+if not (0 < st["estimates"]["kappa_class"] < 1): fail(f"kappa {st['estimates']}")
+# 3. adjudication: a third reader resolves both, --apply closes them
+todo["adjudicated_label"] = ["C", "VC"]; todo["adjudicator"] = "readerR3"
+todo.to_csv(f"{B}/labels/adjudication_todo.csv", index=False)
+run(f"{S}/consensus.py", "--readers", "readerR1,readerR2", "--apply", f"{B}/labels/adjudication_todo.csv")
+cons = pd.read_csv(f"{B}/labels/consensus.csv"); cons = cons[cons.study_id == "PH3"]
+if (cons.method == "pending").any() or (cons.method == "adjudicated").sum() != 2: fail("adjudication not applied")
+if len(cons) != len(key): fail("consensus does not cover every object on the sheet")
+print(f"   consensus: {cons.method.value_counts().to_dict()}; kappa(6 classes) {st['estimates']['kappa_class']}")
+print("RESULT consensus OK")
+````
+
+## tests/check_dicom_repair.py
+
+````python
+"""v5.2.2 checks: cohort.py import on broken DICOM exports (dicom_repair.py), known answers. Needs pydicom and dcm2niix;
+skipped (RESULT OK, with a note) when either is missing. No patient data: synthetic series written here.
+usage: check_dicom_repair.py    (writes into $CSS_BASE/repair_check/)
+The source folder imitates a browser download: files named ...-Series-<n>-<instance>.dcm, flagged JPEG Lossless, some
+cut off part-way with a *.crswap beside them. A stub dcmdjpeg stands in for DCMTK (decodes = rewrites uncompressed;
+fails on a cut-off file).
+1. without --repair-missing: the SWI series with missing slices is NOT converted (flag incomplete), nothing with gaps.
+2. with --repair-missing: SWI series 7 (3 of 40 missing, at most 2 in a row) -> complete 40-slice volume, same affine as
+   the intact series, every readable slice bit-identical, interpolated slices = linear interpolation (exact on a
+   signal linear in the slice index); series 8 (6 in a row missing) refused and removed; phase series 9 refused; the
+   SWI is chosen and flagged repaired; crswap files counted; repair.json lists the decisions."""
+import os, sys, shutil, subprocess, json, numpy as np, pandas as pd, nibabel as nib
+HERE = os.path.dirname(os.path.abspath(__file__)); S = os.path.join(HERE, "..", "scripts")
+py = sys.executable
+B = f"{os.environ.get('CSS_BASE', '/tmp')}/repair_check"
+def fail(m): print("FAIL:", m); sys.exit(1)
+try:
+    import pydicom
+    from pydicom.dataset import Dataset, FileMetaDataset
+    from pydicom.uid import generate_uid, ExplicitVRLittleEndian
+    from pydicom.encaps import encapsulate
+except ImportError:
+    print("skipped: pydicom not installed"); print("RESULT repair OK"); sys.exit(0)
+if not shutil.which("dcm2niix"):
+    print("skipped: dcm2niix not found"); print("RESULT repair OK"); sys.exit(0)
+JPEG_LL = "1.2.840.10008.1.2.4.70"
+shutil.rmtree(B, ignore_errors=True); os.makedirs(B)
+study = generate_uid()
+
+def write_series(folder, sn, n, desc, itype, missing=(), spacing=1.5, ts=JPEG_LL, vals=None):
+    os.makedirs(folder, exist_ok=True); suid = generate_uid(); truth = []
+    for i in range(1, n + 1):
+        fm = FileMetaDataset(); fm.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.4"; uid = generate_uid()
+        fm.MediaStorageSOPInstanceUID = uid; fm.TransferSyntaxUID = ts
+        ds = Dataset(); ds.file_meta = fm; ds.SOPClassUID = fm.MediaStorageSOPClassUID; ds.SOPInstanceUID = uid
+        ds.Modality = "MR"; ds.PatientName = "SYNTHETIC"; ds.PatientID = "SYN"; ds.StudyInstanceUID = study
+        ds.SeriesInstanceUID = suid; ds.SeriesNumber = sn; ds.InstanceNumber = i; ds.AcquisitionNumber = 1
+        ds.SeriesDescription = desc; ds.ImageType = itype; ds.Manufacturer = "SIEMENS"; ds.EchoTime = "20"
+        ds.MagneticFieldStrength = "3"; ds.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
+        ds.ImagePositionPatient = [-48.0, -48.0, -30.0 + spacing * (i - 1)]; ds.SliceLocation = -30.0 + spacing * (i - 1)
+        ds.PixelSpacing = [1.5, 1.5]; ds.SliceThickness = spacing; ds.SpacingBetweenSlices = spacing
+        ds.Rows = ds.Columns = 64; ds.SamplesPerPixel = 1; ds.PhotometricInterpretation = "MONOCHROME2"
+        ds.BitsAllocated = 16; ds.BitsStored = 12; ds.HighBit = 11; ds.PixelRepresentation = 0
+        img = (vals(i) if vals else (100 + 10 * i + np.add.outer(np.arange(64), np.arange(64)))).astype(np.uint16)
+        ds.PixelData = encapsulate([img.tobytes()]) if ts == JPEG_LL else img.tobytes(); truth.append(img)
+        if ts == JPEG_LL: ds["PixelData"].VR = "OB"
+        f = f"{folder}/04-541-321-2019-10-24-1111111-Series-{sn}-{i}.dcm"
+        ds.save_as(f, enforce_file_format=True)
+        if i in missing:                                      # cut off part-way, like the browser download
+            b = open(f, "rb").read(); open(f, "wb").write(b[:int(len(b) * 0.6)]); open(f + ".crswap", "wb").write(b"")
+    return np.stack(truth, -1)
+
+stub = f"{B}/dcmdjpeg"
+open(stub, "w").write(f"""#!{py}
+import sys, pydicom
+from pydicom.uid import ExplicitVRLittleEndian
+from pydicom.encaps import generate_frames
+try:
+    ds = pydicom.dcmread(sys.argv[1]); n = ds.Rows * ds.Columns * 2
+    fr = next(generate_frames(ds.PixelData, number_of_frames=1))
+    if len(fr) != n: sys.exit(1)
+except Exception:
+    sys.exit(1)
+ds.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian; ds.PixelData = fr; ds["PixelData"].VR = "OW"
+ds.save_as(sys.argv[2], enforce_file_format=True)
+""")
+os.chmod(stub, 0o755)
+C = f"{B}/drive"
+truth7 = write_series(f"{C}/M01/SWI", 7, 40, "SWI_Images", ["ORIGINAL", "PRIMARY", "M", "SWI"], missing=(5, 17, 18))
+write_series(f"{C}/M01/SWI", 8, 40, "mIP_Images(SW)", ["DERIVED", "PRIMARY", "MNIP"], missing=tuple(range(20, 26)))
+write_series(f"{C}/M01/SWI", 9, 40, "Pha_Images", ["ORIGINAL", "PRIMARY", "P", "ND"], missing=(10,))
+write_series(f"{C}/M01/T1", 2, 30, "T1 MPRAGE SAG", ["ORIGINAL", "PRIMARY", "M"], spacing=1.0)
+full = write_series(f"{B}/intact/SWI", 7, 40, "SWI_Images", ["ORIGINAL", "PRIMARY", "M", "SWI"], ts=ExplicitVRLittleEndian)
+env = dict(os.environ, CSS_BASE=B)
+def imp(*extra):
+    shutil.rmtree(f"{B}/raw", ignore_errors=True)
+    r = subprocess.run([py, f"{S}/cohort.py", "import", C, "--dcmdjpeg", stub, *extra], capture_output=True, text=True, env=env)
+    if r.returncode: print(r.stdout[-2000:], r.stderr[-2000:]); fail("cohort import failed")
+    return pd.read_csv(f"{B}/review/cohort_import.csv", dtype=str).fillna("").set_index("study_id").loc["M01"], r.stdout
+
+# 1. no repair
+m, out = imp()
+if m.swi_kind == "swi" or "swi_series7_incomplete_3of40" not in m["flags"]: fail(f"no repair: kind {m.swi_kind}, flags {m['flags']}")
+for f in os.listdir(f"{B}/raw/M01/SWI"):
+    if f.endswith(".json") and "SWI_Images" in json.load(open(f"{B}/raw/M01/SWI/{f}")).get("SeriesDescription", ""):
+        fail("series 7 converted although slices are missing")
+print(f"1. without --repair-missing: series 7 not converted (flags {m['flags']})")
+
+# 2. repair
+m, out = imp("--repair-missing")
+fl = m["flags"].split(";")
+for want in ("swi_10_crswap_files", "swi_series7_repaired_3of40_interpolated", "swi_series8_unrepairable_6of40", "swi_series9_unrepairable_1of40"):
+    if want not in fl: fail(f"flag {want} missing: {fl}")
+if m.swi_kind != "swi": fail(f"SWI not chosen after repair: {m.swi_kind} {m.swi}")
+rep = json.load(open(f"{B}/raw/M01/SWI/repair.json"))["series"]
+if rep["8"]["status"] != "removed" or "consecutive" not in rep["8"]["reason"] or "phase" not in rep["9"]["reason"]:
+    fail(f"repair report {rep}")
+img = nib.load(m.swi); A = np.asarray(img.dataobj)
+subprocess.run(["dcm2niix", "-z", "y", "-f", "full", "-o", f"{B}/intact", f"{B}/intact/SWI"], capture_output=True)
+ref = nib.load(f"{B}/intact/full.nii.gz"); R = np.asarray(ref.dataobj)
+if A.shape != R.shape or not np.allclose(img.affine, ref.affine, atol=1e-4): fail(f"geometry {A.shape} vs {R.shape}\n{img.affine}\n{ref.affine}")
+k_of = lambda inst: int(np.round(np.linalg.inv(ref.affine) @ np.r_[0.0, 0.0, -30.0 + 1.5 * (inst - 1), 1.0])[2])
+good = [i for i in range(1, 41) if i not in (5, 17, 18)]
+if not all(np.array_equal(A[..., k_of(i)], R[..., k_of(i)]) for i in good): fail("a readable slice changed")
+for i in (5, 17, 18):          # the synthetic signal is linear in the slice index -> interpolation is exact
+    if not np.array_equal(A[..., k_of(i)], R[..., k_of(i)]): fail(f"interpolated slice {i} differs by {np.abs(A[..., k_of(i)].astype(int) - R[..., k_of(i)]).max()}")
+print(f"2. --repair-missing: series 7 -> {A.shape} volume, affine equal to the intact series, 37 readable slices identical, 3 "
+      "interpolated slices exact on a linear signal; series 8 (6 consecutive missing) and phase series 9 refused and removed; "
+      "10 crswap files counted")
+print("RESULT repair OK")
+````
+
+## tests/check_evaluate.py
+
+````python
+"""v4.18 evaluate.py on hand-made label tables with known answers (no images needed).
+usage: check_evaluate.py    (writes into $CSS_BASE/eval_check/)"""
+import os, sys, json, subprocess, pandas as pd, numpy as np
+B0 = os.environ["CSS_BASE"]; B = f"{B0}/eval_check"; S = f"{B0}/scripts"
+def fail(m): print("FAIL:", m); sys.exit(1)
+for d in ("review", "labels"): os.makedirs(f"{B}/{d}", exist_ok=True)
+def cands(s, n, off=0):
+    return pd.DataFrame(dict(cand_id=range(1, n + 1), vox_i=[10 * i + off for i in range(1, n + 1)], vox_j=20, vox_k=5,
+                             volume_mm3=30.0, score=np.linspace(2, 1, n)))
+uid = lambda s, r: f"{s}:{int(r.vox_i)}:{int(r.vox_j)}:{int(r.vox_k)}:{float(r.volume_mm3):g}"
+cons = []
+def lab(s, r, cls, lst="candidate", oid=None):
+    cons.append(dict(study_id=s, cand_uid=uid(s, r), list=lst, obj_id=oid or int(r.get("cand_id", 0) or 0), readers="A+B",
+                     adjudicator="", consensus_label=cls, consensus_class=cls, method="agreement"))
+# S1 (test, positive): ranks 1 and 4 cSS, 2 vein, 3 uncertain, 5 unlabelled; one EXCLUDED object called cSS
+c1 = cands("S1", 5); c1.to_csv(f"{B}/review/S1_candidates.csv", index=False)
+x1 = cands("S1", 1, off=3).rename(columns={"cand_id": "excl_id"}).assign(rule_version="E7@v4.12")
+x1.to_csv(f"{B}/review/S1_excluded.csv", index=False)
+for rk, cls in ((1, "cSS"), (2, "other_vein"), (3, "uncertain"), (4, "cSS")): lab("S1", c1.iloc[rk - 1], cls)
+lab("S1", x1.iloc[0], "cSS", "excluded", 1)
+# S2 (test, negative): 3 candidates, all veins; plus a stale label (no matching object)
+c2 = cands("S2", 3); c2.to_csv(f"{B}/review/S2_candidates.csv", index=False)
+pd.DataFrame(columns=["excl_id"]).to_csv(f"{B}/review/S2_excluded.csv", index=False)
+for rk in (1, 2, 3): lab("S2", c2.iloc[rk - 1], "other_vein")
+cons.append(dict(study_id="S2", cand_uid="S2:1:1:1:9", list="candidate", obj_id=9, readers="A+B", adjudicator="",
+                 consensus_label="cSS", consensus_class="cSS", method="agreement"))
+# S3 (dev): must not appear in the test evaluation
+c3 = cands("S3", 2); c3.to_csv(f"{B}/review/S3_candidates.csv", index=False)
+lab("S3", c3.iloc[0], "cSS")
+pd.DataFrame(cons).to_csv(f"{B}/labels/consensus.csv", index=False)
+# missed outlines in S1: one never generated (two readers, 2 voxels apart = one lesion), one on shown rank 2 (the 'vein')
+pd.DataFrame([dict(study_id="S1", reader_id="A", vox_i=100, vox_j=100, vox_k=5, fate="not generated", obj_id=np.nan, rule_version="", reason="not dark"),
+              dict(study_id="S1", reader_id="B", vox_i=101, vox_j=101, vox_k=5, fate="not generated", obj_id=np.nan, rule_version="", reason="not dark"),
+              dict(study_id="S1", reader_id="A", vox_i=20, vox_j=20, vox_k=5, fate="shown", obj_id=2, rule_version="", reason="")]
+             ).to_csv(f"{B}/labels/missed_lesions.csv", index=False)
+pd.DataFrame([dict(study_id="S1", css_status="pos", split="test", slice_mm="1.2"),
+              dict(study_id="S2", css_status="neg", split="test", slice_mm="2.0"),
+              dict(study_id="S3", css_status="pos", split="dev", slice_mm="1.2")]).to_csv(f"{B}/labels/study_meta.csv", index=False)
+r = subprocess.run([sys.executable, f"{S}/evaluate.py", "--k", "1,2", "--boot", "200", "--by", "slice_group"],
+                   capture_output=True, text=True, env=dict(os.environ, CSS_BASE=B))
+if r.returncode: print(r.stdout, r.stderr); fail("evaluate.py failed")
+o = json.load(open(f"{B}/review/evaluation_test_consensus.json"))["overall"]
+want = dict(n_studies=2, n_ref_lesions=5, lesion_sens=0.6, sens_top1=0.2, sens_top2=0.4, patient_sens=1.0,
+            fp_per_scan=1.5, fp_per_neg_scan=3.0, uncertain_per_scan=0.5, fp_per_scan_top2=1.0)
+bad = {k: (o[k], v) for k, v in want.items() if abs(o[k] - v) > 1e-9}
+if bad: print(r.stdout); fail(f"metrics (got, want): {bad}")
+if "S2: 1 label(s) match no current" not in r.stdout or "S1: 1 shown candidate(s) without a label" not in r.stdout:
+    fail("stale / unlabelled warnings missing")
+fr = pd.read_csv(f"{B}/review/evaluation_test_consensus_froc.csv")
+if not (fr.lesion_sens.is_monotonic_increasing and fr.fp_per_scan.is_monotonic_increasing): fail("FROC not monotone")
+print("   " + "\n   ".join(l for l in r.stdout.splitlines()[:6]))
+print("RESULT evaluate OK")
+````
+
+## tests/check_labels.py
+
+````python
+"""v4.15 checks: expert sheet with excluded objects, fine-grained label import, long label table,
+missed-lesion fates, study metadata with a fixed split.   usage: check_labels.py   (needs PH3 in $CSS_BASE)"""
+import os, sys, subprocess, numpy as np, nibabel as nib, pandas as pd
+from scipy import ndimage as ndi
+B = os.environ["CSS_BASE"]; S = f"{B}/scripts"; py = sys.executable
+def fail(m): print("FAIL:", m); sys.exit(1)
+def run(*a, ok=True):
+    r = subprocess.run([py, *a], capture_output=True, text=True)
+    if ok and r.returncode: print(r.stdout[-800:], r.stderr[-1500:]); fail("step failed: " + " ".join(a))
+    return r
+run(f"{S}/detect_css.py", "PH3")
+truth = nib.load(f"{B}/work/PH3_truth.nii.gz").get_fdata() > 0
+cand = nib.load(f"{B}/review/PH3_candidates.nii.gz").get_fdata().astype(int)
+excl = nib.load(f"{B}/review/PH3_excluded.nii.gz").get_fdata().astype(int)
+drop = nib.load(f"{B}/work/PH3_dropped.nii.gz").get_fdata().astype(int)
+nx = len(pd.read_csv(f"{B}/review/PH3_excluded.csv"))
+
+# 1. sheet mixes the excluded objects in, unmarked, and the key says which list each number is
+print("   " + run(f"{S}/expert_sheet.py", "PH3", "--include-excluded").stdout.splitlines()[0])
+key = pd.read_csv(f"{B}/review/PH3_expert_key.csv")
+if (key.list == "excluded").sum() != nx or (key.list == "candidate").sum() != len(pd.read_csv(f"{B}/review/PH3_candidates.csv")):
+    fail(f"key lists {key.list.value_counts().to_dict()}")
+if not key.sheet_no.tolist() == list(range(1, len(key) + 1)): fail("sheet numbers")
+
+# 2. fine codes + confidence; one number left out (-> N, defaulted); excluded veins labelled VC
+ans, left_out = [], int(key.sheet_no.iloc[-1])
+for _, r in key.iterrows():
+    if r.sheet_no == left_out: continue
+    m = (cand == r.obj_id) if r.list == "candidate" else (excl == r.obj_id)
+    ans.append(f"{r.sheet_no}{'C:5' if truth[m].mean() > 0.2 else ('VS:3' if r.list == 'candidate' else 'VC:4')}")
+out = run(f"{S}/expert_import.py", "PH3", "expertB", "--letters", " ".join(ans)).stdout
+print("   " + out.strip().replace("\n", "\n   "))
+e = pd.read_csv(f"{B}/review/PH3_expert_expertB.csv")
+if list(e.columns[:6]) != ["cand_id", "call", "vox_i", "vox_j", "vox_k", "volume_mm3"]: fail("review expert file columns")
+if not set(e.call) <= {"cSS", "Vein", "Normal"} or not {"cSS"} <= set(e.call): fail(f"coarse calls {set(e.call)}")
+L = pd.read_csv(f"{B}/labels/candidate_labels.csv"); Lb = L[L.reader_id == "expertB"]
+if (Lb.list == "excluded").sum() != nx: fail("excluded objects missing from the label table")
+if Lb.defaulted.sum() != 1 or Lb[Lb.sheet_no == left_out].label.iloc[0] != "normal_other": fail("default N")
+if not set(Lb[Lb.list == "excluded"].label) <= {"vein_sulcal", "cSS"}: fail("excluded labels")
+if Lb[Lb.label == "cSS"].confidence.ne(5).any(): fail("confidence not stored")
+# re-import of the same session replaces, a second session adds
+run(f"{S}/expert_import.py", "PH3", "expertB", "--letters", " ".join(ans))
+if len(pd.read_csv(f"{B}/labels/candidate_labels.csv").query("reader_id == 'expertB'")) != len(Lb): fail("re-import duplicated rows")
+xn = int(key[key.list == "excluded"].sheet_no.iloc[0])
+out2 = run(f"{S}/expert_import.py", "PH3", "expertB", "--session", "2", "--letters",
+           " ".join(a for a in ans if not a.startswith(f"{xn}")) + f" {xn}C").stdout
+if "EXCLUDED object(s) cSS" not in out2: fail("no warning when an excluded object is called cSS")
+L2 = pd.read_csv(f"{B}/labels/candidate_labels.csv").query("reader_id == 'expertB'")
+if sorted(L2.session.unique()) != [1, 2] or len(L2) != 2 * len(Lb): fail("session 2 rows")
+if run(f"{S}/expert_import.py", "PH3", "expertB", "--letters", "1QQ", ok=False).returncode == 0: fail("bad code accepted")
+# old key format (no list/obj_id columns) still imports
+key[key.list == "candidate"].drop(columns=["list", "obj_id"]).to_csv(f"{B}/review/PH3_expert_key.csv", index=False)
+run(f"{S}/expert_import.py", "PH3", "expertC", "--css", ",".join(str(n) for n, a in
+    zip(key.sheet_no, ans) if a.endswith("C:5") and n in set(key[key.list == "candidate"].sheet_no)))
+print("   expert codes, confidence, defaults, sessions, excluded objects and the old key format: OK")
+
+# 3. missed-lesion outlines: one blob per fate
+vox = np.array(nib.load(f"{B}/data/PH3_swi.nii").header.get_zooms()[:3])
+M = np.zeros(cand.shape, np.uint8)
+def piece(obj):
+    """one connected outline: the object's voxels in a 3x3x3 box around one of its voxels"""
+    q = np.argwhere(obj); q = q[len(q) // 2]; box = np.zeros(obj.shape, bool)
+    box[q[0] - 1:q[0] + 2, q[1] - 1:q[1] + 2, q[2] - 1:q[2] + 2] = True
+    return obj & box
+far_from = ndi.distance_transform_edt((cand == 0) & (excl == 0), sampling=vox)
+M[piece((cand == 1) & truth)] = 1                                   # shown
+M[piece((excl > 0) & (ndi.distance_transform_edt(cand == 0, sampling=vox) > 4))] = 1    # excluded
+d_ok = [i for i in np.unique(drop) if i and far_from[drop == i].min() > 4]
+M[piece(drop == d_ok[0])] = 1                                       # dropped (gate reason)
+seg = nib.load(f"{B}/work/PH3_seg_swispace.nii.gz").get_fdata().astype(int)
+free = np.isin(seg, [2, 41]) & (ndi.distance_transform_edt((cand == 0) & (excl == 0) & (drop == 0), sampling=vox) > 6)
+p = np.argwhere(free)[len(np.argwhere(free)) // 2]
+M[p[0] - 1:p[0] + 2, p[1] - 1:p[1] + 2, p[2]:p[2] + 2] = 1          # nothing there -> not generated (WM)
+# v4.17: a second never-generated outline on normal (not dark) cortex inside the search zone
+gen = nib.load(f"{B}/work/PH3_gen.nii.gz").get_fdata().astype(int)
+ok_ctx = (seg >= 1000) & ((gen & 1) > 0) & ((gen & 8) == 0) & \
+    (ndi.distance_transform_edt((cand == 0) & (excl == 0) & (drop == 0) & (M == 0), sampling=vox) > 6)
+q = np.argwhere(ok_ctx)[len(np.argwhere(ok_ctx)) // 3]
+M[q[0], q[1], q[2]] = 1; M[q[0] + 1, q[1], q[2]] = 1
+os.makedirs(f"{B}/labels", exist_ok=True)
+aff = nib.load(f"{B}/data/PH3_swi.nii").affine
+nib.save(nib.Nifti1Image(M, aff), f"{B}/labels/PH3_missed_expertB.nii.gz")
+print("   " + run(f"{S}/label_missed.py", "PH3", "expertB").stdout.strip().replace("\n", "\n   "))
+ml = pd.read_csv(f"{B}/labels/missed_lesions.csv")
+if sorted(ml.fate) != sorted(["shown", "excluded", "dropped", "not generated", "not generated"]): fail(f"fates {ml.fate.tolist()}")
+ng = sorted(ml[ml.fate == "not generated"].reason.astype(str))
+if ng != ["not dark enough (z >= -2 everywhere)", "outside the search zone: white matter / deep-nucleus label"]:
+    fail(f"not-generated reasons {ng}")
+if not ml[ml.fate == "excluded"].rule_version.iloc[0].startswith("E"): fail("excluded fate without rule id")
+if not str(ml[ml.fate == "dropped"].reason.iloc[0]).startswith(("volume", "<2", "elong", "no cortex")): fail("dropped reason")
+run(f"{S}/label_missed.py", "PH3", "expertB")
+if len(pd.read_csv(f"{B}/labels/missed_lesions.csv")) != 5: fail("re-run duplicated missed-lesion rows")
+
+# 4. study metadata: QC fields copied, split fixed once assigned
+print("   " + run(f"{S}/study_meta.py", "PH3", "--status", "pos", "--ref-L", "1", "--ref-R", "2", "--split", "dev").stdout.strip())
+if run(f"{S}/study_meta.py", "PH3", "--split", "test", ok=False).returncode == 0: fail("split changed without --force")
+run(f"{S}/study_meta.py", "PH3", "--motion", "1")
+sm = pd.read_csv(f"{B}/labels/study_meta.csv").set_index("study_id").loc["PH3"]
+if sm.split != "dev" or sm.css_status != "pos" or int(sm.ref_multifocality_0_4) != 3 or sm.qc_status != "low_confidence_review":
+    fail(f"study_meta row {sm.to_dict()}")
+run(f"{S}/study_meta.py", "PH3", "--split", "test", "--force")
+if "forced" not in pd.read_csv(f"{B}/labels/study_meta.csv").set_index("study_id").loc["PH3", "note"]: fail("forced change not logged")
+print("   study_meta: QC fields copied, split fixed unless --force (logged)")
+print("RESULT labels OK")
+````
+
+## tests/check_make_swi.py
+
+````python
+"""v4.18 make_swi.py: synthetic GRE (wrapped background phase, paramagnetic veins, diamagnetic calcium) with
+both phase sign conventions -> sign found automatically, veins darkened, calcium untouched, grid kept.
+usage: check_make_swi.py    (uses $CSS_BASE/work as scratch)"""
+import os, sys, subprocess, numpy as np, nibabel as nib
+from scipy import ndimage as ndi
+B = os.environ["CSS_BASE"]; W = f"{B}/work"; os.makedirs(W, exist_ok=True)
+def fail(m): print("FAIL:", m); sys.exit(1)
+sh = (120, 140, 90); vox = 0.8
+x, y, z = np.meshgrid(*[np.arange(n) for n in sh], indexing="ij")
+head = ((x - 60) / 50) ** 2 + ((y - 70) / 60) ** 2 + ((z - 45) / 38) ** 2 < 1
+rng = np.random.default_rng(0); veins = np.zeros(sh, bool)
+for k in range(15):
+    p0 = np.array([rng.integers(25, 95), rng.integers(25, 115), rng.integers(20, 70)]); d = rng.normal(size=3); d /= np.linalg.norm(d)
+    pts = (p0 + np.outer(np.linspace(0, 25, 200), d)).round().astype(int)
+    ok = np.all((pts >= 0) & (pts < sh), 1); veins[tuple(pts[ok].T)] = True
+veins = ndi.binary_dilation(veins) & head
+calc = (x - 60) ** 2 + (y - 40) ** 2 + (z - 45) ** 2 < 9
+M = np.where(head, 1000.0, 0.0); M[veins] *= 0.6; M[calc] *= 0.6
+M = np.clip(M + rng.normal(0, 20, sh) * head, 0, None)
+aff = np.diag([-vox, vox, -vox, 1.0]); aff[:3, 3] = [50, -50, 40]          # LAI, like LEMON
+for s in (1, -1):
+    bg = 0.08 * (x - 60) + 0.05 * (y - 70) + 0.002 * (z - 45) ** 2          # wraps several times
+    ph = np.angle(np.exp(1j * (bg + s * 1.2 * ndi.gaussian_filter(veins.astype(float), 0.7) / 0.35 - s * 1.2 * calc))) * head
+    nib.save(nib.Nifti1Image(M.astype(np.float32), aff), f"{W}/GRE_mag.nii.gz")
+    nib.save(nib.Nifti1Image(((ph + np.pi) / (2 * np.pi) * 4095 - 2048).astype(np.float32), aff), f"{W}/GRE_pha.nii.gz")
+    r = subprocess.run([sys.executable, f"{B}/scripts/make_swi.py", f"{W}/GRE_mag.nii.gz", f"{W}/GRE_pha.nii.gz",
+                        f"{W}/GRE_swi.nii.gz"], capture_output=True, text=True)
+    if r.returncode: print(r.stdout, r.stderr); fail("make_swi failed")
+    if f"paramagnetic sign {s:+d}" not in r.stdout: fail(f"phase sign {s:+d} not found: {r.stdout}")
+    S = nib.load(f"{W}/GRE_swi.nii.gz")
+    if S.shape != sh or not np.allclose(S.affine, aff): fail("grid / affine changed")
+    S = S.get_fdata(); rv = float(np.median(S[veins] / M[veins].clip(1))); rc = float(np.median(S[calc] / M[calc].clip(1)))
+    if not (rv < 0.3 and rc > 0.95): fail(f"sign {s:+d}: veins x{rv:.2f}, calcium x{rc:.2f}")
+    print(f"   sign {s:+d}: found; veins x{rv:.2f} of magnitude, calcium x{rc:.2f}")
+print("RESULT make_swi OK")
+````
 
 ## tests/check_mimic.py
 
-```python
+````python
 """v5.0 checks: mimic layer (scripts/mimic_rules.py) and its hooks in detect_css.py.
 usage: check_mimic.py    (unit part needs nothing; the integration part needs PH3 from phantom_v4.py, aligned, in $CSS_BASE)
 1. phase rule: a PARAMAGNETIC sheet / tube / blob in any orientation to B0 gives phase_z > 0, a DIAMAGNETIC one < 0,
@@ -5983,11 +9369,362 @@ mb_note = (f"microbleed row detected as {len(mbo)} object(s), mb_cluster_n {list
               " (not generated by the detector on this phantom - covered by the unit test)"))
 print(f"CSS_USE_MIMIC=1: E10 excludes the calcified band ({e10.rule_version.iloc[0]}), paramagnetic cSS kept {kept}; {mb_note}")
 print("RESULT mimic OK")
-```
+````
+
+## tests/check_mp2rage.py
+
+````python
+"""v4.18 mp2rage_robust.py: synthetic MP2RAGE (signed INV1, complex noise) -> background noise removed, brain kept.
+usage: check_mp2rage.py    (scratch files in $CSS_BASE/work)"""
+import os, sys, subprocess, numpy as np, nibabel as nib
+B = os.environ["CSS_BASE"]; W = f"{B}/work"; os.makedirs(W, exist_ok=True)
+def fail(m): print("FAIL:", m); sys.exit(1)
+rng = np.random.default_rng(0); sh = (100, 110, 90)
+x, y, z = np.meshgrid(*[np.arange(n) for n in sh], indexing="ij")
+e = lambda a, b, c: ((x - 50) / a) ** 2 + ((y - 55) / b) ** 2 + ((z - 45) / c) ** 2 < 1
+head, brain, wm = e(40, 45, 38), e(32, 37, 30), e(20, 24, 18)
+i1 = np.where(head, -200.0, 0.0); i1[brain] = -80; i1[wm] = 150          # INV1 sign flips with T1
+i2 = np.where(head, 600.0, 0.0); i2[brain] = 700; i2[wm] = 800
+n = lambda v: v + rng.normal(0, 20, sh) + 1j * rng.normal(0, 20, sh)
+c1, c2 = n(i1), n(i2)
+uni = np.real(c1 * np.conj(c2)) / (np.abs(c1) ** 2 + np.abs(c2) ** 2)
+pad = np.zeros(sh, bool); pad[8:-8, 8:-8, 8:-8] = True       # LEMON-like zero-padded / defaced border (v4.18.2)
+for name, v in (("uni", np.round((uni + 0.5) * 4095)), ("inv1", np.abs(c1)), ("inv2", np.abs(c2))):
+    nib.save(nib.Nifti1Image((v * pad).astype(np.float32), np.eye(4)), f"{W}/MP2_{name}.nii.gz")
+r = subprocess.run([sys.executable, f"{B}/scripts/mp2rage_robust.py", *(f"{W}/MP2_{k}.nii.gz" for k in ("uni", "inv1", "inv2")),
+                    f"{W}/MP2_robust.nii.gz"], capture_output=True, text=True)
+if r.returncode: print(r.stdout, r.stderr); fail("mp2rage_robust failed")
+U = nib.load(f"{W}/MP2_uni.nii.gz").get_fdata(); O = nib.load(f"{W}/MP2_robust.nii.gz").get_fdata()
+from scipy import ndimage as ndi
+band = (ndi.distance_transform_edt(~head) > 5) & (ndi.distance_transform_edt(~head) <= 15) & pad
+hm = np.median(U[wm])
+bg_before, bg_after = (U[band] > 0.25 * hm).mean(), (O[band] > 0.25 * hm).mean()
+cor = float(np.corrcoef(U[brain], O[brain])[0, 1])
+if not (bg_after < 0.05 and bg_before > 0.3 and cor > 0.95 and abs(np.median(O[wm]) - np.median(U[wm])) < 0.10 * np.median(U[wm])):
+    fail(f"speckle {bg_before:.2f} -> {bg_after:.3f}, brain r {cor:.3f}, wm {np.median(O[wm]):.0f} vs {np.median(U[wm]):.0f}; {r.stdout.strip()}")
+print(f"   robust MP2RAGE (zero-padded border): speckle 5-15 mm outside the head {bg_before:.0%} -> {bg_after:.1%}, "
+      f"brain correlation {cor:.3f}, white matter within 10 %; {r.stdout.strip().split('; ')[0].split(': ')[-1]}")
+print("RESULT mp2rage OK")
+````
+
+## tests/check_overlay.py
+
+````python
+"""v4.16 checks for surface_overlay.py on PH6 (needs phantom_surfaces.py PH6 and check_surfvein.py first).
+Colour by detector list and by expert calls; annotation / id overlay consistency; Destrieux sulcus per object;
+a lower-priority class never hides a cSS call."""
+import os, sys, subprocess, numpy as np, nibabel as nib, pandas as pd
+from nibabel.freesurfer.io import read_annot
+B = os.environ["CSS_BASE"]; S = f"{B}/scripts"; py = sys.executable
+def fail(m): print("FAIL:", m); sys.exit(1)
+def run(*a, ok=True):
+    r = subprocess.run([py, *a], capture_output=True, text=True)
+    if ok and r.returncode: print(r.stdout[-800:], r.stderr[-1500:]); fail("step failed: " + " ".join(a))
+    return r
+tr = nib.load(f"{B}/work/PH6_truth.nii.gz").get_fdata().astype(int)
+sv = nib.load(f"{B}/work/PH6_surfvein.nii.gz").get_fdata().astype(int)
+C = nib.load(f"{B}/review/PH6_candidates.nii.gz").get_fdata().astype(int)
+X = nib.load(f"{B}/review/PH6_excluded.nii.gz").get_fdata().astype(int)
+
+def consistent(mode, tab):
+    """every coloured vertex carries the id of an object of that colour's class"""
+    cls_of = {(1 if r.list == "candidate" else -1) * int(r.obj_id): r.cls for _, r in tab.iterrows()}
+    for h in ("lh", "rh"):
+        lab, ctab, names = read_annot(f"{B}/review/PH6_surf_{mode}.{h}.annot")
+        ids = nib.load(f"{B}/review/PH6_surf_ids.{h}.mgh").get_fdata().ravel()
+        names = [n.decode() for n in names]
+        for v in np.nonzero(lab >= 0)[0]:
+            if cls_of.get(int(ids[v])) != names[lab[v]]: fail(f"{mode} {h}: vertex {v} colour/id mismatch")
+
+# 1. colour by detector list
+print("   " + run(f"{S}/surface_overlay.py", "PH6").stdout.splitlines()[1])
+L = pd.read_csv(f"{B}/review/PH6_surf_list_objects.csv")
+if (L.n_vertices == 0).any(): fail("objects not on the surface")
+consistent("list", L)
+want = {1: "S_k05", 2: "S_k07", 3: "S_k13", 6: "S_k09"}          # PH3 tram-track 1-3 and single bank 6
+for t, sul in want.items():
+    c = int(np.bincount(C[tr == t][C[tr == t] > 0]).argmax())
+    got = L[(L.list == "candidate") & (L.obj_id == c)].sulcus.iloc[0]
+    if got != sul: fail(f"cSS {t}: sulcus {got}, expected {sul}")
+print(f"   list mode: annotation and id overlay consistent; cSS sulci {', '.join(want.values())} as constructed")
+
+# 2. colour by expert calls (truth-derived answers: C cSS, VS surface vein / sinus, VC other)
+run(f"{S}/expert_sheet.py", "PH6", "--include-excluded")
+key = pd.read_csv(f"{B}/review/PH6_expert_key.csv"); ans = []
+for _, r in key.iterrows():
+    m = (C == r.obj_id) if r.list == "candidate" else (X == r.obj_id)
+    ans.append(f"{r.sheet_no}{'C' if (tr[m] > 0).mean() > 0.2 else 'VS' if (sv[m] > 0).mean() > 0.5 else 'VC'}")
+run(f"{S}/expert_import.py", "PH6", "expertS", "--letters", " ".join(ans))
+print("   " + run(f"{S}/surface_overlay.py", "PH6", "--color-by", "expert").stdout.splitlines()[1])
+E = pd.read_csv(f"{B}/review/PH6_surf_expert_objects.csv")
+if (E.cls == "not_labelled").any(): fail("expert labels not matched to every object")
+if set(E.cls) != {"cSS", "surface_vein", "other_vein"}: fail(f"expert classes {set(E.cls)}")
+if E[E.cls == "cSS"].n_hidden.sum(): fail("a cSS call is hidden under another class")
+consistent("expert", E)
+r_ = run(f"{S}/surface_overlay.py", "PH6", "--color-by", "expert", "--reader", "nobody", ok=False)
+if r_.returncode == 0 or "no labels from reader 'nobody'" not in r_.stderr: fail("unknown reader not refused clearly")
+print(f"   expert mode: {E.cls.value_counts().to_dict()}; no cSS vertex hidden; colours consistent")
+print("RESULT overlay OK")
+````
+
+## tests/check_physics.py
+
+````python
+"""v4.18 physics-based synthetic lesions: dipole field (css_common.susceptibility_signal) against analytic values,
+then make_synthetic.py --physics on PH1: blooming grows with TE, calcium has the opposite phase, lesions detected.
+usage: check_physics.py    (needs PH1 from phantom.py, aligned, in $CSS_BASE)"""
+import os, sys, re, shutil, subprocess, numpy as np, nibabel as nib, pandas as pd
+B = os.environ["CSS_BASE"]; S = f"{B}/scripts"; py = sys.executable
+sys.path.insert(0, S)
+from css_common import susceptibility_signal, GAMMA_HZ_T
+def fail(m): print("FAIL:", m); sys.exit(1)
+def run(*a):
+    r = subprocess.run([py, *a], capture_output=True, text=True)
+    if r.returncode: print(r.stdout[-600:], r.stderr[-1500:]); fail("step failed: " + " ".join(a))
+    return r.stdout
+
+# 1. analytic checks: long cylinder inside field = chi (3 cos^2 th - 1) / 6; sphere outside: + along B0, - across
+sh, vox, aff = (80, 80, 80), (0.5, 0.5, 0.5), np.diag([0.5, 0.5, 0.5, 1.0])
+k = 2 * np.pi * GAMMA_HZ_T * 3.0 * 0.02 * 1e-6
+for name, sl, th in (("parallel", (slice(39, 41), slice(39, 41), slice(5, 75)), 0.0),
+                     ("perpendicular", (slice(5, 75), slice(39, 41), slice(39, 41)), np.pi / 2)):
+    chi = np.zeros(sh); chi[sl] = 0.45
+    ph, _ = susceptibility_signal(chi, vox, aff, 3.0, 0.02)
+    want = k * 0.45 * (3 * np.cos(th) ** 2 - 1) / 6; got = float(np.median(ph[sl]))
+    if abs(got - want) > 0.1 * abs(want): fail(f"cylinder {name}: phase {got:.2f} vs analytic {want:.2f}")
+x, y, z = np.meshgrid(*[np.arange(80)] * 3, indexing="ij")
+chi = np.zeros(sh); chi[(x - 40) ** 2 + (y - 40) ** 2 + (z - 40) ** 2 < 9] = 1.0
+ph, _ = susceptibility_signal(chi, vox, aff, 3.0, 0.02)
+if not (ph[40, 40, 46] > 0 > ph[46, 40, 40] and abs(ph[40, 40, 46] / ph[46, 40, 40] + 2) < 0.4):
+    fail(f"sphere dipole pattern {ph[40, 40, 46]:.2f} / {ph[46, 40, 40]:.2f} (expect ratio -2)")
+# B0 follows the affine: the same cylinder stored with axes swapped (array axis 0 = scanner z) reads parallel
+aff2 = np.zeros((4, 4)); aff2[0, 2] = aff2[1, 1] = aff2[2, 0] = 0.5; aff2[3, 3] = 1
+chi = np.zeros(sh); chi[5:75, 39:41, 39:41] = 0.45
+ph, _ = susceptibility_signal(chi, vox, aff2, 3.0, 0.02)
+if abs(float(np.median(ph[5:75, 39:41, 39:41])) - k * 0.45 / 3) > 0.1 * k * 0.45 / 3: fail("B0 direction not taken from the affine")
+print(f"   dipole model: cylinders match the analytic field (within 10 %), sphere pattern +2:-1, B0 from the affine")
+
+# 2. make_synthetic --physics on PH1: TE dependence, calcium phase sign, detection
+shutil.copy(f"{B}/synthseg/PH1_seg.nii.gz", f"{B}/synthseg/PH1S_seg.nii.gz")
+I = nib.load(f"{B}/data/PH1_swi.nii").get_fdata(); res = {}
+for te in (10, 40):
+    run(f"{S}/make_synthetic.py", "PH1", "8", "0.6", "1", "--physics", "--te-ms", str(te), "--calcium", "2", "--veins", "4")
+    Sx = nib.load(f"{B}/data/PH1S_swi.nii").get_fdata(); t = nib.load(f"{B}/work/PH1S_truth.nii.gz").get_fdata() > 0
+    v = nib.load(f"{B}/work/PH1S_veins.nii.gz").get_fdata().astype(int); ph = nib.load(f"{B}/work/PH1S_dphase.nii.gz").get_fdata()
+    kd = pd.read_csv(f"{B}/work/PH1S_vein_kinds.csv").set_index("vein_id").kind
+    ca = np.isin(v, [i for i, x in kd.items() if x == "calcium"])
+    if not ca.any(): fail("no calcium decoys inserted")
+    res[te] = dict(bloom=int(((Sx < 0.8 * I) & (I > 0) & ~t & (v == 0)).sum()), ca_phase=float(np.median(ph[ca])),
+                   lesion=float(np.median(Sx[t] / I[t])))
+if not res[40]["bloom"] > 1.5 * res[10]["bloom"]: fail(f"blooming does not grow with TE: {res}")
+if not (res[10]["ca_phase"] < 0 and res[40]["lesion"] < res[10]["lesion"]): fail(f"calcium phase / TE darkening wrong: {res}")
+run(f"{S}/make_synthetic.py", "PH1", "8", "0.6", "1", "--physics", "--calcium", "2", "--veins", "4", "--surface-veins", "2")
+run(f"{S}/align_seg.py", "PH1S"); run(f"{S}/detect_css.py", "PH1S")
+r = re.search(r"found=(\d+) total=(\d+)", run(f"{S}/eval_synthetic.py", "PH1S"))
+if int(r.group(1)) < 6: fail(f"physics lesions: only {r.group(1)}/{r.group(2)} found")
+print(f"   physics lesions on PH1: darkened voxels outside objects TE 10 ms {res[10]['bloom']} -> TE 40 ms {res[40]['bloom']}; "
+      f"calcium phase {res[10]['ca_phase']:+.2f} rad (diamagnetic); found {r.group(1)}/{r.group(2)} at TE 20 ms")
+print("RESULT physics OK")
+````
+
+## tests/check_qc.py
+
+````python
+"""v4.14 checks: case QC, generation-gate log, extent at the volume edge, CSV column contract.
+usage: check_qc.py        (needs PH3 from phantom_v4.py in $CSS_BASE and the scripts in $CSS_BASE/scripts)
+Each check prints one line and the script exits 1 on the first failure."""
+import os, sys, json, subprocess, numpy as np, nibabel as nib, pandas as pd
+B = os.environ["CSS_BASE"]; S = f"{B}/scripts"; py = sys.executable
+
+V413 = ["cand_id", "hemi", "region", "label", "volume_mm3", "n_slices", "elongation", "surface_contact",
+        "darkness_z", "artifact_zone", "midline_zone", "score", "vox_i", "vox_j", "vox_k", "cortex_frac",
+        "cortex_dist_mm", "branch_per10mm", "surface_gradient", "vein_like", "long_structure", "pial_dist_mm",
+        "bank_frac", "tube_ratio", "surface_alignment", "tram_frac", "vein_tree_mm", "mirror_dark_frac",
+        "ich_dist_mm", "near_ich_suggest", "infratentorial", "flair_csf_z", "parenchyma_frac", "extent_mm",
+        "cmb_like", "flair_bright", "flair_ctx_z", "flair_ctx_bright", "css_evidence", "vein_evidence",
+        "edge_contrast", "infra_frac", "basal_frac", "rel_height", "vessel_ext_mm", "vessel_wm_mm",
+        "vessel_run_mm", "axis_normal", "score_v3", "score_v4", "accept"]
+
+def fail(m): print("FAIL:", m); sys.exit(1)
+def run(*a):
+    r = subprocess.run([py, *a], capture_output=True, text=True)
+    if r.returncode: print(r.stdout[-800:], r.stderr[-1500:]); fail("step failed: " + " ".join(a))
+    return r.stdout
+def make_case(name, I, seg, aff, t1=True):
+    """write a derived phantom; t1=True pretends the labels are T1-derived (fresh t1seg file)"""
+    nib.save(nib.Nifti1Image(I.astype(np.float32), aff), f"{B}/data/{name}_swi.nii")
+    nib.save(nib.Nifti1Image(seg.astype(np.int32), aff), f"{B}/synthseg/{name}_seg.nii.gz")
+    p = f"{B}/work/{name}_t1seg_swispace.nii.gz"
+    if t1: nib.save(nib.Nifti1Image(seg.astype(np.int32), aff), p)
+    elif os.path.exists(p): os.remove(p)
+    run(f"{S}/align_seg.py", name); run(f"{S}/detect_css.py", name)
+    return json.load(open(f"{B}/review/{name}_qc.json"))
+
+img = nib.load(f"{B}/data/PH3_swi.nii"); I0 = img.get_fdata().astype(np.float32); aff = img.affine
+seg0 = nib.load(f"{B}/synthseg/PH3_seg.nii.gz").get_fdata().astype(np.int32)
+truth = nib.load(f"{B}/work/PH3_truth.nii.gz").get_fdata().astype(int)
+
+# 1. CSV column contract: v4.13 columns unchanged and first, new ones appended
+run(f"{S}/detect_css.py", "PH3")
+c = list(pd.read_csv(f"{B}/review/PH3_candidates.csv").columns)
+if c[:len(V413)] != V413: fail(f"candidate columns changed: {c[:len(V413)]}")
+if c[len(V413):len(V413) + 3] != ["qc_status", "rule_version", "n_pieces"]: fail(f"new columns: {c[len(V413):]}")
+x = pd.read_csv(f"{B}/review/PH3_excluded.csv")
+# v5.0: exclusion_confidence ends the v4.x columns; the v5.0 mimic columns are appended after it (append-only contract)
+V50 = ["mimic_score", "mimic_class", "mimic_reason", "phase_z", "mb_cluster_n", "phase_r"]
+xc = list(x.columns)
+# v5.1.x: the block appended after the v4.19 columns is the same in both files and starts with the v5.0 columns
+tail_c = c[c.index("cand_mirror_z") + 1:]
+tail_x = xc[xc.index("exclusion_confidence") + 1:] if "exclusion_confidence" in xc else None
+if xc[:2] != ["excl_id", "reason"] or tail_x != tail_c or tail_c[:len(V50)] != V50:
+    fail(f"appended columns differ: candidates {tail_c[:8]}..., excluded {(tail_x or [])[:8]}...")
+if len(x) and not x.rule_version.str.match(r"E\d@v4\.\d").all(): fail("excluded rows without rule id")
+print(f"columns: v4.13 order kept, appended {c[len(V413):]}; excluded rows carry rule ids {sorted(x.rule_version.unique())}")
+
+# 2. generation-gate log: every dropped component has an allowed reason and never overlaps a shown/excluded one
+d = pd.read_csv(f"{B}/work/PH3_dropped.csv")
+dm = nib.load(f"{B}/work/PH3_dropped.nii.gz").get_fdata().astype(int)
+cm = nib.load(f"{B}/review/PH3_candidates.nii.gz").get_fdata().astype(int)
+xm = nib.load(f"{B}/review/PH3_excluded.nii.gz").get_fdata().astype(int)
+ok_r = ("volume <", "<2 slices", "elongation <", "no cortex label")
+if not len(d) or not d.reason.map(lambda r: r.startswith(ok_r)).all(): fail(f"dropped reasons {d.reason.unique()}")
+if set(np.unique(dm)) - {0} != set(d.drop_id): fail("dropped map ids != dropped.csv ids")
+if ((dm > 0) & ((cm > 0) | (xm > 0))).any(): fail("dropped voxels overlap candidates/excluded")
+print(f"dropped log: {len(d)} components, reasons {d.reason.value_counts().to_dict()}")
+
+# 3. orientation: same phantom stored with the S-I axis first -> insufficient_quality
+perm = (2, 0, 1)
+aff_t = aff.copy(); aff_t[:, :3] = aff[:, list(perm)]       # new axis i = old axis perm[i]
+# v4.18: detect_css stops (exit 2, QC file written) unless CSS_ALLOW_ORIENT=1
+nib.save(nib.Nifti1Image(np.transpose(I0, perm).astype(np.float32), aff_t), f"{B}/data/PHT_swi.nii")
+nib.save(nib.Nifti1Image(np.transpose(seg0, perm).astype(np.int32), aff_t), f"{B}/synthseg/PHT_seg.nii.gz")
+run(f"{S}/align_seg.py", "PHT")
+st = subprocess.run([py, f"{S}/detect_css.py", "PHT"], capture_output=True, text=True)
+q0 = json.load(open(f"{B}/review/PHT_qc.json"))
+if st.returncode != 2 or "STOPPED" not in st.stdout or q0["status"] != "insufficient_quality":
+    fail(f"wrong orientation did not stop detection (exit {st.returncode})")
+os.environ["CSS_ALLOW_ORIENT"] = "1"
+qt = make_case("PHT", np.transpose(I0, perm), np.transpose(seg0, perm), aff_t)
+del os.environ["CSS_ALLOW_ORIENT"]
+if qt["orientation_ok"] or qt["status"] != "insufficient_quality": fail(f"transposed phantom QC {qt['status']}")
+print(f"orientation: transposed phantom -> {qt['status']} ({qt['reasons'][0]})")
+
+# 4. label misregistration: labels shifted by (n, n, 2n/3) voxels -> the rigid shift fit recovers the shift
+#    (v4.17.1; the window is +-3 mm, so the largest shift is only required to be flagged, not measured)
+vals = []
+zoom = np.array(img.header.get_zooms()[:3])
+for n in (0, 1, 2, 4):
+    sh = (n, n, max(n * 2 // 3, 0))
+    q = make_case(f"PHS{n}", I0, np.roll(seg0, sh, axis=(0, 1, 2)), aff)
+    vals.append((n, float(np.linalg.norm(np.array(sh) * zoom)), q["label_shift_mm"], q["edge_bias_mm"], q["status"]))
+print("label shift true -> estimated mm (bias), status: " +
+      ", ".join(f"{t:.2f} -> {e} ({b}) {s}" for n, t, e, b, s in vals))
+if vals[0][4] != "ok": fail("unshifted T1-labelled phantom should be QC ok")
+for n, t, e, b, s in vals[:3]:
+    if abs(e - t) > 0.6: fail(f"shift {t:.2f} mm estimated as {e} mm")
+if vals[2][4] == "ok" or vals[3][4] == "ok": fail("a >= 2.5 mm label shift is still QC ok")
+
+# 5. extent at the volume edge (B1): crop so that a truth lesion starts on array slice 0
+k0 = int(np.argwhere(truth == 1)[:, 2].min()) + 1
+aff_c = aff.copy(); aff_c[:3, 3] += aff[:3, 2] * k0
+make_case("PHC", I0[:, :, k0:], seg0[:, :, k0:], aff_c)
+cc = pd.read_csv(f"{B}/review/PHC_candidates.csv"); cmc = nib.load(f"{B}/review/PHC_candidates.nii.gz").get_fdata().astype(int)
+xc = pd.read_csv(f"{B}/review/PHC_excluded.csv"); xmc = nib.load(f"{B}/review/PHC_excluded.nii.gz").get_fdata().astype(int)
+vox = np.array(img.header.get_zooms()[:3]); edge_hits = 0
+for tab, m, idc in ((cc, cmc, "cand_id"), (xc, xmc, "excl_id")):
+    for _, r in tab.iterrows():
+        p = np.argwhere(m == r[idc])
+        if not len(p): continue
+        ext = float(np.sqrt((((p.max(0) - p.min(0) + 1) * vox) ** 2).sum()))
+        edge_hits += int(p[:, 2].min() == 0)
+        if abs(ext - r.extent_mm) > 0.15: fail(f"extent_mm {r.extent_mm} != bounding box {ext:.1f} ({idc} {r[idc]})")
+if not edge_hits: fail("no candidate touches slice 0 - test does not exercise the volume edge")
+print(f"extent at the volume edge: {edge_hits} object(s) on slice 0, all extent_mm equal their bounding box")
+# 6. isotropic voxels (v4.18.3, LEMON 0.8 mm): the pial boundary sample must not be empty ("not measurable")
+aff_i = aff.copy(); aff_i[:3, 2] = aff[:3, 2] / np.linalg.norm(aff[:3, 2]) * zoom[0]
+qi = make_case("PHI", I0, seg0, aff_i)
+print(f"isotropic {zoom[0]:.2f} mm voxels: edge_n {qi['edge_n']}, label shift {qi['label_shift_mm']} mm, status {qi['status']}")
+if qi["edge_n"] < 50 or qi["label_shift_mm"] is None: fail("pial edge agreement not measurable on isotropic voxels")
+# 7. high bbregister cost with a measured edge fit: recorded as a note, status unchanged (v4.19.3)
+json.dump({"method": "bbregister", "cost": 0.96}, open(f"{B}/work/PHI_reg.json", "w"))
+qh = make_case("PHI", I0, seg0, aff_i)
+if qh["status"] != "ok" or not any("not used" in n for n in qh.get("notes", [])):
+    fail(f"cost 0.96 with a measured edge fit: status {qh['status']}, notes {qh.get('notes')}")
+print(f"registration cost 0.96 + edge fit measured: status {qh['status']}, note kept")
+print("RESULT qc OK")
+````
+
+## tests/check_qc_strict.py
+
+````python
+"""v5.0 checks: CSS_QC_STRICT=1 (detect_css.py, align_seg.py, rank_candidates.py). Default (unset) = v4.19 behaviour.
+usage: check_qc_strict.py    (needs PH3 from phantom_v4.py, aligned, in $CSS_BASE)
+1. insufficient_quality (labels cover too few brain slices): strict -> header-only candidates CSV, exit 3;
+   unset -> candidates written as before.
+2. low_confidence_review (SWI-only anatomy): strict -> detection runs (exit 0) and rank_candidates.py multiplies
+   score_model by 0.8; unset -> score_model unchanged.
+3. align_seg.py: T1 labels older than the SWI -> strict stops with an error; unset -> silent SynthSeg fall-back."""
+import os, sys, json, time, subprocess, numpy as np, nibabel as nib, pandas as pd
+B = os.environ["CSS_BASE"]; S = f"{B}/scripts"; py = sys.executable
+def fail(m): print("FAIL:", m); sys.exit(1)
+def run(*a, strict=False, env=None):
+    e = dict(os.environ); e.pop("CSS_QC_STRICT", None); e.update(env or {})
+    if strict: e["CSS_QC_STRICT"] = "1"
+    return subprocess.run([py, *a], capture_output=True, text=True, env=e)
+img = nib.load(f"{B}/data/PH3_swi.nii"); I = img.get_fdata().astype(np.float32); aff = img.affine
+seg = nib.load(f"{B}/synthseg/PH3_seg.nii.gz").get_fdata().astype(np.int32)
+def case(name, sg):
+    nib.save(nib.Nifti1Image(I, aff), f"{B}/data/{name}_swi.nii")
+    nib.save(nib.Nifti1Image(sg, aff), f"{B}/synthseg/{name}_seg.nii.gz")
+    p = f"{B}/work/{name}_t1seg_swispace.nii.gz"
+    if os.path.exists(p): os.remove(p)
+    r = run(f"{S}/align_seg.py", name)
+    if r.returncode: fail(f"align_seg {name}: {r.stderr[-300:]}")
+
+# 1. labels on the lower 40 % of slices only -> label_slice_coverage < 0.9 -> insufficient_quality
+sg = seg.copy(); sg[:, :, int(0.4 * sg.shape[2]):] = 0
+case("PHQ1", sg)
+r0 = run(f"{S}/detect_css.py", "PHQ1")
+q = json.load(open(f"{B}/review/PHQ1_qc.json"))
+if r0.returncode or q["status"] != "insufficient_quality": fail(f"unset: exit {r0.returncode}, QC {q['status']}")
+n0 = len(pd.read_csv(f"{B}/review/PHQ1_candidates.csv"))
+r1 = run(f"{S}/detect_css.py", "PHQ1", strict=True)
+c1 = pd.read_csv(f"{B}/review/PHQ1_candidates.csv")
+if r1.returncode != 3 or len(c1) or "cannot be scored" not in r1.stdout: fail(f"strict: exit {r1.returncode}, {len(c1)} rows")
+if "region_z" not in c1.columns: fail("strict empty CSV lost the column contract")
+print(f"insufficient_quality ({q['reasons'][0]}): unset -> {n0} candidates, exit 0; strict -> 0 rows, exit 3, columns kept")
+
+# 2. low confidence (SWI-only anatomy) + a small hand-made model
+case("PHQ2", seg)
+r = run(f"{S}/detect_css.py", "PHQ2", strict=True)
+q = json.load(open(f"{B}/review/PHQ2_qc.json"))
+if r.returncode or q["status"] != "low_confidence_review": fail(f"low-confidence case: exit {r.returncode}, {q['status']}")
+model = dict(features=["darkness_z", "tube_ratio"], weights=[1.0, -1.0], bias=-2.0, impute_median=[3.0, 0.5],
+             mean=[3.0, 0.5], sd=[1.0, 0.3], training_studies=["XX"], n_patients=3, lopo_auc=None, baseline="score_v4")
+json.dump(model, open(f"{B}/work/qc_model.json", "w"))
+def ranked(strict):
+    rr = run(f"{S}/rank_candidates.py", "PHQ2", "--model", f"{B}/work/qc_model.json", strict=strict)
+    if rr.returncode: fail(f"rank_candidates: {rr.stderr[-300:]}")
+    return pd.read_csv(f"{B}/review/PHQ2_candidates.csv")
+a, b = ranked(False), ranked(True)
+ratio = (b.score_model / a.score_model).round(3).unique()
+if len(ratio) != 1 or abs(ratio[0] - 0.8) > 0.002 or not (a.rank_model == b.rank_model).all():
+    fail(f"strict low-confidence penalty: ratios {ratio}")
+print(f"low_confidence_review: strict detection runs (exit 0); score_model x{ratio[0]} with the order unchanged")
+
+# 3. stale T1 labels
+nib.save(nib.Nifti1Image(seg, aff), f"{B}/work/PHQ2_t1seg_swispace.nii.gz")
+old = time.time() - 3600; os.utime(f"{B}/work/PHQ2_t1seg_swispace.nii.gz", (old, old))
+r0, r1 = run(f"{S}/align_seg.py", "PHQ2"), run(f"{S}/align_seg.py", "PHQ2", strict=True)
+if r0.returncode or "synthseg" not in r0.stdout.lower() and "PHQ2_seg" not in r0.stdout: fail(f"unset: {r0.stdout} {r0.stderr}")
+if r1.returncode == 0 or "older than the SWI" not in r1.stderr: fail(f"strict stale T1 labels accepted: {r1.stdout}")
+print("stale T1 labels: unset -> SynthSeg fall-back as before; strict -> stops with an error")
+print("RESULT qc_strict OK")
+````
 
 ## tests/check_ranker.py
 
-```python
+````python
 """v5.0 checks: train_ranker.py / rank_candidates.py on synthetic label tables with known answers (no images).
 usage: check_ranker.py    (writes into $CSS_BASE/ranker_check/)
 1. one feature (darkness_z) separates cSS perfectly -> LOPO AUC 1.0, its weight the largest and positive;
@@ -6068,178 +9805,517 @@ r = run(f"{S}/train_ranker.py", ok=False)
 if r.returncode == 0 or "need >= 3" not in (r.stdout + r.stderr): fail("2 patients were accepted")
 print("2 labelled patients: refused (needs >= 3)")
 print("RESULT ranker OK")
-```
+````
 
-## tests/check_qc_strict.py
+## tests/check_region.py
 
-```python
-"""v5.0 checks: CSS_QC_STRICT=1 (detect_css.py, align_seg.py, rank_candidates.py). Default (unset) = v4.19 behaviour.
-usage: check_qc_strict.py    (needs PH3 from phantom_v4.py, aligned, in $CSS_BASE)
-1. insufficient_quality (labels cover too few brain slices): strict -> header-only candidates CSV, exit 3;
-   unset -> candidates written as before.
-2. low_confidence_review (SWI-only anatomy): strict -> detection runs (exit 0) and rank_candidates.py multiplies
-   score_model by 0.8; unset -> score_model unchanged.
-3. align_seg.py: T1 labels older than the SWI -> strict stops with an error; unset -> silent SynthSeg fall-back."""
-import os, sys, json, time, subprocess, numpy as np, nibabel as nib, pandas as pd
+````python
+"""v4.19.2 checks: regional + contralateral reference (detect_css.py region_z, region_dark_frac, mirror_region_z,
+cand_mirror_z). usage: check_region.py   (needs PH3 from phantom_v4.py, aligned, in $CSS_BASE)
+PH3 + one gyrus darkened by 25 % and given its own label (1024 / 2024, like a naturally dark motor strip in
+recon-all's aparc): PHR = both hemispheres (physiological, symmetric), PHU = left only.
+PHANTOM REGRESSION CHECKS ONLY: they do not validate any threshold for real data."""
+import os, sys, subprocess, numpy as np, nibabel as nib, pandas as pd
+from scipy import ndimage as ndi
 B = os.environ["CSS_BASE"]; S = f"{B}/scripts"; py = sys.executable
 def fail(m): print("FAIL:", m); sys.exit(1)
-def run(*a, strict=False, env=None):
-    e = dict(os.environ); e.pop("CSS_QC_STRICT", None); e.update(env or {})
-    if strict: e["CSS_QC_STRICT"] = "1"
-    return subprocess.run([py, *a], capture_output=True, text=True, env=e)
-img = nib.load(f"{B}/data/PH3_swi.nii"); I = img.get_fdata().astype(np.float32); aff = img.affine
-seg = nib.load(f"{B}/synthseg/PH3_seg.nii.gz").get_fdata().astype(np.int32)
-def case(name, sg):
+img = nib.load(f"{B}/data/PH3_swi.nii"); I0 = img.get_fdata().astype(np.float32); aff = img.affine
+seg0 = nib.load(f"{B}/synthseg/PH3_seg.nii.gz").get_fdata().astype(np.int32)
+a2 = nib.load(f"{B}/work/PH3_a2009s_swispace.nii.gz").get_fdata().astype(int)
+tr = nib.load(f"{B}/work/PH3_truth.nii.gz").get_fdata().astype(int)
+GL = (a2 == 11104) & (seg0 >= 1000); GR = (a2 == 12104) & (seg0 >= 1000)   # gyrus sector 3, its own mirror; no lesions
+if (tr[GL | GR] > 0).any() or GL.sum() < 1000: fail("test gyrus overlaps a lesion / is missing")
+def case(name, dark):
+    I = I0.copy(); seg = seg0.copy(); seg[GL] = 1024; seg[GR] = 2024
+    I *= 1 - 0.25 * ndi.gaussian_filter(dark.astype(np.float32), 1.0)
     nib.save(nib.Nifti1Image(I, aff), f"{B}/data/{name}_swi.nii")
-    nib.save(nib.Nifti1Image(sg, aff), f"{B}/synthseg/{name}_seg.nii.gz")
+    for p in (f"{B}/synthseg/{name}_seg.nii.gz", f"{B}/work/{name}_t1seg_swispace.nii.gz"):
+        nib.save(nib.Nifti1Image(seg, aff), p)
+    for st in ("align_seg.py", "detect_css.py"):
+        r = subprocess.run([py, f"{S}/{st}", name], capture_output=True, text=True)
+        if r.returncode: print(r.stdout[-800:], r.stderr[-1500:]); fail(f"{st} {name} failed")
+    rows = []
+    for lst, idc in (("candidates", "cand_id"), ("excluded", "excl_id")):
+        d = pd.read_csv(f"{B}/review/{name}_{lst}.csv"); M = nib.load(f"{B}/review/{name}_{lst}.nii.gz").get_fdata().astype(int)
+        for _, r_ in d.iterrows():
+            m = M == r_[idc]
+            k = "cSS" if (tr[m] > 0).mean() > 0.2 else ("dark gyrus" if dark[m].mean() > 0.3 else "other")
+            rows.append(dict(kind=k, **{c: r_[c] for c in ("region_z", "region_dark_frac", "mirror_region_z", "cand_mirror_z")}))
+    D = pd.DataFrame(rows); c, g = D[D.kind == "cSS"], D[D.kind == "dark gyrus"]
+    if len(c) < 4 or not len(g): fail(f"{name}: expected cSS and dark-gyrus objects, got {D.kind.value_counts().to_dict()}")
+    print(f"{name}: cSS region_z {c.region_z.max():.2f}..{c.region_z.min():.2f}, dark frac <= {c.region_dark_frac.max():.3f}, "
+          f"mirror {c.mirror_region_z.abs().max():.2f} | dark gyrus region_z {g.region_z.min():.2f}..{g.region_z.max():.2f}, "
+          f"dark frac {g.region_dark_frac.min():.2f}..{g.region_dark_frac.max():.2f}, mirror {g.mirror_region_z.min():.2f}..{g.mirror_region_z.max():.2f}")
+    if (c.region_z > -4).any() or (c.region_dark_frac > 0.1).any(): fail(f"{name}: cSS should be focal (far darker than its region)")
+    if (g.region_z.abs() > 2).any() or (g.region_dark_frac < 0.3).any(): fail(f"{name}: dark gyrus should read as broadly dark")
+    if (c.mirror_region_z.abs() > 1).any(): fail(f"{name}: unchanged regions should be symmetric")
+    return g
+g = case("PHR", GL | GR)
+if (g.mirror_region_z.abs() > 1).any(): fail("bilateral dark gyrus should be symmetric")
+g = case("PHU", GL)
+if (g.mirror_region_z > -2).any(): fail("one-sided dark gyrus should be darker than its mirror region")
+print("RESULT region OK")
+````
+
+## tests/check_review_web.py
+
+````python
+"""review_web.py server checks (no browser): PH3 in $CSS_BASE. usage: check_review_web.py
+meta lists every candidate with a meter value in 0-1 and a band; a call without a reviewer name is refused; calls,
+comment, undo-style clearing and a missed-cSS mark are written with the reviewer name; ID_calls.csv keeps the
+review_css.py format; calls re-load for the same reviewer and not for another; names are remembered."""
+import os, sys, json, time, subprocess, urllib.request, pandas as pd
+HERE = os.path.dirname(os.path.abspath(__file__)); S = os.path.join(HERE, "..", "scripts"); B = os.environ["CSS_BASE"]
+def fail(m): print("FAIL:", m); srv.kill(); sys.exit(1)
+for f in ("PH3_calls.csv", "PH3_calls_Reader_A.csv", "PH3_review_log.csv", "PH3_missed.csv", "reviewers.json"):
+    if os.path.exists(f"{B}/review/{f}"): os.remove(f"{B}/review/{f}")
+srv = subprocess.Popen([sys.executable, f"{S}/review_web.py", "PH3", "--no-browser", "--port", "8931"], stdout=subprocess.PIPE, text=True)
+U = srv.stdout.readline().split("http://")[1].split()[0]; U = "http://" + U.rstrip("/")
+def get(p):
+    for _ in range(60):
+        try: return json.load(urllib.request.urlopen(U + p, timeout=60))
+        except OSError: time.sleep(0.5)
+    fail("server did not answer")
+def post(p, d):
+    r = urllib.request.Request(U + p, json.dumps(d).encode(), {"Content-Type": "application/json"})
+    try: return json.load(urllib.request.urlopen(r, timeout=120))
+    except urllib.error.HTTPError as e: return json.load(e)
+m = get("/api/meta?study=PH3&reviewer="); n = len(m["cands"])
+if not n or any(not (0 <= c["ai"]["score"] <= 1) or c["ai"]["band"] not in ("green", "yellow", "red") or not c["ai"]["suspect"] for c in m["cands"]):
+    fail("meter values / bands")
+if "error" not in post("/api/call", dict(study="PH3", reviewer="", cand_id=1, call="cSS")): fail("a call without a reviewer name must be refused")
+post("/api/reviewer", dict(name="Reader A"))
+ids = [c["id"] for c in m["cands"]]
+post("/api/call", dict(study="PH3", reviewer="Reader A", cand_id=ids[0], call="cSS", meter=0.8))
+post("/api/call", dict(study="PH3", reviewer="Reader A", cand_id=ids[1], call="Vein"))
+post("/api/call", dict(study="PH3", reviewer="Reader A", cand_id=ids[1], call="", action="clear"))
+post("/api/call", dict(study="PH3", reviewer="Reader A", cand_id=ids[2], comment="check, \"quoted\""))
+if "error" not in post("/api/call", dict(study="PH3", reviewer="Reader A", cand_id=ids[0], call="Banana")): fail("unknown call accepted")
+r = post("/api/missed", dict(study="PH3", reviewer="Reader A", action="add", ijk=m["cands"][0]["centre"], comment="here"))
+if len(r["missed"]) != 1: fail("missed mark not stored")
+c = pd.read_csv(f"{B}/review/PH3_calls.csv")
+if list(c.columns) != ["cand_id", "call", "vox_i", "vox_j", "vox_k", "volume_mm3"] or list(c.call) != ["cSS"]: fail(f"ID_calls.csv format / content: {c}")
+a = pd.read_csv(f"{B}/review/PH3_calls_Reader_A.csv")
+if set(a.reviewer) != {"Reader A"} or len(a) != 2 or "quoted" not in str(a.comment.tolist()): fail(f"per-reviewer file: {a}")
+if len(pd.read_csv(f"{B}/review/PH3_review_log.csv")) != 4: fail("log must hold the 4 accepted actions")
+ms = pd.read_csv(f"{B}/review/PH3_missed.csv")
+if ms.reviewer[0] != "Reader A" or [ms.can_i[0], ms.can_j[0], ms.can_k[0]] != m["cands"][0]["centre"]: fail("missed csv")
+if get("/api/meta?study=PH3&reviewer=Reader%20A")["calls"][str(ids[0])]["call"] != "cSS": fail("calls not re-loaded")
+if get("/api/meta?study=PH3&reviewer=Reader%20B")["calls"]: fail("another reviewer must start empty")
+if get("/api/meta?study=PH3&reviewer=")["reviewers"]["last"] != "Reader A": fail("last reviewer name not remembered")
+f = post("/api/finish", dict(study="PH3", reviewer="Reader A"))
+if f["counts"]["cSS"] != 1 or f["unread"] != n - 1: fail(f"summary: {f}")
+srv.kill()
+for f in ("PH3_calls.csv", "PH3_calls_Reader_A.csv", "PH3_review_log.csv", "PH3_missed.csv", "reviewers.json"): os.remove(f"{B}/review/{f}")
+print(f"review_web: {n} candidates with meter, name required, calls / comment / missed mark stored with the reviewer, re-loaded per reviewer")
+print("RESULT review_web OK")
+````
+
+## tests/check_stage2.py
+
+````python
+"""v4.17 (audit Stage 2) checks: recon-all label convention (sulcal CSF = 0), Hessian on the mask-filled image,
+E8 artifact-zone rule only with T1 anatomy, stale FLAIR / Destrieux ignored, per-case manifest.
+usage: check_stage2.py     (needs PH3 in $CSS_BASE)"""
+import os, sys, json, subprocess, re, numpy as np, nibabel as nib, pandas as pd
+from scipy import ndimage as ndi
+B = os.environ["CSS_BASE"]; S = f"{B}/scripts"; py = sys.executable
+def fail(m): print("FAIL:", m); sys.exit(1)
+def run(*a):
+    r = subprocess.run([py, *a], capture_output=True, text=True)
+    if r.returncode: print(r.stdout[-800:], r.stderr[-1500:]); fail("step failed: " + " ".join(a))
+    return r.stdout
+img = nib.load(f"{B}/data/PH3_swi.nii"); I = img.get_fdata().astype(np.float32); aff = img.affine
+seg0 = nib.load(f"{B}/synthseg/PH3_seg.nii.gz").get_fdata().astype(np.int32)
+brain = I > 0
+def case(name, seg, t1=True, flair=None, data=None):
+    nib.save(nib.Nifti1Image(I if data is None else data, aff), f"{B}/data/{name}_swi.nii")
+    nib.save(nib.Nifti1Image(seg, aff), f"{B}/synthseg/{name}_seg.nii.gz")
     p = f"{B}/work/{name}_t1seg_swispace.nii.gz"
-    if os.path.exists(p): os.remove(p)
-    r = run(f"{S}/align_seg.py", name)
-    if r.returncode: fail(f"align_seg {name}: {r.stderr[-300:]}")
+    if t1: nib.save(nib.Nifti1Image(seg, aff), p)
+    elif os.path.exists(p): os.remove(p)
+    if flair is not None: nib.save(nib.Nifti1Image(flair, aff), f"{B}/work/{name}_flair_swispace.nii.gz")
+    run(f"{S}/align_seg.py", name); out = run(f"{S}/detect_css.py", name)
+    return out, pd.read_csv(f"{B}/review/{name}_candidates.csv")
+# FLAIR: CSF bright, tissue darker (no acute SAH anywhere)
+tis = ndi.binary_fill_holes(brain & (seg0 > 0) & (seg0 != 24))
+FL = np.where(brain & ~tis, 600.0, 300.0).astype(np.float32) * brain + \
+     np.random.default_rng(0).normal(0, 10, I.shape).astype(np.float32) * brain
 
-# 1. labels on the lower 40 % of slices only -> label_slice_coverage < 0.9 -> insufficient_quality
-sg = seg.copy(); sg[:, :, int(0.4 * sg.shape[2]):] = 0
-case("PHQ1", sg)
-r0 = run(f"{S}/detect_css.py", "PHQ1")
-q = json.load(open(f"{B}/review/PHQ1_qc.json"))
-if r0.returncode or q["status"] != "insufficient_quality": fail(f"unset: exit {r0.returncode}, QC {q['status']}")
-n0 = len(pd.read_csv(f"{B}/review/PHQ1_candidates.csv"))
-r1 = run(f"{S}/detect_css.py", "PHQ1", strict=True)
-c1 = pd.read_csv(f"{B}/review/PHQ1_candidates.csv")
-if r1.returncode != 3 or len(c1) or "cannot be scored" not in r1.stdout: fail(f"strict: exit {r1.returncode}, {len(c1)} rows")
-if "region_z" not in c1.columns: fail("strict empty CSV lost the column contract")
-print(f"insufficient_quality ({q['reasons'][0]}): unset -> {n0} candidates, exit 0; strict -> 0 rows, exit 3, columns kept")
+# 1. recon-all aparc+aseg convention: sulcal/extracerebral CSF unlabelled (0), label 24 only in a small basal region
+seg_r = seg0.copy(); seg_r[seg_r == 24] = 0
+basal = np.zeros_like(brain); basal[:, :, :12] = True
+seg_r[(seg0 == 24) & basal] = 24
+_, A = case("PH7A", seg0, flair=FL)               # SynthSeg convention
+_, Bc = case("PH7B", seg_r, flair=FL)             # recon-all convention
+key = ["vox_i", "vox_j", "vox_k", "volume_mm3"]
+m = A.merge(Bc, on=key, suffixes=("_a", "_b"))
+if len(m) != len(A) or len(m) != len(Bc): fail(f"candidates differ between label conventions ({len(A)} vs {len(Bc)})")
+if (m.surface_contact_a - m.surface_contact_b).abs().max() > 0.01: fail("surface_contact depends on the CSF label convention")
+if Bc.flair_csf_z.isna().all(): fail("FLAIR features switched off with recon-all labels")
+if (m.flair_csf_z_a - m.flair_csf_z_b).abs().max() > 0.5: fail("FLAIR CSF reference depends on the label convention")
+print(f"   label convention: {len(m)} identical candidates, surface_contact and FLAIR CSF z the same with sulcal CSF = 0")
 
-# 2. low confidence (SWI-only anatomy) + a small hand-made model
-case("PHQ2", seg)
-r = run(f"{S}/detect_css.py", "PHQ2", strict=True)
-q = json.load(open(f"{B}/review/PHQ2_qc.json"))
-if r.returncode or q["status"] != "low_confidence_review": fail(f"low-confidence case: exit {r.returncode}, {q['status']}")
-model = dict(features=["darkness_z", "tube_ratio"], weights=[1.0, -1.0], bias=-2.0, impute_median=[3.0, 0.5],
-             mean=[3.0, 0.5], sd=[1.0, 0.3], training_studies=["XX"], n_patients=3, lopo_auc=None, baseline="score_v4")
-json.dump(model, open(f"{B}/work/qc_model.json", "w"))
-def ranked(strict):
-    rr = run(f"{S}/rank_candidates.py", "PHQ2", "--model", f"{B}/work/qc_model.json", strict=strict)
-    if rr.returncode: fail(f"rank_candidates: {rr.stderr[-300:]}")
-    return pd.read_csv(f"{B}/review/PHQ2_candidates.csv")
-a, b = ranked(False), ranked(True)
-ratio = (b.score_model / a.score_model).round(3).unique()
-if len(ratio) != 1 or abs(ratio[0] - 0.8) > 0.002 or not (a.rank_model == b.rank_model).all():
-    fail(f"strict low-confidence penalty: ratios {ratio}")
-print(f"low_confidence_review: strict detection runs (exit 0); score_model x{ratio[0]} with the order unchanged")
+# 2. Hessian on the mask-filled image (a sharp mask edge must not create curvature)
+src = open(f"{S}/detect_css.py").read()
+if src.count("gaussian_filter(If, sg, order=order)") != 2 or "gaussian_filter(Ic, sg, order=order)" in src:
+    fail("3-D Hessian is not computed on the mask-filled image")
+flat = np.where(brain, 200.0, 0.0); filled = np.where(brain, 200.0, 200.0)
+sg = [1.6 / v for v in img.header.get_zooms()[:3]]
+near_edge = brain & (ndi.distance_transform_edt(brain, sampling=img.header.get_zooms()[:3]) < 3)
+e0 = np.abs(ndi.gaussian_filter(flat, sg, order=(2, 0, 0))[near_edge]).max()
+e1 = np.abs(ndi.gaussian_filter(filled, sg, order=(2, 0, 0))[near_edge]).max()
+if not e1 < 1e-2 * e0: fail("filled image still curves at the mask edge")   # residue = kernel truncation
+print(f"   Hessian: second derivative at the mask edge {e0:.1f} (zeros outside) -> {e1:.3f} (filled)")
 
-# 3. stale T1 labels
-nib.save(nib.Nifti1Image(seg, aff), f"{B}/work/PHQ2_t1seg_swispace.nii.gz")
-old = time.time() - 3600; os.utime(f"{B}/work/PHQ2_t1seg_swispace.nii.gz", (old, old))
-r0, r1 = run(f"{S}/align_seg.py", "PHQ2"), run(f"{S}/align_seg.py", "PHQ2", strict=True)
-if r0.returncode or "synthseg" not in r0.stdout.lower() and "PHQ2_seg" not in r0.stdout: fail(f"unset: {r0.stdout} {r0.stderr}")
-if r1.returncode == 0 or "older than the SWI" not in r1.stderr: fail(f"strict stale T1 labels accepted: {r1.stdout}")
-print("stale T1 labels: unset -> SynthSeg fall-back as before; strict -> stops with an error")
-print("RESULT qc_strict OK")
-```
+# 3. E8 artifact-zone rule: never on SWI-only anatomy
+lut = f"{os.environ.get('FREESURFER_HOME', '')}/FreeSurferColorLUT.txt"
+if os.path.exists(lut) and "lateralorbitofrontal" not in open(lut).read():
+    open(lut, "a").write("1012 ctx-lh-lateralorbitofrontal 35 75 50 0\n2012 ctx-rh-lateralorbitofrontal 35 75 50 0\n")
+seg_o = seg0.copy(); seg_o[seg0 == 1028] = 1012; seg_o[seg0 == 2028] = 2012
+# a dark curvilinear line on the low frontal surface: relative height ~0.25 (above the 0.2 skull-base cut)
+x, y, zz = np.meshgrid(*[(np.arange(n) - n / 2) * v for n, v in zip(I.shape, img.header.get_zooms()[:3])], indexing="ij")
+dep = (1 - np.sqrt((x / 52) ** 2 + (y / 58) ** 2 + (zz / 44) ** 2)) * 52
+ang = np.degrees(np.arctan2(y, x))
+low = (dep > 0) & (dep < 1.2) & (zz > -24) & (zz < -18) & (np.abs(ang - 90) < 15) & (seg_o >= 1000)
+I_o = I * np.where(low, 0.35, 1.0).astype(np.float32)
+o1, _ = case("PH7C", seg_o, t1=False, data=I_o)
+x1 = pd.read_csv(f"{B}/review/PH7C_excluded.csv")
+if len(x1) and x1.reason.str.contains("artifact zone").any(): fail("E8 fired on SWI-only anatomy")
+o2, _ = case("PH7D", seg_o, t1=True, data=I_o)
+x2 = pd.read_csv(f"{B}/review/PH7D_excluded.csv")
+n8 = int(x2.reason.str.contains("artifact zone").sum()) if len(x2) else 0
+if n8 == 0: fail("E8 never fires even with T1 anatomy - the gating test is not exercising the rule")
+print(f"   E8 artifact zone: 0 exclusions SWI-only, {n8} with T1 anatomy")
 
-## scripts/audit_case.py
+# 4. stale inputs: a FLAIR / Destrieux older than the SWI are ignored
+import time
+t0 = time.time()                                         # explicit times: file systems can share an mtime tick
+os.utime(f"{B}/work/PH7A_flair_swispace.nii.gz", (t0 - 100, t0 - 100))   # FLAIR from before the SWI re-import
+os.utime(f"{B}/data/PH7A_swi.nii", (t0 - 50, t0 - 50))
+os.utime(f"{B}/work/PH7A_t1seg_swispace.nii.gz", (t0, t0))               # keep T1 labels current for this check
+run(f"{S}/align_seg.py", "PH7A"); out = run(f"{S}/detect_css.py", "PH7A")
+if "FLAIR IGNORED" not in out or not pd.read_csv(f"{B}/review/PH7A_candidates.csv").flair_csf_z.isna().all():
+    fail("a stale FLAIR was used")
+nib.save(nib.load(f"{B}/work/PH3_a2009s_swispace.nii.gz"), f"{B}/work/PH7A_a2009s_swispace.nii.gz")
+os.utime(f"{B}/work/PH7A_a2009s_swispace.nii.gz", (t0 - 100, t0 - 100))
+d = pd.read_csv(f"{B}/review/PH7A_candidates.csv"); d["accept"] = 1; d.to_csv(f"{B}/review/PH7A_candidates.csv", index=False)
+sc = run(f"{S}/score_css.py", "PH7A")
+if "Destrieux labels are older than the SWI" not in sc or "euclidean" not in sc: fail("stale Destrieux labels used")
+print("   stale FLAIR and Destrieux labels ignored with a warning")
 
-```python
-#!/usr/bin/env python3
-"""Per-case audit report (v5.1): what went in, what the detector did with every object, and what to distrust.
-usage: audit_case.py SUBJECT            -> prints the report, writes review/ID_audit.json
-Reads only existing outputs (review/ID_manifest.json, ID_qc.json, candidates / excluded CSVs, work/ID_dropped.csv)
-and image headers; changes nothing. Sections:
-  inputs       file, sha256 (from the manifest), shape, voxel size, orientation, obliquity, S-I array axis
-  acquisition  sequence type (SWI / T2*-GRE / SWI built from GRE by make_swi.py / unknown), field, TE, TR, slice
-               thickness, vendor (dcm2niix JSON, if present)
-  anatomy      T1 route, FLAIR / phase availability and FRESHNESS against the SWI, registration method, cost,
-               label shift, edge agreement, QC status and reasons
-  fates        raw components -> not generated (no strong seed) -> pieces -> merged objects -> dropped per gate /
-               excluded per rule / shown; the counts must add up (the detector stops otherwise, exit 4)
-Research software: expert review of every candidate remains required; not validated for clinical use."""
-import sys, os, json, glob, nibabel as nib, numpy as np, pandas as pd
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from css_common import base as _base, stale_against
+# 5. manifest
+mf = json.load(open(f"{B}/review/PH7B_manifest.json"))["detect"]
+need = {"pipeline_version", "inputs", "environment", "parameters", "qc_status"}
+if not need <= set(mf): fail(f"manifest misses {need - set(mf)}")
+import hashlib
+if mf["inputs"]["swi"]["sha256"] != hashlib.sha256(open(f"{B}/data/PH7B_swi.nii", "rb").read()).hexdigest():
+    fail("manifest SWI hash wrong")
+if not {"swi", "labels", "t1_labels", "flair"} <= set(mf["inputs"]): fail(f"manifest inputs {list(mf['inputs'])}")
+print(f"   manifest: {mf['pipeline_version']}, inputs {sorted(mf['inputs'])}, numpy {mf['environment']['numpy']}")
+print("RESULT stage2 OK")
+````
 
-if len(sys.argv) < 2: sys.exit(__doc__)
-s = sys.argv[1]; B = _base()
-J = lambda p: json.load(open(p)) if os.path.exists(p) else {}
-man, qc = J(f"{B}/review/{s}_manifest.json"), J(f"{B}/review/{s}_qc.json")
-det = man.get("detect", {})
-if not det: sys.exit(f"{s}: no detector run recorded (review/{s}_manifest.json) - run detect_css.py first")
-swi_p = f"{B}/data/{s}_swi.nii"
-rep = dict(subject=s, schema_version=man.get("schema_version"), build=(det.get("environment") or {}).get("build"),
-           detector=det.get("pipeline_version"), run_at=det.get("run_at"), parameters=det.get("parameters"),
-           note="research software; expert review of every candidate remains required; not validated for clinical use")
-# inputs
-def geom(p):
-    try: im = nib.load(p)
-    except Exception: return None
-    a = im.affine; vox = [round(float(v), 3) for v in im.header.get_zooms()[:3]]
-    si = int(np.argmax(np.abs(a[2, :3]))); n = a[:3, si] / np.linalg.norm(a[:3, si])
-    return dict(shape=list(im.shape[:3]), voxel_mm=vox, orientation="".join(nib.aff2axcodes(a)), si_axis=si,
-                obliquity_deg=round(float(np.degrees(np.arccos(min(1.0, abs(n[2]))))), 1))
-inp = det.get("inputs", {})
-rep["inputs"] = {k: dict(path=v.get("path"), sha256=(v.get("sha256") or "")[:16], **(geom(v["path"]) or {}))
-                 for k, v in inp.items() if k in ("swi", "labels", "t1_labels", "flair", "phase", "destrieux")}
-# acquisition
-acq = qc.get("acquisition") or {}
-if acq.get("sequence"): seq = acq["sequence"]
-elif os.path.exists(f"{B}/work/{s}_gre_swi.nii.gz"): seq = "SWI built from GRE magnitude + phase (make_swi.py)"
-else: seq = "unknown (no dcm2niix JSON in raw/ID/SWI)"
-rep["acquisition"] = dict(sequence=seq, field_T=acq.get("field_T"), TE_ms=acq.get("TE_ms"), TR_ms=acq.get("TR_ms"),
-                          slice_thickness_mm=acq.get("slice_thickness_mm"), vendor=acq.get("manufacturer"))
-# anatomy, freshness
-fresh = {}
-for name, p in (("T1 labels", f"{B}/work/{s}_t1seg_swispace.nii.gz"), ("FLAIR", f"{B}/work/{s}_flair_swispace.nii.gz"),
-                ("phase", f"{B}/data/{s}_phase.nii.gz"), ("Destrieux labels", f"{B}/work/{s}_a2009s_swispace.nii.gz")):
-    fresh[name] = "absent" if not os.path.exists(p) else ("STALE (older than the SWI) - ignored" if stale_against(p, [swi_p]) else "fresh")
-sp = f"{B}/review/{s}_surface_features.csv"
-fresh["surface features"] = "absent" if not os.path.exists(sp) else \
-    ("STALE (older than this detection) - ignored" if stale_against(sp, [f"{B}/review/{s}_candidates.nii.gz"]) else "fresh")
-reg = qc.get("registration") or {}
-rep["anatomy"] = dict(route=qc.get("anatomy"), inputs=fresh, registration=reg.get("method"), registration_cost=reg.get("cost"),
-                      label_shift_mm=qc.get("label_shift_mm"), edge_bias_mm=qc.get("edge_bias_mm"),
-                      edge_scatter_mm=qc.get("edge_scatter_mm"), edge_n=qc.get("edge_n"),
-                      qc_status=qc.get("status"), qc_reasons=qc.get("reasons"), qc_notes=qc.get("notes"),
-                      phase_rule=(det.get("parameters") or {}).get("phase"))
-# fates
-F = det.get("fates") or {}
-dp, xp, cp = f"{B}/work/{s}_dropped.csv", f"{B}/review/{s}_excluded.csv", f"{B}/review/{s}_candidates.csv"
-nd = len(pd.read_csv(dp)) if os.path.exists(dp) else None
-nx = len(pd.read_csv(xp)) if os.path.exists(xp) else None
-nc = len(pd.read_csv(cp)) if os.path.exists(cp) else None
-check = None
-if F.get("objects") is not None and None not in (nd, nx, nc):
-    check = "ok" if (F.get("qc_blocked") or nd + nx + nc) == F["objects"] else \
-        f"MISMATCH: {F['objects']} objects vs {nd} dropped + {nx} excluded + {nc} shown (files changed after the run?)"
-rep["fates"] = dict(F, files=dict(dropped=nd, excluded=nx, shown=nc), consistency=check)
-json.dump(rep, open(f"{B}/review/{s}_audit.json", "w"), indent=2, default=str)
+## tests/check_surfvein.py
 
-# printed report
-print(f"{s}: audit (schema {rep['schema_version']}, build {rep['build']}, detector {rep['detector']}, run {rep['run_at']})")
-print("  research software - expert review of every candidate remains required; not validated for clinical use")
-for k, v in rep["inputs"].items():
-    print(f"  input {k:10s} {v.get('orientation', '?')} {v.get('voxel_mm')} mm, obliquity {v.get('obliquity_deg')} deg, "
-          f"S-I axis {v.get('si_axis')}, sha256 {v.get('sha256')}")
-a = rep["acquisition"]
-print(f"  acquisition: {a['sequence']}; field {a['field_T']} T, TE {a['TE_ms']} ms, slice {a['slice_thickness_mm']} mm, vendor {a['vendor']}")
-an = rep["anatomy"]
-print(f"  anatomy: {an['route']}; " + ", ".join(f"{k} {v}" for k, v in an["inputs"].items()))
-print(f"  registration: {an['registration']} (cost {an['registration_cost']}); label shift {an['label_shift_mm']} mm, "
-      f"edge bias {an['edge_bias_mm']} mm, scatter {an['edge_scatter_mm']} mm (n {an['edge_n']})")
-print(f"  QC: {an['qc_status']}" + (f" - {'; '.join(an['qc_reasons'])}" if an["qc_reasons"] else "")
-      + (f" [notes: {'; '.join(an['qc_notes'])}]" if an.get("qc_notes") else ""))
-print(f"  phase rule: {an['phase_rule']}")
-if F:
-    print(f"  fates: {F.get('raw_components')} raw components -> {F.get('not_generated_unseeded')} not generated (no strong seed) "
-          f"-> {F.get('pieces_before_merge')} pieces -> {F.get('objects')} objects")
-    print(f"         dropped by gate {F.get('dropped_by_gate')}; excluded by rule {F.get('excluded_by_rule')}; "
-          f"shown {F.get('shown')}; QC-blocked {F.get('qc_blocked')}  [{check}]")
-else:
-    print("  fates: not recorded (detector run before v5.1)")
-```
+````python
+"""v4.16 checks on PH6 (PH3 + a surface-following, branching vein draining to a sagittal sinus):
+local vein tracking (detect_css.py / css_vessel.py) and pial-surface features (surface_features.py).
+usage: check_surfvein.py    (needs PH6 from phantom_surfvein.py, aligned, in $CSS_BASE)
+PHANTOM REGRESSION CHECKS ONLY: they show that the features measure what they are meant to on constructed
+anatomy. They do not validate any threshold for real data."""
+import os, sys, subprocess, numpy as np, nibabel as nib, pandas as pd
+B = os.environ["CSS_BASE"]; S = f"{B}/scripts"; py = sys.executable
+def fail(m): print("FAIL:", m); sys.exit(1)
+def run(*a, ok=True):
+    r = subprocess.run([py, *a], capture_output=True, text=True)
+    if ok and r.returncode: print(r.stdout[-800:], r.stderr[-1500:]); fail("step failed: " + " ".join(a))
+    return r
+run(f"{S}/detect_css.py", "PH6")
+tr = nib.load(f"{B}/work/PH6_truth.nii.gz").get_fdata().astype(int)
+sv = nib.load(f"{B}/work/PH6_surfvein.nii.gz").get_fdata().astype(int)
+objs = []
+for lst, idc in (("candidates", "cand_id"), ("excluded", "excl_id")):
+    d = pd.read_csv(f"{B}/review/PH6_{lst}.csv"); M = nib.load(f"{B}/review/PH6_{lst}.nii.gz").get_fdata().astype(int)
+    for _, r in d.iterrows():
+        m = M == r[idc]
+        kind = "cSS" if (tr[m] > 0).mean() > 0.2 else (
+            {1: "surface vein", 2: "surface vein", 3: "sinus"}[int(np.bincount(sv[m][sv[m] > 0]).argmax())]
+            if (sv[m] > 0).mean() > 0.5 else "other")
+        objs.append(dict(list=lst[:-1] if lst == "candidates" else "excluded", obj_id=int(r[idc]), kind=kind, **r.to_dict()))
+O = pd.DataFrame(objs)
+found = [t for t in range(1, int(tr.max()) + 1)
+         if (nib.load(f"{B}/review/PH6_candidates.nii.gz").get_fdata()[tr == t] > 0).mean() >= 0.3]
+if len(found) < int(tr.max()) - 1: fail(f"cSS lost when the surface vein is added: {found}")
+cols = ["kind", "list", "local_cont_max_mm", "terminal_ends", "local_branch_points", "score_v4"]
+print(O[O.kind != "other"][cols].to_string(index=False))
+c, v = O[O.kind == "cSS"], O[O.kind.isin(["surface vein", "sinus"])]
+if not len(v): fail("surface vein / sinus not generated at all")
+# 1. local tracking: the vein network runs on beyond the candidate (into the sinus / the other vein part)
+vv = O[O.kind == "surface vein"]
+if not len(vv) or not (vv.local_cont_max_mm >= 10).all() or not (vv.terminal_ends <= 1).all():
+    fail("the surface vein should continue (into the sinus) beyond one end")
+# sinus pieces (the 40 mm merge cap splits the sinus into several candidates) are reported, not asserted
+if (c.local_cont_max_mm >= 10).any(): fail("a phantom cSS candidate continues >= 10 mm")
+mv = O[(O.kind == "surface vein") & (O.cand_geodesic_mm == O[O.kind == "surface vein"].cand_geodesic_mm.max())]
+if (mv.local_branch_points < 1).all(): fail("the branching surface vein shows no junction")
+print(f"vein tracking: cSS continuation <= {c.local_cont_max_mm.max():.1f} mm, surface vein >= "
+      f"{vv.local_cont_max_mm.min():.1f} mm (sinus pieces {', '.join(f'{x:.1f}' for x in O[O.kind == 'sinus'].local_cont_max_mm)}); "
+      f"main vein junctions {int(mv.local_branch_points.max())}")
+
+# 2. surface features: transform direction found from the labels, explicit transform gives the same values
+run(f"{os.path.dirname(os.path.abspath(__file__))}/phantom_surfaces.py", "PH6", "6")
+out = run(f"{S}/surface_features.py", "PH6").stdout
+if "(LTA maps SWI->T1)" not in out: fail(f"wrong transform direction chosen: {out}")
+F1 = pd.read_csv(f"{B}/review/PH6_surface_features.csv")
+run(f"{S}/surface_features.py", "PH6", "--surface-xfm", f"{B}/work/PH6_tkras_to_swi.txt")
+F2 = pd.read_csv(f"{B}/review/PH6_surface_features.csv")
+if not np.allclose(F1.select_dtypes("number").fillna(-9).values, F2.select_dtypes("number").fillna(-9).values, atol=0.02):
+    fail("LTA route and explicit-transform route disagree")
+# real FreeSurfer LTA format (type 0 VOX2VOX, volume info with "cras", as bbregister writes it) -> same features
+run(f"{os.path.dirname(os.path.abspath(__file__))}/phantom_surfaces.py", "PH6", "6", "--lta-vox2vox")
+out0 = run(f"{S}/surface_features.py", "PH6").stdout
+F0 = pd.read_csv(f"{B}/review/PH6_surface_features.csv")
+if "(LTA maps SWI->T1)" not in out0 or not np.allclose(F1.select_dtypes("number").fillna(-9).values,
+                                                       F0.select_dtypes("number").fillna(-9).values, atol=0.02):
+    fail(f"type-0 (vox2vox) LTA gives different results: {out0}")
+bad = np.loadtxt(f"{B}/work/PH6_tkras_to_swi.txt"); bad[:3, 3] += 8.0
+np.savetxt(f"{B}/work/PH6_bad_xfm.txt", bad)
+if run(f"{S}/surface_features.py", "PH6", "--surface-xfm", f"{B}/work/PH6_bad_xfm.txt", ok=False).returncode == 0:
+    fail("an 8 mm misregistered surface was accepted")
+if len(F1) != len(O) or F1.surf_valid.min() < 1: fail("not every object projected onto the surface")
+F = F1.merge(O[["list", "obj_id", "kind"]], on=["list", "obj_id"])
+fc, fv = F[F.kind == "cSS"], F[F.kind.isin(["surface vein", "sinus"])]
+if not (fc.surf_normal_dist_mm < 0).all() or not (fv.surf_normal_dist_mm > 0).all():
+    fail("surface normal distance: cSS should be subpial (<0), the surface vein outside (>0)")
+print(f"surface features: direction from labels OK, RAS2RAS / VOX2VOX LTA / explicit transform identical, 8 mm shift refused; "
+      f"normal distance cSS {fc.surf_normal_dist_mm.max():.2f} mm max, surface vein {fv.surf_normal_dist_mm.min():.2f} mm min")
+print(F[["kind", "list", "surf_normal_dist_mm", "surf_pieces", "surf_band_continuity", "geo_length_mm",
+         "surf_dark_cont_mm", "surf_exit_paths"]][F.kind != "other"].to_string(index=False))
+# v4.18 morphometry: constant curv / thickness read back exactly; sulc is lower (deeper) for the low sinus
+if not (np.allclose(F1.surf_curv.dropna(), 0.1, atol=1e-3) and np.allclose(F1.surf_thickness_mm.dropna(), 2.5, atol=1e-3)):
+    fail("surface morphometry (curv / thickness) not read back")
+if F1.surf_sulc.isna().all() or not F1.surf_sulcal_frac.between(0, 1).all(): fail("surf_sulc / surf_sulcal_frac missing")
+print(f"morphometry: curv 0.1 / thickness 2.5 mm read back; surf_sulc range {F1.surf_sulc.min():.1f}..{F1.surf_sulc.max():.1f}")
+
+# 3. v4.19 dimensionality on the surface: phantom cSS are patches, veins / sinus pieces are curves
+fv2 = F[F.kind.isin(["surface vein", "sinus"]) & F.surf_width_mm.notna()]
+print(f"surface width (area / length): cSS {fc.surf_width_mm.min():.2f}-{fc.surf_width_mm.max():.2f} mm, surface vein / "
+      f"sinus {fv2.surf_width_mm.min():.2f}-{fv2.surf_width_mm.max():.2f} mm; inradius cSS >= {fc.surf_inradius_mm.min():.2f}, "
+      f"veins <= {fv2.surf_inradius_mm.max():.2f} mm")
+if fc.surf_width_mm.isna().any() or fc.surf_width_mm.min() < 2 * fv2.surf_width_mm.max():
+    fail("phantom cSS patches should be > 2x wider on the surface than the surface vein / sinus")
+if fc.surf_inradius_mm.min() <= fv2.surf_inradius_mm.max(): fail("surf_inradius_mm does not separate patch from curve")
+# resolution limit: bands cut from convexity lesion 5, 1 / 2 / 4 / 8 slices high, measured as fake candidates.
+# Width must grow with height; a 1-slice band is as narrow as a vein (it IS a curve on the surface).
+import shutil
+keep = {f: open(f"{B}/review/PH6_{f}", "rb").read() for f in ("candidates.csv", "candidates.nii.gz", "excluded.csv")}
+cd = pd.read_csv(f"{B}/review/PH6_candidates.csv"); ref = nib.load(f"{B}/review/PH6_candidates.nii.gz")
+m5 = tr == 5; ks = np.unique(np.nonzero(m5)[2]); N = np.zeros(tr.shape, np.int16); rows = []
+for i, (k0, h) in enumerate([(0, 1), (2, 2), (5, 4), (10, 8)], 1):
+    sel = m5.copy(); sel[:, :, :ks[0] + k0] = False; sel[:, :, ks[0] + k0 + h:] = False; N[sel] = i
+    rr = cd.iloc[0].copy(); rr["cand_id"] = i; rr["hemi"] = ""
+    rr["vox_i"], rr["vox_j"], rr["vox_k"] = np.argwhere(sel).mean(0).round().astype(int); rows.append(rr)
+pd.DataFrame(rows).to_csv(f"{B}/review/PH6_candidates.csv", index=False)
+pd.read_csv(f"{B}/review/PH6_excluded.csv").iloc[:0].to_csv(f"{B}/review/PH6_excluded.csv", index=False)
+nib.save(nib.Nifti1Image(N, ref.affine), f"{B}/review/PH6_candidates.nii.gz")
+run(f"{S}/surface_features.py", "PH6")
+W = pd.read_csv(f"{B}/review/PH6_surface_features.csv").sort_values("obj_id")
+for f, b in keep.items(): open(f"{B}/review/PH6_{f}", "wb").write(b)
+run(f"{S}/surface_features.py", "PH6")                     # restore the real feature table
+dz = abs(ref.affine[2, 2])
+print("band height -> surface width / inradius: " + ", ".join(
+    f"{h * dz:.1f} mm -> {w:.2f} / {r_:.2f}" for h, w, r_ in zip((1, 2, 4, 8), W.surf_width_mm, W.surf_inradius_mm)))
+if not (np.diff(W.surf_width_mm.values) > 0).all() or not (np.diff(W.surf_inradius_mm.values) >= 0).all():
+    fail("surface width should grow with the band height")
+if W.surf_width_mm.iloc[0] > 1.5 * fv2.surf_width_mm.max(): fail("a 1-slice band should measure as narrow as a vein")
+print("RESULT surfvein OK")
+````
+
+## tests/check_swi_mask.py
+
+````python
+"""v5.2.5 checks: skull-stripping the SWI with the T1 brain labels (scripts/swi_mask_from_t1.py) instead of SynthStrip.
+usage: check_swi_mask.py    (needs PH3 aligned in $CSS_BASE; works on a copy in $CSS_BASE/swimask_check/)
+1. PH3 given a synthetic skull and scalp (whole-head SWI): mask = labels + 5 mm; skull and scalp removed, every label
+   voxel kept, modification time of data/ID_swi.nii unchanged (derived files are not made stale), FLAIR masked too.
+2. detection on the masked whole-head phantom shows the same objects as on the phantom with its own brain-only image
+   (same positions, volumes within 2 %), and every true lesion."""
+import os, sys, shutil, subprocess, numpy as np, nibabel as nib, pandas as pd
+from scipy import ndimage as ndi
+HERE = os.path.dirname(os.path.abspath(__file__)); S = os.path.join(HERE, "..", "scripts"); py = sys.executable
+def fail(m): print("FAIL:", m); sys.exit(1)
+B0 = os.environ.get("CSS_BASE")
+if not B0 or not os.path.exists(f"{B0}/data/PH3_swi.nii") or not os.path.exists(f"{B0}/work/PH3_seg_swispace.nii.gz"):
+    print("skipped: PH3 not aligned"); print("RESULT swimask OK"); sys.exit(0)
+def base(tag):
+    B = f"{B0}/swimask_check/{tag}"; shutil.rmtree(B, ignore_errors=True)
+    for d in ("data", "work", "review", "labels"): os.makedirs(f"{B}/{d}")
+    shutil.copy(f"{B0}/data/PH3_swi.nii", f"{B}/data/")
+    for f in os.listdir(f"{B0}/work"):
+        if f.startswith("PH3_") and f != "PH3_pial_sd.nii.gz": shutil.copy(f"{B0}/work/{f}", f"{B}/work/")
+    shutil.copy(f"{B}/work/PH3_seg_swispace.nii.gz", f"{B}/work/PH3_t1seg_swispace.nii.gz"); return B
+ref, new = base("ref"), base("head")
+s = nib.load(f"{new}/data/PH3_swi.nii"); I = np.asarray(s.dataobj, np.float32)
+L = np.asarray(nib.load(f"{new}/work/PH3_seg_swispace.nii.gz").dataobj); vox = np.array(s.header.get_zooms()[:3], float)
+d = ndi.distance_transform_edt(~ndi.binary_fill_holes(L > 0), sampling=vox); med = float(np.median(I[L > 0]))
+H = I.copy(); H[(I == 0) & (d <= 8)] = 0.9 * med; H[(I == 0) & (d > 8) & (d <= 13)] = 0.25 * med; H[(I == 0) & (d > 13) & (d <= 18)] = 1.3 * med
+nib.save(nib.Nifti1Image(H, s.affine, s.header), f"{new}/data/PH3_swi.nii")
+nib.save(nib.Nifti1Image(np.full(I.shape, 50.0, np.float32), s.affine), f"{new}/work/PH3_flair_swispace.nii.gz")
+t0 = os.path.getmtime(f"{new}/data/PH3_swi.nii") - 3600; os.utime(f"{new}/data/PH3_swi.nii", (t0, t0))
+r = subprocess.run([py, f"{S}/swi_mask_from_t1.py", "PH3"], capture_output=True, text=True, env=dict(os.environ, CSS_BASE=new))
+if r.returncode: fail(r.stdout + r.stderr)
+Mk = np.asarray(nib.load(f"{new}/work/PH3_brainmask.nii.gz").dataobj) > 0
+J = np.asarray(nib.load(f"{new}/data/PH3_swi.nii").dataobj); F = np.asarray(nib.load(f"{new}/work/PH3_flair_swispace.nii.gz").dataobj)
+if not Mk[L > 0].all(): fail("label voxels outside the mask")
+if (J[d > 8] != 0).any() or (F[~Mk] != 0).any(): fail("skull / scalp or FLAIR outside the mask not removed")
+if not (Mk & (d > 4.5) & (d <= 5)).any() or (Mk & (d > 5.5)).any(): fail("mask is not labels + 5 mm")
+if abs(os.path.getmtime(f"{new}/data/PH3_swi.nii") - t0) > 1: fail("SWI modification time changed")
+print(f"1. {r.stdout.strip()}  | skull + scalp removed, all labels kept, FLAIR masked, SWI mtime kept")
+for B in (ref, new):
+    r = subprocess.run([py, f"{S}/detect_css.py", "PH3"], capture_output=True, text=True, env=dict(os.environ, CSS_BASE=B))
+    if r.returncode: fail(f"detect_css {B}: {r.stderr[-500:]}")
+a, b = (pd.read_csv(f"{B}/review/PH3_candidates.csv") for B in (ref, new))
+k = ["vox_i", "vox_j", "vox_k"]
+if len(a) != len(b) or not (np.abs(a[k].values - b[k].values) <= 1).all() or (np.abs(b.volume_mm3 / a.volume_mm3 - 1) > 0.02).any():
+    fail(f"candidates differ:\n{a[k + ['volume_mm3']]}\n{b[k + ['volume_mm3']]}")
+T = np.asarray(nib.load(f"{new}/work/PH3_truth.nii.gz").dataobj).astype(int)
+C = np.asarray(nib.load(f"{new}/review/PH3_candidates.nii.gz").dataobj).astype(int)
+shown = sorted({int(t) for t in np.unique(T[(C > 0) & (T > 0)])}); n_true = len(np.unique(T[T > 0]))
+if len(shown) != n_true: fail(f"true lesions shown {shown} of {n_true}")
+print(f"2. detection: {len(b)} candidates at the same positions as on the brain-only phantom, volumes within "
+      f"{100 * float(np.abs(b.volume_mm3 / a.volume_mm3 - 1).max()):.1f} %, true lesions {shown}")
+print("RESULT swimask OK")
+````
+
+## tests/check_v4.py
+
+````python
+"""Check v4 detector output on the phantom_v4 truth.   usage: check_v4.py NAME
+Prints each candidate's truth class and features, sensitivity, and how well score_v3 / score_v4
+and each definition feature separate true cSS from mimics. Exits 1 if a sanity check fails."""
+import os, sys, numpy as np, nibabel as nib, pandas as pd
+B = os.environ["CSS_BASE"]; name = sys.argv[1]
+ld = lambda p: nib.load(p).get_fdata().astype(int)
+truth, veins = ld(f"{B}/work/{name}_truth.nii.gz"), ld(f"{B}/work/{name}_veins.nii.gz")
+cand = ld(f"{B}/review/{name}_candidates.nii.gz")
+df = pd.read_csv(f"{B}/review/{name}_candidates.csv")
+cls = []
+for c in df.cand_id:
+    m = cand == c; t = np.bincount(truth[m], minlength=7)[1:]; v = np.bincount(veins[m], minlength=7)[1:]
+    if t.sum() >= v.sum() and t.sum() > 0.2 * m.sum(): cls.append(f"cSS{t.argmax() + 1}")
+    elif v.sum() > 0: cls.append(f"vein{v.argmax() + 1}")
+    else: cls.append("other")
+df["truth"] = cls
+F = ["darkness_z", "pial_dist_mm", "bank_frac", "tube_ratio", "surface_alignment", "tram_frac",
+     "vein_tree_mm", "mirror_dark_frac", "score_v3", "score_v4"]
+print(df[["cand_id", "truth"] + F].to_string(index=False))
+# a lesion is found when kept candidates cover >=30 % of it (merged neighbours count for both)
+found = [t for t in range(1, int(truth.max()) + 1) if (cand[truth == t] > 0).mean() >= 0.3]
+n = int(truth.max()); print(f"\nsensitivity: {len(found)}/{n}  found lesions {found}  (coverage >=30 %)")
+pos = df[df.truth.str.startswith("cSS")]; neg = df[~df.truth.str.startswith("cSS")]
+def auc(x, y):
+    x, y = np.asarray(x, float), np.asarray(y, float); x, y = x[~np.isnan(x)], y[~np.isnan(y)]
+    if not len(x) or not len(y): return float("nan")
+    return float((x[:, None] > y[None, :]).mean() + 0.5 * (x[:, None] == y[None, :]).mean())
+print("AUC cSS vs mimics (>0.5 = higher in cSS):  " +
+      "  ".join(f"{f} {auc(pos[f], neg[f]):.2f}" for f in F))
+vk = [v for v in range(1, int(veins.max()) + 1) if (cand[veins == v] > 0).mean() >= 0.3]
+print(f"veins still shown as candidates: {len(vk)}/{int(veins.max())} {vk}")
+ich = nib.load(f"{B}/work/{name}_ich_used.nii.gz").get_fdata() > 0
+icht = nib.load(f"{B}/work/{name}_ich_truth.nii.gz").get_fdata() > 0
+ich_dice = 2 * (ich & icht).sum() / max(ich.sum() + icht.sum(), 1)
+print(f"automatic ICH mask Dice vs truth: {ich_dice:.2f}")
+tc_shown = bool(veins.max() >= 7 and (cand[veins == 7] > 0).any())     # any overlap: most of it is in WM
+if veins.max() >= 7: print("transcortical vein (7) " + ("STILL SHOWN" if tc_shown else "excluded/not shown"))
+ok = len(found) >= n - 1 and not tc_shown and auc(pos.score_v4, neg.score_v4) >= 0.8 and ich_dice > 0.5
+print("RESULT v4 " + ("OK" if ok else "FAIL") +
+      f" found={len(found)} total={n} auc_v3={auc(pos.score_v3, neg.score_v3):.2f} "
+      f"auc_v4={auc(pos.score_v4, neg.score_v4):.2f} ich_dice={ich_dice:.2f}")
+sys.exit(0 if ok else 1)
+````
+
+## tests/check_v418.py
+
+````python
+"""v4.18 checks: ridge scales in mm, mirror lookup restricted to the brain, skeleton length with diagonal steps.
+usage: check_v418.py    (needs PH1 and PH3 detected in $CSS_BASE)"""
+import os, sys, json, numpy as np, pandas as pd
+B = os.environ["CSS_BASE"]; sys.path.insert(0, f"{B}/scripts")
+from css_common import skeleton_length
+def fail(m): print("FAIL:", m); sys.exit(1)
+
+# 1. skeleton length: straight, diagonal, L-corner (no double count at the corner)
+z = np.zeros((20, 20), bool)
+a = z.copy(); a[5, 2:12] = 1
+b = z.copy(); b[np.arange(10), np.arange(10)] = 1
+c = z.copy(); c[5, 2:8] = 1; c[5:10, 7] = 1
+got = [skeleton_length(a, (0.5, 0.5)), skeleton_length(b, (0.5, 0.5)), skeleton_length(c, (1, 1))]
+want = [4.5, 9 * np.hypot(0.5, 0.5), 9.0]
+if not np.allclose(got, want): fail(f"skeleton length {got} != {want}")
+print(f"   skeleton length: straight {got[0]:.2f}, diagonal {got[1]:.2f} (old rule {10 * 0.5:.2f}), corner {got[2]:.1f} mm")
+
+# 2. ridge scales: the same mm on every protocol (PH1 0.5 mm, PH3 0.8 mm in-plane)
+for s, inpl in (("PH1", 0.5), ("PH3", 0.8)):
+    p = json.load(open(f"{B}/review/{s}_manifest.json"))["detect"]["parameters"]
+    if not np.allclose(np.array(p["sato_sigmas_px"]) * inpl, p["sato_sigmas_mm"], atol=0.01):
+        fail(f"{s}: sato px {p['sato_sigmas_px']} x {inpl} mm != {p['sato_sigmas_mm']} mm")
+    print(f"   {s}: ridge sigma {p['sato_sigmas_mm']} mm = {p['sato_sigmas_px']} px")
+
+# 3. mirror: a fraction in [0, 1] or NaN (most mirror points outside the brain), never forced dark by background
+m = pd.concat([pd.read_csv(f"{B}/review/PH3_{k}.csv") for k in ("candidates", "excluded")]).mirror_dark_frac
+if ((m < 0) | (m > 1)).any(): fail("mirror_dark_frac outside [0, 1]")
+print(f"   PH3 mirror_dark_frac: {int(m.isna().sum())} NaN, median {m.median():.2f}")
+# 4. end types on synthetic geometry: a 10 mm candidate whose far end stops / runs on / forks / reaches the midline
+import css_vessel as cv, nibabel as nib
+sh = (80, 60, 8); vx = (0.5, 0.5, 0.5)
+for kind in ("stops", "runs_on", "branches", "midline"):
+    cm = np.zeros(sh, bool); ves = np.zeros(sh, bool); mid = np.zeros(sh, bool)
+    cm[10:30, 30, 4] = True
+    if kind != "stops": ves[31:60, 30, 4] = True
+    if kind == "branches":
+        for k in range(16): ves[45 + k, 30 + k, 4] = True; ves[45 + k, 30 - k, 4] = True
+    if kind == "midline": mid[55:] = True
+    o = cv.local_tracking(cm, ves, vx, 20.0, dark=np.zeros(sh, bool), midline=mid)
+    if (o["end_type_max"], o["end_type_min"]) != (kind, "stops"): fail(f"end type {kind}: {o['end_type_max']}/{o['end_type_min']}")
+print("   end types: stops / runs_on / branches / midline recovered on synthetic geometry")
+
+# 5. review tier on PH3 (phantom only - not a validation): every true lesion in tier 1
+c = pd.read_csv(f"{B}/review/PH3_candidates.csv")
+C = nib.load(f"{B}/review/PH3_candidates.nii.gz").get_fdata().astype(int)
+t = nib.load(f"{B}/work/PH3_truth.nii.gz").get_fdata() > 0
+c["truth"] = [t[C == i].mean() > 0.2 for i in c.cand_id]
+if (c[c.truth].review_tier != 1).any(): fail(f"PH3 true lesion in tier 2: {c[c.truth & (c.review_tier != 1)].cand_id.tolist()}")
+print(f"   PH3 tiers: lesions {c[c.truth].review_tier.tolist()}, others {c[~c.truth].review_tier.tolist()}")
+# 6. radius (half-width) along the centre line: 1 / 3 / 5-voxel-wide bands at 0.5 mm -> 0.25 / 0.75 / 1.25 mm
+from css_common import radius_profile
+got = []
+for w in (1, 3, 5):
+    m = np.zeros((40, 40, 3), bool); m[10:30, 20 - w // 2: 21 + w // 2, 1] = True
+    got.append(float(np.median(radius_profile(m, (0.5, 0.5, 1.0)))))
+if not np.allclose(got, [0.25, 0.75, 1.25]): fail(f"radius profile {got}")
+cols = ["cand_radius_med_mm", "cand_radius_p95_mm", "cand_radius_cv", "net_radius_med_mm", "net_radius_p95_mm"]
+if not set(cols) <= set(c.columns): fail("radius columns missing")
+print(f"   radius: bands {got} mm; PH3 lesions median {c[c.truth].cand_radius_med_mm.median():.2f} mm, "
+      f"others {c[~c.truth].cand_radius_med_mm.median():.2f} mm (phantom only)")
+# 7. robustness.py: an identity perturbation (gamma 1) must reproduce the copy exactly; copies are cleaned up
+import subprocess, glob
+r = subprocess.run([sys.executable, f"{B}/scripts/robustness.py", "PH3", "--perturb", "copy,gamma:1.0,shift:0",
+                    "--old", f"{B}/work/PH3_truth.nii.gz", "--ids", "1,2,3,4,5,6"], capture_output=True, text=True)
+if r.returncode: print(r.stdout[-800:], r.stderr[-1500:]); fail("robustness.py failed")
+rb = pd.read_csv(f"{B}/review/PH3_robustness.csv").set_index("perturbation")
+g, c0 = rb.loc["gamma:1"], rb.loc["copy"]
+if not (g.candidates == c0.candidates == g.found_again and g.new == 0 and g.spearman == 1.0):
+    fail(f"identity perturbation changed the result: {g.to_dict()}")
+if glob.glob(f"{B}/*/PH3_R*"): fail("robustness copies not cleaned up")
+print(f"   robustness: copy {int(c0.candidates)} candidates, gamma 1 identical; 1-voxel shift -> {int(rb.loc['shift:0'].candidates)} "
+      f"candidates, {int(rb.loc['shift:0'].found_again)}/{int(c0.candidates)} found again (phantom)")
+print("RESULT v4.18 OK")
+````
 
 ## tests/check_v51.py
 
-```python
+````python
 """v5.1 checks: auditable fates, label-convention and storage invariance, obliquity, stale derived inputs.
 usage: check_v51.py    (needs PH3 from phantom_v4.py, aligned, in $CSS_BASE; uses every other phantom found there)
 1. fate invariant: for every phantom case, dropped / excluded / shown maps are disjoint, together cover exactly the
@@ -6380,56 +10456,11 @@ if not seen: fail("no phantom with a truth map to test the mimic layer on")
 if lost_any: fail("CSS_USE_MIMIC=1 lost true lesions: " + "; ".join(lost_any))
 print(f"mimic layer on vs off, true lesions kept: {', '.join(seen)} - none lost")
 print("RESULT v51 OK")
-```
-
-## scripts/css_pieces.py
-
-```python
-"""Per-piece evidence for merged candidates (v5.1.1). Pure functions, imported by detect_css.py; unit-tested in
-tests/check_v511.py.
-
-detect_css.py merges dark pieces closer than MERGE_GAP_MM into one candidate (a line broken by noise, the two banks of
-a tram-track). That can also join a cSS segment and a neighbouring vein; the group's median features then describe
-neither, and a vein rule (E5 / E6 / E7) would remove the cSS segment with it. Each pre-merge piece is therefore
-classified with the detector's own vein_like definition:
-  vein-like piece   median pial distance > 0.3 mm (off the cortex) and tubular (median tube ratio > 0.4, or unknown)
-  cSS-like piece    median pial distance <= 0.3 mm and not tubular (tube ratio <= 0.4, or unknown)
-mixed_object = >= 2 pieces and each kind holds >= min_frac of the object's volume.
-Limits: a vein TOUCHING a cSS segment voxel to voxel is one piece already (this cannot split it); merges undone by
-the 40 mm chain cap leave single pieces (nothing to compare). Thresholds are the v4 vein_like ones, not validated."""
-import numpy as np
-
-
-def piece_evidence(mm, pieces, pial_sd, tube, min_frac=0.15):
-    """mm: candidate mask (crop); pieces: pre-merge labels (same crop, or None = no merging); pial_sd, tube: maps (same
-    crop). -> dict of the per-piece columns"""
-    pcs = {}
-    if pieces is not None:
-        pl = pieces[mm]
-        for pid in np.unique(pl[pl > 0]):
-            pm = mm & (pieces == pid)
-            tv = tube[pm]; tp = float(np.nanmedian(tv)) if np.isfinite(tv).any() else np.nan
-            pp = float(np.median(pial_sd[pm]))
-            pcs[int(pid)] = (int(pm.sum()), pp, tp, bool(pp > 0.3 and (np.isnan(tp) or tp > 0.4)),
-                             bool(pp <= 0.3 and (np.isnan(tp) or tp <= 0.4)))
-    tot = sum(v[0] for v in pcs.values()) or 1
-    vf = sum(v[0] for v in pcs.values() if v[3]) / tot
-    cf = sum(v[0] for v in pcs.values() if v[4]) / tot
-    return dict(piece_vol_vox=";".join(str(v[0]) for v in pcs.values()),
-                piece_pial_mm=";".join(f"{v[1]:.2f}" for v in pcs.values()),
-                piece_tube=";".join("nan" if np.isnan(v[2]) else f"{v[2]:.2f}" for v in pcs.values()),
-                piece_vein_frac=round(vf, 2) if pcs else np.nan,
-                mixed_object=int(len(pcs) > 1 and vf >= min_frac and cf >= min_frac))
-
-
-def rescue_mixed(rule_version, mixed_object, enabled):
-    """True = a vein rule (E5 / E6 / E7) must not remove this mixed object as a whole (CSS_MIXED_REVIEW=1)"""
-    return bool(enabled and mixed_object and rule_version.split("@")[0] in ("E5", "E6", "E7"))
-```
+````
 
 ## tests/check_v511.py
 
-```python
+````python
 """v5.1.1 checks: per-piece evidence of merged objects, CSS_MIXED_REVIEW, valid-sample fractions, missing-input
 indicators, versioned expert labels.
 usage: check_v511.py    (unit parts need nothing; the rest needs PH3 from phantom_v4.py, aligned, in $CSS_BASE)
@@ -6527,135 +10558,11 @@ if L.label_schema_version.iloc[0] != "css-labels/1.0" or L.sort_values("sheet_no
 if L[L.sheet_no == 2].label_class.iloc[0] != "surface_vein": fail("label_class not written")
 print("expert labels: css-labels/1.0, fine label + class + confidence_missing written; --require-confidence refuses")
 print("RESULT v511 OK")
-```
-
-## scripts/css_features.py
-
-```python
-"""Feature families of docs/FEATURE_SPEC (cSS vs VS / VC / VT / CA / MB) that the detector did not yet compute (v5.1.2).
-Pure functions on a candidate crop; imported by detect_css.py, unit-tested in tests/check_v512.py. RECORDED ONLY: no
-rule, score or tier uses them. All distances in mm (voxel size passed explicitly).
-
-Already computed elsewhere under another name (not duplicated): pial_dist_mm (median signed pial distance),
-cortex_frac (cortex overlap), parenchyma_frac, bank_frac / tram_frac, tube_ratio, cand_radius_med/p95_mm / cv,
-local_cont_max/min_mm (curved continuation), vessel_run_mm (straight continuation), vessel_wm_mm (white-matter
-continuation), local_branch_per10mm, terminal_ends, end_type_* ("midline" = reaches the sagittal sinus zone), surf_*
-(surface morphology, surface_features.py), phase_z / phase_r (dipole fit), mb_cluster_n, flair_csf_z / flair_ctx_z,
-ich_dist_mm. Not computable here: CT hyperdensity (no CT input)."""
-import numpy as np
-from scipy import ndimage as ndi
-from scipy.sparse import coo_matrix
-from scipy.sparse.csgraph import dijkstra
-
-FEATURE_SCHEMA = "css-features/1.0"
-
-
-def csf_maps(csf, vox):
-    """whole-brain maps for position_features: distance into the CSF from tissue (0 in tissue), and 'within 1.5 mm
-    of CSF'. Computed once per scan (a per-candidate crop would cut the distances at the crop edge)."""
-    return (ndi.distance_transform_edt(csf, sampling=vox).astype(np.float32),
-            ndi.distance_transform_edt(~csf, sampling=vox) <= 1.5)
-
-
-def position_features(mm, pial_sd, csf_depth, near_csf, sulcal_depth=None):
-    """Family B/D: pial-distance percentiles, contact within 1 / 2 mm of the pial boundary, CSF adjacency, how far
-    into the CSF the candidate sits (median distance from tissue: ~0 on a bank, larger in mid-sulcus = VC) and how
-    deep below the gyral crowns (sulcal_depth_map). All maps are crops at the candidate."""
-    psd = pial_sd[mm]
-    out = dict(pial_sd_p10_mm=round(float(np.percentile(psd, 10)), 2), pial_sd_p90_mm=round(float(np.percentile(psd, 90)), 2),
-               surface_contact_frac_1mm=round(float((np.abs(psd) <= 1.0).mean()), 2),
-               surface_contact_frac_2mm=round(float((np.abs(psd) <= 2.0).mean()), 2),
-               csf_adjacent_frac=round(float(near_csf[mm].mean()), 2),
-               csf_depth_mm=round(float(np.median(csf_depth[mm])), 2),
-               sulcal_depth_mm=round(float(np.median(sulcal_depth[mm])), 2) if sulcal_depth is not None else np.nan)
-    return out
-
-
-def compactness_features(mm, vox):
-    """Family G: equivalent-sphere diameter, 3-D compactness 36 pi V^2 / S^3 (S = anisotropic marching-cubes area;
-    1 = sphere), sphericity = compactness^(1/3), elongation (longest / shortest principal axis) and flatness
-    (middle / shortest), principal axes from the voxel coordinates in mm."""
-    vox = np.asarray(vox, float); V = float(mm.sum() * np.prod(vox))
-    out = dict(equivalent_sphere_diameter_mm=round(float((6 * V / np.pi) ** (1 / 3)), 2),
-               compactness_3d=np.nan, sphericity=np.nan, elongation_3d=np.nan, flatness_3d=np.nan)
-    if mm.sum() < 4: return out
-    try:
-        from skimage.measure import marching_cubes, mesh_surface_area
-        v, f, _, _ = marching_cubes(np.pad(mm, 1).astype(np.float32), 0.5, spacing=tuple(vox))
-        S = float(mesh_surface_area(v, f))
-        if S > 0:
-            c = min(1.0, 36 * np.pi * V ** 2 / S ** 3)
-            out.update(compactness_3d=round(c, 3), sphericity=round(c ** (1 / 3), 3))
-    except Exception:
-        pass
-    P = np.argwhere(mm) * vox
-    ev = np.sort(np.linalg.eigvalsh(np.cov((P - P.mean(0)).T)))[::-1] if len(P) > 3 else None
-    if ev is not None:
-        a = np.sqrt(np.maximum(ev, 1e-6))
-        sd_min = max(a[2], vox.min() / np.sqrt(12))                     # a 1-voxel-thin object: voxel size floor
-        out.update(elongation_3d=round(float(a[0] / sd_min), 2), flatness_3d=round(float(a[1] / sd_min), 2))
-    return out
-
-
-_OFF = np.array([(a, b, c) for a in (-1, 0, 1) for b in (-1, 0, 1) for c in (-1, 0, 1) if (a, b, c) > (0, 0, 0)])
-
-
-def path_features(mm, vox):
-    """Family E: two-sweep geodesic diameter through the candidate's voxels (largest 26-connected piece), and
-    tortuosity = geodesic length / straight end-to-end distance (1 = straight; curved veins and wrapping cSS > 1)."""
-    vox = np.asarray(vox, float)
-    lab, n = ndi.label(mm, structure=np.ones((3, 3, 3), bool))       # merged objects: pieces need not touch;
-    if n > 1: mm = lab == (np.argmax(np.bincount(lab.ravel())[1:]) + 1)   # the path runs in the largest piece
-    idx = np.argwhere(mm)
-    if len(idx) < 3: return dict(path_length_mm=np.nan, tortuosity=np.nan)
-    lin = np.ravel_multi_index(idx.T, mm.shape); order = np.argsort(lin); sl = lin[order]
-    r_, c_, w_ = [], [], []
-    for o in _OFF:
-        q = idx + o; ok = np.all((q >= 0) & (q < np.array(mm.shape)), axis=1)
-        ql = np.full(len(idx), -1, np.int64); ql[ok] = np.ravel_multi_index(q[ok].T, mm.shape)
-        pos = np.clip(np.searchsorted(sl, ql), 0, len(sl) - 1); hit = ok & (sl[pos] == ql)
-        r_.append(np.nonzero(hit)[0]); c_.append(order[pos[hit]]); w_.append(np.full(hit.sum(), float(np.linalg.norm(o * vox))))
-    r, c, w = np.concatenate(r_), np.concatenate(c_), np.concatenate(w_)
-    G = coo_matrix((np.r_[w, w], (np.r_[r, c], np.r_[c, r])), shape=(len(idx),) * 2).tocsr()
-    d0 = dijkstra(G, indices=0); e1 = int(np.argmax(np.where(np.isfinite(d0), d0, -1)))
-    d1 = dijkstra(G, indices=e1); e2 = int(np.argmax(np.where(np.isfinite(d1), d1, -1)))
-    L = float(d1[e2]); eu = float(np.linalg.norm((idx[e1] - idx[e2]) * vox))
-    return dict(path_length_mm=round(L, 1), tortuosity=round(L / eu, 2) if eu > 1.0 else np.nan)
-
-
-def darkness_features(zc):
-    """Family A: lower tail and dark fractions of the candidate's local darkness z"""
-    zc = np.asarray(zc, float)
-    if not len(zc): return dict(darkness_z_p10=np.nan, dark_frac_z2=np.nan, dark_frac_z3=np.nan, dark_frac_z4=np.nan)
-    return dict(darkness_z_p10=round(float(-np.percentile(zc, 10)), 2), dark_frac_z2=round(float((zc < -2).mean()), 2),
-                dark_frac_z3=round(float((zc < -3).mean()), 2), dark_frac_z4=round(float((zc < -4).mean()), 2))
-
-
-def sulcal_depth_map(tissue, vox, close_mm=5.0):
-    """distance (mm) below the 'hull' of the brain tissue (closing by close_mm): ~0 on gyral crowns, grows into sulci"""
-    d_out = ndi.distance_transform_edt(~tissue, sampling=vox)
-    hull = ndi.distance_transform_edt(d_out <= close_mm, sampling=vox) > close_mm
-    hull |= tissue
-    return ndi.distance_transform_edt(hull, sampling=vox).astype(np.float32)
-
-
-def qc_flags(row):
-    """';'-joined reasons why some of this candidate's features are less trustworthy"""
-    f = []
-    if row.get("ref_valid_frac", 1) is not None and np.isfinite(row.get("ref_valid_frac", 1)) and row.get("ref_valid_frac", 1) < 0.5:
-        f.append("cortex_reference_sparse")
-    mv = row.get("mirror_valid_frac", np.nan)
-    if np.isfinite(mv) and mv < 0.5: f.append("mirror_outside_brain")
-    if row.get("missing_phase_features"): f.append("no_phase")
-    if row.get("missing_flair_features"): f.append("no_flair")
-    if row.get("missing_t1_anatomy"): f.append("swi_only_anatomy")
-    if row.get("mixed_object"): f.append("mixed_merged_object")
-    return ";".join(f)
-```
+````
 
 ## tests/check_v512.py
 
-```python
+````python
 """v5.1.2 checks: feature-spec families (scripts/css_features.py, phase validity / polarity in mimic_rules.py).
 usage: check_v512.py    (units need nothing; the directional part needs PH3 from phantom_v4.py, aligned, in $CSS_BASE;
                          the phase part uses PHM from check_mimic.py when present)
@@ -6723,74 +10630,11 @@ if os.path.exists(f"{B}/review/PHM_candidates.csv"):
         print(f"PHM phase: valid fraction {allp.phase_valid_frac.min():.2f}-{allp.phase_valid_frac.max():.2f}, "
               f"polarity consistency {allp.phase_polarity_frac.min():.2f}-{allp.phase_polarity_frac.max():.2f}")
 print("RESULT v512 OK")
-```
-
-## scripts/css_tiers.py
-
-```python
-"""Review-priority tiers (v5.1.3): a transparent READING ORDER from the recorded evidence. Not a diagnosis, not an
-exclusion: every candidate stays in the list and in the audit trail. Pure function; unit-tested in tests/check_v513.py.
-
-  1 high_priority_cSS_candidate   no strong mimic evidence
-  2 css_vs_mimic_uncertain        mixed merged object; possible calcification (phase); FLAIR context (acute cSAH /
-                                  thrombosis)
-  3 likely_vein                   CONVERGENT vascular evidence (never one feature): white-matter continuation >= 4 mm
-                                  with dark continuation >= 8 mm or a tubular shape (transcortical); reaches the sinus
-                                  zone with >= 10 mm continuation; tubular and continuing at both ends; OFF the cortex
-                                  (pial distance > 0.3 mm) AND in the CSF (>= 0.5 mm from tissue) AND vessel-shaped
-                                  (tube ratio > 0.35, elongation >= 10 or continuation >= 10 mm). cSS in the
-                                  subarachnoid space can sit off the cortex too - one reason this only reorders.
-  4 likely_other_mimic_or_artifact  air-bone artifact zone; microbleed-like (single compact parenchymal focus or cluster)
-  5 case_qc_insufficient          the case failed QC (insufficient_quality): fix the case before reading
-A low_confidence_review case keeps its per-candidate tiers (a case-wide constant would not order anything); the
-case status is in qc_status and the reviewer shows it.
-All cut-offs are PLACEHOLDERS from the v4 rules and phantoms, not validated; compare the order with expert labels
-(evaluate.py) before relying on it."""
-import numpy as np
-
-TIER_NAMES = {1: "high_priority_cSS_candidate", 2: "css_vs_mimic_uncertain", 3: "likely_vein",
-              4: "likely_other_mimic_or_artifact", 5: "case_qc_insufficient"}
-WM_CONT_MM, WM_RUN_MM, SINUS_RUN_MM, TUBE_HI, TUBE_MID, CSF_DEPTH_MM, ELONG_HI = 4.0, 8.0, 10.0, 0.45, 0.35, 0.5, 10.0
-
-
-def _f(r, k, d=np.nan):
-    v = r.get(k, d)
-    try: return float(v)
-    except (TypeError, ValueError): return d
-
-
-def review_priority(r, qc_status):
-    """candidate row (dict) -> (tier 1-5, name, reason)"""
-    if qc_status == "insufficient_quality":
-        return 5, TIER_NAMES[5], "case QC insufficient_quality"
-    if _f(r, "mixed_object", 0) >= 1:
-        return 2, TIER_NAMES[2], "mixed merged object (vein-like and cSS-like pieces)"
-    if str(r.get("mimic_class", "none")) in ("mb_cluster",) or _f(r, "cmb_like", 0) >= 1:
-        return 4, TIER_NAMES[4], "microbleed-like (compact parenchymal focus / cluster)"
-    if _f(r, "artifact_zone", 0) >= 1:
-        return 4, TIER_NAMES[4], "air-bone artifact zone"
-    tube, cont = _f(r, "tube_ratio"), _f(r, "local_cont_max_mm", 0)
-    vein = []
-    if _f(r, "vessel_wm_mm", 0) >= WM_CONT_MM and (cont >= WM_RUN_MM or (np.isfinite(tube) and tube > TUBE_HI)):
-        vein.append("continues into white matter")
-    if "midline" in (str(r.get("end_type_max", "")), str(r.get("end_type_min", ""))) and cont >= SINUS_RUN_MM:
-        vein.append("runs on to the sinus zone")
-    if np.isfinite(tube) and tube > TUBE_HI and _f(r, "terminal_ends", 2) == 0: vein.append("tubular, continues at both ends")
-    shaped = (np.isfinite(tube) and tube > TUBE_MID) or _f(r, "elongation_3d", 0) >= ELONG_HI or cont >= SINUS_RUN_MM
-    if _f(r, "pial_dist_mm", 0) > 0.3 and _f(r, "csf_depth_mm", 0) >= CSF_DEPTH_MM and shaped:
-        vein.append("off the cortex, in the CSF, vessel-shaped")
-    if str(r.get("mimic_class", "none")) == "calcification":
-        return 2, TIER_NAMES[2], "possible calcification (diamagnetic phase)" + (f"; also {vein[0]}" if vein else "")
-    if str(r.get("mimic_class", "none")) in ("acute", "thrombosis", "mixed"):
-        return 2, TIER_NAMES[2], f"FLAIR context ({r.get('mimic_class')})"
-    if vein:
-        return 3, TIER_NAMES[3], "; ".join(vein)
-    return 1, TIER_NAMES[1], "no strong mimic evidence"
-```
+````
 
 ## tests/check_v513.py
 
-```python
+````python
 """v5.1.3 checks: review-priority tiers (scripts/css_tiers.py) - a reading order, never an exclusion.
 usage: check_v513.py    (units need nothing; the phantom part needs PH3 / PH6 aligned in $CSS_BASE)
 1. every branch on hand-made rows: QC insufficient -> 5; mixed object -> 2; microbleed-like / artifact zone -> 4;
@@ -6852,607 +10696,11 @@ for f in touched:
 if "order: review priority" not in r.stdout: fail(f"--by-priority not applied:\n{r.stdout[-500:]}{r.stderr[-500:]}")
 print("review_css.py --by-priority: order by tier applied (" + [l for l in r.stdout.splitlines() if l.startswith("order:")][0] + ")")
 print("RESULT v513 OK")
-```
-
-## scripts/css_model.py
-
-```python
-"""Shared model code for the learned rankers (v5.2): class-balanced L2 logistic regression, patient-grouped
-leave-one-patient-out (LOPO) with optional nested selection of the L2 strength, metrics, model hashing.
-numpy / scipy only. Used by train_ranker.py and classify_surface_patches.py; tested in tests/check_v52.py.
-Every split is by PATIENT (study_id): all objects of one study are always on the same side."""
-import hashlib, json, numpy as np
-from scipy.optimize import minimize
-
-L2_GRID = (0.1, 1.0, 10.0)
-
-
-def prep(X, med=None, mu=None, sd=None):
-    """median imputation + standardisation; parameters from X (the training fold) unless given"""
-    X = np.asarray(X, float)
-    if med is None: med = np.nanmedian(X, axis=0); med = np.where(np.isfinite(med), med, 0.0)
-    X = np.where(np.isfinite(X), X, med)
-    if mu is None: mu = X.mean(0); sd = X.std(0); sd = np.where(sd > 1e-9, sd, 1.0)
-    return (X - mu) / sd, med, mu, sd
-
-
-def fit_lr(Z, y, l2):
-    """class-balanced L2 logistic regression on standardised Z -> (w, b); raises if only one class"""
-    y = np.asarray(y, float)
-    if len(np.unique(y)) < 2: raise ValueError("both classes are required")
-    cw = np.where(y == 1, 0.5 / y.mean(), 0.5 / (1 - y.mean()))
-    def f(p):
-        w, b = p[:-1], p[-1]; t = np.clip(Z @ w + b, -40, 40)
-        g = cw * (1 / (1 + np.exp(-t)) - y)
-        return (cw * (np.logaddexp(0, t) - y * t)).sum() / len(y) + 0.5 * l2 * (w @ w) / len(y), \
-            np.r_[Z.T @ g / len(y) + l2 * w / len(y), g.sum() / len(y)]
-    r = minimize(f, np.zeros(Z.shape[1] + 1), jac=True, method="L-BFGS-B")
-    return r.x[:-1], float(r.x[-1])
-
-
-def predict(X, med, mu, sd, w, b):
-    Z = prep(X, med, mu, sd)[0]
-    return 1 / (1 + np.exp(-(Z @ w + b)))
-
-
-def auc(y, s):
-    y = np.asarray(y); s = np.asarray(s, float); pos, neg = s[y == 1], s[y == 0]
-    if not len(pos) or not len(neg): return np.nan
-    return float(((pos[:, None] > neg[None, :]).sum() + 0.5 * (pos[:, None] == neg[None, :]).sum()) / (len(pos) * len(neg)))
-
-
-def average_precision(y, s):
-    """PR-AUC as average precision (precision at each positive, ranked by score)"""
-    y = np.asarray(y); s = np.asarray(s, float)
-    if not (y == 1).any(): return np.nan
-    o = np.argsort(-s, kind="stable"); yy = y[o]; tp = np.cumsum(yy)
-    return float((tp[yy == 1] / (np.nonzero(yy == 1)[0] + 1)).mean())
-
-
-def brier(y, p):
-    return float(np.mean((np.asarray(p, float) - np.asarray(y, float)) ** 2))
-
-
-def lopo(X, y, groups, l2=1.0, nested=False):
-    """leave-one-patient-out predictions. nested=True picks l2 from L2_GRID inside each training fold by an inner LOPO
-    (AUC). Folds whose training part has one class only are SKIPPED and reported (never fabricated).
-    -> (out-of-fold scores, fold log)"""
-    X = np.asarray(X, float); y = np.asarray(y); g = np.asarray(groups)
-    out = np.full(len(y), np.nan); log = []
-    for p in sorted(set(g)):
-        te, tr = g == p, g != p
-        if len(np.unique(y[tr])) < 2:
-            log.append(dict(study_id=str(p), status="skipped", reason="training fold has one class")); continue
-        lam = l2
-        if nested:
-            best = (-1, l2)
-            for cand in L2_GRID:
-                s_in, _ = lopo(X[tr], y[tr], g[tr], cand, nested=False)
-                a = auc(y[tr][np.isfinite(s_in)], s_in[np.isfinite(s_in)])
-                if np.isfinite(a) and a > best[0]: best = (a, cand)
-            lam = best[1]
-        Z, med, mu, sd = prep(X[tr]); w, b = fit_lr(Z, y[tr], lam)
-        out[te] = predict(X[te], med, mu, sd, w, b)
-        log.append(dict(study_id=str(p), status="evaluated", n_test=int(te.sum()), l2=lam))
-    return out, log
-
-
-def patient_bootstrap(df, fn, n=500, seed=1):
-    """95 % interval of fn(sub-dataframe) over bootstrap resamples of PATIENTS (column study_id)"""
-    rng = np.random.default_rng(seed); pats = df.study_id.unique(); vals = []
-    import pandas as pd
-    for _ in range(n):
-        d = pd.concat([df[df.study_id == p] for p in rng.choice(pats, len(pats), replace=True)])
-        v = fn(d)
-        if np.isfinite(v): vals.append(v)
-    return [round(float(np.percentile(vals, 2.5)), 3), round(float(np.percentile(vals, 97.5)), 3)] if vals else [None, None]
-
-
-def sens_at_fp(df, score, fp_per_scan=1.0):
-    """lesion sensitivity when, in every study, candidates are read down the score order until fp_per_scan false
-    positives have been passed (the reading-burden view; needs columns study_id, y and the score)"""
-    found = tot = 0
-    for _, d in df.groupby("study_id"):
-        d = d.sort_values(score, ascending=False); fp = np.cumsum(d.y.values == 0)
-        keep = fp <= fp_per_scan; found += int(d.y.values[keep].sum()); tot += int(d.y.sum())
-    return found / tot if tot else np.nan
-
-
-def model_hash(model):
-    """sha256 of the model content (weights, features, preprocessing), excluding the hash field itself"""
-    m = {k: v for k, v in model.items() if k not in ("model_hash",)}
-    return hashlib.sha256(json.dumps(m, sort_keys=True, default=str).encode()).hexdigest()
-```
-
-## scripts/surface_aligned_patch.py
-
-```python
-#!/usr/bin/env python3
-"""Surface-aligned multimodal patches per detector object (v5.2, master plan Stage 2). Research software.
-usage: surface_aligned_patch.py SUBJECT [--lists candidates,excluded] [--ids 3,7] [--size-mm 24,12,8]
-                                [--spacing-mm 0.5,0.5,0.5]
-For every object of review/ID_candidates|excluded.nii.gz a patch of fixed PHYSICAL size is sampled in a right-handed
-frame at the object:
-  u  the object's long axis (PCA, world mm) projected into the cortical tangent plane
-  v  cross(n, u): across the surface
-  n  outward pial normal (from tissue toward CSF): gradient of work/ID_pial_sd.nii.gz (detect_css.py), mapped to world
-     coordinates with the inverse transpose of the affine (oblique data included), smoothed over 1 mm. The sign is
-     checked against the labels (tissue must lie on the -n side); a reversed map is flipped and recorded.
-Channels (each sampled on the same world grid, linear interpolation, NaN outside the image):
-  swi    data/ID_swi.nii                         required
-  phase  data/ID_phase.nii.gz                    optional; used only if on the SWI grid and newer than the SWI
-  flair  work/ID_flair_swispace.nii.gz           optional; newer than the SWI
-  labels work/ID_seg_swispace.nii.gz             optional; nearest neighbour; newer than the SWI
-A missing or stale channel is NOT zero-filled: it is absent from the file, valid_<ch> is all False and the reason is
-in the metadata. Intensity channels are valid only inside the image AND inside the brain mask (SWI > 0), so outside-
-brain zeros never enter patch features. Objects with < 3 voxels are skipped with a reason.
-Writes review/ID_patches/<list>_<id>.npz (image_<ch>, valid, valid_<ch>, world_grid_mm, center_world_mm, center_ijk,
-u_world, v_world, n_world, metadata_json) and review/ID_patches.csv (one row per object, also the skipped ones).
-Library entry: extract_patch(images, pial, mask, ...) on nibabel images (each channel sampled through its OWN affine;
-the CLI only passes channels already on the SWI grid)."""
-import sys, os, json, argparse, numpy as np, nibabel as nib, pandas as pd
-from scipy import ndimage as ndi
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from css_common import base as _base, cand_uid, stale_against, build_id
-
-PATCH_SCHEMA = "css-patch/1.0"
-
-
-def unit(x, eps=1e-8):
-    n = float(np.linalg.norm(x))
-    if n < eps: raise ValueError("near-zero vector")
-    return x / n
-
-
-def to_world(aff, ijk):
-    x = np.asarray(ijk, float).reshape(-1, 3)
-    return (aff @ np.c_[x, np.ones(len(x))].T).T[:, :3].reshape(np.asarray(ijk).shape)
-
-
-def to_voxel(aff, xyz):
-    x = np.asarray(xyz, float).reshape(-1, 3)
-    return (np.linalg.inv(aff) @ np.c_[x, np.ones(len(x))].T).T[:, :3].reshape(np.asarray(xyz).shape)
-
-
-def world_normal(pial_sd, aff, ijk, vox, half_mm=6.0):
-    """outward unit normal at voxel ijk: gradient of the (1 mm smoothed) signed distance in a local crop, as a world
-    covector (inverse transpose of the affine's linear part)"""
-    r = np.ceil(half_mm / np.asarray(vox)).astype(int); c = np.round(ijk).astype(int)
-    lo = np.maximum(c - r, 0); hi = np.minimum(c + r + 1, pial_sd.shape)
-    crop = ndi.gaussian_filter(pial_sd[tuple(slice(a, b) for a, b in zip(lo, hi))].astype(np.float64), 1.0 / np.asarray(vox))
-    g = np.array([np.gradient(crop, axis=a)[tuple(c - lo)] for a in range(3)])        # per voxel index
-    return unit(np.linalg.inv(np.asarray(aff, float)[:3, :3]).T @ g)
-
-
-def frame(mask, pial_sd, aff, vox, tissue=None):
-    ijk = np.argwhere(mask)
-    if len(ijk) < 3: raise ValueError(f"object has {len(ijk)} voxels (< 3)")
-    c_ijk = ijk.mean(0); near = ijk[np.argmin(np.linalg.norm(ijk - c_ijk, axis=1))]   # a voxel OF the object
-    n = world_normal(pial_sd, aff, near, vox); flipped = False
-    if tissue is not None:                                           # the labels decide which side is tissue
-        side = lambda t: ndi.map_coordinates(tissue.astype(np.float32), to_voxel(aff, to_world(aff, near) + t * n).reshape(3, 1), order=0)[0]
-        if side(+1.5) > 0.5 and side(-1.5) < 0.5: n, flipped = -n, True
-    P = to_world(aff, ijk); C = P - P.mean(0)
-    u = np.linalg.eigh(C.T @ C / max(len(P) - 1, 1))[1][:, -1]
-    u = u - (u @ n) * n
-    if np.linalg.norm(u) < 1e-5:
-        e = np.eye(3)[np.argmin(np.abs(n))]; u = e - (e @ n) * n
-    u = unit(u)
-    if u[np.argmax(np.abs(u))] < 0: u = -u
-    v = unit(np.cross(n, u)); u = unit(np.cross(v, n))
-    return dict(center_ijk=c_ijk, center_world=to_world(aff, c_ijk), u=u, v=v, n=n, normal_flipped=flipped,
-                pial_sd_at_center_mm=float(pial_sd[tuple(np.round(c_ijk).astype(int))]))
-
-
-def grid(fr, size_mm, spacing_mm):
-    ax = [(np.arange(int(round(s / d)) + 1) - int(round(s / d)) / 2) * d for s, d in zip(size_mm, spacing_mm)]
-    U, V, N = np.meshgrid(*ax, indexing="ij")
-    return fr["center_world"] + U[..., None] * fr["u"] + V[..., None] * fr["v"] + N[..., None] * fr["n"]
-
-
-def sample(img_data, aff, xyz, order=1):
-    co = np.moveaxis(to_voxel(aff, xyz), -1, 0)
-    vals = ndi.map_coordinates(img_data, co, order=order, mode="constant", cval=np.nan, prefilter=False).astype(np.float32)
-    inside = ndi.map_coordinates(np.ones(img_data.shape, np.float32), co, order=0, mode="constant", cval=0) > 0.5
-    return vals, inside
-
-
-_ARR = {}
-
-
-def _arr(img):
-    """float32 array of a nibabel image, loaded once per image object"""
-    if id(img) not in _ARR: _ARR[id(img)] = (img, np.asarray(img.dataobj, np.float32))
-    return _ARR[id(img)][1]
-
-
-def extract_patch(images, pial, mask, size_mm=(24, 12, 8), spacing_mm=(0.5, 0.5, 0.5), obj_id=None, labels=None,
-                  brain=None):
-    """one surface-aligned patch.
-    images: {channel: nibabel image}; pial: signed pial distance image (mm, + outward); mask: object label image
-    (obj_id selects one object, None = every non-zero voxel); labels: optional segmentation image (tissue side check);
-    brain: optional brain mask on the SWI grid (default: filled SWI > 0). Intensity channels are valid only inside
-    their image and inside the brain; 'labels' only inside its image.
-    -> dict(shape, channels, arrays {image_<ch>}, valids {valid_<ch>}, valid (= valid_swi, else any channel), frame, grid)
-    raises ValueError for an object of < 3 voxels"""
-    aff = pial.affine; vox = np.array(pial.header.get_zooms()[:3], float)
-    M = _arr(mask); m = (M == obj_id) if obj_id is not None else (M > 0)
-    tissue = None
-    if labels is not None: L = _arr(labels); tissue = (L > 0) & (L != 24)
-    fr = frame(m, _arr(pial), aff, vox, tissue)
-    G = grid(fr, size_mm, spacing_mm)
-    brain_s = None
-    if "swi" in images:
-        if brain is None: brain = ndi.binary_fill_holes(_arr(images["swi"]) > 0)
-        brain_s = sample(brain.astype(np.float32), images["swi"].affine, G, order=0)[0] > 0.5
-    arrays, valids = {}, {}
-    for name, img in images.items():
-        vals, inside = sample(_arr(img), img.affine, G, 0 if name == "labels" else 1)
-        ok = inside & np.isfinite(vals)
-        if name != "labels" and brain_s is not None: ok &= brain_s
-        arrays[f"image_{name}"] = vals; valids[f"valid_{name}"] = ok
-    valid = valids["valid_swi"] if "valid_swi" in valids else np.any(list(valids.values()), axis=0)
-    return dict(shape=tuple(G.shape[:3]), channels=sorted(images), arrays=arrays, valids=valids, valid=valid, grid=G,
-                frame=dict(u_world=fr["u"], v_world=fr["v"], n_world=fr["n"], center_world=fr["center_world"],
-                           center_ijk=fr["center_ijk"], normal_flipped=fr["normal_flipped"],
-                           pial_sd_at_center_mm=fr["pial_sd_at_center_mm"]))
-
-
-if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("subject"); ap.add_argument("--lists", default="candidates,excluded"); ap.add_argument("--ids", default="")
-    ap.add_argument("--size-mm", default="24,12,8"); ap.add_argument("--spacing-mm", default="0.5,0.5,0.5")
-    a = ap.parse_args(); s = a.subject; B = _base()
-    size = [float(x) for x in a.size_mm.split(",")]; spc = [float(x) for x in a.spacing_mm.split(",")]
-    swi_p, psd_p = f"{B}/data/{s}_swi.nii", f"{B}/work/{s}_pial_sd.nii.gz"
-    if not os.path.exists(psd_p): sys.exit(f"{psd_p} missing - re-run detect_css.py {s} (v5.2 writes it)")
-    if stale_against(psd_p, [swi_p]): sys.exit(f"{psd_p} is older than the SWI - re-run detect_css.py {s}")
-    swi = nib.load(swi_p); aff = swi.affine
-    brain = ndi.binary_fill_holes(_arr(swi) > 0); psd_img = nib.load(psd_p)
-    chans, missing = {"swi": swi}, {}
-    for name, p in (("phase", f"{B}/data/{s}_phase.nii.gz"), ("flair", f"{B}/work/{s}_flair_swispace.nii.gz"),
-                    ("labels", f"{B}/work/{s}_seg_swispace.nii.gz")):
-        if not os.path.exists(p): missing[name] = "absent"; continue
-        im = nib.load(p)
-        if im.shape[:3] != swi.shape[:3] or not np.allclose(im.affine, aff, atol=1e-3): missing[name] = "not on the SWI grid"; continue
-        if stale_against(p, [swi_p]): missing[name] = "older than the SWI"; continue
-        chans[name] = im
-    out_dir = f"{B}/review/{s}_patches"; os.makedirs(out_dir, exist_ok=True)
-    ids = {int(x) for x in a.ids.split(",") if x.strip()}
-    rows = []
-    for lst in [x for x in a.lists.split(",") if x]:
-        mp, cp = f"{B}/review/{s}_{lst}.nii.gz", f"{B}/review/{s}_{lst}.csv"
-        if not (os.path.exists(mp) and os.path.exists(cp)): continue
-        M_img = nib.load(mp); d = pd.read_csv(cp)
-        idc = "cand_id" if lst == "candidates" else "excl_id"
-        for _, r in d.iterrows():
-            oid = int(r[idc])
-            if ids and oid not in ids: continue
-            row = dict(study_id=s, list=lst, obj_id=oid, cand_uid=cand_uid(s, r), patch_path="", status="skipped", skip_reason="")
-            try:
-                P = extract_patch(chans, psd_img, M_img, size, spc, obj_id=oid, labels=chans.get("labels"), brain=brain)
-            except ValueError as e:
-                row["skip_reason"] = str(e); rows.append(row); continue
-            fr, G, arrays, valids, valid = P["frame"], P["grid"], P["arrays"], P["valids"], P["valid"]
-            for name in missing: valids[f"valid_{name}"] = np.zeros(G.shape[:3], bool)
-            meta = dict(schema=PATCH_SCHEMA, subject=s, list=lst, obj_id=oid, cand_uid=row["cand_uid"], size_mm=size,
-                        spacing_mm=spc, axis_semantics={"0": "u_along_candidate", "1": "v_across_surface", "2": "n_outward"},
-                        normal_sign="positive_outward_toward_csf", normal_flipped=fr["normal_flipped"],
-                        pial_sd_at_center_mm=fr["pial_sd_at_center_mm"], channels=sorted(chans), missing_channels=missing,
-                        build=build_id(), research_only=True)
-            path = f"{out_dir}/{lst}_{oid}.npz"
-            np.savez_compressed(path, **arrays, **valids, valid=valid, world_grid_mm=G.astype(np.float32),
-                                center_world_mm=fr["center_world"], center_ijk=fr["center_ijk"], u_world=fr["u_world"],
-                                v_world=fr["v_world"], n_world=fr["n_world"], metadata_json=json.dumps(meta))
-            row.update(patch_path=os.path.relpath(path, B), status="ok", channels=";".join(sorted(chans)),
-                       missing_channels=";".join(f"{k}:{v}" for k, v in missing.items()),
-                       valid_frac_swi=round(float(valid.mean()), 3), normal_flipped=int(fr["normal_flipped"]),
-                       pial_sd_at_center_mm=round(fr["pial_sd_at_center_mm"], 2))
-            rows.append(row)
-    pd.DataFrame(rows).to_csv(f"{B}/review/{s}_patches.csv", index=False)
-    ok = sum(r["status"] == "ok" for r in rows)
-    print(f"{s}: {ok} surface-aligned patches ({size} mm, spacing {spc} mm) -> {out_dir}; {len(rows) - ok} skipped; "
-          f"channels {sorted(chans)}" + (f"; missing {missing}" if missing else "") + "  [research software]")
-```
-
-## scripts/classify_surface_patches.py
-
-```python
-#!/usr/bin/env python3
-"""cSS-versus-vein ranking from surface-aligned patches (v5.2, master plan Stage 3). Research software: the output
-ranks candidates for expert review; it is not a diagnosis and not a calibrated probability.
-usage:
-  classify_surface_patches.py features SUBJECT [SUBJECT ...]
-        review/ID_patches/*.npz (surface_aligned_patch.py) -> review/ID_patch_features.csv
-  classify_surface_patches.py train [--split dev] [--source consensus|reader:NAME] [--negatives vein|all]
-        [--min-studies 5] [--l2 1.0] [--no-nested] [--out review/surface_patch_model.json]
-  classify_surface_patches.py predict SUBJECT [SUBJECT ...] [--model review/surface_patch_model.json]
-        [--allow-training-study]          -> review/ID_patch_predictions.csv
-  classify_surface_patches.py lopo-manifest MANIFEST.csv [--l2 1.0]
-        explicit patch list (columns patch_path, study_id, label = cSS | vein code): LOPO by study, no model saved
-Library: read_manifest / build_matrix / grouped_lopo (same features, same css_model LOPO as 'train').
-Features per channel, in a FIXED order (swi, phase, flair, labels): validity fraction, robust-z distribution
-(mean, sd, p5, p50, p95, min, max), mean |gradient| along u / v / n, and 8-bin profiles (mean, sd) along each axis;
-for the label channel the tissue share in 8 bins along the normal. Every channel adds <ch>_missing and
-<ch>_valid_fraction: a missing phase / FLAIR is information and is never a zero image. Optional geometry and vessel
-columns are read from review/ID_candidates|excluded.csv (surface / vessel topology, v5.1.x).
-Training: labelled objects of the DEV split only (labels/study_meta.csv; --split test is refused), target cSS (1)
-vs vein (VS / VC / VT / VX / V; --negatives all = every non-cSS label), 'uncertain' left out. Class-balanced L2
-logistic regression, leave-one-patient-out with nested L2 selection (css_model.py); folds whose training part has
-one class are skipped and reported. Ablations on the same folds: A swi, B swi+phase, C swi+labels+surface geometry,
-D swi+vessel topology, E swi+flair, F swi+phase+labels+geometry+vessel, G everything. Reported per ablation: AUC,
-PR-AUC, Brier, sensitivity at 1 FP per scan, with patient-bootstrap intervals for AUC. Needs >= --min-studies studies
-and both classes, else it refuses. The model JSON records the feature schema, channel order, preprocessing,
-training studies, fold log, out-of-fold predictions, label-file hash, build and a model hash."""
-import sys, os, json, argparse, numpy as np, pandas as pd
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from css_common import base as _base, label_class, sha256, build_id
-import css_model as CM
-
-FEATURE_SCHEMA = "css-patch-features/1.0"
-CHANNELS = ["swi", "phase", "flair", "labels"]
-GEOMETRY = ["pial_dist_mm", "csf_depth_mm", "sulcal_depth_mm", "surface_contact_frac_1mm", "elongation_3d",
-            "compactness_3d", "surf_width_mm", "surf_inradius_mm", "surf_aspect", "geo_length_mm"]
-VESSEL = ["tube_ratio", "local_cont_max_mm", "local_cont_min_mm", "terminal_ends", "local_branch_per10mm",
-          "vessel_wm_mm", "vessel_run_mm", "tortuosity", "cand_radius_med_mm", "net_radius_med_mm"]
-ABLATIONS = {"A_swi": ["swi"], "B_swi_phase": ["swi", "phase"], "C_swi_surface": ["swi", "labels", "geometry"],
-             "D_swi_vessel": ["swi", "vessel"], "E_swi_flair": ["swi", "flair"],
-             "F_swi_phase_surface_vessel": ["swi", "phase", "labels", "geometry", "vessel"],
-             "G_all": ["swi", "phase", "flair", "labels", "geometry", "vessel"]}
-
-
-def robust_z(x, valid):
-    valid = valid & np.isfinite(x); z = np.full(x.shape, np.nan, np.float32)
-    if not valid.any(): return z
-    med = np.median(x[valid]); mad = np.median(np.abs(x[valid] - med))
-    z[valid] = (x[valid] - med) / max(1.4826 * mad, float(np.std(x[valid])), 1e-3)
-    return z
-
-
-def axis_profile(z, valid, axis, bins=8):
-    e = np.linspace(0, z.shape[axis], bins + 1).astype(int); m, s = [], []
-    for lo, hi in zip(e[:-1], e[1:]):
-        sl = [slice(None)] * 3; sl[axis] = slice(lo, max(lo + 1, hi))
-        v = z[tuple(sl)][valid[tuple(sl)]]
-        m.append(float(v.mean()) if len(v) else np.nan); s.append(float(v.std()) if len(v) else np.nan)
-    return m + s
-
-
-def channel_features(name, img, valid):
-    """-> ordered (names, values); img None = channel missing (values NaN, <ch>_missing = 1)"""
-    names = [f"{name}_missing", f"{name}_valid_fraction"]
-    if name == "labels":
-        names += [f"labels_tissue_n{b}" for b in range(8)]
-        if img is None: return names, [1.0, 0.0] + [np.nan] * 8
-        t = ((img > 0) & (img != 24)).astype(np.float32)
-        return names, [0.0, float(valid.mean())] + axis_profile(np.where(valid, t, np.nan), valid, 2)[:8]
-    stats = ["mean", "sd", "p5", "p50", "p95", "min", "max", "grad_u", "grad_v", "grad_n"]
-    prof = [f"prof_{ax}_{k}{b}" for ax in "uvn" for k in ("mean", "sd") for b in range(8)]
-    names += [f"{name}_{s}" for s in stats + prof]
-    if img is None or not valid.any(): return names, [1.0 if img is None else 0.0, float(valid.mean()) if img is not None else 0.0] + [np.nan] * (len(names) - 2)
-    z = robust_z(img.astype(np.float32), valid); v = z[valid]
-    g = [float(np.nanmean(np.abs(gg[valid]))) for gg in np.gradient(np.where(valid, z, 0.0))]
-    vals = [0.0, float(valid.mean()), float(v.mean()), float(v.std()), *map(float, np.percentile(v, [5, 50, 95])),
-            float(v.min()), float(v.max()), *g]
-    for ax in range(3): vals += axis_profile(z, valid, ax)
-    return names, vals
-
-
-def patch_features(npz_path):
-    z = np.load(npz_path, allow_pickle=False); names, vals = [], []
-    for ch in CHANNELS:
-        img = z[f"image_{ch}"] if f"image_{ch}" in z.files else None
-        vm = z[f"valid_{ch}"] if f"valid_{ch}" in z.files else np.zeros(z["valid"].shape, bool)
-        n_, v_ = channel_features(ch, img, np.asarray(vm).astype(bool))
-        names += n_; vals += v_
-    return names, vals, json.loads(str(z["metadata_json"])) if "metadata_json" in z.files else {}
-
-
-POSITIVE = {"cSS", "css", "C"}
-NEGATIVE = {"vein", "surface_vein", "other_vein", "V", "VS", "VC", "VT", "VX"}
-
-
-def read_manifest(path):
-    """explicit patch list -> rows (dicts). Needs columns patch_path, study_id, label; a relative patch_path is read
-    against the manifest's folder, then $CSS_BASE. A patch listed twice (whatever its labels) or a missing file -> ValueError."""
-    d = pd.read_csv(path, dtype=str)
-    need = {"patch_path", "study_id", "label"} - set(d.columns)
-    if need: raise ValueError(f"{path}: missing columns {sorted(need)}")
-    here = os.path.dirname(os.path.abspath(path)); rows, seen = [], set()
-    for _, r in d.iterrows():
-        pp = r.patch_path
-        if not os.path.isabs(pp):
-            pp = next((c for c in (os.path.join(here, pp), os.path.join(_base(), pp)) if os.path.exists(c)), os.path.join(here, pp))
-        key = os.path.realpath(pp)
-        if key in seen: raise ValueError(f"{path}: patch listed more than once: {r.patch_path}")
-        if not os.path.exists(pp): raise ValueError(f"{path}: patch file not found: {r.patch_path}")
-        seen.add(key); rows.append(dict(r, patch_path=pp))
-    return rows
-
-
-def build_matrix(rows):
-    """rows from read_manifest -> (X, y, groups, feature_names, channels). Features of channels present in at least one
-    patch, named '<channel>:<feature>' (e.g. 'phase:missing' = 1 where that patch has no phase). Labels: cSS -> 1,
-    vein codes -> 0; anything else -> ValueError (no silent relabelling)."""
-    bad = sorted({r["label"] for r in rows if r["label"] not in POSITIVE | NEGATIVE})
-    if bad: raise ValueError(f"labels must be cSS or a vein code, got {bad}")
-    feats, present = [], set()
-    for r in rows:
-        names, vals, _ = patch_features(r["patch_path"]); feats.append(vals)
-        z = np.load(r["patch_path"], allow_pickle=False); present |= {ch for ch in CHANNELS if f"image_{ch}" in z.files}
-    keep = [k for k, n in enumerate(names) if n.split("_", 1)[0] in present]
-    X = np.asarray(feats, float)[:, keep]
-    fn = [names[k].replace("_", ":", 1) for k in keep]
-    y = np.array([1 if r["label"] in POSITIVE else 0 for r in rows]); g = np.array([r["study_id"] for r in rows])
-    return X, y, g, fn, sorted(present)
-
-
-def grouped_lopo(X, y, groups, l2=1.0, nested=False):
-    """leave-one-study-out scores + fold log (css_model.lopo: folds by study, one-class training folds skipped)"""
-    return CM.lopo(X, y, groups, l2, nested=nested)
-
-
-auc = CM.auc
-
-
-def cmd_features(subjects, B):
-    for s in subjects:
-        mp = f"{B}/review/{s}_patches.csv"
-        if not os.path.exists(mp): print(f"{s}: no {mp} - run surface_aligned_patch.py first"); continue
-        man = pd.read_csv(mp); rows = []
-        for _, r in man[man.status == "ok"].iterrows():
-            names, vals, meta = patch_features(f"{B}/{r.patch_path}")
-            rows.append(dict(study_id=s, cand_uid=r.cand_uid, list=r.list, obj_id=r.obj_id, **dict(zip(names, vals)),
-                             feature_schema=FEATURE_SCHEMA))
-        pd.DataFrame(rows).to_csv(f"{B}/review/{s}_patch_features.csv", index=False)
-        print(f"{s}: {len(rows)} patch feature rows ({len(names) if rows else 0} features) -> review/{s}_patch_features.csv")
-
-
-def study_table(B, s):
-    p = f"{B}/review/{s}_patch_features.csv"
-    if not os.path.exists(p): return None
-    d = pd.read_csv(p)
-    geo = []
-    for lst in ("candidates", "excluded"):
-        q = f"{B}/review/{s}_{lst}.csv"
-        if os.path.exists(q):
-            g = pd.read_csv(q); g["list"] = lst; g["obj_id"] = g["cand_id" if lst == "candidates" else "excl_id"]; geo.append(g)
-    if geo:
-        g = pd.concat(geo, ignore_index=True)
-        sp = f"{B}/review/{s}_surface_features.csv"
-        if os.path.exists(sp):
-            sf = pd.read_csv(sp); sf["list"] = sf["list"].map({"candidate": "candidates", "excluded": "excluded"})
-            g = g.merge(sf[["list", "obj_id"] + [c for c in GEOMETRY if c in sf.columns and c not in g.columns]],
-                        on=["list", "obj_id"], how="left")
-        keep = ["list", "obj_id"] + [c for c in GEOMETRY + VESSEL if c in g.columns]
-        d = d.merge(g[keep], on=["list", "obj_id"], how="left")
-    return d
-
-
-def columns_for(groups, cols):
-    out = []
-    for gname in groups:
-        if gname in CHANNELS: out += [c for c in cols if c.startswith(gname + "_")]
-        elif gname == "geometry": out += [c for c in GEOMETRY if c in cols]
-        elif gname == "vessel": out += [c for c in VESSEL if c in cols]
-    return out
-
-
-def cmd_train(a, B):
-    if a.split == "test": sys.exit("training on the test split is refused (labels/study_meta.csv): test studies are for reporting")
-    L = f"{B}/labels"; meta = pd.read_csv(f"{L}/study_meta.csv", dtype=str)
-    studies = meta[meta.split == "dev"].study_id if a.split == "dev" else meta[meta.split != "test"].study_id
-    if a.source == "consensus":
-        lab = pd.read_csv(f"{L}/consensus.csv"); lab = lab[lab.method != "pending"].assign(cls=lambda x: x.consensus_class)
-        lab_path = f"{L}/consensus.csv"
-    else:
-        rd = a.source.split(":", 1)[1]; lab = pd.read_csv(f"{L}/candidate_labels.csv"); lab = lab[lab.reader_id == rd]
-        lab = lab[lab.session == lab.groupby("study_id").session.transform("max")].assign(cls=lambda x: x.label.map(label_class))
-        lab_path = f"{L}/candidate_labels.csv"
-    neg = {"surface_vein", "other_vein"} if a.negatives == "vein" else None
-    rows = []
-    for s in studies:
-        d = study_table(B, s)
-        if d is None: continue
-        m = d.merge(lab[["study_id", "cand_uid", "cls"]], on=["study_id", "cand_uid"], how="inner")
-        m = m[(m.cls == "cSS") | (m.cls.isin(neg) if neg else (m.cls != "uncertain"))]
-        if len(m): rows.append(m.assign(y=(m.cls == "cSS").astype(int)))
-    if not rows: sys.exit("no labelled patches in the requested split - extract patches and label studies first")
-    T = pd.concat(rows, ignore_index=True); n_st = T.study_id.nunique()
-    print(f"train: {len(T)} labelled patches ({int(T.y.sum())} cSS, {int((1 - T.y).sum())} "
-          f"{'vein' if neg else 'non-cSS'}) from {n_st} studies, split {a.split}")
-    if n_st < a.min_studies: sys.exit(f"need >= {a.min_studies} labelled studies, have {n_st} - not fitted")
-    if T.y.nunique() < 2: sys.exit("need both cSS and negative labels - not fitted")
-    cols = [c for c in T.columns if c not in ("study_id", "cand_uid", "list", "obj_id", "cls", "y", "feature_schema")]
-    res, oof = {}, {}
-    for name, groups in ABLATIONS.items():
-        fc = [c for c in columns_for(groups, cols) if T[c].notna().any()]
-        if not fc: res[name] = dict(n_features=0, note="no features available"); continue
-        sc, log = CM.lopo(T[fc].values.astype(float), T.y.values, T.study_id.values, a.l2, nested=not a.no_nested)
-        ok = np.isfinite(sc); D = T[ok].assign(s=sc[ok])
-        res[name] = dict(n_features=len(fc), auc=CM.auc(D.y, D.s), auc_ci95=CM.patient_bootstrap(D, lambda x: CM.auc(x.y, x.s), 300),
-                         pr_auc=CM.average_precision(D.y, D.s), brier=CM.brier(D.y, D.s),
-                         sens_at_1fp_per_scan=CM.sens_at_fp(D, "s", 1.0),
-                         folds_skipped=[f["study_id"] for f in log if f["status"] == "skipped"])
-        oof[name] = (sc, log)
-    fc = [c for c in columns_for(ABLATIONS["G_all"], cols) if T[c].notna().any()]
-    Z, med, mu, sd = CM.prep(T[fc].values.astype(float)); w, b = CM.fit_lr(Z, T.y.values, a.l2)
-    model = dict(model_type="logistic_l2_balanced", model_version="v5.2", feature_schema=FEATURE_SCHEMA, channel_order=CHANNELS,
-                 feature_names=fc, weights=[float(x) for x in w], bias=b, imputation_medians=[float(x) for x in med],
-                 training_mean=[float(x) for x in mu], training_scale=[float(x) for x in sd], l2=a.l2,
-                 training_studies=sorted(T.study_id.unique().tolist()), n_patches=int(len(T)), n_css=int(T.y.sum()),
-                 n_negative=int((1 - T.y).sum()), negatives=a.negatives, split=a.split, source=a.source,
-                 label_file=lab_path, label_sha256=sha256(lab_path), ablations=res,
-                 lopo_fold_status=oof["G_all"][1] if "G_all" in oof else [],
-                 lopo_predictions=[dict(study_id=s_, cand_uid=u_, y=int(y_), score=None if not np.isfinite(p_) else round(float(p_), 4))
-                                   for s_, u_, y_, p_ in zip(T.study_id, T.cand_uid, T.y, oof["G_all"][0])] if "G_all" in oof else [],
-                 build=build_id(), research_only=True,
-                 note="ranks candidates for expert review; not calibrated, not clinically validated")
-    model["model_hash"] = CM.model_hash(model)
-    out = a.out or f"{B}/review/surface_patch_model.json"; json.dump(model, open(out, "w"), indent=2, default=float)
-    for name, r in res.items():
-        if "auc" in r:
-            print(f"  {name:28s} n_feat {r['n_features']:4d}  AUC {r['auc']:.3f} {r['auc_ci95']}  PR-AUC {r['pr_auc']:.3f}  "
-                  f"Brier {r['brier']:.3f}  sens@1FP {r['sens_at_1fp_per_scan']:.2f}" + (f"  skipped {r['folds_skipped']}" if r["folds_skipped"] else ""))
-    print(f"-> {out} (model hash {model['model_hash'][:12]}; fitted on {len(model['training_studies'])} dev studies)")
-
-
-def cmd_predict(a, B):
-    mp = a.model or f"{B}/review/surface_patch_model.json"
-    if not os.path.exists(mp): sys.exit(f"no model {mp}")
-    M = json.load(open(mp))
-    if M.get("feature_schema") != FEATURE_SCHEMA or M.get("channel_order") != CHANNELS:
-        sys.exit(f"model feature schema / channel order ({M.get('feature_schema')}, {M.get('channel_order')}) do not match this "
-                 f"script ({FEATURE_SCHEMA}, {CHANNELS}) - retrain")
-    if M.get("model_hash") != CM.model_hash(M): sys.exit("model hash mismatch - the model file was changed after fitting")
-    for s in a.subjects:
-        if s in M["training_studies"] and not a.allow_training_study:
-            print(f"{s}: used to train the model - not predicted (--allow-training-study)"); continue
-        d = study_table(B, s)
-        if d is None: print(f"{s}: no patch features - run 'features' first"); continue
-        miss = [c for c in M["feature_names"] if c not in d.columns]
-        if [c for c in miss if not any(c.startswith(ch + "_") for ch in CHANNELS)]:
-            sys.exit(f"{s}: features the model needs are absent: {miss[:5]} - schema mismatch")
-        X = np.column_stack([pd.to_numeric(d[c], errors="coerce").values if c in d.columns else np.full(len(d), np.nan)
-                             for c in M["feature_names"]])
-        sc = CM.predict(X, np.array(M["imputation_medians"]), np.array(M["training_mean"]), np.array(M["training_scale"]),
-                        np.array(M["weights"]), M["bias"])
-        mm = d[[c for c in d.columns if c.endswith("_missing")]]
-        out = pd.DataFrame(dict(study_id=s, cand_uid=d.cand_uid, list=d.list, obj_id=d.obj_id, css_score=np.round(sc, 4),
-                                missing_modalities=[";".join(c[:-8] for c in mm.columns if r_[c] == 1) for _, r_ in mm.iterrows()],
-                                model_hash=M["model_hash"], model_version=M["model_version"], build=build_id(), research_only=1))
-        out.to_csv(f"{B}/review/{s}_patch_predictions.csv", index=False)
-        print(f"{s}: {len(out)} patch scores -> review/{s}_patch_predictions.csv (model {M['model_hash'][:12]}; research only)")
-
-
-def cmd_lopo_manifest(a):
-    X, y, g, fn, ch = build_matrix(read_manifest(a.manifest))
-    sc, log = grouped_lopo(X, y, g, a.l2); ok = np.isfinite(sc)
-    sk = [f["study_id"] for f in log if f["status"] == "skipped"]
-    print(f"{len(y)} patches ({int(y.sum())} cSS) from {len(set(g))} studies, channels {ch}, {len(fn)} features: LOPO AUC "
-          f"{CM.auc(y[ok], sc[ok]):.3f}, PR-AUC {CM.average_precision(y[ok], sc[ok]):.3f}" + (f"; folds skipped {sk}" if sk else "")
-          + "  [research only, no model saved]")
-
-
-if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = ap.add_subparsers(dest="cmd", required=True)
-    f = sub.add_parser("features"); f.add_argument("subjects", nargs="+")
-    t = sub.add_parser("train"); t.add_argument("--split", default="dev", choices=["dev", "all", "test"])
-    t.add_argument("--source", default="consensus"); t.add_argument("--negatives", default="vein", choices=["vein", "all"])
-    t.add_argument("--min-studies", type=int, default=5); t.add_argument("--l2", type=float, default=1.0)
-    t.add_argument("--no-nested", action="store_true"); t.add_argument("--out", default="")
-    p = sub.add_parser("predict"); p.add_argument("subjects", nargs="+"); p.add_argument("--model", default="")
-    p.add_argument("--allow-training-study", action="store_true")
-    q = sub.add_parser("lopo-manifest"); q.add_argument("manifest"); q.add_argument("--l2", type=float, default=1.0)
-    a = ap.parse_args(); B = _base()
-    {"features": lambda: cmd_features(a.subjects, B), "train": lambda: cmd_train(a, B), "predict": lambda: cmd_predict(a, B),
-     "lopo-manifest": lambda: cmd_lopo_manifest(a)}[a.cmd]()
-```
+````
 
 ## tests/check_v52.py
 
-```python
+````python
 """v5.2 checks: surface-aligned patches (surface_aligned_patch.py), the patch classifier (classify_surface_patches.py)
 and the shared model code (css_model.py). Synthetic volumes and tables with known answers; no FreeSurfer, no phantoms.
 usage: check_v52.py    (writes into $CSS_BASE/v52_check/)
@@ -7649,11 +10897,442 @@ if PB and os.path.exists(f"{PB}/work/PH3_seg_swispace.nii.gz"):
 else:
     print("6. phantom part skipped")
 print("RESULT v52 OK")
-```
+````
+
+## tests/check_v53.py
+
+````python
+"""v5.3 checks (CSS_V53=1): cortex-outline search zone, skull band / extent / midline rules, second merge pass, tiers.
+Synthetic phantom only (tests/phantom_v4.py); no patient data. usage: check_v53.py   (own temporary $CSS_BASE)
+1. switch OFF: the candidate list equals the v5.2 list on the same phantom; only the 4 new columns are appended.
+2. skull phantom = PH3 with a T1-style brain mask: a dark "inner skull" line 0.6-2 mm outside the cortex on the convexity.
+   OFF: the dark line makes objects (shown or excluded) outside the cortex outline. ON: no object voxel lies more
+   than V53_OUT_MM + 1 voxel outside the labelled tissue, no shown candidate is skull-backed, every true cSS lesion found OFF is still
+   shown ON, and every object has exactly one fate (the detector's own invariant, exit code 0).
+3. tiers: "off the cortex, in the CSF, vessel-shaped" alone is tier 3 without v53_active and tier 1 with it; with a
+   second vascular sign it stays tier 3.
+This shows the mechanics work; it says nothing about performance on patients."""
+import os, sys, subprocess, tempfile, shutil, numpy as np, nibabel as nib, pandas as pd
+from scipy import ndimage as ndi
+HERE = os.path.dirname(os.path.abspath(__file__)); S = os.path.join(HERE, "..", "scripts"); sys.path.insert(0, S)
+import css_tiers
+py = sys.executable
+def fail(m): print("FAIL:", m); sys.exit(1)
+
+# ---- 3. tiers (pure function)
+row = dict(pial_dist_mm=0.8, csf_depth_mm=0.9, tube_ratio=0.4, elongation_3d=3, local_cont_max_mm=2, terminal_ends=2)
+if css_tiers.review_priority(dict(row), "ok")[0] != 3: fail("legacy: off-cortex vessel-shaped should be tier 3")
+if css_tiers.review_priority(dict(row, v53_active=1), "ok")[0] != 1: fail("v5.3: off-cortex alone should be tier 1")
+two = dict(row, v53_active=1, tube_ratio=0.6, terminal_ends=0)
+t = css_tiers.review_priority(two, "ok")
+if t[0] != 3 or "off the cortex" not in t[2]: fail(f"v5.3: two vascular signs should be tier 3 with both reasons ({t})")
+print("tiers: off-cortex alone -> tier 1 with v5.3, tier 3 without; with a second vascular sign -> tier 3")
+
+# ---- phantom study in a private base
+T = tempfile.mkdtemp(); env = dict(os.environ, CSS_BASE=T, FREESURFER_HOME=T + "/fs", CSS_REVIEW_TEST="1")
+for d in ("data", "synthseg", "work", "review", "results", "fs"): os.makedirs(f"{T}/{d}")
+open(T + "/fs/FreeSurferColorLUT.txt", "w").write(
+    "0 Unknown 0 0 0 0\n2 Left-Cerebral-White-Matter 245 245 245 0\n24 CSF 60 60 60 0\n41 Right-Cerebral-White-Matter 245 245 245 0\n"
+    "1022 ctx-lh-postcentral 220 20 20 0\n1028 ctx-lh-superiorfrontal 20 220 160 0\n2022 ctx-rh-postcentral 220 20 20 0\n"
+    "2028 ctx-rh-superiorfrontal 20 220 160 0\n")
+def run(args, **kw):
+    r = subprocess.run([py] + args, env=dict(env, **kw), capture_output=True, text=True)
+    if r.returncode: fail(f"{' '.join(args[-2:])} exit {r.returncode}\n{r.stdout[-800:]}\n{r.stderr[-800:]}")
+    return r.stdout
+def detect(name, v53):
+    out = run([f"{S}/detect_css.py", name], CSS_V53="1" if v53 else "0")
+    lab = nib.load(f"{T}/review/{name}_candidates.nii.gz").get_fdata().astype(int)
+    allobj = (lab > 0) | (nib.load(f"{T}/review/{name}_excluded.nii.gz").get_fdata() > 0)      # shown + excluded objects
+    return pd.read_csv(f"{T}/review/{name}_candidates.csv"), lab, pd.read_csv(f"{T}/review/{name}_excluded.csv"), out, allobj
+run([f"{HERE}/phantom_v4.py", "PH3", "1"]); run([f"{S}/align_seg.py", "PH3"])
+shutil.copy(f"{T}/work/PH3_seg_swispace.nii.gz", f"{T}/work/PH3_t1seg_swispace.nii.gz")     # pretend T1 labels
+truth = nib.load(f"{T}/work/PH3_truth.nii.gz").get_fdata().astype(int)
+
+# ---- 1. switch off = unchanged list, new columns appended last
+off, off_lab, _, _, _ = detect("PH3", False)
+new = ["midline_frac", "mask_edge_mm", "skull_frac", "v53_active"]
+if list(off.columns[-4:]) != new: fail(f"new columns must be appended last, got {list(off.columns[-4:])}")
+if off.v53_active.any(): fail("v53_active must be 0 with the switch off")
+print(f"switch off: {len(off)} candidates, 4 new columns appended, v53_active 0")
+
+# ---- 2. skull phantom: T1-style mask (labels + 5 mm): dark line just outside the cortex (thin-CSF convexity)
+img = nib.load(f"{T}/data/PH3_swi.nii"); I = img.get_fdata().astype(np.float32); vox = img.header.get_zooms()[:3]
+brain = I > 0; d = ndi.distance_transform_edt(~brain, sampling=vox); cmed = float(np.median(I[brain]))
+seg0 = nib.load(f"{T}/work/PH3_seg_swispace.nii.gz").get_fdata().astype(int)
+out_mm = ndi.distance_transform_edt(~((seg0 > 0) & (seg0 != 24)), sampling=vox)   # distance outside the labelled tissue
+edge_in = ndi.distance_transform_edt(brain, sampling=vox)                           # depth below the phantom's own edge
+rng = np.random.default_rng(3)
+I2 = I.copy(); grow = (d > 0) & (d <= 5.0)                          # T1-style mask: 5 mm beyond the labels
+line = (out_mm > 0.6) & (out_mm <= 2.0) & (brain & (edge_in < 4.0) | grow)   # inner table: dark line on the convexity
+I2[grow] = cmed * 0.8 + rng.normal(0, 5, int(grow.sum()))
+I2[line] = cmed * 0.2 + rng.normal(0, 5, int(line.sum()))
+nib.save(nib.Nifti1Image(np.maximum(I2, 0), img.affine), f"{T}/data/PHS_swi.nii")
+for a, b in (("work/PH3_seg_swispace.nii.gz", "work/PHS_seg_swispace.nii.gz"), ("work/PH3_t1seg_swispace.nii.gz", "work/PHS_t1seg_swispace.nii.gz"),
+             ("work/PH3_truth.nii.gz", "work/PHS_truth.nii.gz")):
+    shutil.copy(f"{T}/{a}", f"{T}/{b}")
+for f in os.listdir(f"{T}/work"):
+    if f.startswith("PH3_") and "a2009s" in f: shutil.copy(f"{T}/work/{f}", f"{T}/work/{f.replace('PH3_', 'PHS_')}")
+os.utime(f"{T}/work/PHS_t1seg_swispace.nii.gz")
+s_off, l_off, x_off, _, a_off = detect("PHS", False)
+s_on, l_on, x_on, log, a_on = detect("PHS", True)
+far = lambda m: int((m & (out_mm > 1.0 + max(vox))).sum())      # object voxels beyond the cortex outline + 1 mm
+found = lambda lab: {int(i) for i in np.unique(truth[(lab > 0) & (truth > 0)])}
+if "v5.3 ACTIVE" not in log: fail("the log must say that v5.3 is active")
+if not far(a_off): fail("the skull phantom should make objects (shown or excluded) outside the cortex outline with the switch off")
+if far(a_on): fail(f"v5.3: {far(a_on)} object voxels still lie outside the cortex outline")
+if len(s_on) and (s_on.skull_frac >= 0.5).any(): fail("v5.3: a skull-backed object is still shown")
+lost = found(l_off) - found(l_on)
+if lost and os.environ.get("KEEP") == "1": print(T)
+if lost: fail(f"v5.3 lost true cSS lesions {sorted(lost)} that were shown without it")
+if not s_on.v53_active.all(): fail("v53_active must be 1 with the switch on")
+print(f"skull phantom: object voxels outside the cortex outline {far(a_off)} -> {far(a_on)}; objects off {len(s_off)} shown + "
+      f"{len(x_off)} excluded, on {len(s_on)} shown + {len(x_on)} excluded; true lesions shown {len(found(l_off))} -> {len(found(l_on))}")
+if os.environ.get("KEEP") != "1": shutil.rmtree(T)
+else: print(T)
+print("RESULT v53 OK")
+````
+
+## tests/phantom.py
+
+````python
+"""Synthetic phantom brain (ellipsoid, radial sulci, midline fissure, dark veins) for tests.
+usage: phantom.py NAME SEED   (writes into $CSS_BASE)"""
+import os, numpy as np, nibabel as nib, sys
+B = os.environ["CSS_BASE"]
+from scipy import ndimage as ndi
+name, sd = sys.argv[1], int(sys.argv[2]); rng = np.random.default_rng(sd)
+sh = (220, 220, 40); vox = (0.5, 0.5, 2.0)
+aff = np.diag(list(vox) + [1.0])
+x, y, zz = np.meshgrid(*[(np.arange(n) - n/2) * v for n, v in zip(sh, vox)], indexing="ij")
+r = np.sqrt((x/50)**2 + (y/52)**2 + (zz/38)**2)          # ellipsoid "brain"
+brain = r < 1
+seg = np.zeros(sh, np.int32)
+depth_mm = (1 - r) * 50                                    # approx depth from surface
+left = x < 0; front = y > 0
+ctxcode = np.where(left, 1000, 2000) + np.where(front, 28, 22)
+seg[brain] = np.where(left, 2, 41)[brain]
+seg[brain & (depth_mm < 3)] = ctxcode[brain & (depth_mm < 3)]
+ang = np.arctan2(y, x)
+I = np.zeros(sh, np.float32)
+for a0 in np.arange(-np.pi, np.pi, np.pi/9):              # radial sulci
+    d_line = np.abs(np.sin(ang - a0)) * np.sqrt(x**2 + y**2)
+    sul = brain & (d_line < 0.8) & (depth_mm < 12) & (np.cos(ang - a0) > 0)
+    bank = brain & (d_line < 3.8) & (depth_mm < 15) & (np.cos(ang - a0) > 0) & ~sul
+    seg[bank] = ctxcode[bank]; seg[sul] = 24
+seg[np.abs(x) < 0.7] = np.where(brain[np.abs(x) < 0.7], 24, 0)   # midline fissure
+I[np.isin(seg, [2, 41])] = 230; I[seg >= 1000] = 200; I[seg == 24] = 255
+I[brain] += rng.normal(0, 12, brain.sum())
+# veins: dark tubes along some sulci, with a branch
+for a0 in np.arange(-np.pi, np.pi, np.pi/4):
+    d_line = np.abs(np.sin(ang - a0 + 0.17)) * np.sqrt(x**2 + y**2)
+    v = brain & (d_line < 0.6) & (depth_mm > 2) & (depth_mm < 9) & (np.cos(ang - a0) > 0) & (np.abs(zz) < 14)
+    I[v] = 70
+I[~brain] = 0; I[brain] = np.maximum(I[brain], 1)
+seg[~brain] = 0
+nib.save(nib.Nifti1Image(I, aff), f"{B}/data/{name}_swi.nii")
+nib.save(nib.Nifti1Image(seg, aff), f"{B}/synthseg/{name}_seg.nii.gz")
+````
+
+## tests/phantom_infra.py
+
+````python
+"""Derive PH4 from the v4 phantom PH3: the lowest part becomes cerebellum (labels 8/47) and a dark
+curvilinear line is drawn along its surface (a normal tentorial / cerebellar-folia line).
+usage: phantom_infra.py   (needs PH3 in $CSS_BASE)"""
+import os, numpy as np, nibabel as nib
+B = os.environ["CSS_BASE"]
+img = nib.load(f"{B}/data/PH3_swi.nii"); I = img.get_fdata().astype(np.float32)
+seg = nib.load(f"{B}/synthseg/PH3_seg.nii.gz").get_fdata().astype(np.int32)
+vox = img.header.get_zooms()[:3]; sh = I.shape
+x, y, z = np.meshgrid(*[(np.arange(n) - n / 2) * v for n, v in zip(sh, vox)], indexing="ij")
+low = z < -30
+tis = (seg > 0) & (seg != 24)
+seg[low & tis] = np.where(x < 0, 8, 47)[low & tis]
+r = np.sqrt((x / 52) ** 2 + (y / 58) ** 2 + (z / 44) ** 2); depth = (1 - r) * 52
+line = low & (z > -38) & (depth > 0) & (depth < 1.2) & (np.abs(np.arctan2(y, x) - np.radians(-100)) < np.radians(12))
+I[line] *= 0.35
+nib.save(nib.Nifti1Image(I, img.affine), f"{B}/data/PH4_swi.nii")
+nib.save(nib.Nifti1Image(seg, img.affine), f"{B}/synthseg/PH4_seg.nii.gz")
+nib.save(nib.Nifti1Image(line.astype(np.uint8), img.affine), f"{B}/work/PH4_infra_line.nii.gz")
+print(f"PH4: cerebellum below z=-30 mm, dark cerebellar surface line {int(line.sum())} voxels")
+````
+
+## tests/phantom_surfaces.py
+
+````python
+"""Fake FreeSurfer outputs for a phantom so surface_features.py can be tested without FreeSurfer.
+usage: phantom_surfaces.py NAME [shift_mm=6] [--lta-vox2vox]
+  --lta-vox2vox: write the LTA as FreeSurfer's bbregister does (type 0 LINEAR_VOX_TO_VOX with src/dst volume info
+  blocks using the "cras" key) instead of type 1 RAS->RAS
+Writes subjects/NAME/surf/{lh,rh}.pial (marching cubes on the phantom's labelled tissue, in tkRAS),
+subjects/NAME/mri/orig.mgz (a 'T1' grid whose scanner RAS is the SWI's shifted by shift_mm in x, y and z),
+work/NAME_swi2t1.lta (type 1 RAS->RAS, SWI -> T1, i.e. +shift), and work/NAME_tkras_to_swi.txt (the true
+tkRAS -> SWI world affine, for the --surface-xfm route), and label/{lh,rh}.aparc.a2009s.annot (the phantom's
+Destrieux-like labels sampled at the vertices, names S_kNN / G_kNN)."""
+import os, sys, numpy as np, nibabel as nib
+from scipy import ndimage as ndi
+from skimage.measure import marching_cubes
+from nibabel.freesurfer.io import write_geometry, write_annot
+B = os.environ["CSS_BASE"]; name = sys.argv[1]
+pos = [x for x in sys.argv[2:] if not x.startswith("--")]; shift = float(pos[0]) if pos else 6.0
+swi = nib.load(f"{B}/data/{name}_swi.nii"); aff = swi.affine
+seg = nib.load(f"{B}/work/{name}_seg_swispace.nii.gz").get_fdata().astype(int)
+brain = ndi.binary_fill_holes(np.asarray(swi.dataobj) > 0)
+tissue = ndi.binary_fill_holes(brain & (seg > 0) & (seg != 24))
+left = np.isin(seg, [2, 3]) | ((seg >= 1000) & (seg < 2000))
+hemi_l = ndi.distance_transform_edt(~left) <= ndi.distance_transform_edt(~(tissue & ~left))
+R = np.eye(4); R[:3, 3] = shift                                 # SWI scanner RAS -> "T1" scanner RAS
+orig_aff = R @ aff
+orig = nib.MGHImage(np.zeros(swi.shape, np.uint8), orig_aff)
+for d_ in ("surf", "mri", "label"): os.makedirs(f"{B}/subjects/{name}/{d_}", exist_ok=True)
+a2 = nib.load(f"{B}/work/{name}_a2009s_swispace.nii.gz").get_fdata().astype(int)
+_, near_a2 = ndi.distance_transform_edt(a2 == 0, return_indices=True)        # nearest labelled cortex voxel
+nib.save(orig, f"{B}/subjects/{name}/mri/orig.mgz")
+tkr2t1 = orig.header.get_vox2ras() @ np.linalg.inv(orig.header.get_vox2ras_tkr())
+swi_to_tkr = np.linalg.inv(tkr2t1) @ R
+for h, hm in (("lh", hemi_l), ("rh", ~hemi_l)):
+    v, f, _, _ = marching_cubes(np.pad((tissue & hm).astype(np.float32), 1), 0.5)
+    v -= 1                                                        # undo the padding
+    vw = v @ aff[:3, :3].T + aff[:3, 3]                            # SWI scanner RAS
+    vt = vw @ swi_to_tkr[:3, :3].T + swi_to_tkr[:3, 3]             # tkRAS of the fake T1
+    write_geometry(f"{B}/subjects/{name}/surf/{h}.pial", vt, f.astype(np.int32))
+    # v4.18 morphometry with known values: sulc = height below the top of the hemisphere (mm) - its median,
+    # curv = 0.1, thickness = 2.5 mm (check_surfvein.py recomputes the expected medians)
+    sulc = (vw[:, 2].max() - vw[:, 2]); sulc = sulc - np.median(sulc)
+    nib.freesurfer.write_morph_data(f"{B}/subjects/{name}/surf/{h}.sulc", sulc.astype(np.float32))
+    nib.freesurfer.write_morph_data(f"{B}/subjects/{name}/surf/{h}.curv", np.full(len(vt), 0.1, np.float32))
+    nib.freesurfer.write_morph_data(f"{B}/subjects/{name}/surf/{h}.thickness", np.full(len(vt), 2.5, np.float32))
+    ijk = np.clip(np.round(v).astype(int), 0, np.array(a2.shape) - 1)
+    codes = a2[tuple(n_[tuple(ijk.T)] for n_ in near_a2)]
+    uc = np.unique(codes)
+    names = [("S_k%02d" % (c % 100 - 50) if c % 100 >= 50 else "G_k%02d" % (c % 100 - 1)) if c else "Unknown"
+             for c in uc]
+    ctab = np.array([[(37 * k) % 255 + 1, (91 * k) % 255, (53 * k) % 255, 0, 0] for k in range(len(uc))], np.int32)
+    ctab[:, 4] = ctab[:, 0] + ctab[:, 1] * 256 + ctab[:, 2] * 65536
+    write_annot(f"{B}/subjects/{name}/label/{h}.aparc.a2009s.annot", np.searchsorted(uc, codes), ctab, names,
+                fill_ctab=False)
+def volinfo(tag, A, shape, fn):
+    vs = np.linalg.norm(A[:3, :3], axis=0); D = A[:3, :3] / vs
+    c = A[:3, :3] @ (np.array(shape[:3]) / 2.0) + A[:3, 3]
+    return (f"{tag}\nvalid = 1  # volume info valid\nfilename = {fn}\nvolume = {shape[0]} {shape[1]} {shape[2]}\n"
+            f"voxelsize = {vs[0]:.15e} {vs[1]:.15e} {vs[2]:.15e}\n"
+            + "".join(f"{k}   = {D[0, i]:.15e} {D[1, i]:.15e} {D[2, i]:.15e}\n" for i, k in enumerate(("xras", "yras", "zras")))
+            + f"cras   = {c[0]:.15e} {c[1]:.15e} {c[2]:.15e}\n")
+with open(f"{B}/work/{name}_swi2t1.lta", "w") as fh:
+    if "--lta-vox2vox" in sys.argv:
+        V = np.linalg.inv(orig_aff) @ R @ aff                     # SWI voxel -> T1 voxel
+        fh.write("# transform file (phantom, bbregister-style)\ntype      = 0 # LINEAR_VOX_TO_VOX\nnxforms   = 1\n"
+                 "mean      = 0.0000 0.0000 0.0000\nsigma     = 1.0000\n1 4 4\n"
+                 + "\n".join(" ".join(f"{x:.15e}" for x in row) for row in V) + "\n"
+                 + volinfo("src volume info", aff, swi.shape, f"{B}/data/{name}_swi.nii")
+                 + volinfo("dst volume info", orig_aff, swi.shape, f"{B}/subjects/{name}/mri/orig.mgz")
+                 + "subject phantom\nfscale 0.100000\n")
+    else:
+        fh.write("# transform file (phantom)\ntype      = 1 # LINEAR_RAS_TO_RAS\nnxforms   = 1\nmean      = 0.0 0.0 0.0\n"
+                 "sigma     = 1.0\n1 4 4\n" + "\n".join(" ".join(f"{x:.6f}" for x in row) for row in R) + "\n")
+np.savetxt(f"{B}/work/{name}_tkras_to_swi.txt", np.linalg.inv(swi_to_tkr))
+print(f"{name}: phantom pial surfaces + orig.mgz + LTA (shift {shift} mm) in {B}/subjects/{name}")
+````
+
+## tests/phantom_surfvein.py
+
+````python
+"""Derive PH6 from the v4 phantom PH3: add the hardest real mimic - a cortical vein running ALONG the pial
+surface (0.8 mm outside it, over many slices), with a side branch, draining into a superior sagittal sinus.
+usage: phantom_surfvein.py   (needs PH3 in $CSS_BASE; writes PH6 data, labels and work/PH6_surfvein.nii.gz:
+       1 = main surface vein, 2 = its branch, 3 = superior sagittal sinus)
+PH3's cSS lesions, veins and ICH are unchanged (same truth files are copied)."""
+import os, shutil, numpy as np, nibabel as nib
+from scipy import ndimage as ndi
+B = os.environ["CSS_BASE"]
+img = nib.load(f"{B}/data/PH3_swi.nii"); I = img.get_fdata().astype(np.float32)
+vox = img.header.get_zooms()[:3]; sh = I.shape
+x, y, z = np.meshgrid(*[(np.arange(n) - n / 2) * v for n, v in zip(sh, vox)], indexing="ij")
+r = np.sqrt((x / 52) ** 2 + (y / 58) ** 2 + (z / 44) ** 2)
+mask = (1 - r) * 52 > -4.5
+P = np.stack([x, y, z], -1)
+
+def surf_point(alpha, beta, out_mm):
+    """point at polar angle alpha / azimuth beta (deg), out_mm outside the ellipsoid pial surface"""
+    a, b = np.radians(alpha), np.radians(beta)
+    u = np.array([np.sin(a) * np.cos(b), np.sin(a) * np.sin(b), np.cos(a)])
+    s = 1.0 / np.sqrt((u[0] / 52) ** 2 + (u[1] / 58) ** 2 + (u[2] / 44) ** 2)
+    return u * s * (1 + out_mm / 52)
+
+def tube(points, radius):
+    """voxels within radius of a polyline (sampled every <= 0.3 mm)"""
+    m = np.zeros(sh, bool)
+    pts = [points[0]]
+    for p0, p1 in zip(points[:-1], points[1:]):
+        n = max(int(np.ceil(np.linalg.norm(p1 - p0) / 0.3)), 1)
+        pts += [p0 + (p1 - p0) * t for t in np.linspace(0, 1, n + 1)[1:]]
+    ijk = np.round(np.array(pts) / np.array(vox) + np.array(sh) / 2).astype(int)
+    ijk = ijk[np.all((ijk >= 0) & (ijk < np.array(sh)), axis=1)]
+    m[tuple(ijk.T)] = True
+    return (ndi.distance_transform_edt(~m, sampling=vox) <= radius) & mask
+
+# main vein: from the lateral convexity (polar 75 deg) up to the vertex midline, over the gyral crown
+# between sulci 14 and 15 (azimuth 157.5 deg, left hemisphere), 0.8 mm outside the pial surface
+azim = lambda a: 157.5 + 4 * np.sin(np.radians(a * 3))      # gentle meander
+main_pts = [surf_point(a, azim(a), 0.8) for a in np.linspace(75, 4, 120)]
+# side branch leaving the main vein at polar 45 deg (joined to it) and running 20 mm antero-laterally
+branch_pts = [surf_point(a, b, 0.8) for a, b in zip(np.linspace(45, 62, 40), np.linspace(azim(45), 138, 40))]
+# superior sagittal sinus: midline tube 2.5 mm outside the surface, polar -60..60 deg in the y-z plane
+sss_pts = [np.array([0.0, 58 * np.sin(t) * (1 + 2.5 / 52), 44 * np.cos(t) * (1 + 2.5 / 52)])
+           for t in np.radians(np.linspace(-60, 60, 200))]
+lab = np.zeros(sh, np.int16)
+for k, (pts, rad) in enumerate(((main_pts, 0.7), (branch_pts, 0.6), (sss_pts, 1.8)), 1):
+    lab[tube(pts, rad) & (lab == 0)] = k
+w = np.clip(ndi.gaussian_filter((lab > 0).astype(np.float32), [0.4 / v for v in vox]) * 1.6, 0, 1)
+I = I * (1 - 0.6 * w)
+I[~mask] = 0; I[mask] = np.maximum(I[mask], 1)
+nib.save(nib.Nifti1Image(I, img.affine), f"{B}/data/PH6_swi.nii")
+shutil.copy(f"{B}/synthseg/PH3_seg.nii.gz", f"{B}/synthseg/PH6_seg.nii.gz")
+for f in ("a2009s_swispace", "truth", "veins", "ich_truth"):
+    shutil.copy(f"{B}/work/PH3_{f}.nii.gz", f"{B}/work/PH6_{f}.nii.gz")
+nib.save(nib.Nifti1Image(lab, img.affine), f"{B}/work/PH6_surfvein.nii.gz")
+print(f"PH6: PH3 + surface-following vein ({int((lab == 1).sum())} vox) with branch ({int((lab == 2).sum())} vox) "
+      f"draining to a sagittal sinus ({int((lab == 3).sum())} vox)")
+````
+
+## tests/phantom_v4.py
+
+````python
+"""Phantom brain with the structures the cSS definition separates (v4 tests).
+usage: phantom_v4.py NAME SEED        (writes into $CSS_BASE; appends test labels to the LUT)
+
+Geometry (mm, 0.8 x 0.8 x 1.2 voxels like a clinical SWI):
+  ellipsoid hemispheres, 2.5 mm cortex, 4.5 mm extra-axial CSF (SynthStrip keeps CSF), midline
+  fissure, 16 radial sulci (2 mm CSF, 14 mm deep).
+Truth  work/NAME_truth.nii.gz  (cSS, ids 1-6):
+  1-3 tram-track: subpial band on BOTH banks of a sulcus        (the classic sign)
+  4-5 convexity: subpial band following the gyral crown          (curvilinear sheet)
+  6   single bank of a sulcus
+Mimics work/NAME_veins.nii.gz (ids 1-6):
+  1-4 tubular veins in the middle of the sulcal CSF (1,2 and 3,4 are left/right mirror pairs)
+  5-6 cortical surface veins running tangentially in the CSF just outside the pial surface
+  7   transcortical / medullary vein: radial tube from the surface CSF through the cortex 14 mm into WM
+Also: a lobar ICH (dark sphere, 8 mm) in left white matter -> work/NAME_ich_truth.nii.gz
+Labels: synthseg/NAME_seg.nii.gz (aseg/DK-like) and work/NAME_a2009s_swispace.nii.gz
+(Destrieux-like: S_k = banks of sulcus k, G_k = gyrus between sulci k and k+1)."""
+import os, sys, numpy as np, nibabel as nib
+from scipy import ndimage as ndi
+
+B = os.environ["CSS_BASE"]
+name, sd = sys.argv[1], int(sys.argv[2]); rng = np.random.default_rng(sd)
+vox = (0.8, 0.8, 1.2); sh = (150, 165, 90)
+aff = np.diag(list(vox) + [1.0])
+x, y, z = np.meshgrid(*[(np.arange(n) - n / 2) * v for n, v in zip(sh, vox)], indexing="ij")
+R0 = 52.0
+r = np.sqrt((x / 52) ** 2 + (y / 58) ** 2 + (z / 44) ** 2)
+depth = (1 - r) * R0                        # ~mm below the pial surface (negative = outside)
+inside = r < 1                              # pial surface
+mask = depth > -4.5                         # brain mask incl. 4.5 mm extra-axial CSF (atrophic CAA)
+left = x < 0
+rho = np.sqrt(x ** 2 + y ** 2); ang = np.arctan2(y, x)
+
+seg = np.zeros(sh, np.int32)
+seg[mask] = 24
+seg[inside] = np.where(left, 2, 41)[inside]
+ctx = np.where(left, 1000, 2000) + np.where(y > 0, 28, 22)
+cort = inside & (depth < 2.5)
+A0 = np.arange(-np.pi, np.pi, np.pi / 8) + np.pi / 16          # 16 sulci, none on the midline
+sul_any = np.zeros(sh, bool); bank_k = np.full(sh, -1, np.int16)
+dl = np.zeros((len(A0),) + sh, np.float32)
+for k, a0 in enumerate(A0):
+    d_line = np.abs(np.sin(ang - a0)) * rho
+    front = np.cos(ang - a0) > 0
+    dl[k] = np.where(front, d_line, 99)
+    sul = inside & (dl[k] < 1.0) & (depth < 14)
+    bank = inside & (dl[k] < 3.5) & (depth < 16.5) & ~sul
+    cort |= bank; sul_any |= sul
+    bank_k[bank & (bank_k < 0)] = k
+fiss = mask & (np.abs(x) < 1.0)
+cort |= inside & (np.abs(x) < 3.5) & ~fiss
+cort &= ~sul_any & ~fiss
+seg[cort] = ctx[cort]; seg[sul_any | fiss] = 24
+seg[~mask] = 0
+
+# Destrieux-like labels on the cortex
+sector = (np.floor((ang - A0[0]) / (np.pi / 8)).astype(int)) % len(A0)
+a2 = np.zeros(sh, np.int32)
+hemi_off = np.where(left, 11100, 12100)
+a2[cort] = (hemi_off + 1 + sector)[cort]                         # G_k
+bk = cort & (bank_k >= 0)
+a2[bk] = (hemi_off + 50 + bank_k)[bk]                            # S_k
+
+I = np.zeros(sh, np.float32)
+I[np.isin(seg, [2, 41])] = 180; I[seg >= 1000] = 210; I[seg == 24] = 250
+I[mask] += rng.normal(0, 10, int(mask.sum()))
+
+def darken(m, f=0.6, blur=0.6):
+    """hemosiderin / deoxy-Hb: multiplicative darkening with blooming (gaussian edge)"""
+    w = np.clip(ndi.gaussian_filter(m.astype(np.float32), [blur / v for v in vox]) * 1.6, 0, 1)
+    I[:] = I * (1 - f * w)
+
+truth = np.zeros(sh, np.int16); veins = np.zeros(sh, np.int16)
+zc = lambda lo, hi: (z > lo) & (z < hi)
+# 1-3 tram-track: subpial 1.2 mm band on both banks (sulci 2, 6 left side; 11 right side)
+for i, (k, z0) in enumerate([(5, -6), (7, 4), (13, -10)], 1):
+    m = (dl[k] >= 1.0) & (dl[k] < 2.2) & (depth > 3) & (depth < 12) & zc(z0, z0 + 16) & cort
+    truth[m] = i
+# 4-5 convexity crown: outer 1 mm of cortex over a 14 deg arc, 18 mm high
+for i, (a, z0) in enumerate([(A0[4] + np.pi / 16, -2), (A0[12] + np.pi / 16, 6)], 4):
+    m = cort & (depth >= 0) & (depth < 1.2) & (np.abs(np.angle(np.exp(1j * (ang - a)))) < np.radians(7)) & zc(z0, z0 + 18)
+    truth[m] = i
+# 6 single bank
+k = 9; s = np.sign(np.sin(ang - A0[k]))
+m = (dl[k] >= 1.0) & (dl[k] < 2.2) & (s > 0) & (depth > 3) & (depth < 12) & zc(-4, 12) & cort
+truth[m] = 6
+# veins 1-4: tubes (r 0.7 mm) in the sulcal CSF at 5 mm depth, running 30 mm along z;
+# 1/2 and 3/4 are left-right mirror images (normal anatomy is roughly symmetric)
+# (sulcus k mirrors sulcus 7-k mod 16; sulci 5, 7, 9, 13 carry cSS)
+for i, k in enumerate([1, 6, 11, 12], 1):
+    c_xy = np.array([np.cos(A0[k]), np.sin(A0[k])])
+    # point on the sulcal plane where depth ~5 mm (search along the ray)
+    t = np.linspace(20, 60, 400); px, py = c_xy[0] * t, c_xy[1] * t
+    rr = np.sqrt((px / 52) ** 2 + (py / 58) ** 2); p = np.argmin(np.abs((1 - rr) * R0 - 5))
+    m = (np.sqrt((x - px[p]) ** 2 + (y - py[p]) ** 2) < 0.7) & zc(-14, 16) & mask
+    veins[m] = i
+# veins 5-6: cortical surface veins 1.2 mm outside the pial surface, tangential, 40 deg arc
+for i, (a, z0) in enumerate([(np.radians(60), 8), (np.radians(-120), -6)], 5):
+    m = (np.abs(depth + 1.2) < 0.7) & (np.abs(z - z0) < 0.7) & \
+        (np.abs(np.angle(np.exp(1j * (ang - a)))) < np.radians(20)) & mask
+    veins[m] = i
+# vein 7: radial (perpendicular to the cortex), gyral crown between sulci 1 and 2, from 2 mm outside
+# the pial surface to 14 mm deep; slight tilt so it is seen on several slices
+a7 = A0[1] + np.pi / 16
+u7 = np.array([np.cos(a7) * 52, np.sin(a7) * 58, 6.0]); u7 /= np.linalg.norm(u7)
+P = np.stack([x, y, z - 2.0], -1); tp = P @ u7
+dperp = np.linalg.norm(P - tp[..., None] * u7, axis=-1)
+m = (dperp < 1.0) & (depth > -2) & (depth < 14) & mask
+veins[m] = 7
+ich = (np.sqrt((x + 22) ** 2 + (y - 10) ** 2 + (z - 4) ** 2) < 8) & inside
+darken(truth > 0, 0.6); darken(veins > 0, 0.6, blur=0.4); darken(ich, 0.7, blur=0.8)
+I[~mask] = 0; I[mask] = np.maximum(I[mask], 1)
+
+os.makedirs(f"{B}/data", exist_ok=True); os.makedirs(f"{B}/work", exist_ok=True)
+os.makedirs(f"{B}/synthseg", exist_ok=True)
+nib.save(nib.Nifti1Image(I, aff), f"{B}/data/{name}_swi.nii")
+nib.save(nib.Nifti1Image(seg, aff), f"{B}/synthseg/{name}_seg.nii.gz")
+nib.save(nib.Nifti1Image(a2, aff), f"{B}/work/{name}_a2009s_swispace.nii.gz")
+nib.save(nib.Nifti1Image(truth, aff), f"{B}/work/{name}_truth.nii.gz")
+nib.save(nib.Nifti1Image(veins, aff), f"{B}/work/{name}_veins.nii.gz")
+nib.save(nib.Nifti1Image(ich.astype(np.uint8), aff), f"{B}/work/{name}_ich_truth.nii.gz")
+lutp = os.path.join(os.environ.get("FREESURFER_HOME", ""), "FreeSurferColorLUT.txt")
+if os.path.exists(lutp) and "ctx_lh_S_k00" not in open(lutp).read():
+    with open(lutp, "a") as f:
+        for h, off in (("lh", 11100), ("rh", 12100)):
+            for k in range(len(A0)):
+                f.write(f"{off + 1 + k} ctx_{h}_G_k{k:02d} 100 100 100 0\n")
+                f.write(f"{off + 50 + k} ctx_{h}_S_k{k:02d} 200 200 200 0\n")
+print(f"{name}: phantom v4  cSS lesions {int(truth.max())}  veins {int(veins.max())}  "
+      f"ICH {int(ich.sum() * np.prod(vox))} mm3")
+````
 
 ## tests/verify_updated_architecture.py
 
-```python
+````python
 #!/usr/bin/env python3
 """Verification suite for the updated cSS pipeline architecture.
 
@@ -7950,960 +11629,49 @@ def main():
 
 if __name__ == "__main__":
     raise SystemExit(main())
-```
-
-## scripts/cohort.py
-
-```python
-#!/usr/bin/env python3
-"""Import and run a whole cohort of subject folders (v5.2.1). Research software.
-usage: cohort.py import COHORT_DIR [--ids M01,M02] [--dcm2niix dcm2niix]
-       cohort.py run [--ids M01,M02] [--no-recon] [--redo]
-COHORT_DIR holds one folder per study code (M01, M02 ... - codes, never names), each with sub-folders T1, SWI and
-FLAIR (case-insensitive; FLAIR may be missing). A sub-folder may hold DICOM files (converted with dcm2niix) or NIfTI
-files (+ dcm2niix JSON sidecars, copied); either way they land in $CSS_BASE/raw/ID/<T1|SWI|FLAIR> and the runs read
-only that copy (an existing raw/ID/MOD is kept: delete it to re-import).
-'import' picks the series to use and writes review/cohort_import.csv - CHECK IT before 'run':
-  SWI    the processed SWI (description / ImageType SWI), else the magnitude; NEVER the minIP (mIP / MNIP / MIP),
-         never the phase. The phase series of the same folder (ImageType P / PHASE, description Pha) -> --phase,
-         only if it has the SWI's grid.
-  T1     the most isotropic series (smallest largest voxel side; ties: smallest voxel) - an original 3-D sagittal
-  FLAIR  acquisition beats a thick axial MPR reformat; orientation does not matter (registered to the SWI).
-  DICOM  copied into raw/ID/MOD/_dicom first; JPEG-compressed files are decompressed with dcmdjpeg (DCMTK: conda install
-         -n css -c conda-forge dcmtk). A file that does not decode is a broken / partly written file: the series is
-         never converted with gaps: with --repair-missing its missing slices are interpolated from the neighbours
-         (dicom_repair.py; refused above --max-missing-frac 0.2 or --max-missing-run 2 consecutive slices, for phase
-         series and irregular positions), otherwise the series is removed. Flags <mod>_series<N>_repaired_KofM_
-         interpolated / _unrepairable_ / _incomplete_; details in raw/ID/MOD/repair.json, unreadable_files.txt. A
-         volume with missing slices hides lesions without any error; interpolated slices cannot show a lesion that
-         is only in that slice. Browser downloads leave *.crswap files beside broken files (<mod>_N_crswap_files).
-'run' skips a study without a usable SWI or T1 (--allow-no-t1: SWI-only route).
-  flags  dcm2niix_<mod>_<reason> (messages in raw/ID/MOD/dcm2niix.log), swi_slice_gt_2mm, t1_not_3d (largest side > 1.5 mm), several_swi_candidates, no_t1, no_flair, no_phase ...
-'run' calls run_css.sh for every study in the table, ONE AT A TIME (NOVIEW=1; CSS_THREADS, CSS_QC_STRICT,
-CSS_MIXED_REVIEW, CSS_USE_MIMIC are passed through), logs to logs/ID_run.log, skips studies already detected unless
---redo, and appends the outcome (ok / qc_insufficient / failed + exit code) to review/cohort_run.csv.
-Scoring is NOT automatic: read each case with review_css.py ID (blinded to the expert grades), then
-compare_grades.py."""
-import sys, os, glob, json, shutil, argparse, subprocess, datetime, numpy as np, pandas as pd, nibabel as nib
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from css_common import base as _base
-
-MODS = ("T1", "SWI", "FLAIR")
-DCM2NIIX_EXIT = {1: "error", 2: "no_dicom_found", 4: "corrupt_file", 5: "input_folder_invalid", 6: "output_folder_invalid",
-                 7: "output_read_only", 8: "some_files_failed", 9: "rename_error", 10: "incomplete_volumes"}
-
-
-def transfer_syntax(path):
-    """(0002,0010) Transfer Syntax UID from the DICOM file meta header ('' if not a Part-10 file)"""
-    try:
-        b = open(path, "rb").read(16384)
-    except OSError:
-        return ""
-    if b[128:132] != b"DICM": return ""
-    i = 132
-    while i + 8 <= len(b):
-        grp, el = int.from_bytes(b[i:i + 2], "little"), int.from_bytes(b[i + 2:i + 4], "little")
-        if grp != 2: break
-        vr = b[i + 4:i + 6]
-        if vr in (b"OB", b"OW", b"OF", b"SQ", b"UT", b"UN"):
-            n = int.from_bytes(b[i + 8:i + 12], "little"); v0 = i + 12
-        else:
-            n = int.from_bytes(b[i + 6:i + 8], "little"); v0 = i + 8
-        if el == 0x0010: return b[v0:v0 + n].decode("ascii", "ignore").strip("\x00 ")
-        i = v0 + n
-    return ""
-
-
-def stage_dicom(src, dst, dcmdjpeg):
-    """copy a DICOM folder to dst, decompressing JPEG files with dcmdjpeg (DCMTK). A JPEG file that does not decode is
-    a broken / partly written file (browser downloads leave *.crswap beside them). -> (dict failed / unchecked, n_failed,
-    n_crswap). Skips macOS '._' files and *.crswap."""
-    shutil.rmtree(dst, ignore_errors=True); os.makedirs(dst)
-    tool = shutil.which(dcmdjpeg) if dcmdjpeg else None
-    failed, unchecked, n_swap = [], 0, 0
-    for root, _, files in os.walk(src):
-        for fn in sorted(files):
-            if fn.endswith(".crswap"): n_swap += 1; continue
-            if fn.startswith("._") or fn.startswith("."): continue
-            f = os.path.join(root, fn); t = os.path.join(dst, f"{len(os.listdir(dst)):05d}_{fn}")
-            ts = transfer_syntax(f)
-            if ts.startswith("1.2.840.10008.1.2.4."):                       # JPEG family
-                if tool is None:
-                    shutil.copy2(f, t); unchecked += 1; continue
-                r = subprocess.run([tool, f, t], capture_output=True)
-                if r.returncode:
-                    failed.append(os.path.relpath(f, src))
-                    if os.path.exists(t): os.remove(t)
-            else:
-                shutil.copy2(f, t)
-    return dict(failed=failed, unchecked=unchecked), len(failed), n_swap
-
-
-def find_sub(folder, mod):
-    for d in sorted(os.listdir(folder)):
-        if os.path.isdir(os.path.join(folder, d)) and d.lower() == mod.lower(): return os.path.join(folder, d)
-    return None
-
-
-def niftis(d):
-    return sorted(glob.glob(f"{d}/**/*.nii.gz", recursive=True) + glob.glob(f"{d}/**/*.nii", recursive=True))
-
-
-def series_info(p):
-    js = p[:-7] + ".json" if p.endswith(".nii.gz") else p[:-4] + ".json"
-    j = json.load(open(js)) if os.path.exists(js) else {}
-    im = nib.load(p); z = [float(v) for v in im.header.get_zooms()[:3]]
-    it = j.get("ImageType", []); it = it if isinstance(it, list) else [str(it)]
-    desc = str(j.get("SeriesDescription", "")) + " " + os.path.basename(p)
-    return dict(path=p, shape=tuple(int(s) for s in im.shape[:3]), vox=z, te=j.get("EchoTime"), image_type=[str(t).upper() for t in it],
-                desc=desc, affine=im.affine, n_dims=len(im.shape))
-
-
-def kind_swi(s):
-    d = s["desc"].lower(); it = s["image_type"]
-    if any(k in d for k in ("mip", "mnip", "minip")) or "MNIP" in it or "MIP" in it: return "minip"
-    if "P" in it or "PHASE" in it or "pha" in d: return "phase"
-    if "swi" in d or "SWI" in it: return "swi"
-    if "mag" in d or "M" in it: return "magnitude"
-    return "unknown"
-
-
-def pick_structural(series):
-    ok = [s for s in series if s["n_dims"] == 3]
-    if not ok: return None
-    return sorted(ok, key=lambda s: (round(max(s["vox"]), 2), float(np.prod(s["vox"]))))[0]
-
-
-def cmd_import(a, B):
-    rows = []
-    subjects = sorted(d for d in os.listdir(a.cohort_dir) if os.path.isdir(os.path.join(a.cohort_dir, d)))
-    if a.ids: subjects = [s for s in subjects if s in a.ids.split(",")]
-    for sid in subjects:
-        src = os.path.join(a.cohort_dir, sid); row = dict(study_id=sid); flags = []
-        found = {}
-        for mod in MODS:
-            d = find_sub(src, mod)
-            if d is None: found[mod] = []; continue
-            out = f"{B}/raw/{sid}/{mod}"; os.makedirs(out, exist_ok=True)
-            # everything is copied / converted into $CSS_BASE/raw/ID/MOD: the runs never read the source drive
-            # (external drives disconnect; their names often contain spaces)
-            if not niftis(out):
-                src_nii = niftis(d)
-                for f in src_nii:                                  # NIfTI (+ JSON sidecar) as they are
-                    shutil.copy2(f, out)
-                    js = f[:-7] + ".json" if f.endswith(".nii.gz") else f[:-4] + ".json"
-                    if os.path.exists(js): shutil.copy2(js, out)
-                if not src_nii:                                    # DICOM -> NIfTI; its messages kept in the log
-                    staged, bad, n_swap = stage_dicom(d, f"{out}/_dicom", a.dcmdjpeg)
-                    if n_swap: flags.append(f"{mod.lower()}_{n_swap}_crswap_files")
-                    if bad:                       # a series with missing slices is repaired (opt-in) or removed
-                        open(f"{out}/unreadable_files.txt", "w").write("\n".join(staged["failed"]) + "\n")
-                        try:
-                            import dicom_repair
-                            fl, rep = dicom_repair.repair_folder(f"{out}/_dicom", [os.path.join(d, f) for f in staged["failed"]],
-                                                                 a.repair_missing, a.max_missing_frac, a.max_missing_run)
-                        except ImportError:
-                            fl, rep = ["pydicom_missing_cannot_repair_or_isolate"], {}
-                            shutil.rmtree(f"{out}/_dicom", ignore_errors=True); os.makedirs(f"{out}/_dicom")
-                        json.dump(rep, open(f"{out}/repair.json", "w"), indent=2, default=str)
-                        flags += [f"{mod.lower()}_{x}" for x in fl]
-                    if staged["unchecked"]: flags.append(f"{mod.lower()}_jpeg_not_checked_no_dcmdjpeg")
-                    r = subprocess.run([a.dcm2niix, "-z", "y", "-f", "%s_%d", "-o", out, f"{out}/_dicom"], capture_output=True, text=True)
-                    open(f"{out}/dcm2niix.log", "w").write(r.stdout + r.stderr)
-                    if r.returncode:
-                        flags.append(f"dcm2niix_{mod.lower()}_{DCM2NIIX_EXIT.get(r.returncode, f'exit{r.returncode}')}")
-            nii = niftis(out)
-            found[mod] = [series_info(p) for p in nii]
-        sw = found["SWI"]; kinds = [(kind_swi(s), s) for s in sw]
-        main = [s for k, s in kinds if k == "swi"] or [s for k, s in kinds if k == "magnitude"] or [s for k, s in kinds if k == "unknown"]
-        if len(main) > 1: flags.append("several_swi_candidates")
-        swi = sorted(main, key=lambda s: float(np.prod(s["vox"])))[0] if main else None
-        if swi is None: flags.append("no_swi" if not sw else "only_minip_or_phase_in_swi_folder")
-        ph = [s for k, s in kinds if k == "phase" and swi is not None and s["shape"] == swi["shape"]
-              and np.allclose(s["affine"], swi["affine"], atol=1e-3)]
-        if any(k == "phase" for k, _ in kinds) and not ph: flags.append("phase_not_on_swi_grid")
-        t1, fl = pick_structural(found["T1"]), pick_structural(found["FLAIR"])
-        if t1 is None: flags.append("no_t1")
-        elif max(t1["vox"]) > 1.5: flags.append("t1_not_3d")
-        if fl is None: flags.append("no_flair")
-        if swi is not None and swi["vox"][2] > 2.0: flags.append("swi_slice_gt_2mm")
-        if not ph: flags.append("no_phase")
-        fmt = lambda s: "x".join(f"{v:.2f}" for v in s["vox"]) if s else ""
-        row.update(swi=swi["path"] if swi else "", swi_vox_mm=fmt(swi), swi_te=swi["te"] if swi else "",
-                   swi_kind=kind_swi(swi) if swi else "", phase=ph[0]["path"] if ph else "",
-                   t1=t1["path"] if t1 else "", t1_vox_mm=fmt(t1), flair=fl["path"] if fl else "", flair_vox_mm=fmt(fl),
-                   n_swi_series=len(sw), n_t1_series=len(found["T1"]), n_flair_series=len(found["FLAIR"]),
-                   flags=";".join(flags))
-        rows.append(row)
-        print(f"{sid}: SWI {row['swi_kind'] or '-'} {row['swi_vox_mm']}  T1 {row['t1_vox_mm'] or '-'}  FLAIR {row['flair_vox_mm'] or '-'}"
-              f"  phase {'yes' if ph else 'no'}" + (f"  [{row['flags']}]" if flags else ""))
-    os.makedirs(f"{B}/review", exist_ok=True)
-    pd.DataFrame(rows).to_csv(f"{B}/review/cohort_import.csv", index=False)
-    print(f"-> {B}/review/cohort_import.csv ({len(rows)} studies). Check the chosen series, then: cohort.py run")
-
-
-def cmd_run(a, B):
-    t = pd.read_csv(f"{B}/review/cohort_import.csv", dtype=str).fillna("")
-    if a.ids: t = t[t.study_id.isin(a.ids.split(","))]
-    os.makedirs(f"{B}/logs", exist_ok=True); runlog = f"{B}/review/cohort_run.csv"
-    env = dict(os.environ, NOVIEW="1"); env.setdefault("CSS_THREADS", "4")
-    for _, r in t.iterrows():
-        s = r.study_id
-        if not r.swi: print(f"{s}: no SWI chosen - skipped ({r['flags']})"); continue
-        if not r.t1 and not a.allow_no_t1:
-            print(f"{s}: no usable T1 - skipped (--allow-no-t1 runs the SWI-only route; {r['flags']})"); continue
-        if os.path.exists(f"{B}/review/{s}_manifest.json") and os.path.exists(f"{B}/review/{s}_candidates.csv") and not a.redo:
-            print(f"{s}: already detected - skipped (--redo to run again)"); continue
-        cmd = ["zsh", f"{B}/scripts/run_css.sh", s, r.swi]
-        if r.t1: cmd += ["--t1", r.t1]
-        if r.flair: cmd += ["--flair", r.flair]
-        if r.t1 and not a.no_recon: cmd += ["--recon"]
-        if r.phase: cmd += ["--phase", r.phase]
-        t0 = datetime.datetime.now(); print(f"{s}: running ({t0:%H:%M}) ... log: logs/{s}_run.log", flush=True)
-        with open(f"{B}/logs/{s}_run.log", "w") as lf:
-            rc = subprocess.run(cmd, stdout=lf, stderr=subprocess.STDOUT, env=env).returncode
-        status = "ok" if rc == 0 else ("qc_insufficient" if rc == 3 else "failed")
-        mins = round((datetime.datetime.now() - t0).total_seconds() / 60, 1)
-        print(f"{s}: {status} (exit {rc}, {mins} min)")
-        old = pd.read_csv(runlog) if os.path.exists(runlog) else pd.DataFrame()
-        pd.concat([old, pd.DataFrame([dict(study_id=s, status=status, exit_code=rc, minutes=mins, finished=f"{datetime.datetime.now():%Y-%m-%d %H:%M}",
-                                           command=" ".join(cmd[2:]))])], ignore_index=True).to_csv(runlog, index=False)
-    print(f"-> {runlog}. Next: read every case with review_css.py ID (blinded to the expert grades), then compare_grades.py")
-
-
-if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = ap.add_subparsers(dest="cmd", required=True)
-    i = sub.add_parser("import"); i.add_argument("cohort_dir"); i.add_argument("--ids", default=""); i.add_argument("--dcm2niix", default="dcm2niix")
-    i.add_argument("--dcmdjpeg", default="dcmdjpeg")
-    i.add_argument("--repair-missing", action="store_true", help="fill missing slices by interpolation (dicom_repair.py)")
-    i.add_argument("--max-missing-frac", type=float, default=0.2); i.add_argument("--max-missing-run", type=int, default=2)
-    r = sub.add_parser("run"); r.add_argument("--ids", default=""); r.add_argument("--no-recon", action="store_true"); r.add_argument("--redo", action="store_true")
-    r.add_argument("--allow-no-t1", action="store_true")
-    a = ap.parse_args(); B = _base()
-    cmd_import(a, B) if a.cmd == "import" else cmd_run(a, B)
-```
-
-## scripts/compare_grades.py
-
-```python
-#!/usr/bin/env python3
-"""Compare the pipeline's cSS multifocality score with an expert's PATIENT-LEVEL grades (v5.2.1). Research software.
-usage: compare_grades.py --template                       -> labels/expert_grades.csv to fill (ids from cohort_import.csv)
-       compare_grades.py [--expert labels/expert_grades.csv] [--scores review/css_scores.csv] [--boot 2000]
-                         [--out results/grade_comparison]
-       compare_grades.py --results-only     -> results/css_results.xlsx (+ .csv): the pipeline's scores alone
-Expert file (.csv or .xlsx; one row per patient; the radiologist's own sheet works as it is: "Patient name", "ID",
-"R css", "L css", "cSS score (0-4)" are recognised): study_id, expert_L (0-2), expert_R (0-2), expert_total (0-4; filled from L + R
-when empty; a total that differs from L + R is reported, the given total is used). Optional column note.
-Pipeline scores: review/css_scores.csv (score_css.py, after the cases were READ with review_css.py or expert_import
---score); qc_status from review/ID_qc.json, build from review/ID_manifest.json.
-Writes (opens in Excel / Numbers):
-  <out>_results.csv    the radiologist's layout: Patient name, ID, R cSS, L cSS, cSS score (0-4) of the pipeline, the
-                       radiologist's three values, difference, agree, field strength, QC, notes (first sheet in .xlsx)
-  <out>_patients.csv   one row per patient: expert and pipeline L / R / total, differences, presence, QC, flags
-  <out>_summary.csv    per scale (total 0-4, left 0-2, right 0-2): n, exact agreement, within +-1, quadratic weighted
-                       kappa with patient-bootstrap 95 % CI, unweighted kappa, Spearman rho, mean difference (pipeline -
-                       expert) with 95 % limits of agreement; cSS presence per patient and per hemisphere: sensitivity,
-                       specificity, counts
-  <out>_confusion_total.csv  expert (rows) x pipeline (columns), total score 0-4
-  <out>.xlsx           the same three tables as sheets, when openpyxl is installed
-Patients without a pipeline score are listed, not dropped silently; scores with unreviewed candidates are flagged
-(n_unreviewed > 0: the score is a lower bound), and so are patients whose series had missing slices interpolated on
-import (cohort.py --repair-missing; column repaired_series). Patient-level grades cannot measure lesion-level sensitivity or false
-positives - that needs candidate labels (expert_sheet.py / expert_import.py)."""
-import sys, os, re, json, argparse, numpy as np, pandas as pd
-from scipy.stats import spearmanr
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from css_common import base as _base, cohen_kappa
-
-# v5.2.3: the radiologist's own sheet can be given as it is - column names are matched case / space / bracket-blind
-ALIASES = {**dict.fromkeys(["studyid", "patientname", "patient", "name", "subject", "code"], "study_id"),
-           **dict.fromkeys(["id", "patientid"], "patient_id"),
-           **dict.fromkeys(["expertr", "rcss", "rightcss", "r", "right", "rscore", "rightscore"], "expert_R"),
-           **dict.fromkeys(["expertl", "lcss", "leftcss", "l", "left", "lscore", "leftscore"], "expert_L"),
-           **dict.fromkeys(["experttotal", "cssscore04", "cssscore", "total", "totalscore", "score", "csstotal"], "expert_total"),
-           **dict.fromkeys(["note", "notes", "comment", "comments"], "note")}
-RESULT_COLS = ["Patient name", "ID", "R cSS", "L cSS", "cSS score (0-4)"]
-SCALES = [("total", "expert_total", "pipe_total", list(range(5))), ("left", "expert_L", "pipe_L", [0, 1, 2]),
-          ("right", "expert_R", "pipe_R", [0, 1, 2])]
-
-
-def read_json(p):
-    try: return json.load(open(p))
-    except Exception: return {}
-
-
-def load(expert_p, scores_p, B):
-    E = (pd.read_excel(expert_p, dtype=str) if expert_p.lower().endswith((".xlsx", ".xls"))
-         else pd.read_csv(expert_p, dtype=str))                         # .xlsx needs openpyxl
-    E = E.rename(columns=lambda c: ALIASES.get(re.sub(r"[^a-z0-9]", "", str(c).lower()), c))
-    E = E.dropna(how="all")
-    for c in ("study_id", "patient_id"):
-        if c in E.columns: E[c] = E[c].astype(str).str.strip()
-    need = {"study_id", "expert_L", "expert_R"} - set(E.columns)
-    if need: sys.exit(f"{expert_p}: missing columns {sorted(need)}")
-    if "expert_total" not in E.columns: E["expert_total"] = np.nan
-    for c in ("expert_L", "expert_R", "expert_total"): E[c] = pd.to_numeric(E[c], errors="coerce")
-    E["expert_LR_sum"] = E.expert_L + E.expert_R
-    E["expert_total_mismatch"] = (E.expert_total.notna() & (E.expert_total != E.expert_LR_sum)).astype(int)
-    E["expert_total"] = E.expert_total.fillna(E.expert_LR_sum)
-    bad = E[(~E.expert_L.isin([0, 1, 2])) | (~E.expert_R.isin([0, 1, 2])) | (~E.expert_total.isin(range(5)))]
-    if len(bad): sys.exit(f"{expert_p}: grades out of range (L/R 0-2, total 0-4) for {bad.study_id.tolist()}")
-    S = pd.read_csv(scores_p, dtype={"subject": str}) if os.path.exists(scores_p) else pd.DataFrame(columns=["subject"])
-    S = S.drop_duplicates("subject", keep="last").rename(columns={"subject": "study_id", "L_score": "pipe_L",
-                                                                  "R_score": "pipe_R", "multifocality_0_4": "pipe_total"})
-    keep = [c for c in ("study_id", "pipe_L", "pipe_R", "pipe_total", "scoring_method", "n_candidates", "n_unreviewed")
-            if c in S.columns]
-    D = E.merge(S[keep], on="study_id", how="left")
-    D["qc_status"] = [read_json(f"{B}/review/{s}_qc.json").get("status", "") for s in D.study_id]
-    D["field_T"] = [read_json(f"{B}/review/{s}_score.json").get("field_T", "") for s in D.study_id]
-    D["build"] = [str(((read_json(f"{B}/review/{s}_manifest.json").get("detect") or {}).get("environment") or {}).get("build", ""))
-                  for s in D.study_id]
-    D["n_accepted"] = [int(pd.read_csv(p).get("accept", pd.Series(dtype=float)).fillna(0).sum())
-                       if os.path.exists(p := f"{B}/review/{s}_candidates.csv") else np.nan for s in D.study_id]
-    for e, p in (("expert_L", "pipe_L"), ("expert_R", "pipe_R"), ("expert_total", "pipe_total")):
-        if p not in D.columns: D[p] = np.nan
-        D[f"diff_{p[5:]}"] = D[p] - D[e]
-    D["expert_css"] = (D.expert_total > 0).astype(int)
-    D["pipe_css"] = np.where(D.pipe_total.notna(), (D.pipe_total > 0).astype(float), np.nan)
-    ci = f"{B}/review/cohort_import.csv"                    # v5.2.2: series repaired by interpolation on import
-    imp = pd.read_csv(ci, dtype=str).fillna("").set_index("study_id")["flags"] if os.path.exists(ci) else pd.Series(dtype=str)
-    D["repaired_series"] = [";".join(x for x in imp.get(s, "").split(";") if "_repaired_" in x) for s in D.study_id]
-    fl = []
-    for _, r in D.iterrows():
-        f = []
-        if r.repaired_series: f.append(f"slices interpolated on import ({r.repaired_series}) - preliminary")
-        if pd.isna(r.pipe_total): f.append("no pipeline score")
-        if r.get("n_unreviewed", 0) and r.get("n_unreviewed", 0) > 0: f.append(f"{int(r.n_unreviewed)} candidates unreviewed")
-        if r.expert_total_mismatch: f.append("expert total != L + R")
-        if str(r.qc_status) not in ("", "ok"): f.append(f"QC {r.qc_status}")
-        if str(r.get("scoring_method", "")).startswith("euclid"): f.append("Euclidean approximation (no Destrieux labels)")
-        fl.append("; ".join(f))
-    D["flags"] = fl
-    return D
-
-
-def results_table(D):
-    """the radiologist's layout: Patient name, ID, R cSS, L cSS, cSS score (0-4) - pipeline, then radiologist, then
-    the difference and agreement per patient (only the pipeline columns when there are no expert grades)"""
-    iv = lambda v: "" if pd.isna(v) else int(v)
-    rows = []
-    for _, r in D.iterrows():
-        row = {"Patient name": r.study_id, "ID": r.get("patient_id", "") if pd.notna(r.get("patient_id", "")) else "",
-               "R cSS": iv(r.pipe_R), "L cSS": iv(r.pipe_L), "cSS score (0-4)": iv(r.pipe_total)}
-        if "expert_total" in D.columns:
-            row.update({"radiologist R cSS": iv(r.expert_R), "radiologist L cSS": iv(r.expert_L),
-                        "radiologist cSS score (0-4)": iv(r.expert_total),
-                        "difference (pipeline - radiologist)": iv(r.diff_total),
-                        "agree": "" if pd.isna(r.pipe_total) else ("yes" if r.pipe_total == r.expert_total else "no")})
-        row.update({"field (T)": r.get("field_T", ""), "QC": r.get("qc_status", ""), "notes": r.get("flags", "")})
-        rows.append(row)
-    return pd.DataFrame(rows)
-
-
-def boot_kappa(a, b, cats, n, seed):
-    rng = np.random.default_rng(seed); v = []
-    for _ in range(n):
-        i = rng.integers(0, len(a), len(a)); k = cohen_kappa(a[i], b[i], cats, "quadratic")
-        if np.isfinite(k): v.append(k)
-    return [round(float(np.percentile(v, 2.5)), 3), round(float(np.percentile(v, 97.5)), 3)] if len(v) > 20 else [None, None]
-
-
-def presence(y, p):
-    tp, fn = int(((y == 1) & (p == 1)).sum()), int(((y == 1) & (p == 0)).sum())
-    tn, fp = int(((y == 0) & (p == 0)).sum()), int(((y == 0) & (p == 1)).sum())
-    return dict(tp=tp, fn=fn, tn=tn, fp=fp, sensitivity=round(tp / (tp + fn), 3) if tp + fn else None,
-                specificity=round(tn / (tn + fp), 3) if tn + fp else None)
-
-
-def summarise(D, boot, seed):
-    rows = []
-    for name, e, p, cats in SCALES:
-        d = D[D[p].notna()]; a, b = d[e].astype(int).values, d[p].astype(int).values
-        if not len(d): rows.append(dict(scale=name, n=0)); continue
-        diff = b - a; sd = float(np.std(diff, ddof=1)) if len(diff) > 1 else np.nan
-        rho = spearmanr(a, b).statistic if len(set(a)) > 1 and len(set(b)) > 1 else np.nan
-        rows.append(dict(scale=name, n=len(d), exact_agreement=round(float((diff == 0).mean()), 3),
-                         within_1=round(float((np.abs(diff) <= 1).mean()), 3),
-                         kappa_quadratic=round(cohen_kappa(a, b, cats, "quadratic"), 3),
-                         kappa_quadratic_ci95=boot_kappa(a, b, cats, boot, seed),
-                         kappa_unweighted=round(cohen_kappa(a, b, cats), 3),
-                         spearman_rho=None if not np.isfinite(rho) else round(float(rho), 3),
-                         mean_diff_pipeline_minus_expert=round(float(diff.mean()), 3),
-                         loa95_low=None if not np.isfinite(sd) else round(float(diff.mean() - 1.96 * sd), 3),
-                         loa95_high=None if not np.isfinite(sd) else round(float(diff.mean() + 1.96 * sd), 3),
-                         pipeline_higher=int((diff > 0).sum()), pipeline_lower=int((diff < 0).sum())))
-    d = D[D.pipe_total.notna()]
-    rows.append(dict(scale="cSS present (patient, total > 0)", n=len(d),
-                     **presence(d.expert_css.values, d.pipe_css.astype(int).values)))
-    hy = np.r_[(d.expert_L > 0).values, (d.expert_R > 0).values].astype(int)
-    hp = np.r_[(d.pipe_L > 0).values, (d.pipe_R > 0).values].astype(int)
-    rows.append(dict(scale="cSS present (hemisphere, score > 0)", n=2 * len(d), **presence(hy, hp)))
-    return pd.DataFrame(rows)
-
-
-if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--template", action="store_true"); ap.add_argument("--expert", default="")
-    ap.add_argument("--scores", default=""); ap.add_argument("--boot", type=int, default=2000)
-    ap.add_argument("--seed", type=int, default=1); ap.add_argument("--out", default="")
-    ap.add_argument("--results-only", action="store_true", help="pipeline scores in the radiologist's layout, no comparison")
-    a = ap.parse_args(); B = _base()
-    ep = a.expert or f"{B}/labels/expert_grades.csv"
-    if a.template:
-        ci = f"{B}/review/cohort_import.csv"
-        ids = pd.read_csv(ci, dtype=str).study_id.tolist() if os.path.exists(ci) else []
-        if os.path.exists(ep): sys.exit(f"{ep} exists - not overwritten")
-        os.makedirs(os.path.dirname(ep), exist_ok=True)
-        pd.DataFrame(dict(study_id=ids, expert_L="", expert_R="", expert_total="", note="")).to_csv(ep, index=False)
-        sys.exit(print(f"-> {ep} with {len(ids)} rows: fill expert_L / expert_R (0-2) and expert_total (0-4)") or 0)
-    if a.results_only:                   # no expert file: every scored patient, pipeline columns only
-        ids = pd.read_csv(a.scores or f"{B}/review/css_scores.csv", dtype=str).subject.drop_duplicates().tolist()
-        tmp = f"{B}/results/.ids_only.csv"; os.makedirs(os.path.dirname(tmp), exist_ok=True)
-        pd.DataFrame(dict(study_id=ids, expert_L=0, expert_R=0)).to_csv(tmp, index=False)
-        D = load(tmp, a.scores or f"{B}/review/css_scores.csv", B); os.remove(tmp)
-        R = results_table(D.drop(columns=["expert_total"]))
-        R["notes"] = [f.replace("expert total != L + R", "").strip("; ") for f in R.notes]
-        out = a.out or f"{B}/results/css_results"; R.to_csv(f"{out}.csv", index=False)
-        try:
-            R.to_excel(f"{out}.xlsx", sheet_name="results", index=False); xl = f" and {out}.xlsx"
-        except ImportError:
-            xl = " (.xlsx: conda install -n css -c conda-forge openpyxl)"
-        print(R[RESULT_COLS].to_string(index=False))
-        sys.exit(print(f"-> {out}.csv{xl}   [research software: pipeline + reader scores, not validated]") or 0)
-    D = load(ep, a.scores or f"{B}/review/css_scores.csv", B)
-    out = a.out or f"{B}/results/grade_comparison"; os.makedirs(os.path.dirname(out), exist_ok=True)
-    cols = ["study_id", "expert_L", "pipe_L", "diff_L", "expert_R", "pipe_R", "diff_R", "expert_total", "pipe_total",
-            "diff_total", "expert_css", "pipe_css", "scoring_method", "qc_status", "n_candidates", "n_accepted",
-            "n_unreviewed", "build", "repaired_series", "flags"] + [c for c in ("note",) if c in D.columns]
-    P = D[[c for c in cols if c in D.columns]]; Sm = summarise(D, a.boot, a.seed)
-    sc = D[D.pipe_total.notna()]
-    C = pd.crosstab(pd.Categorical(sc.expert_total.astype(int), categories=range(5)),
-                    pd.Categorical(sc.pipe_total.astype(int), categories=range(5)), rownames=["expert"], colnames=["pipeline"], dropna=False)
-    Rt = results_table(D)
-    P.to_csv(f"{out}_patients.csv", index=False); Sm.to_csv(f"{out}_summary.csv", index=False); C.to_csv(f"{out}_confusion_total.csv")
-    Rt.to_csv(f"{out}_results.csv", index=False)
-    try:
-        import openpyxl  # noqa: F401
-        with pd.ExcelWriter(f"{out}.xlsx") as w:
-            Rt.to_excel(w, sheet_name="results", index=False)
-            P.to_excel(w, sheet_name="patients", index=False); Sm.to_excel(w, sheet_name="summary", index=False)
-            C.to_excel(w, sheet_name="confusion_total")
-        xl = f" and {out}.xlsx"
-    except ImportError:
-        xl = " (for one .xlsx workbook: conda install -n css -c conda-forge openpyxl)"
-    miss = D[D.pipe_total.isna()].study_id.tolist()
-    t = Sm.iloc[0]
-    print(f"compare_grades: {len(D)} patients with expert grades, {len(sc)} with a pipeline score"
-          + (f"; NO pipeline score: {', '.join(miss)}" if miss else ""))
-    if len(sc):
-        print(f"  total 0-4: exact {t.exact_agreement:.0%}, within 1 {t.within_1:.0%}, weighted kappa {t.kappa_quadratic} "
-              f"{t.kappa_quadratic_ci95}, mean difference {t.mean_diff_pipeline_minus_expert:+.2f} "
-              f"(LoA {t.loa95_low} to {t.loa95_high})")
-        for _, r in Sm.iloc[1:3].iterrows():
-            print(f"  {r.scale:5s} 0-2: exact {r.exact_agreement:.0%}, weighted kappa {r.kappa_quadratic} {r.kappa_quadratic_ci95}")
-        for _, r in Sm.iloc[3:].iterrows():
-            print(f"  {r.scale}: sensitivity {r.sensitivity}, specificity {r.specificity} (TP {r.tp} FN {r.fn} TN {r.tn} FP {r.fp})")
-    fl = P[P["flags"] != ""]
-    for _, r in fl.iterrows(): print(f"  {r.study_id}: {r['flags']}")
-    print(f"-> {out}_results.csv, _patients.csv, _summary.csv, _confusion_total.csv{xl}   [research software; n = {len(sc)}: read the intervals]")
-```
-
-## tests/check_cohort.py
-
-```python
-"""v5.2.1 checks: cohort.py import (series choice) and compare_grades.py (patient-level agreement), known answers.
-usage: check_cohort.py    (writes into $CSS_BASE/cohort_check/; no FreeSurfer, no DICOM: NIfTI + JSON sidecars)
-1. import: in the SWI folder the processed SWI is chosen, never the minIP or the magnitude; the phase on the same grid
-   goes to --phase, a phase on another grid does not; in the T1 folder the isotropic sagittal 3-D beats a thick axial
-   MPR reformat; a missing FLAIR folder, a 3 mm SWI and a 3 mm-only T1 are flagged; --ids filters.
-2. compare_grades: hand-computed exact agreement, within-1, unweighted / quadratic kappa, mean difference, presence
-   sensitivity / specificity; a patient without a pipeline score is listed (not dropped); a total that is not L + R is
-   flagged; out-of-range grades are refused; --template writes the ids."""
-import os, sys, json, shutil, subprocess, numpy as np, nibabel as nib, pandas as pd
-HERE = os.path.dirname(os.path.abspath(__file__)); S = os.path.join(HERE, "..", "scripts"); sys.path.insert(0, S)
-from css_common import cohen_kappa
-py = sys.executable
-B = f"{os.environ.get('CSS_BASE', '/tmp')}/cohort_check"; C = f"{B}/cohort"
-def fail(m): print("FAIL:", m); sys.exit(1)
-shutil.rmtree(B, ignore_errors=True)
-def series(folder, name, vox, desc, image_type, shape=(20, 20, 10)):
-    os.makedirs(folder, exist_ok=True); aff = np.diag(list(vox) + [1.0])
-    nib.save(nib.Nifti1Image(np.ones(shape, np.float32), aff), f"{folder}/{name}.nii.gz")
-    json.dump(dict(SeriesDescription=desc, ImageType=image_type, EchoTime=0.02), open(f"{folder}/{name}.json", "w"))
-# M01: full set; M02: thick SWI, axial-only T1, no FLAIR, phase on another grid
-series(f"{C}/M01/SWI", "10_SWI_Images", (0.9, 0.9, 1.5), "SWI_Images", ["ORIGINAL", "PRIMARY", "M", "SWI"])
-series(f"{C}/M01/SWI", "11_mIP_Images_SW", (0.9, 0.9, 1.5), "mIP_Images(SW)", ["DERIVED", "PRIMARY", "MNIP"])
-series(f"{C}/M01/SWI", "8_Mag_Images", (0.9, 0.9, 1.5), "Mag_Images", ["ORIGINAL", "PRIMARY", "M", "ND"])
-series(f"{C}/M01/SWI", "9_Pha_Images", (0.9, 0.9, 1.5), "Pha_Images", ["ORIGINAL", "PRIMARY", "P", "ND"])
-series(f"{C}/M01/t1", "3_AX_T1_MPR", (0.5, 0.5, 3.0), "AX T1 MPR", ["DERIVED", "SECONDARY", "MPR"])
-series(f"{C}/M01/t1", "2_T1_MPRAGE_SAG", (1.0, 1.0, 1.0), "T1 MPRAGE SAG", ["ORIGINAL", "PRIMARY", "M"])
-series(f"{C}/M01/Flair", "5_AX_FLAIR_MPR", (0.5, 0.5, 1.0), "AX FLAIR MPR", ["DERIVED", "SECONDARY", "MPR"])
-series(f"{C}/M02/SWI", "4_SWI_Images", (0.9, 0.9, 3.0), "SWI_Images", ["ORIGINAL", "PRIMARY", "M", "SWI"])
-series(f"{C}/M02/SWI", "5_Pha_Images", (0.9, 0.9, 3.0), "Pha_Images", ["ORIGINAL", "PRIMARY", "P"], shape=(20, 20, 5))
-series(f"{C}/M02/T1", "3_AX_T1_MPR", (0.5, 0.5, 3.0), "AX T1 MPR", ["DERIVED", "SECONDARY", "MPR"])
-series(f"{C}/M03/SWI", "4_SWI_Images", (0.9, 0.9, 1.5), "SWI_Images", ["ORIGINAL", "PRIMARY", "M", "SWI"])
-env = dict(os.environ, CSS_BASE=B)
-def run(*a, ok=True):
-    r = subprocess.run([py, *a], capture_output=True, text=True, env=env)
-    if ok and r.returncode: print(r.stdout[-1500:], r.stderr[-1500:]); fail("step failed: " + " ".join(a[:2]))
-    return r
-run(f"{S}/cohort.py", "import", C, "--ids", "M01,M02")
-T = pd.read_csv(f"{B}/review/cohort_import.csv", dtype=str).fillna("").set_index("study_id")
-if list(T.index) != ["M01", "M02"]: fail(f"--ids: {list(T.index)}")
-m1, m2 = T.loc["M01"], T.loc["M02"]
-if not m1.swi.endswith("10_SWI_Images.nii.gz") or m1.swi_kind != "swi" or "/raw/M01/SWI/" not in m1.swi: fail(f"M01 SWI choice {m1.swi}")
-if not m1.phase.endswith("9_Pha_Images.nii.gz"): fail(f"M01 phase {m1.phase}")
-if not m1.t1.endswith("2_T1_MPRAGE_SAG.nii.gz") or m1.t1_vox_mm != "1.00x1.00x1.00": fail(f"M01 T1 {m1.t1} {m1.t1_vox_mm}")
-if not m1.flair.endswith("5_AX_FLAIR_MPR.nii.gz"): fail(f"M01 FLAIR {m1.flair}")
-if m1["flags"] != "": fail(f"M01 flags {m1['flags']}")
-f2 = set(m2["flags"].split(";"))
-if not {"no_flair", "t1_not_3d", "swi_slice_gt_2mm", "phase_not_on_swi_grid", "no_phase"} <= f2 or m2.phase: fail(f"M02 flags {f2}, phase {m2.phase}")
-print("1. import: SWI_Images chosen over mIP / Mag; Pha_Images on the SWI grid -> --phase; sagittal 1 mm iso T1 over the "
-      f"3 mm axial MPR; M02 flagged {sorted(f2)}; --ids honoured")
-# 1b. run: a stub run_css.sh records its arguments; M02 exits 3 (QC insufficient under strict QC)
-os.makedirs(f"{B}/scripts", exist_ok=True)
-open(f"{B}/scripts/run_css.sh", "w").write('echo "$@" > "$CSS_BASE/args_$1.txt"; [ "$1" = M02 ] && exit 3; '
-                                           'mkdir -p "$CSS_BASE/review"; echo x > "$CSS_BASE/review/$1_manifest.json"; '
-                                           'echo x > "$CSS_BASE/review/$1_candidates.csv"; exit 0\n')
-shell = shutil.which("zsh")
-if shell:
-    run(f"{S}/cohort.py", "run")
-    a1 = open(f"{B}/args_M01.txt").read().split()
-    if a1[:2] != ["M01", m1.swi] or ["--t1", m1.t1] != a1[2:4] or "--recon" not in a1 or a1[a1.index("--phase") + 1] != m1.phase \
-            or a1[a1.index("--flair") + 1] != m1.flair: fail(f"run_css arguments {a1}")
-    a2 = open(f"{B}/args_M02.txt").read().split()
-    if "--flair" in a2 or "--phase" in a2: fail(f"M02 arguments {a2}")
-    R = pd.read_csv(f"{B}/review/cohort_run.csv").set_index("study_id")
-    if R.loc["M01", "status"] != "ok" or R.loc["M02", "status"] != "qc_insufficient": fail(f"run statuses {R.status.to_dict()}")
-    r2 = run(f"{S}/cohort.py", "run").stdout
-    if "M01: already detected - skipped" not in r2: fail("re-run did not skip a detected study")
-    print("1b. run: run_css.sh gets SWI, --t1 (sagittal), --flair, --recon, --phase; M02 without FLAIR / phase; exit 3 -> "
-          "qc_insufficient; a detected study is skipped on re-run")
-else:
-    print("1b. run: skipped (zsh not installed)")
-
-# 2. compare_grades on hand-made scores
-os.makedirs(f"{B}/labels", exist_ok=True)
-E = pd.DataFrame(dict(study_id=["M01", "M02", "M03", "M04", "M05", "M06"], expert_L=[0, 1, 2, 0, 1, 2],
-                      expert_R=[0, 1, 2, 1, 0, 2], expert_total=[0, 2, 4, 1, 2, ""]))       # M05 total 2 != 1 + 0
-E.to_csv(f"{B}/labels/expert_grades.csv", index=False)
-Sc = pd.DataFrame(dict(subject=["M01", "M02", "M03", "M04", "M06"], L_score=[0, 1, 1, 0, 2], R_score=[1, 1, 2, 0, 2],
-                       multifocality_0_4=[1, 2, 3, 0, 4], scoring_method="sulcal (Destrieux)", n_candidates=10,
-                       n_unreviewed=[0, 0, 0, 3, 0]))
-Sc.to_csv(f"{B}/review/css_scores.csv", index=False)
-out = run(f"{S}/compare_grades.py", "--boot", "200").stdout
-P = pd.read_csv(f"{B}/results/grade_comparison_patients.csv", dtype={"study_id": str}).set_index("study_id")
-Sm = pd.read_csv(f"{B}/results/grade_comparison_summary.csv").set_index("scale")
-if len(P) != 6 or "no pipeline score" not in P.loc["M05", "flags"] or "expert total != L + R" not in P.loc["M05", "flags"]:
-    fail(f"M05 flags {P.loc['M05', 'flags'] if 'M05' in P.index else 'missing'}")
-if "3 candidates unreviewed" not in P.loc["M04", "flags"]: fail("unreviewed flag")
-a, b = np.array([0, 2, 4, 1, 4]), np.array([1, 2, 3, 0, 4])           # M01, M02, M03, M04, M06 totals
-t = Sm.loc["total"]
-want = dict(n=5, exact_agreement=0.4, within_1=1.0, mean_diff_pipeline_minus_expert=round(float((b - a).mean()), 3),
-            kappa_quadratic=round(cohen_kappa(a, b, range(5), "quadratic"), 3), kappa_unweighted=round(cohen_kappa(a, b, range(5)), 3))
-for k, v in want.items():
-    if abs(float(t[k]) - v) > 1e-9: fail(f"total {k}: {t[k]} vs {v}")
-pr = Sm.loc["cSS present (patient, total > 0)"]
-if (int(pr.tp), int(pr.fn), int(pr.tn), int(pr.fp)) != (3, 1, 0, 1): fail(f"presence counts {pr.tp, pr.fn, pr.tn, pr.fp}")
-hm = Sm.loc["cSS present (hemisphere, score > 0)"]
-# hemispheres (expert>0, pipe>0): L M01 0/0 M02 1/1 M03 1/1 M04 0/0 M06 1/1; R M01 0/1 M02 1/1 M03 1/1 M04 1/0 M06 1/1
-if (int(hm.tp), int(hm.fn), int(hm.tn), int(hm.fp)) != (6, 1, 2, 1): fail(f"hemisphere counts {hm.tp, hm.fn, hm.tn, hm.fp}")
-Cf = pd.read_csv(f"{B}/results/grade_comparison_confusion_total.csv", index_col=0)
-if int(Cf.values.sum()) != 5 or int(Cf.loc[4, "3"]) != 1: fail("confusion matrix")
-print(f"2. compare_grades: total exact {t.exact_agreement:.0%}, within 1 {t.within_1:.0%}, quadratic kappa {t.kappa_quadratic}, "
-      f"mean diff {t.mean_diff_pipeline_minus_expert:+.2f} (hand-computed); presence TP/FN/TN/FP 3/1/0/1, hemispheres 6/1/2/1; "
-      "M05 without a score listed and its total flagged; M04 unreviewed flagged")
-# 2b. the radiologist's own layout, as .xlsx when openpyxl is there (else .csv), and --results-only
-json.dump(dict(field_T=1.5), open(f"{B}/review/M01_score.json", "w"))
-rad = pd.DataFrame({"Patient name": ["M01", "M02", "M03", "M04", "M05", "M06"], "ID": ["T01", "T02", "T03", "T04", "T05", "T06"],
-                    "R css": [0, 1, 2, 1, 0, 2], "l css": [0, 1, 2, 0, 1, 2], "cSS score (0-4)": [0, 2, 4, 1, 2, ""]})
-try:
-    import openpyxl  # noqa: F401
-    rp = f"{B}/labels/radiologist.xlsx"; rad.to_excel(rp, index=False)
-except ImportError:
-    rp = f"{B}/labels/radiologist.csv"; rad.to_csv(rp, index=False)
-run(f"{S}/compare_grades.py", "--expert", rp, "--boot", "50", "--out", f"{B}/results/rad")
-Rr = pd.read_csv(f"{B}/results/rad_results.csv", dtype=str).fillna("").set_index("Patient name")
-if list(Rr.columns[:4]) != ["ID", "R cSS", "L cSS", "cSS score (0-4)"]: fail(f"results columns {list(Rr.columns)}")
-if (Rr.loc["M03", "ID"], Rr.loc["M03", "R cSS"], Rr.loc["M03", "L cSS"], Rr.loc["M03", "cSS score (0-4)"],
-        Rr.loc["M03", "radiologist cSS score (0-4)"], Rr.loc["M03", "agree"]) != ("T03", "2", "1", "3", "4", "no"):
-    fail(f"M03 row {Rr.loc['M03'].to_dict()}")
-if Rr.loc["M02", "agree"] != "yes" or Rr.loc["M05", "cSS score (0-4)"] != "" or Rr.loc["M01", "field (T)"] != "1.5":
-    fail(f"M02 / M05 / M01 rows {Rr.loc[['M01', 'M02', 'M05']].to_dict('records')}")
-S2 = pd.read_csv(f"{B}/results/rad_summary.csv").set_index("scale")
-if abs(float(S2.loc["total", "kappa_quadratic"]) - float(t.kappa_quadratic)) > 1e-9: fail("radiologist layout gives other statistics")
-run(f"{S}/compare_grades.py", "--results-only")
-Ro = pd.read_csv(f"{B}/results/css_results.csv", dtype=str).fillna("")
-if list(Ro.columns[:5]) != ["Patient name", "ID", "R cSS", "L cSS", "cSS score (0-4)"] or len(Ro) != 5 or "radiologist R cSS" in Ro.columns:
-    fail(f"--results-only {list(Ro.columns)} {len(Ro)}")
-print(f"2b. radiologist's sheet as it is ({os.path.basename(rp)}: Patient name / ID / R css / l css / cSS score (0-4)) -> results "
-      "sheet in that layout, pipeline + radiologist + agree, same statistics; --results-only writes the pipeline columns alone")
-pd.DataFrame(dict(study_id=["M07"], expert_L=[3], expert_R=[0])).to_csv(f"{B}/labels/bad.csv", index=False)
-if run(f"{S}/compare_grades.py", "--expert", f"{B}/labels/bad.csv", ok=False).returncode == 0: fail("out-of-range grade accepted")
-os.remove(f"{B}/labels/expert_grades.csv"); run(f"{S}/compare_grades.py", "--template")
-tp = pd.read_csv(f"{B}/labels/expert_grades.csv", dtype=str)
-if tp.study_id.tolist() != ["M01", "M02"]: fail(f"template ids {tp.study_id.tolist()}")
-print("   out-of-range grade refused; --template lists the imported ids")
-print("RESULT cohort OK")
-```
-
-## scripts/dicom_repair.py
-
-```python
-"""Fill missing slices of a DICOM series by interpolation (v5.2.2, opt-in: cohort.py import --repair-missing).
-Research software. Used when an export left some files unreadable (e.g. browser downloads that stopped part-way,
-leaving *.crswap files) and the study cannot be exported again yet.
-
-Per series (SeriesNumber) of a staged, already decompressed folder:
-  - the unreadable files' instance numbers come from their header (read without pixel data) or, failing that, from the
-    file name (...Series-<series>-<instance>.dcm);
-  - the slice position (ImagePositionPatient) must be a straight-line function of the instance number on the readable
-    files (largest deviation <= 0.1 mm), else the series is refused (irregular / multi-volume);
-  - refused as well: more than max_frac of the slices missing, more than max_run consecutive missing slices, a phase
-    series (interpolating phase across wraps is wrong), fewer than 3 readable slices;
-  - each missing slice = linear interpolation (by instance distance) of the nearest readable slice below and above
-    (at the series ends: a copy of the nearest), written as a new file with its own position, instance number and UID,
-    ImageComments 'cSS pipeline: interpolated slice'.
-A refused series is REMOVED from the staged folder (never converted with gaps). Every decision is in the report.
-Interpolated slices cannot show a lesion that is only in that slice: results from repaired series are preliminary.
-Needs pydicom (conda install -n css -c conda-forge pydicom)."""
-import os, re, glob, numpy as np
-
-FN_RE = re.compile(r"Series-(\d+)-(\d+)\.dcm$", re.I)
-
-
-def _hdr(path):
-    import pydicom
-    try:
-        ds = pydicom.dcmread(path, stop_before_pixels=True, force=True)
-        it = [str(t).upper() for t in (ds.get("ImageType") or [])]
-        ipp = ds.get("ImagePositionPatient")
-        return dict(series=int(ds.SeriesNumber) if "SeriesNumber" in ds else None,
-                    instance=int(ds.InstanceNumber) if "InstanceNumber" in ds else None,
-                    ipp=np.array([float(v) for v in ipp]) if ipp is not None else None,
-                    loc=float(ds.SliceLocation) if "SliceLocation" in ds else None,
-                    phase="P" in it or "PHASE" in it)
-    except Exception:
-        return dict(series=None, instance=None, ipp=None, loc=None, phase=False)
-
-
-def _failed_ids(path):
-    h = _hdr(path)
-    m = FN_RE.search(os.path.basename(path))
-    if h["series"] is None and m: h["series"] = int(m.group(1))
-    if h["instance"] is None and m: h["instance"] = int(m.group(2))
-    return h
-
-
-def _runs(missing, present):
-    """longest run of consecutive missing instances (inside the series' instance range)"""
-    allv = sorted(set(missing) | set(present)); best = cur = 0; miss = set(missing)
-    for v in range(allv[0], allv[-1] + 1):
-        cur = cur + 1 if v in miss else 0; best = max(best, cur)
-    return best
-
-
-def repair_folder(staged_dir, failed_paths, enabled, max_frac=0.2, max_run=2, tol_mm=0.1):
-    """staged_dir: readable (decompressed) files of one modality folder; failed_paths: the unreadable source files.
-    -> (flags, report dict). Removes every series that has missing files and is not repaired."""
-    import pydicom
-    from pydicom.uid import generate_uid
-    good = {}
-    for f in sorted(glob.glob(os.path.join(staged_dir, "*"))):
-        h = _hdr(f)
-        if h["series"] is not None: good.setdefault(h["series"], []).append((f, h))
-    bad = {}
-    unknown = []
-    for f in failed_paths:
-        h = _failed_ids(f)
-        if h["series"] is None or h["instance"] is None: unknown.append(os.path.basename(f)); continue
-        bad.setdefault(h["series"], []).append(h["instance"])
-    flags, rep = [], dict(unidentified_failed_files=unknown, series={})
-    if unknown: flags.append(f"{len(unknown)}_unreadable_files_of_unknown_series")
-    for sn, miss in sorted(bad.items()):
-        g = good.get(sn, []); miss = sorted(set(miss)); n = len(g) + len(miss)
-        r = dict(n_slices=n, n_missing=len(miss), missing_instances=miss)
-        inst = np.array([h["instance"] for _, h in g]) if g else np.array([])
-        reason = ""
-        if not enabled: reason = "incomplete (repair not requested)"
-        elif len(g) < 3: reason = "fewer than 3 readable slices"
-        elif any(h["phase"] for _, h in g): reason = "phase series (not interpolated)"
-        elif len(miss) / n > max_frac: reason = f"{len(miss)}/{n} slices missing (> {max_frac:.0%})"
-        elif _runs(miss, inst.tolist()) > max_run: reason = f"{_runs(miss, inst.tolist())} consecutive slices missing (> {max_run})"
-        elif len(set(inst.tolist())) != len(inst) or any(h["ipp"] is None for _, h in g):
-            reason = "duplicate instance numbers / no slice positions (multi-volume?)"
-        if not reason:
-            P = np.array([h["ipp"] for _, h in g]); A = np.c_[np.ones(len(inst)), inst]
-            coef, *_ = np.linalg.lstsq(A, P, rcond=None); dev = float(np.abs(A @ coef - P).max())
-            r["position_fit_max_dev_mm"] = round(dev, 4)
-            if dev > tol_mm: reason = f"slice positions not linear in instance number (max deviation {dev:.2f} mm)"
-        if reason:
-            for f, _ in g: os.remove(f)
-            r["status"] = "removed"; r["reason"] = reason
-            flags.append(f"series{sn}_{'incomplete' if not enabled else 'unrepairable'}_{len(miss)}of{n}")
-            rep["series"][str(sn)] = r; continue
-        locs = [(h["instance"], h["loc"]) for _, h in g if h["loc"] is not None]
-        lc = np.polyfit([a for a, _ in locs], [b for _, b in locs], 1) if len(locs) >= 2 else None
-        by_inst = {h["instance"]: f for f, h in g}; keys = np.array(sorted(by_inst))
-        cache = {}
-        def arr(i):
-            if i not in cache: cache[i] = pydicom.dcmread(by_inst[i]).pixel_array.astype(np.float64)
-            return cache[i]
-        for m in miss:
-            lo, hi = keys[keys < m], keys[keys > m]
-            if len(lo) and len(hi):
-                a, b = int(lo[-1]), int(hi[0]); w = (m - a) / (b - a); px = (1 - w) * arr(a) + w * arr(b); src = a if w <= 0.5 else b
-            else:
-                src = int(lo[-1]) if len(lo) else int(hi[0]); px = arr(src)
-            ds = pydicom.dcmread(by_inst[src])
-            dt = ds.pixel_array.dtype
-            info = np.iinfo(dt) if np.issubdtype(dt, np.integer) else None
-            px = np.clip(np.rint(px), info.min, info.max) if info else px
-            ds.PixelData = px.astype(dt).tobytes()
-            ds.InstanceNumber = int(m)
-            ds.ImagePositionPatient = [f"{v:.6f}" for v in (coef[0] + coef[1] * m)]
-            if lc is not None and "SliceLocation" in ds: ds.SliceLocation = f"{np.polyval(lc, m):.6f}"
-            uid = generate_uid(); ds.SOPInstanceUID = uid
-            if hasattr(ds, "file_meta"): ds.file_meta.MediaStorageSOPInstanceUID = uid
-            ds.ImageComments = "cSS pipeline: interpolated slice"
-            ds.save_as(os.path.join(staged_dir, f"interp_s{sn}_i{m:05d}.dcm"))
-        r["status"] = "repaired"; r["interpolated"] = miss
-        flags.append(f"series{sn}_repaired_{len(miss)}of{n}_interpolated")
-        rep["series"][str(sn)] = r
-    return flags, rep
-```
-
-## tests/check_dicom_repair.py
-
-```python
-"""v5.2.2 checks: cohort.py import on broken DICOM exports (dicom_repair.py), known answers. Needs pydicom and dcm2niix;
-skipped (RESULT OK, with a note) when either is missing. No patient data: synthetic series written here.
-usage: check_dicom_repair.py    (writes into $CSS_BASE/repair_check/)
-The source folder imitates a browser download: files named ...-Series-<n>-<instance>.dcm, flagged JPEG Lossless, some
-cut off part-way with a *.crswap beside them. A stub dcmdjpeg stands in for DCMTK (decodes = rewrites uncompressed;
-fails on a cut-off file).
-1. without --repair-missing: the SWI series with missing slices is NOT converted (flag incomplete), nothing with gaps.
-2. with --repair-missing: SWI series 7 (3 of 40 missing, at most 2 in a row) -> complete 40-slice volume, same affine as
-   the intact series, every readable slice bit-identical, interpolated slices = linear interpolation (exact on a
-   signal linear in the slice index); series 8 (6 in a row missing) refused and removed; phase series 9 refused; the
-   SWI is chosen and flagged repaired; crswap files counted; repair.json lists the decisions."""
-import os, sys, shutil, subprocess, json, numpy as np, pandas as pd, nibabel as nib
-HERE = os.path.dirname(os.path.abspath(__file__)); S = os.path.join(HERE, "..", "scripts")
-py = sys.executable
-B = f"{os.environ.get('CSS_BASE', '/tmp')}/repair_check"
-def fail(m): print("FAIL:", m); sys.exit(1)
-try:
-    import pydicom
-    from pydicom.dataset import Dataset, FileMetaDataset
-    from pydicom.uid import generate_uid, ExplicitVRLittleEndian
-    from pydicom.encaps import encapsulate
-except ImportError:
-    print("skipped: pydicom not installed"); print("RESULT repair OK"); sys.exit(0)
-if not shutil.which("dcm2niix"):
-    print("skipped: dcm2niix not found"); print("RESULT repair OK"); sys.exit(0)
-JPEG_LL = "1.2.840.10008.1.2.4.70"
-shutil.rmtree(B, ignore_errors=True); os.makedirs(B)
-study = generate_uid()
-
-def write_series(folder, sn, n, desc, itype, missing=(), spacing=1.5, ts=JPEG_LL, vals=None):
-    os.makedirs(folder, exist_ok=True); suid = generate_uid(); truth = []
-    for i in range(1, n + 1):
-        fm = FileMetaDataset(); fm.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.4"; uid = generate_uid()
-        fm.MediaStorageSOPInstanceUID = uid; fm.TransferSyntaxUID = ts
-        ds = Dataset(); ds.file_meta = fm; ds.SOPClassUID = fm.MediaStorageSOPClassUID; ds.SOPInstanceUID = uid
-        ds.Modality = "MR"; ds.PatientName = "SYNTHETIC"; ds.PatientID = "SYN"; ds.StudyInstanceUID = study
-        ds.SeriesInstanceUID = suid; ds.SeriesNumber = sn; ds.InstanceNumber = i; ds.AcquisitionNumber = 1
-        ds.SeriesDescription = desc; ds.ImageType = itype; ds.Manufacturer = "SIEMENS"; ds.EchoTime = "20"
-        ds.MagneticFieldStrength = "3"; ds.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
-        ds.ImagePositionPatient = [-48.0, -48.0, -30.0 + spacing * (i - 1)]; ds.SliceLocation = -30.0 + spacing * (i - 1)
-        ds.PixelSpacing = [1.5, 1.5]; ds.SliceThickness = spacing; ds.SpacingBetweenSlices = spacing
-        ds.Rows = ds.Columns = 64; ds.SamplesPerPixel = 1; ds.PhotometricInterpretation = "MONOCHROME2"
-        ds.BitsAllocated = 16; ds.BitsStored = 12; ds.HighBit = 11; ds.PixelRepresentation = 0
-        img = (vals(i) if vals else (100 + 10 * i + np.add.outer(np.arange(64), np.arange(64)))).astype(np.uint16)
-        ds.PixelData = encapsulate([img.tobytes()]) if ts == JPEG_LL else img.tobytes(); truth.append(img)
-        if ts == JPEG_LL: ds["PixelData"].VR = "OB"
-        f = f"{folder}/04-541-321-2019-10-24-1111111-Series-{sn}-{i}.dcm"
-        ds.save_as(f, enforce_file_format=True)
-        if i in missing:                                      # cut off part-way, like the browser download
-            b = open(f, "rb").read(); open(f, "wb").write(b[:int(len(b) * 0.6)]); open(f + ".crswap", "wb").write(b"")
-    return np.stack(truth, -1)
-
-stub = f"{B}/dcmdjpeg"
-open(stub, "w").write(f"""#!{py}
-import sys, pydicom
-from pydicom.uid import ExplicitVRLittleEndian
-from pydicom.encaps import generate_frames
-try:
-    ds = pydicom.dcmread(sys.argv[1]); n = ds.Rows * ds.Columns * 2
-    fr = next(generate_frames(ds.PixelData, number_of_frames=1))
-    if len(fr) != n: sys.exit(1)
-except Exception:
-    sys.exit(1)
-ds.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian; ds.PixelData = fr; ds["PixelData"].VR = "OW"
-ds.save_as(sys.argv[2], enforce_file_format=True)
-""")
-os.chmod(stub, 0o755)
-C = f"{B}/drive"
-truth7 = write_series(f"{C}/M01/SWI", 7, 40, "SWI_Images", ["ORIGINAL", "PRIMARY", "M", "SWI"], missing=(5, 17, 18))
-write_series(f"{C}/M01/SWI", 8, 40, "mIP_Images(SW)", ["DERIVED", "PRIMARY", "MNIP"], missing=tuple(range(20, 26)))
-write_series(f"{C}/M01/SWI", 9, 40, "Pha_Images", ["ORIGINAL", "PRIMARY", "P", "ND"], missing=(10,))
-write_series(f"{C}/M01/T1", 2, 30, "T1 MPRAGE SAG", ["ORIGINAL", "PRIMARY", "M"], spacing=1.0)
-full = write_series(f"{B}/intact/SWI", 7, 40, "SWI_Images", ["ORIGINAL", "PRIMARY", "M", "SWI"], ts=ExplicitVRLittleEndian)
-env = dict(os.environ, CSS_BASE=B)
-def imp(*extra):
-    shutil.rmtree(f"{B}/raw", ignore_errors=True)
-    r = subprocess.run([py, f"{S}/cohort.py", "import", C, "--dcmdjpeg", stub, *extra], capture_output=True, text=True, env=env)
-    if r.returncode: print(r.stdout[-2000:], r.stderr[-2000:]); fail("cohort import failed")
-    return pd.read_csv(f"{B}/review/cohort_import.csv", dtype=str).fillna("").set_index("study_id").loc["M01"], r.stdout
-
-# 1. no repair
-m, out = imp()
-if m.swi_kind == "swi" or "swi_series7_incomplete_3of40" not in m["flags"]: fail(f"no repair: kind {m.swi_kind}, flags {m['flags']}")
-for f in os.listdir(f"{B}/raw/M01/SWI"):
-    if f.endswith(".json") and "SWI_Images" in json.load(open(f"{B}/raw/M01/SWI/{f}")).get("SeriesDescription", ""):
-        fail("series 7 converted although slices are missing")
-print(f"1. without --repair-missing: series 7 not converted (flags {m['flags']})")
-
-# 2. repair
-m, out = imp("--repair-missing")
-fl = m["flags"].split(";")
-for want in ("swi_10_crswap_files", "swi_series7_repaired_3of40_interpolated", "swi_series8_unrepairable_6of40", "swi_series9_unrepairable_1of40"):
-    if want not in fl: fail(f"flag {want} missing: {fl}")
-if m.swi_kind != "swi": fail(f"SWI not chosen after repair: {m.swi_kind} {m.swi}")
-rep = json.load(open(f"{B}/raw/M01/SWI/repair.json"))["series"]
-if rep["8"]["status"] != "removed" or "consecutive" not in rep["8"]["reason"] or "phase" not in rep["9"]["reason"]:
-    fail(f"repair report {rep}")
-img = nib.load(m.swi); A = np.asarray(img.dataobj)
-subprocess.run(["dcm2niix", "-z", "y", "-f", "full", "-o", f"{B}/intact", f"{B}/intact/SWI"], capture_output=True)
-ref = nib.load(f"{B}/intact/full.nii.gz"); R = np.asarray(ref.dataobj)
-if A.shape != R.shape or not np.allclose(img.affine, ref.affine, atol=1e-4): fail(f"geometry {A.shape} vs {R.shape}\n{img.affine}\n{ref.affine}")
-k_of = lambda inst: int(np.round(np.linalg.inv(ref.affine) @ np.r_[0.0, 0.0, -30.0 + 1.5 * (inst - 1), 1.0])[2])
-good = [i for i in range(1, 41) if i not in (5, 17, 18)]
-if not all(np.array_equal(A[..., k_of(i)], R[..., k_of(i)]) for i in good): fail("a readable slice changed")
-for i in (5, 17, 18):          # the synthetic signal is linear in the slice index -> interpolation is exact
-    if not np.array_equal(A[..., k_of(i)], R[..., k_of(i)]): fail(f"interpolated slice {i} differs by {np.abs(A[..., k_of(i)].astype(int) - R[..., k_of(i)]).max()}")
-print(f"2. --repair-missing: series 7 -> {A.shape} volume, affine equal to the intact series, 37 readable slices identical, 3 "
-      "interpolated slices exact on a linear signal; series 8 (6 consecutive missing) and phase series 9 refused and removed; "
-      "10 crswap files counted")
-print("RESULT repair OK")
-```
-
-## scripts/swi_mask_from_t1.py
-
-```python
-#!/usr/bin/env python3
-"""Skull-strip the SWI with the T1 brain labels instead of SynthStrip (v5.2.5). Research software.
-usage: swi_mask_from_t1.py SUBJECT [--dilate-mm 5]
-Why: SynthStrip peaked at 31 GB (T1) and 64 GB (SWI) on the user's 36 GB Mac and froze it. With a T1, run_css.sh now
-imports the SWI whole-head; prep_anat.sh registers T1 / FLAIR to it (bbregister or mri_coreg on whole-head images)
-and puts the T1 labels on the SWI grid (work/ID_t1seg_swispace.nii.gz). This script then
-  mask = every labelled voxel (brain, ventricles, cerebellum, brainstem), holes filled, grown by --dilate-mm, largest
-         connected piece, holes filled again. Default 5 mm: detect_css.py ignores a 3 mm rim inside the mask edge, so
-         candidates keep 2 mm of CSF beyond the label boundary (cSS lies on the cortical surface; known P006 cSS have
-         pial_dist <= -0.57 mm); dark objects further out in the CSF fall into the rim (veins, not cSS)
-and writes work/ID_brainmask.nii.gz, the masked SWI (data/ID_swi.nii, rewritten in place with its ORIGINAL modification
-time, so files derived from it are not marked stale) and the masked FLAIR on the SWI grid (if present, same rule).
-A mask volume outside 900-2300 cm3 is reported (registration or label problem): check in freeview before reading."""
-import sys, os, argparse, numpy as np, nibabel as nib
-from scipy import ndimage as ndi
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from css_common import base as _base
-
-
-def brain_mask(labels, vox, dilate_mm):
-    m = ndi.binary_fill_holes(labels > 0)
-    if dilate_mm > 0:
-        m = ndi.distance_transform_edt(~m, sampling=vox) <= dilate_mm
-    lab, n = ndi.label(m)
-    if n > 1: m = lab == (np.argmax(np.bincount(lab.ravel())[1:]) + 1)
-    return ndi.binary_fill_holes(m)
-
-
-def mask_in_place(path, m):
-    """multiply the image by the mask, keep header, dtype and modification time"""
-    st = os.stat(path); im = nib.load(path); a = np.asanyarray(im.dataobj)
-    out = np.where(m.reshape(m.shape + (1,) * (a.ndim - 3)), a, 0).astype(a.dtype)
-    nib.save(nib.Nifti1Image(out, im.affine, im.header), path)
-    os.utime(path, (st.st_atime, st.st_mtime))
-
-
-if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("subject"); ap.add_argument("--dilate-mm", type=float, default=5.0)
-    a = ap.parse_args(); s = a.subject; B = _base()
-    swi_p, lab_p = f"{B}/data/{s}_swi.nii", f"{B}/work/{s}_t1seg_swispace.nii.gz"
-    for p in (swi_p, lab_p):
-        if not os.path.exists(p): sys.exit(f"{s}: {p} missing - prep_anat.sh must run first (T1 labels on the SWI grid)")
-    swi, L = nib.load(swi_p), nib.load(lab_p)
-    if L.shape[:3] != swi.shape[:3] or not np.allclose(L.affine, swi.affine, atol=1e-3):
-        sys.exit(f"{s}: T1 labels are not on the SWI grid - re-run prep_anat.sh")
-    vox = np.array(swi.header.get_zooms()[:3], float)
-    m = brain_mask(np.asanyarray(L.dataobj), vox, a.dilate_mm)
-    cc = float(m.sum() * vox.prod() / 1000)
-    nib.save(nib.Nifti1Image(m.astype(np.uint8), swi.affine), f"{B}/work/{s}_brainmask.nii.gz")
-    mask_in_place(swi_p, m)
-    fl = f"{B}/work/{s}_flair_swispace.nii.gz"
-    done = ["SWI"]
-    if os.path.exists(fl) and nib.load(fl).shape[:3] == m.shape: mask_in_place(fl, m); done.append("FLAIR")
-    warn = "" if 900 <= cc <= 2300 else f"  WARNING: unusual brain volume - check {s} in freeview before reading"
-    print(f"{s}: brain mask from the T1 labels (+{a.dilate_mm:g} mm) {cc:.0f} cm3 -> {' + '.join(done)} skull-stripped, "
-          f"work/{s}_brainmask.nii.gz (no SynthStrip){warn}")
-```
-
-## tests/check_swi_mask.py
-
-```python
-"""v5.2.5 checks: skull-stripping the SWI with the T1 brain labels (scripts/swi_mask_from_t1.py) instead of SynthStrip.
-usage: check_swi_mask.py    (needs PH3 aligned in $CSS_BASE; works on a copy in $CSS_BASE/swimask_check/)
-1. PH3 given a synthetic skull and scalp (whole-head SWI): mask = labels + 5 mm; skull and scalp removed, every label
-   voxel kept, modification time of data/ID_swi.nii unchanged (derived files are not made stale), FLAIR masked too.
-2. detection on the masked whole-head phantom shows the same objects as on the phantom with its own brain-only image
-   (same positions, volumes within 2 %), and every true lesion."""
-import os, sys, shutil, subprocess, numpy as np, nibabel as nib, pandas as pd
-from scipy import ndimage as ndi
-HERE = os.path.dirname(os.path.abspath(__file__)); S = os.path.join(HERE, "..", "scripts"); py = sys.executable
-def fail(m): print("FAIL:", m); sys.exit(1)
-B0 = os.environ.get("CSS_BASE")
-if not B0 or not os.path.exists(f"{B0}/data/PH3_swi.nii") or not os.path.exists(f"{B0}/work/PH3_seg_swispace.nii.gz"):
-    print("skipped: PH3 not aligned"); print("RESULT swimask OK"); sys.exit(0)
-def base(tag):
-    B = f"{B0}/swimask_check/{tag}"; shutil.rmtree(B, ignore_errors=True)
-    for d in ("data", "work", "review", "labels"): os.makedirs(f"{B}/{d}")
-    shutil.copy(f"{B0}/data/PH3_swi.nii", f"{B}/data/")
-    for f in os.listdir(f"{B0}/work"):
-        if f.startswith("PH3_") and f != "PH3_pial_sd.nii.gz": shutil.copy(f"{B0}/work/{f}", f"{B}/work/")
-    shutil.copy(f"{B}/work/PH3_seg_swispace.nii.gz", f"{B}/work/PH3_t1seg_swispace.nii.gz"); return B
-ref, new = base("ref"), base("head")
-s = nib.load(f"{new}/data/PH3_swi.nii"); I = np.asarray(s.dataobj, np.float32)
-L = np.asarray(nib.load(f"{new}/work/PH3_seg_swispace.nii.gz").dataobj); vox = np.array(s.header.get_zooms()[:3], float)
-d = ndi.distance_transform_edt(~ndi.binary_fill_holes(L > 0), sampling=vox); med = float(np.median(I[L > 0]))
-H = I.copy(); H[(I == 0) & (d <= 8)] = 0.9 * med; H[(I == 0) & (d > 8) & (d <= 13)] = 0.25 * med; H[(I == 0) & (d > 13) & (d <= 18)] = 1.3 * med
-nib.save(nib.Nifti1Image(H, s.affine, s.header), f"{new}/data/PH3_swi.nii")
-nib.save(nib.Nifti1Image(np.full(I.shape, 50.0, np.float32), s.affine), f"{new}/work/PH3_flair_swispace.nii.gz")
-t0 = os.path.getmtime(f"{new}/data/PH3_swi.nii") - 3600; os.utime(f"{new}/data/PH3_swi.nii", (t0, t0))
-r = subprocess.run([py, f"{S}/swi_mask_from_t1.py", "PH3"], capture_output=True, text=True, env=dict(os.environ, CSS_BASE=new))
-if r.returncode: fail(r.stdout + r.stderr)
-Mk = np.asarray(nib.load(f"{new}/work/PH3_brainmask.nii.gz").dataobj) > 0
-J = np.asarray(nib.load(f"{new}/data/PH3_swi.nii").dataobj); F = np.asarray(nib.load(f"{new}/work/PH3_flair_swispace.nii.gz").dataobj)
-if not Mk[L > 0].all(): fail("label voxels outside the mask")
-if (J[d > 8] != 0).any() or (F[~Mk] != 0).any(): fail("skull / scalp or FLAIR outside the mask not removed")
-if not (Mk & (d > 4.5) & (d <= 5)).any() or (Mk & (d > 5.5)).any(): fail("mask is not labels + 5 mm")
-if abs(os.path.getmtime(f"{new}/data/PH3_swi.nii") - t0) > 1: fail("SWI modification time changed")
-print(f"1. {r.stdout.strip()}  | skull + scalp removed, all labels kept, FLAIR masked, SWI mtime kept")
-for B in (ref, new):
-    r = subprocess.run([py, f"{S}/detect_css.py", "PH3"], capture_output=True, text=True, env=dict(os.environ, CSS_BASE=B))
-    if r.returncode: fail(f"detect_css {B}: {r.stderr[-500:]}")
-a, b = (pd.read_csv(f"{B}/review/PH3_candidates.csv") for B in (ref, new))
-k = ["vox_i", "vox_j", "vox_k"]
-if len(a) != len(b) or not (np.abs(a[k].values - b[k].values) <= 1).all() or (np.abs(b.volume_mm3 / a.volume_mm3 - 1) > 0.02).any():
-    fail(f"candidates differ:\n{a[k + ['volume_mm3']]}\n{b[k + ['volume_mm3']]}")
-T = np.asarray(nib.load(f"{new}/work/PH3_truth.nii.gz").dataobj).astype(int)
-C = np.asarray(nib.load(f"{new}/review/PH3_candidates.nii.gz").dataobj).astype(int)
-shown = sorted({int(t) for t in np.unique(T[(C > 0) & (T > 0)])}); n_true = len(np.unique(T[T > 0]))
-if len(shown) != n_true: fail(f"true lesions shown {shown} of {n_true}")
-print(f"2. detection: {len(b)} candidates at the same positions as on the brain-only phantom, volumes within "
-      f"{100 * float(np.abs(b.volume_mm3 / a.volume_mm3 - 1).max()):.1f} %, true lesions {shown}")
-print("RESULT swimask OK")
-```
+````
+
+## install.sh
+
+````bash
+#!/bin/zsh
+# usage (from the package root):  zsh install.sh
+B=$HOME/css_project; SRC=$(cd "$(dirname "$0")" && pwd)/scripts
+mkdir -p $B/scripts $B/data $B/synthseg $B/work $B/review $B/results
+if ls $B/scripts/*.py >/dev/null 2>&1; then
+  BK=$B/scripts/backup_$(date +%Y%m%d_%H%M); mkdir -p $BK; cp $B/scripts/*.py $B/scripts/*.sh $BK/ 2>/dev/null
+  echo "old scripts backed up to $BK"
+fi
+# v4.18.3: copy to a temporary name, then rename - a batch that is running keeps reading its old file
+# (cp over a running zsh script changes it under the shell's feet)
+for f in $SRC/*.py $SRC/*.sh $SRC/BUILD; do   # BUILD: commit id, filled in by git archive (v5.1)
+  t=$B/scripts/.$(basename $f).new; cp $f $t && chmod +x $t && mv -f $t $B/scripts/$(basename $f) || { echo "install FAILED at $f"; exit 1; }
+done
+grep -q 'css_project/scripts' ~/.zshrc || echo 'export PATH="$HOME/css_project/scripts:$PATH"' >> ~/.zshrc
+echo "installed to $B/scripts  - open a new Terminal window"
+````
+
+## environment.yml
+
+````yaml
+# conda environment for the cSS pipeline (v4.17).  Create:  conda env create -f environment.yml
+# Minimum versions are what the code needs (scikit-image >= 0.20: regionprops spacing; 3-D skeletonize).
+# Tested in this release with: python 3.13.16, numpy 2.5.4, scipy 1.18.1, nibabel 5.4.2, pandas 3.0.6,
+# scikit-image 0.26.0, matplotlib 3.11.2 (not yet with python 3.11 itself). Every detector run records the versions actually used in
+# review/<ID>_manifest.json ("environment"), together with the FreeSurfer build stamp.
+# FreeSurfer (8.x, with its licence) is installed separately and is not part of this environment.
+name: css
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy>=1.26
+  - scipy>=1.11
+  - nibabel>=5.0
+  - pandas>=2.0
+  - scikit-image>=0.22
+  - matplotlib>=3.7
+  - pydicom>=2.4        # v5.2.2 cohort import: isolate / repair broken DICOM series
+  - dcmtk              # v5.2.2 dcmdjpeg: JPEG-compressed DICOM exports
+  - openpyxl           # v5.2.1 compare_grades.py .xlsx output
+````
