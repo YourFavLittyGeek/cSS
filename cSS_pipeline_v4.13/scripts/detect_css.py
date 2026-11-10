@@ -107,16 +107,23 @@ QC_STRICT = os.environ.get("CSS_QC_STRICT", "") == "1"
 #   CSS_MIXED_REVIEW=1 (v5.1.1) a merged object whose pieces disagree (vein-like + cSS-like) is not excluded by the
 #   vein rules E5 / E6 / E7 as a whole; it is shown with mixed_object_review = 1
 MIXED_REVIEW = os.environ.get("CSS_MIXED_REVIEW", "") == "1"
-#   CSS_V53=1 (v5.3, from the M02-M11 reading; NOT validated - thresholds were chosen on those 10 patients):
-#   needs T1 anatomy. (a) search zone = cortex + V53_OUT_MM outside the labelled pial boundary (was 4 mm) and no
-#   brain-mask edge band, so the dark inner skull / dura inside a grown brain mask is not searched;
-#   (b) exclusions E12 extent, E13 midline (falx / sinus in the interhemispheric fissure), E14 orbitofrontal
-#   air-bone zone, E15 skull band; (c) second merge pass (V53_GAP_MM, cap V53_MAX_MM) so one continuous lining is
-#   one candidate. Without the switch the columns below are still recorded and nothing else changes.
+#   CSS_V53=1 (v5.3.1, from the M02-M11 reading; NOT validated - thresholds were chosen on those 10 patients):
+#   needs T1 anatomy. (a) candidates are generated exactly as without the switch (same zone, same ridge percentiles);
+#   then object voxels more than V53_OUT_MM outside the labelled pial boundary are removed (dark inner skull / dura
+#   inside the grown brain mask). v5.3.0 narrowed the search zone itself: that shifted the ridge percentiles and cut
+#   the hysteresis seeds, and lost 3 reader-called cSS at generation. (b) exclusions E12 extent (volume only),
+#   E13 midline (falx / sinus in the interhemispheric fissure), E14 orbitofrontal air-bone zone, E15 skull band
+#   (only for objects lying on / outside the brain surface), E16 ventricles; E1 infratentorial is unchanged and always
+#   on. (c) second merge pass: objects within V53_GAP_MM AND with the same cortical region label join (v5.3.0 joined
+#   any objects within 6 mm: 10 joined a reader-called cSS with a vein / normal / artifact). Without the switch the
+#   columns below are still recorded and nothing else changes.
 V53 = os.environ.get("CSS_V53", "") == "1"
-V53_OUT_MM = 1.0                 # search this far outside the labelled pial boundary
-V53_GAP_MM, V53_MAX_MM = 6.0, 80.0   # second merge pass: gap and cap on the merged object's bounding-box diagonal
-E12_MM3, E12_EXT_MM = 3000.0, 60.0   # extent: largest reader-called cSS in M02-M11 was 830 mm3
+V53_OUT_MM = 1.5                 # object voxels further than this outside the labelled pial boundary are removed
+V53_GAP_MM, V53_MAX_MM = 5.0, 80.0   # second merge pass: gap (same region label only) and cap on the bounding-box diagonal
+E12_MM3 = 3000.0                     # extent: one connected object above this volume (largest reader-called cSS 830 mm3;
+                                     # v5.3.0 also used length > 60 mm, which removed 9 thin cSS)
+VENT = [4, 5, 14, 15, 43, 44, 31, 63, 72]   # lateral / 3rd / 4th / 5th ventricle, choroid plexus
+E16_MM, E16_FRAC = 3.0, 0.3          # ventricles: share of the object within this distance of a ventricle / choroid label
 E13_MID_MM, E13_FRAC = 3.0, 0.5      # midline: share of the object within this distance of the hemisphere boundary
 E14_EDGE_MM = 8.0                    # orbitofrontal: object this close to the brain-mask edge
 E15_FRAC = 0.5                       # skull band: share of the object whose outward 3-6 mm is dark / outside the mask
@@ -257,9 +264,8 @@ def region_ref(code, vals_c, own_vals):
 dist_mm = ndi.distance_transform_edt(brain, sampling=vox)
 rim = brain & (dist_mm < RIM_MM)
 If = Ic.copy(); If[~brain] = mu
-shell = brain & (pial_sd >= -PIAL_IN_MM) & (pial_sd <= (V53_OUT_MM if V53 else PIAL_OUT_MM)) & ~np.isin(seg, WM + DEEP)
-if not V53:                      # v5.3: the mask edge band is where the dark inner skull sits - not searched
-    shell |= edge_band & ~np.isin(seg, WM + DEEP)
+shell = brain & (pial_sd >= -PIAL_IN_MM) & (pial_sd <= PIAL_OUT_MM) & ~np.isin(seg, WM + DEEP)
+shell |= edge_band & ~np.isin(seg, WM + DEEP)
 zone = shell & ~rim
 # v5.3 skull band map (recorded for every candidate; E15 acts only with CSS_V53=1): a voxel is "skull-backed" when it
 # lies near the brain-mask edge and at least 3 of the samples 3-6 mm outward along the pial normal are dark or outside the mask.
@@ -315,6 +321,14 @@ for side in (hemiL, ~hemiL):
     lab[nz] = remap[wl[nz]]
     nxt += len(keep)
 GEN[lab > 0] |= 128
+n_trim_v53 = 0
+if V53 and lab.max() > 0:
+    # v5.3.1: remove the object voxels lying more than V53_OUT_MM outside the labelled tissue (skull / dura band);
+    # objects that lose every voxel disappear here (counted), the rest keep their label
+    _out = (lab > 0) & (pial_sd > V53_OUT_MM); n_trim_v53 = int(_out.sum())
+    _before = int(len(np.unique(lab[lab > 0]))); lab[_out] = 0; del _out
+    u = np.unique(lab[lab > 0]); remap = np.zeros(int(lab.max()) + 1, np.int32); remap[u] = np.arange(1, len(u) + 1)
+    lab = remap[lab]; n_gone_v53 = _before - len(u)
 nib.save(nib.Nifti1Image(GEN, swi.affine), f"{base}/work/{subj}_gen.nii.gz"); del GEN
 del R, wl, weak, strong
 
@@ -347,37 +361,52 @@ if MERGE_GAP_MM > 0 and lab.max() > 0:
     PIECES = _orig                     # v5.1.1: pre-merge pieces kept for per-piece evidence
     del _sel, _pairs
     del near_lab, merged
-    # v5.3 second pass (CSS_V53=1): objects of the first pass within V53_GAP_MM of each other become one candidate
-    # (one continuous lining was reported as several fragments). The bridge may not cross white matter / deep
-    # nuclei, hemispheres never merge, and a group longer than V53_MAX_MM keeps its first-pass objects.
+    # v5.3.1 second pass (CSS_V53=1): first-pass objects within V53_GAP_MM of each other AND with the same cortical
+    # region label (aparc) become one candidate - one continuous lining was reported as several fragments. Objects
+    # in different regions never join (v5.3.0 joined cSS with neighbouring veins / normal cortex). The bridge may not
+    # cross white matter / deep nuclei; a group longer than V53_MAX_MM keeps its first-pass objects.
     n_joined_v53 = 0
-    # E12 extent is judged on the objects of the FIRST pass (one connected dark structure, e.g. the inner skull):
-    # a lining merged from several foci by pass 2 may be long and is never an "extent" artifact for that reason
-    _vol1 = np.bincount(lab.ravel()) * float(np.prod(vox)); _big1 = np.zeros(int(lab.max()) + 1, bool)
-    for g, sl in enumerate(ndi.find_objects(lab), 1):
-        if sl is not None:
-            _big1[g] = _vol1[g] > E12_MM3 or np.sqrt(sum(((s_.stop - s_.start) * v) ** 2 for s_, v in zip(sl, vox))) > E12_EXT_MM
-    BAND = _big1[lab]; del _vol1, _big1
+    # E12 extent is judged on the objects of the FIRST pass (one connected dark structure, e.g. the inner skull)
+    _vol1 = np.bincount(lab.ravel()) * float(np.prod(vox))
+    BAND = (_vol1 > E12_MM3)[lab] & (lab > 0); del _vol1
     if V53 and V53_GAP_MM > MERGE_GAP_MM and lab.max() > 0:
-        _src = (lab > 0) & ~BAND                     # band objects neither join nor bridge
-        near2 = (ndi.distance_transform_edt(~_src, sampling=vox) <= V53_GAP_MM / 2) & ~(np.isin(seg, WM + DEEP) & ~_src) & ~BAND
-        m2 = np.zeros_like(lab); nxt = 0
-        for side in (hemiL, ~hemiL):
-            gl, ng = ndi.label(near2 & side, structure=s3)
-            sel = _src & side
-            m2[sel] = gl[sel] + nxt; nxt += ng
-        m2[BAND] = lab[BAND] + nxt                   # band objects keep their own label
-        g2 = int(m2.max()) + int(lab.max()); big2 = np.zeros(g2 + 1, bool)
-        for g, sl in enumerate(ndi.find_objects(m2), 1):
-            if g <= nxt and sl is not None and np.sqrt(sum(((s_.stop - s_.start) * v) ** 2 for s_, v in zip(sl, vox))) > V53_MAX_MM:
-                big2[g] = True
-        m2 = np.where(big2[m2] & (lab > 0), lab + g2, m2)
-        u = np.unique(m2[m2 > 0]); remap = np.zeros(int(m2.max()) + 1, np.int32); remap[u] = np.arange(1, len(u) + 1)
-        _n1 = int(lab.max()); lab = remap[m2]; n_joined_v53 = _n1 - int(lab.max())
+        objs = ndi.find_objects(lab); n1 = len(objs); code1 = np.zeros(n1 + 1, np.int32)
+        for g, sl in enumerate(objs, 1):
+            if sl is None or BAND[sl][lab[sl] == g].any(): continue
+            pd_ = tuple(slice(max(a.start - 2, 0), a.stop + 2) for a in sl)
+            nb = seg[pd_][ndi.binary_dilation(lab[pd_] == g, iterations=2)]; nb = nb[nb >= 1000]
+            if nb.size: code1[g] = int(np.bincount(nb).argmax())
+        parent = np.arange(n1 + 1)
+        def _find(a):
+            while parent[a] != a: parent[a] = parent[parent[a]]; a = parent[a]
+            return a
+        pv = tuple(int(np.ceil(V53_GAP_MM / v)) + 1 for v in vox); blocked = np.isin(seg, WM + DEEP)
+        for c in np.unique(code1[code1 > 0]):
+            ids = np.nonzero(code1 == c)[0]
+            if len(ids) < 2: continue
+            bb = [objs[g - 1] for g in ids]
+            box = tuple(slice(max(min(b[a].start for b in bb) - pv[a], 0), min(max(b[a].stop for b in bb) + pv[a], I.shape[a])) for a in range(3))
+            sub = lab[box]; grp = np.isin(sub, ids)
+            near = (ndi.distance_transform_edt(~grp, sampling=vox) <= V53_GAP_MM / 2) & ~(blocked[box] & ~grp)
+            cl, _ = ndi.label(near, structure=s3)
+            first = {}
+            for g in ids:
+                k_ = int(np.bincount(cl[sub == g]).argmax())
+                if k_ in first: parent[_find(g)] = _find(first[k_])
+                else: first[k_] = g
+        root = np.array([_find(g) for g in range(n1 + 1)])
+        # cap: a group whose bounding box is longer than V53_MAX_MM keeps its first-pass objects
+        for r_ in np.unique(root[1:]):
+            mem = np.nonzero(root == r_)[0]
+            if len(mem) < 2: continue
+            lo = np.min([[objs[g - 1][a].start for a in range(3)] for g in mem], 0); hi = np.max([[objs[g - 1][a].stop for a in range(3)] for g in mem], 0)
+            if np.sqrt((((hi - lo) * np.array(vox)) ** 2).sum()) > V53_MAX_MM: root[mem] = mem
+        u, inv = np.unique(root[1:], return_inverse=True); remap = np.zeros(n1 + 1, np.int32); remap[1:] = inv + 1
+        lab = remap[lab]; n_joined_v53 = n1 - len(u)
         _sel = _orig > 0
         _pairs = np.unique(np.stack([lab[_sel], _orig[_sel]]), axis=1)
         n_pieces = np.bincount(_pairs[0], minlength=int(lab.max()) + 1)
-        del near2, m2, _sel, _pairs, _src
+        del _sel, _pairs, blocked
 
 os.makedirs(f"{base}/work", exist_ok=True)
 nib.save(nib.Nifti1Image((zone & (z < GROW_Z)).astype(np.uint8), swi.affine),
@@ -540,6 +569,7 @@ cortex_dist = ndi.distance_transform_edt(~cortex, sampling=vox)      # 0 inside 
 # v4.9 normal anatomy: cerebellum/brainstem (tentorial interface) and basal cisterns
 d_infra = ndi.distance_transform_edt(~np.isin(seg, INFRA), sampling=vox) if np.isin(seg, INFRA).any() \
     else np.full(I.shape, np.inf, np.float32)
+d_vent = ndi.distance_transform_edt(~np.isin(seg, VENT), sampling=vox) if np.isin(seg, VENT).any() else np.full(I.shape, np.inf)
 d_basal = ndi.distance_transform_edt(~np.isin(seg, BASAL), sampling=vox) if np.isin(seg, BASAL).any() \
     else np.full(I.shape, np.inf, np.float32)
 pial_depth = ndi.distance_transform_edt(cortex | np.isin(seg, [2, 41]), sampling=vox)
@@ -732,7 +762,8 @@ for p in regionprops(lab, spacing=vox):
     # v5.3 (recorded always): midline share, distance to the brain-mask edge, skull-backed share
     v53 = dict(midline_frac=round(float((dmid[pad][mm] < E13_MID_MM).mean()), 2),
                mask_edge_mm=round(float(np.median(dist_mm[pad][mm])), 1),
-               skull_frac=round(float(SKULL[pad][mm].mean()), 2), v53_active=int(V53), _band=bool(BAND[pad][mm].any()))
+               skull_frac=round(float(SKULL[pad][mm].mean()), 2), v53_active=int(V53), _band=bool(BAND[pad][mm].any()),
+               vent_frac=round(float((d_vent[pad][mm] <= E16_MM).mean()), 2))
     midz      = bool(np.median(dmid[pad][mm]) < 5.0)
     # off-surface tube. vein_tree_mm is recorded only: on real SWI (P006) the dark tubular network
     # along the cortex merges into one brain-wide component (255 mm for most candidates)
@@ -834,7 +865,8 @@ V50_COLS = ["mimic_score", "mimic_class", "mimic_reason", "phase_z", "mb_cluster
             "path_length_mm", "tortuosity", "darkness_z_p10", "dark_frac_z2", "dark_frac_z3", "dark_frac_z4",
             "flair_csf_bright_frac", "feature_qc_flags", "feature_schema_version",
             "review_priority_rank", "review_priority", "review_priority_reason",                # v5.1.3 (css_tiers.py)
-            "midline_frac", "mask_edge_mm", "skull_frac", "v53_active"]                         # v5.3, appended
+            "midline_frac", "mask_edge_mm", "skull_frac", "v53_active",                         # v5.3, appended
+            "vent_frac"]                                                                         # v5.3.1, appended
 cols = cols + V50_COLS
 
 # ---- 11. exclusions (v4.8) - each with an explicit, definition-based reason
@@ -858,7 +890,7 @@ FULL_BOTTOM = bool(len(_nz) and _area[_bot] < 0.2 * _area.max())
 RULE_CONF = {"E1": "high" if T1_ANAT else "medium", "E2": "medium", "E3": "medium", "E4": "high",
              "E5": "medium", "E6": "medium", "E7": "medium", "E8": "low", "E9": "medium",
              "E10": "low", "E11": "low",                       # v5.0 mimic rules: no real-data support yet
-             "E12": "low", "E13": "low", "E14": "low", "E15": "low"}   # v5.3: chosen on M02-M11, not validated
+             "E12": "low", "E13": "low", "E14": "low", "E15": "low", "E16": "low"}   # v5.3: chosen on M02-M11, not validated
 def exclusion(r):
     """-> (rule_version, reason); ("", "") = kept. v5.1.1 CSS_MIXED_REVIEW=1: a mixed merged object (pieces disagree)
     is not removed whole by a vein rule (E5 / E6 / E7); it is shown with mixed_object_review = 1"""
@@ -877,10 +909,12 @@ def exclusion_v4(r):
         return "E3@v4.9.2", "skull base (lowest 20 % of the cerebrum)"
     if r["extent_mm"] < MIN_EXTENT_MM: return "E4@v4.8", f"speck (<{MIN_EXTENT_MM:g} mm)"
     if V53:                          # v5.3 opt-in rules (CSS_V53=1); every excluded object stays in ID_excluded.csv
-        if r["skull_frac"] >= E15_FRAC:
-            return "E15@v5.3", "skull band: dark all the way out to the brain-mask edge (inner skull / dura, not a lining)"
+        if r["skull_frac"] >= E15_FRAC and r["pial_dist_mm"] > 0:     # v5.3.1: only objects on / outside the surface
+            return "E15@v5.3.1", "skull band: outside the cortex and dark all the way out to the brain-mask edge (inner skull / dura)"
         if r["_band"]:
-            return "E12@v5.3", f"extent: one connected object larger than any cSS focus (> {E12_MM3:g} mm3 or > {E12_EXT_MM:g} mm) - band artifact"
+            return "E12@v5.3.1", f"extent: one connected object larger than any cSS focus (> {E12_MM3:g} mm3) - band artifact"
+        if r["vent_frac"] >= E16_FRAC:
+            return "E16@v5.3.1", "ventricle / choroid plexus (within 3 mm of a ventricle label)"
         if r["midline_frac"] >= E13_FRAC and r["pial_dist_mm"] > 0:
             return "E13@v5.3", "midline: in the interhemispheric fissure (falx / sagittal sinus / midline veins)"
         if "orbitofrontal" in r["region"] and r["mask_edge_mm"] < E14_EDGE_MM:
@@ -1005,7 +1039,8 @@ print(f"{subj}: {n_raw} raw components -> {len(df)} candidates "
       pd.Series([r['_excl'] for r in excluded]).value_counts().items()) if excluded else "none")
       + (f"; {n_before_merge - int(lab.max())} pieces joined, {n_chains} long chains kept apart"
          if n_before_merge is not None else "")
-      + (f"; v5.3 ACTIVE: {n_joined_v53} more joined (gap {V53_GAP_MM:g} mm)" if V53 and n_before_merge is not None else "") + "] "
+      + (f"; v5.3 ACTIVE: {n_trim_v53} voxels > {V53_OUT_MM:g} mm outside the cortex removed, {n_joined_v53} more joined"
+         f" (gap {V53_GAP_MM:g} mm, same region)" if V53 and n_before_merge is not None else "") + "] "
       f"({cnt('artifact_zone')} artifact zone, {cnt('midline_zone')} midline, {cnt('vein_like')} vein-like, "
       f"{cnt('near_ich_suggest')} near ICH [{ich_src}], {cnt('infratentorial')} infratentorial)  rank={RANK}"
       + ("  FLAIR used" if FL is not None else ""))
@@ -1033,7 +1068,7 @@ update_manifest(base, subj, "detect", dict(
     parameters=dict(z_thr=z_thr, ridge_pct=r_pct, rim_mm=RIM_MM, rank=RANK, keep_all=KEEP_ALL,
                     use_mimic=USE_MIMIC, qc_strict=QC_STRICT, mixed_review=MIXED_REVIEW, phase=MIM.phase_note,
                     sato_sigmas_mm=list(SATO_SIGMAS_MM), sato_sigmas_px=[round(v, 2) for v in SATO_PX],
-                    v53=V53, v53_out_mm=V53_OUT_MM, v53_gap_mm=V53_GAP_MM, v53_max_mm=V53_MAX_MM),
+                    v53=V53, v53_out_mm=V53_OUT_MM, v53_gap_mm=V53_GAP_MM, v53_max_mm=V53_MAX_MM, v53_same_region_merge=True),
     anatomy="T1" if T1_ANAT else "SWI-only", flair_used=FL is not None, qc_status=QC["status"],
     n_candidates=int(len(df)), n_excluded=len(excluded), n_dropped=len(dropped), fates=FATES,
     inputs={k: dict(path=p_, sha256=sha256(p_), mtime=os.path.getmtime(p_)) for k, p_ in _inputs.items()},

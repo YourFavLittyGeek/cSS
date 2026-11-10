@@ -46,10 +46,10 @@ truth = nib.load(f"{T}/work/PH3_truth.nii.gz").get_fdata().astype(int)
 
 # ---- 1. switch off = unchanged list, new columns appended last
 off, off_lab, _, _, _ = detect("PH3", False)
-new = ["midline_frac", "mask_edge_mm", "skull_frac", "v53_active"]
-if list(off.columns[-4:]) != new: fail(f"new columns must be appended last, got {list(off.columns[-4:])}")
+new = ["midline_frac", "mask_edge_mm", "skull_frac", "v53_active", "vent_frac"]
+if list(off.columns[-5:]) != new: fail(f"new columns must be appended last, got {list(off.columns[-5:])}")
 if off.v53_active.any(): fail("v53_active must be 0 with the switch off")
-print(f"switch off: {len(off)} candidates, 4 new columns appended, v53_active 0")
+print(f"switch off: {len(off)} candidates, 5 new columns appended, v53_active 0")
 
 # ---- 2. skull phantom: T1-style mask (labels + 5 mm): dark line just outside the cortex (thin-CSF convexity)
 img = nib.load(f"{T}/data/PH3_swi.nii"); I = img.get_fdata().astype(np.float32); vox = img.header.get_zooms()[:3]

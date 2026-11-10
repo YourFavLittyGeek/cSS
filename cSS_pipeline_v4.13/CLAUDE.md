@@ -483,6 +483,11 @@ v5.1") but are not ranker features; Stage A only, then stop for the user's real-
   Viewer / Candidates / Calls summary (AI meter vs reviewer, CSV export), one-line comment, missed cSS drawn as
   rectangle or pen (ID_missed.csv: plane, slice, points, detector_fate; not in the 0-4 score). redetect.py re-runs
   only detect_css (optionally CSS_V53=1) with a backup of lists + calls. docs/HOW_TO_TEST_v5.4.md = cohort steps.
+- v5.3.1 after the first acceptance test on the user's Mac (v5.3.0: cSS shown 45/61, Artifact 20/78, Normal 80/114,
+  10 merges joined cSS with other calls, counts rose in M06/M07/M10): generation unchanged from v5.2 (narrowing the zone
+  shifted the ridge percentiles and seeds), then object voxels > 1.5 mm outside the labelled cortex removed; E12 volume
+  > 3000 mm3 only; E15 only when pial_dist > 0; new E16 ventricles (vent_frac >= 0.3 within 3 mm); second merge 5 mm and
+  same aparc region only; v53_compare prints exclusions by rule x call. Not yet re-run on the Mac.
 
 ## Known issues / decisions
 - SWI-only route (SynthSeg on SWI) gives a coarse pial surface → pial features less reliable.

@@ -39,3 +39,18 @@ Runs v5.3 in `$CSS_BASE/v53_eval/` and reports, per reader call, whether each cu
 excluded (rule), dropped or no longer generated → `review/v53_compare_summary.txt`, `review/v53_compare.csv`.
 Targets (plan step 5): cSS calls shown 61/61 or each loss explained; Artifact < 25; Normal < 80; cSS in tier 3 < 6.
 Only if that passes: run M12–M15 with `CSS_V53=1` and read them (untouched test cases).
+
+## v5.3.1 — after the first acceptance test (M02–M11, user's Mac)
+v5.3.0 result: cSS calls still shown 45 / 61 (9 lost to the extent rule, 3 to the skull-band rule, 3 below the size
+gates, 1 not generated), Artifact 20 / 78, Normal 80 / 114, cSS in tier 3 18 -> 3; 10 merged candidates joined a cSS
+call with a vein / normal / artifact / near-ICH call; candidate counts rose in M06, M07, M10. Changes:
+- Generation is unchanged from v5.2 (same zone, same ridge percentiles). Narrowing the zone had moved the percentile
+  thresholds and cut hysteresis seeds. Instead, object voxels more than 1.5 mm outside the labelled cortex are
+  removed after generation ("outside the skull" / dura band).
+- E12 extent: volume > 3,000 mm³ only (the 60 mm length test removed thin cSS).
+- E15 skull band: only for objects whose median position is on / outside the brain surface (pial distance > 0).
+- E16 ventricles (new): >= 30 % of the object within 3 mm of a ventricle or choroid plexus label.
+- E13 midline unchanged; E1 infratentorial (cerebellum / brainstem) unchanged and always on.
+- Second merge: 5 mm and only between objects with the same cortical region label.
+- v53_compare.py also prints the excluded counts by rule and reader call.
+New column: vent_frac (appended). Still tuned on M02–M11 only.

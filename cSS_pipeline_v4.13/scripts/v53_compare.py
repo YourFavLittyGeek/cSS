@@ -53,7 +53,7 @@ for sid in ids:
                          region=c.region, volume_mm3=c.volume_mm3, old_tier=c.get("review_priority_rank", np.nan),
                          fate=fate, shown_frac=round(n_sh / n, 2), new_cand_id=nid if fate == "shown" else "",
                          new_tier=tier.get(nid, "") if fate == "shown" else "",
-                         excluded_reason=str(why.get(xid, "")).split(":")[0] if fate == "excluded" else ""))
+                         excluded_reason=str(why.get(xid, "")).split(":")[0].split(" (")[0] if fate == "excluded" else ""))
     notes.append(f"{sid}: {len(old)} candidates now -> {len(new)} with v5.3 ({len(xd)} excluded)")
     print(notes[-1], flush=True)
     if not keep:
@@ -76,6 +76,11 @@ if len(css):
     bad = mixed[mixed.apply(lambda s: "cSS" in s and len(s) > 1)]
     out.append(f"v5.3 candidates that join a cSS call with another call: {len(bad)}")
     for (sid, nid), s in bad.items(): out.append(f"   {sid} new #{nid}: {', '.join(x or '(not read)' for x in s)}")
+ex = d[d.fate == "excluded"]
+if len(ex):
+    out.append(""); out.append("Excluded by rule (rows) and reader call (columns):")
+    out.append(pd.crosstab(ex.excluded_reason.str.split(":").str[0].str.strip(), ex.reader_call.replace("", "(not read)")).to_string())
+out.append("")
 for call in ("Artifact", "Normal", "Vein"):
     a = d[d.reader_call == call]
     if len(a): out.append(f"{call} still shown: {(a.fate == 'shown').sum()} / {len(a)}")
