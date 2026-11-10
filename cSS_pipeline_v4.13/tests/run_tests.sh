@@ -193,4 +193,7 @@ python $S/stress_test.py --hosts PH4 --depths 0.6 --seeds 1 --tag t1host | grep 
 echo "== v5.3 (CSS_V53=1): cortex-outline zone, skull band / extent / midline rules, second merge pass, tiers"
 python $ROOT/tests/check_v53.py | tee $T/v53.log | grep -v "^RESULT"
 grep -q "RESULT v53 OK" $T/v53.log || { echo "FAIL: v5.3 checks"; exit 1; }
+echo "== v5.4 browser reviewer server (review_web.py): calls, comments, missed marks, reviewer names"
+python $ROOT/tests/check_review_web.py | tee $T/rweb.log | grep -v "^RESULT"
+grep -q "RESULT review_web OK" $T/rweb.log || { echo "FAIL: review_web checks"; exit 1; }
 echo; echo "ALL TESTS PASSED  (temp dir $T)"

@@ -473,6 +473,12 @@ v5.1") but are not ranker features; Stage A only, then stop for the user's real-
   midline_frac, mask_edge_mm, skull_frac, v53_active. v53_compare.py = acceptance test against saved calls in
   $CSS_BASE/v53_eval (main project untouched). M12-M15 and M01 are the untouched test cases. Pitfall found: extent
   rule after merging excluded two merged true phantom lesions.
+- v5.4 (docs/CHANGELOG_v5.4.md): review_web.py + review_web.html = browser reviewer served on 127.0.0.1 (stdlib
+  http.server, canvas viewer; no new packages): 3 linked planes, wheel / zoom / window-level, themes, reviewer names
+  (review/reviewers.json), keys Y V N A U H, comment, undo, missed-cSS marks (review/ID_missed.csv), darkness probe,
+  ruler, sequence drop-down, help, summary + score. Writes ID_calls.csv in the old format plus ID_calls_<reviewer>.csv
+  and an append-only ID_review_log.csv. Meter = css_evidence / (css + vein evidence) x tier factors: NOT a probability,
+  not validated; user chose to keep it visible (K hides; log records it). review_css.py kept. Phantom-tested only.
 
 ## Known issues / decisions
 - SWI-only route (SynthSeg on SWI) gives a coarse pial surface → pial features less reliable.
