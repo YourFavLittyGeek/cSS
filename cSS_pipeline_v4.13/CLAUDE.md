@@ -488,6 +488,10 @@ v5.1") but are not ranker features; Stage A only, then stop for the user's real-
   shifted the ridge percentiles and seeds), then object voxels > 1.5 mm outside the labelled cortex removed; E12 volume
   > 3000 mm3 only; E15 only when pial_dist > 0; new E16 ventricles (vent_frac >= 0.3 within 3 mm); second merge 5 mm and
   same aparc region only; v53_compare prints exclusions by rule x call. Not yet re-run on the Mac.
+- v5.3.1 on the Mac: cSS 58/61 (3 lost below the size gates after the 1.5 mm trim), Artifact 50/78, Normal 95/114, cSS tier 3
+  9, 6 cross-call merges. Remaining FPs: convexity artifacts (precentral / superior frontal), medial superior frontal /
+  precuneus and insula Normal. v5.3.2: no trim; E17 outside-cortex rule (out_frac > 1 mm >= 0.6, cortex_frac < 0.4, no tram); v53_compare writes v53_* features
+  and review/v53_objects.csv so thresholds can be studied offline against the calls.
 
 ## Known issues / decisions
 - SWI-only route (SynthSeg on SWI) gives a coarse pial surface → pial features less reliable.

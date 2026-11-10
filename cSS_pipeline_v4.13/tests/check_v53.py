@@ -46,10 +46,10 @@ truth = nib.load(f"{T}/work/PH3_truth.nii.gz").get_fdata().astype(int)
 
 # ---- 1. switch off = unchanged list, new columns appended last
 off, off_lab, _, _, _ = detect("PH3", False)
-new = ["midline_frac", "mask_edge_mm", "skull_frac", "v53_active", "vent_frac"]
-if list(off.columns[-5:]) != new: fail(f"new columns must be appended last, got {list(off.columns[-5:])}")
+new = ["midline_frac", "mask_edge_mm", "skull_frac", "v53_active", "vent_frac", "out_frac"]
+if list(off.columns[-6:]) != new: fail(f"new columns must be appended last, got {list(off.columns[-6:])}")
 if off.v53_active.any(): fail("v53_active must be 0 with the switch off")
-print(f"switch off: {len(off)} candidates, 5 new columns appended, v53_active 0")
+print(f"switch off: {len(off)} candidates, 6 new columns appended, v53_active 0")
 
 # ---- 2. skull phantom: T1-style mask (labels + 5 mm): dark line just outside the cortex (thin-CSF convexity)
 img = nib.load(f"{T}/data/PH3_swi.nii"); I = img.get_fdata().astype(np.float32); vox = img.header.get_zooms()[:3]
@@ -75,13 +75,13 @@ far = lambda m: int((m & (out_mm > 1.0 + max(vox))).sum())      # object voxels 
 found = lambda lab: {int(i) for i in np.unique(truth[(lab > 0) & (truth > 0)])}
 if "v5.3 ACTIVE" not in log: fail("the log must say that v5.3 is active")
 if not far(a_off): fail("the skull phantom should make objects (shown or excluded) outside the cortex outline with the switch off")
-if far(a_on): fail(f"v5.3: {far(a_on)} object voxels still lie outside the cortex outline")
+if far((l_on > 0)): fail(f"v5.3: {far((l_on > 0))} voxels of SHOWN candidates lie outside the cortex outline (excluded objects may)")
 if len(s_on) and (s_on.skull_frac >= 0.5).any(): fail("v5.3: a skull-backed object is still shown")
 lost = found(l_off) - found(l_on)
 if lost and os.environ.get("KEEP") == "1": print(T)
 if lost: fail(f"v5.3 lost true cSS lesions {sorted(lost)} that were shown without it")
 if not s_on.v53_active.all(): fail("v53_active must be 1 with the switch on")
-print(f"skull phantom: object voxels outside the cortex outline {far(a_off)} -> {far(a_on)}; objects off {len(s_off)} shown + "
+print(f"skull phantom: shown-candidate voxels outside the cortex outline {far(l_off > 0)} -> {far(l_on > 0)}; objects off {len(s_off)} shown + "
       f"{len(x_off)} excluded, on {len(s_on)} shown + {len(x_on)} excluded; true lesions shown {len(found(l_off))} -> {len(found(l_on))}")
 if os.environ.get("KEEP") != "1": shutil.rmtree(T)
 else: print(T)

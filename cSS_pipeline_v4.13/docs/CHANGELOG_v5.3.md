@@ -54,3 +54,15 @@ call with a vein / normal / artifact / near-ICH call; candidate counts rose in M
 - Second merge: 5 mm and only between objects with the same cortical region label.
 - v53_compare.py also prints the excluded counts by rule and reader call.
 New column: vent_frac (appended). Still tuned on M02–M11 only.
+
+## v5.3.2 — after the second acceptance test
+v5.3.1 result: cSS calls shown 58 / 61 (lost M07-5, M07-10, M09-2: all below the size gates after the 1.5 mm trim);
+Artifact 50 / 78 (target < 25), Normal 95 / 114 (target < 80), cSS in tier 3 9 (target < 6), 6 merges joining a cSS
+call with another call. Remaining shown artifacts: precentral 11, superior frontal 9, rostral middle frontal 5
+(convexity); Normal: superior frontal 23, precuneus 13, insula 10 (midline / medial and insula).
+- No voxels are removed after generation any more (the 1.5 mm trim caused the 3 losses). Instead a new rule E17
+  "outside the cortex" excludes objects with >= 60 % of their voxels > 1 mm outside the brain surface AND cortex
+  share < 0.4 AND no tram-track. Every object keeps a traceable fate (shown / excluded by a named rule).
+- v53_compare.py now writes each candidate's v5.3 features (v53_* columns) and review/v53_objects.csv (every v5.3
+  object, shown and excluded, with the reader calls mapped onto it), so the rule thresholds can be checked against
+  the calls without another run.

@@ -118,7 +118,8 @@ MIXED_REVIEW = os.environ.get("CSS_MIXED_REVIEW", "") == "1"
 #   any objects within 6 mm: 10 joined a reader-called cSS with a vein / normal / artifact). Without the switch the
 #   columns below are still recorded and nothing else changes.
 V53 = os.environ.get("CSS_V53", "") == "1"
-V53_OUT_MM = 1.5                 # object voxels further than this outside the labelled pial boundary are removed
+V53_OUT_MM = 1.0                 # E17: voxels further than this outside the labelled pial boundary count as "outside"
+E17_FRAC, E17_CTX = 0.6, 0.4         # E17: >= this share outside AND cortex_frac below this (and no tram-track)
 V53_GAP_MM, V53_MAX_MM = 5.0, 80.0   # second merge pass: gap (same region label only) and cap on the bounding-box diagonal
 E12_MM3 = 3000.0                     # extent: one connected object above this volume (largest reader-called cSS 830 mm3;
                                      # v5.3.0 also used length > 60 mm, which removed 9 thin cSS)
@@ -321,14 +322,9 @@ for side in (hemiL, ~hemiL):
     lab[nz] = remap[wl[nz]]
     nxt += len(keep)
 GEN[lab > 0] |= 128
-n_trim_v53 = 0
-if V53 and lab.max() > 0:
-    # v5.3.1: remove the object voxels lying more than V53_OUT_MM outside the labelled tissue (skull / dura band);
-    # objects that lose every voxel disappear here (counted), the rest keep their label
-    _out = (lab > 0) & (pial_sd > V53_OUT_MM); n_trim_v53 = int(_out.sum())
-    _before = int(len(np.unique(lab[lab > 0]))); lab[_out] = 0; del _out
-    u = np.unique(lab[lab > 0]); remap = np.zeros(int(lab.max()) + 1, np.int32); remap[u] = np.arange(1, len(u) + 1)
-    lab = remap[lab]; n_gone_v53 = _before - len(u)
+# v5.3.2: no voxels are removed after generation (v5.3.1 trimmed every voxel > 1.5 mm outside the cortex and dropped
+# 3 reader-called cSS below the size gates; a skull-backed-only trim missed the dark band). Objects lying mostly
+# outside the cortex are excluded by rule E17 instead, so every object keeps a traceable fate.
 nib.save(nib.Nifti1Image(GEN, swi.affine), f"{base}/work/{subj}_gen.nii.gz"); del GEN
 del R, wl, weak, strong
 
@@ -763,7 +759,8 @@ for p in regionprops(lab, spacing=vox):
     v53 = dict(midline_frac=round(float((dmid[pad][mm] < E13_MID_MM).mean()), 2),
                mask_edge_mm=round(float(np.median(dist_mm[pad][mm])), 1),
                skull_frac=round(float(SKULL[pad][mm].mean()), 2), v53_active=int(V53), _band=bool(BAND[pad][mm].any()),
-               vent_frac=round(float((d_vent[pad][mm] <= E16_MM).mean()), 2))
+               vent_frac=round(float((d_vent[pad][mm] <= E16_MM).mean()), 2),
+               out_frac=round(float((pial_sd[pad][mm] > V53_OUT_MM).mean()), 2))
     midz      = bool(np.median(dmid[pad][mm]) < 5.0)
     # off-surface tube. vein_tree_mm is recorded only: on real SWI (P006) the dark tubular network
     # along the cortex merges into one brain-wide component (255 mm for most candidates)
@@ -866,7 +863,7 @@ V50_COLS = ["mimic_score", "mimic_class", "mimic_reason", "phase_z", "mb_cluster
             "flair_csf_bright_frac", "feature_qc_flags", "feature_schema_version",
             "review_priority_rank", "review_priority", "review_priority_reason",                # v5.1.3 (css_tiers.py)
             "midline_frac", "mask_edge_mm", "skull_frac", "v53_active",                         # v5.3, appended
-            "vent_frac"]                                                                         # v5.3.1, appended
+            "vent_frac", "out_frac"]                                                             # v5.3.1 / v5.3.2, appended
 cols = cols + V50_COLS
 
 # ---- 11. exclusions (v4.8) - each with an explicit, definition-based reason
@@ -890,7 +887,7 @@ FULL_BOTTOM = bool(len(_nz) and _area[_bot] < 0.2 * _area.max())
 RULE_CONF = {"E1": "high" if T1_ANAT else "medium", "E2": "medium", "E3": "medium", "E4": "high",
              "E5": "medium", "E6": "medium", "E7": "medium", "E8": "low", "E9": "medium",
              "E10": "low", "E11": "low",                       # v5.0 mimic rules: no real-data support yet
-             "E12": "low", "E13": "low", "E14": "low", "E15": "low", "E16": "low"}   # v5.3: chosen on M02-M11, not validated
+             "E12": "low", "E13": "low", "E14": "low", "E15": "low", "E16": "low", "E17": "low"}   # v5.3: chosen on M02-M11, not validated
 def exclusion(r):
     """-> (rule_version, reason); ("", "") = kept. v5.1.1 CSS_MIXED_REVIEW=1: a mixed merged object (pieces disagree)
     is not removed whole by a vein rule (E5 / E6 / E7); it is shown with mixed_object_review = 1"""
@@ -915,6 +912,8 @@ def exclusion_v4(r):
             return "E12@v5.3.1", f"extent: one connected object larger than any cSS focus (> {E12_MM3:g} mm3) - band artifact"
         if r["vent_frac"] >= E16_FRAC:
             return "E16@v5.3.1", "ventricle / choroid plexus (within 3 mm of a ventricle label)"
+        if r["out_frac"] >= E17_FRAC and r["cortex_frac"] < E17_CTX and not (np.isfinite(r["tram_frac"]) and r["tram_frac"] >= 0.2):
+            return "E17@v5.3.2", f"outside the cortex: most of it lies > {V53_OUT_MM:g} mm outside the brain surface (skull / dura band)"
         if r["midline_frac"] >= E13_FRAC and r["pial_dist_mm"] > 0:
             return "E13@v5.3", "midline: in the interhemispheric fissure (falx / sagittal sinus / midline veins)"
         if "orbitofrontal" in r["region"] and r["mask_edge_mm"] < E14_EDGE_MM:
@@ -1039,7 +1038,7 @@ print(f"{subj}: {n_raw} raw components -> {len(df)} candidates "
       pd.Series([r['_excl'] for r in excluded]).value_counts().items()) if excluded else "none")
       + (f"; {n_before_merge - int(lab.max())} pieces joined, {n_chains} long chains kept apart"
          if n_before_merge is not None else "")
-      + (f"; v5.3 ACTIVE: {n_trim_v53} voxels > {V53_OUT_MM:g} mm outside the cortex removed, {n_joined_v53} more joined"
+      + (f"; v5.3 ACTIVE: {n_joined_v53} more joined"
          f" (gap {V53_GAP_MM:g} mm, same region)" if V53 and n_before_merge is not None else "") + "] "
       f"({cnt('artifact_zone')} artifact zone, {cnt('midline_zone')} midline, {cnt('vein_like')} vein-like, "
       f"{cnt('near_ich_suggest')} near ICH [{ich_src}], {cnt('infratentorial')} infratentorial)  rank={RANK}"
