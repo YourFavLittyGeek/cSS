@@ -207,6 +207,9 @@ python $ROOT/tests/check_shape.py | tee $T/shape.log | grep -v "^RESULT"
 grep -q "RESULT shape OK" $T/shape.log || { echo "FAIL: shape measures"; exit 1; }
 python $ROOT/tests/check_shape_probe.py | tee $T/shapeprobe.log | grep -v "^RESULT"
 grep -q "RESULT shape_probe OK" $T/shapeprobe.log || { echo "FAIL: shape_probe checks"; exit 1; }
+echo "== audit branch: mesh vs mask pial distance comparison (constructed answer)"
+python $ROOT/tests/check_pial_compare.py | tee $T/pial.log | grep -v "^RESULT"
+grep -q "RESULT pial_compare OK" $T/pial.log || { echo "FAIL: pial_compare checks"; exit 1; }
 echo "== v5.5.2 change report + inherited calls (PH3): snapshot, redetect --v53, after, inherit, confirmation in the reviewer"
 python $ROOT/tests/check_inherit.py | tee $T/inherit.log | grep -v "^RESULT"
 grep -q "RESULT inherit OK" $T/inherit.log || { echo "FAIL: inherit checks"; exit 1; }

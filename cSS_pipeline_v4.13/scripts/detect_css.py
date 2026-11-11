@@ -72,7 +72,7 @@ from skimage.filters import sato
 from skimage.measure import regionprops
 from skimage.morphology import skeletonize
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from css_common import base as _base, load_lut, fresh, sha256, update_manifest, environment_record, skeleton_length, radius_profile
+from css_common import match_calls, base as _base, load_lut, fresh, sha256, update_manifest, environment_record, skeleton_length, radius_profile
 import css_qc, css_vessel, mimic_rules, css_pieces, css_features, css_tiers
 
 subj   = sys.argv[1]
@@ -117,7 +117,20 @@ MIXED_REVIEW = os.environ.get("CSS_MIXED_REVIEW", "") == "1"
 #   on. (c) second merge pass: objects within V53_GAP_MM AND with the same cortical region label join (v5.3.0 joined
 #   any objects within 6 mm: 10 joined a reader-called cSS with a vein / normal / artifact). Without the switch the
 #   columns below are still recorded and nothing else changes.
+# ======================================================================================================================
+# FROZEN RULE SET (branch fix/audit-v5.7-priority1, from the independent audit, finding F3):
+# every threshold below that was fitted on M02-M11 (E12 ... E25, the generation gates and the second merge pass) was set on 10 patients read by ONE
+# non-expert reader (repeat-read kappa 0.65 with the AI meter visible, 0.87 hidden). They are FROZEN: do not tighten or add a threshold on the
+# development set. New rules may be added only as opt-in switches, with the margin to the nearest called cSS reported, and are then judged ONCE on
+# the held-out cases (M12-M15, M01) with adjudicated labels. The thresholds and the active switches are written to review/ID_manifest.json
+# (detect > parameters > frozen_rules / switches) on every run.
+# ======================================================================================================================
 V53 = os.environ.get("CSS_V53", "") == "1"
+# CSS_SOFT_GATES=1 (audit F4, opt-in, default OFF = unchanged output): an object that fails a GENERATION gate (G1 volume, G2 slices, G3 elongation)
+# is not dropped but shown as the LAST candidates with soft_gate_fail = the gate id, review priority tier 4 and a note; it is listed in
+# work/ID_soft_gate.csv (measured value and threshold) instead of ID_dropped.csv (an object has exactly one fate). Objects with < 5 voxels and G4 (no
+# cortex label within 2 voxels) stay hard drops.
+SOFT_GATES = os.environ.get("CSS_SOFT_GATES", "") == "1"
 V53_OUT_MM = 1.0                 # E17: voxels further than this outside the labelled pial boundary count as "outside"
 E17_FRAC, E17_CTX = 0.6, 0.4         # E17: >= this share outside AND cortex_frac below this (and no tram-track)
 # v5.3.3 thresholds set just beyond the most extreme of the 61 reader-called cSS of M02-M11 (min / max in brackets).
@@ -674,6 +687,7 @@ objs = ndi.find_objects(lab)
 rows = []
 # v4.14: components removed by the generation gates are logged (work/ID_dropped.csv/.nii.gz), not shown
 dropped = []
+soft_log = []                                  # CSS_SOFT_GATES=1: objects that failed a generation gate but are kept (last, tier 4)
 def drop(p, why, vol, n_sl=None, elong=None, gate="", measured=None, thr=None):
     c_ = np.asarray(p.centroid) / np.array(vox)              # regionprops centroid is in mm (spacing)
     dropped.append(dict(drop_id=len(dropped) + 1, reason=why, volume_mm3=round(vol, 1),
@@ -684,19 +698,27 @@ def drop(p, why, vol, n_sl=None, elong=None, gate="", measured=None, thr=None):
                         threshold=thr))                        # v5.1: gate id + measured value + threshold
 for p in regionprops(lab, spacing=vox):
     vol = float(p.area)                         # already mm3 because spacing is given
+    soft = ""
+    if SOFT_GATES and int(round(vol / float(np.prod(vox)))) < 5:
+        drop(p, "fewer than 5 voxels", vol, gate="G0_tiny", measured=vol, thr=5 * float(np.prod(vox))); continue
     if vol < MIN_MM3:
-        drop(p, f"volume <{MIN_MM3:g} mm3", vol, gate="G1_volume", measured=vol, thr=MIN_MM3); continue
+        if SOFT_GATES: soft = "G1_volume"; soft_log.append(dict(lab=p.label, gate_id=soft, measured=round(vol, 1), threshold=MIN_MM3))
+        else: drop(p, f"volume <{MIN_MM3:g} mm3", vol, gate="G1_volume", measured=vol, thr=MIN_MM3); continue
     sl = objs[p.label - 1]
     pad = tuple(slice(max(s.start - 3, 0), s.stop + 3) for s in sl)
     mm = lab[pad] == p.label
     n_sl = int(mm.any(axis=(0, 1)).sum())
     if n_sl < MIN_SLICES:
-        drop(p, f"<{MIN_SLICES} slices", vol, n_sl, gate="G2_slices", measured=n_sl, thr=MIN_SLICES); continue
+        if SOFT_GATES:
+            soft = soft or "G2_slices"; soft_log.append(dict(lab=p.label, gate_id="G2_slices", measured=n_sl, threshold=MIN_SLICES))
+        else: drop(p, f"<{MIN_SLICES} slices", vol, n_sl, gate="G2_slices", measured=n_sl, thr=MIN_SLICES); continue
     elong = p.axis_major_length / max(p.axis_minor_length, 1e-3)
     # elongation rejects round microbleeds, which are single pieces; a merged candidate (two banks,
     # a bent line) can be compact overall and is not rejected for it (v4.9.2)
     if elong < MIN_ELONG and (n_pieces is None or n_pieces[p.label] <= 1):
-        drop(p, f"elongation <{MIN_ELONG:g}", vol, n_sl, elong, gate="G3_elongation", measured=elong, thr=MIN_ELONG); continue
+        if SOFT_GATES:
+            soft = soft or "G3_elongation"; soft_log.append(dict(lab=p.label, gate_id="G3_elongation", measured=round(float(elong), 2), threshold=MIN_ELONG))
+        else: drop(p, f"elongation <{MIN_ELONG:g}", vol, n_sl, elong, gate="G3_elongation", measured=elong, thr=MIN_ELONG); continue
     seg_nb = seg[pad][ndi.binary_dilation(mm, iterations=2)]
     nb = seg_nb[seg_nb >= 1000]
     # infratentorial only when clearly cerebellar/brainstem with little cerebral cortex nearby, so
@@ -870,7 +892,7 @@ for p in regionprops(lab, spacing=vox):
     css_ev = float(np.mean([v for v in ce if v is not None]))
     vein_ev = float(np.mean([v for v in ve if v is not None]))
     c0 = pts.mean(0)
-    rows.append(dict(hemi="L" if is_left else "R", region=region, label=code,
+    rows.append(dict(soft_gate_fail=soft, hemi="L" if is_left else "R", region=region, label=code,
                      volume_mm3=round(vol, 1), n_slices=n_sl, elongation=round(elong, 1),
                      surface_contact=round(contact, 2), darkness_z=round(depth, 1),
                      artifact_zone=int(artz), midline_zone=int(midz),
@@ -926,7 +948,8 @@ V50_COLS = ["mimic_score", "mimic_class", "mimic_reason", "phase_z", "mb_cluster
             "flair_csf_bright_frac", "feature_qc_flags", "feature_schema_version",
             "review_priority_rank", "review_priority", "review_priority_reason",                # v5.1.3 (css_tiers.py)
             "midline_frac", "mask_edge_mm", "skull_frac", "v53_active",                         # v5.3, appended
-            "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac", "dual_contact_frac"]               # v5.3.1 / v5.3.2 / v5.3.4 / v5.7, appended
+            "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac", "dual_contact_frac",               # v5.3.1 / v5.3.2 / v5.3.4 / v5.7, appended
+            "soft_gate_fail"]                                                                    # v5.7 audit branch: "" or the generation gate the object failed (CSS_SOFT_GATES=1)
 cols = cols + V50_COLS
 
 # ---- 11. exclusions (v4.8) - each with an explicit, definition-based reason
@@ -1054,6 +1077,9 @@ for r in rows:
     r["review_tier"] = 2 if why else 1; r["tier_reason"] = "; ".join(why)
     # v5.1.3 review-priority tier (css_tiers.py): reading order only, nothing hidden or excluded by it
     r["review_priority_rank"], r["review_priority"], r["review_priority_reason"] = css_tiers.review_priority(r, QC["status"])
+    if r.get("soft_gate_fail"):          # soft mode: read last, labelled
+        r["review_priority_rank"] = max(int(r["review_priority_rank"]), 4)
+        r["review_priority_reason"] = f"below a generation gate ({r['soft_gate_fail']}); " + str(r["review_priority_reason"] or "")
 excluded = [r for r in rows if r["_excl"]]
 rows = [r for r in rows if not r["_excl"]]
 os.makedirs(f"{base}/review", exist_ok=True)
@@ -1078,9 +1104,28 @@ if dropped:
 else:
     pd.DataFrame(columns=["drop_id", "reason"]).to_csv(f"{base}/work/{subj}_dropped.csv", index=False)
 nib.save(nib.Nifti1Image(dl, swi.affine), f"{base}/work/{subj}_dropped.nii.gz")
+# ---- audit tables (always written): per-rule exclusion counts and, when calls exist, how many excluded objects were called cSS
+_aud = {}
+for r_ in excluded: _aud.setdefault(r_["rule_version"].split("@")[0], []).append(r_)
+_aud_rows = []
+_css_n = {}
+_cp = f"{base}/review/{subj}_calls.csv"
+if excluded and os.path.exists(_cp):
+    _xd = pd.DataFrame(excluded).reset_index(drop=True); _xd["cand_id"] = np.arange(1, len(_xd) + 1)
+    _m, _ = match_calls(_xd.rename(columns={"vox_i": "vox_i", "vox_j": "vox_j", "vox_k": "vox_k"}), pd.read_csv(_cp))
+    if _m:
+        for _k, _v in _m.items():
+            if _v == "cSS": _css_n[_xd.loc[int(_k) - 1, "rule_version"].split("@")[0]] = _css_n.get(_xd.loc[int(_k) - 1, "rule_version"].split("@")[0], 0) + 1
+for _rule, _lst in sorted(_aud.items()):
+    _aud_rows.append(dict(rule=_rule, n_excluded=len(_lst), called_cSS_among_excluded=_css_n.get(_rule, "" if not os.path.exists(_cp) else 0),
+                          calls_file="ID_calls.csv (fingerprint match)" if os.path.exists(_cp) else "none"))
+pd.DataFrame(_aud_rows, columns=["rule", "n_excluded", "called_cSS_among_excluded", "calls_file"]).to_csv(f"{base}/review/{subj}_rule_audit.csv", index=False)
+if SOFT_GATES:
+    pd.DataFrame(soft_log, columns=["lab", "gate_id", "measured", "threshold"]).to_csv(f"{base}/work/{subj}_soft_gate.csv", index=False)
 keep = np.zeros(I.shape, np.int16)
 if rows:
-    df = pd.DataFrame(rows).sort_values("score", ascending=False).reset_index(drop=True)
+    df = pd.DataFrame(rows); df["_soft"] = (df["soft_gate_fail"].fillna("") != "").astype(int)
+    df = df.sort_values(["_soft", "score"], ascending=[True, False]).reset_index(drop=True).drop(columns="_soft")
     df.insert(0, "cand_id", np.arange(1, len(df) + 1))
     remap = np.zeros(lab.max() + 1, np.int16)
     remap[df["_lab"].values] = df["cand_id"].values
@@ -1138,6 +1183,16 @@ if len(df):
     print(df.head(15)[["cand_id", "hemi", "region", "volume_mm3", "darkness_z", "pial_dist_mm",
                        "tube_ratio", "surface_alignment", "tram_frac", "vein_tree_mm", "score",
                        "vox_i", "vox_j", "vox_k"]].to_string(index=False))
+FROZEN_NAMES = ["MIN_MM3", "MIN_SLICES", "MIN_ELONG", "MIN_EXTENT_MM", "MERGE_GAP_MM", "MERGE_MAX_MM", "V53_GAP_MM", "V53_MAX_MM", "V53_OUT_MM",
+                "E12_MM3", "E13_FRAC_V533", "E14_EDGE_MM", "E15_SKULL", "E16_FRAC", "E16_MM", "E17_FRAC", "E17_CTX", "E18_EDGE", "E19_DARK", "E19_SKULL",
+                "E20_VOL", "E21_CTX", "E22_PLANE_MM", "E22_COS", "E22_EXT_MM", "E24_FRAC", "E24_LABELS", "E25_FRAC", "E25_REACH_MM", "Z_LOW", "R_PCT_LOW"]
+def frozen_rules():
+    """thresholds in force for this run (the rule set is frozen pending held-out validation) -> manifest"""
+    return {n: (list(globals()[n]) if isinstance(globals().get(n), (list, tuple)) else globals().get(n)) for n in FROZEN_NAMES if n in globals()}
+def active_switches():
+    """every experimental environment switch read by the detector, as set for this run"""
+    return {k: os.environ.get(k, "") for k in ("CSS_V53", "CSS_USE_MIMIC", "CSS_MIXED_REVIEW", "CSS_QC_STRICT", "CSS_KEEP_ALL", "CSS_SATO_LEGACY",
+                                              "CSS_RANK", "CSS_ALLOW_ORIENT", "CSS_SURFACE_ZONE", "CSS_SOFT_GATES", "CSS_3D_SEEDS")}
 # v4.17 provenance: inputs (sha256), parameters, versions -> review/ID_manifest.json
 _inputs = {k: p_ for k, p_ in (("swi", f"{base}/data/{subj}_swi.nii"), ("labels", f"{base}/work/{subj}_seg_swispace.nii.gz"),
                                ("t1_labels", _t1p), ("destrieux", f"{base}/work/{subj}_a2009s_swispace.nii.gz"),
@@ -1149,7 +1204,8 @@ update_manifest(base, subj, "detect", dict(
     parameters=dict(z_thr=z_thr, ridge_pct=r_pct, rim_mm=RIM_MM, rank=RANK, keep_all=KEEP_ALL,
                     use_mimic=USE_MIMIC, qc_strict=QC_STRICT, mixed_review=MIXED_REVIEW, phase=MIM.phase_note,
                     sato_sigmas_mm=list(SATO_SIGMAS_MM), sato_sigmas_px=[round(v, 2) for v in SATO_PX],
-                    v53=V53, v53_out_mm=V53_OUT_MM, v53_gap_mm=V53_GAP_MM, v53_max_mm=V53_MAX_MM, v53_same_region_merge=True),
+                    v53=V53, v53_out_mm=V53_OUT_MM, v53_gap_mm=V53_GAP_MM, v53_max_mm=V53_MAX_MM, v53_same_region_merge=True,
+                    frozen_rules=frozen_rules(), switches=active_switches()),
     anatomy="T1" if T1_ANAT else "SWI-only", flair_used=FL is not None, qc_status=QC["status"],
     n_candidates=int(len(df)), n_excluded=len(excluded), n_dropped=len(dropped), fates=FATES,
     inputs={k: dict(path=p_, sha256=sha256(p_), mtime=os.path.getmtime(p_)) for k, p_ in _inputs.items()},

@@ -46,13 +46,14 @@ truth = nib.load(f"{T}/work/PH3_truth.nii.gz").get_fdata().astype(int)
 
 # ---- 1. switch off = unchanged list, new columns appended last
 off, off_lab, _, _, _ = detect("PH3", False)
-new = ["midline_frac", "mask_edge_mm", "skull_frac", "v53_active", "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac", "dual_contact_frac"]
-if list(off.columns[-11:]) != new: fail(f"new columns must be appended last, got {list(off.columns[-11:])}")
+new = ["midline_frac", "mask_edge_mm", "skull_frac", "v53_active", "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac", "dual_contact_frac", "soft_gate_fail"]
+if list(off.columns[-12:]) != new: fail(f"new columns must be appended last, got {list(off.columns[-12:])}")
+if off.soft_gate_fail.fillna("").ne("").any(): fail("soft_gate_fail must be empty when CSS_SOFT_GATES is not set")
 if not off.dual_contact_frac.between(0, 1).all(): fail("dual_contact_frac out of range")
 if (off.skullbase_frac != 0).any(): fail("the plain phantom has no skull-base labels: skullbase_frac must be 0")
 if not off.plane_dist_mm.notna().any() or not (off.cos_plane.dropna().between(0, 1)).all(): fail("plane features (v5.3.4) missing or out of range")
 if off.v53_active.any(): fail("v53_active must be 0 with the switch off")
-print(f"switch off: {len(off)} candidates, 11 new columns appended, v53_active 0")
+print(f"switch off: {len(off)} candidates, 12 new columns appended, v53_active 0")
 # v5.3.3: the absolute thresholds (darkness, volume, cortex share) were fitted to real cSS; the phantom cSS are darker
 # and larger. On the plain phantom (no skull band) switching v5.3 on must not lose a true lesion.
 _t = nib.load(f"{T}/work/PH3_truth.nii.gz").get_fdata().astype(int)
@@ -66,6 +67,11 @@ _e25 = _x[_x.reason.astype(str).str.startswith("interhemispheric fissure")] if "
 if len(_e25) and not (_e25.dual_contact_frac >= 0.3).all(): fail("E25 excluded an object below its threshold")
 print(f"E25 fissure objects excluded on the plain phantom: {len(_e25)}")
 print(f"E22 midline sheets excluded on the plain phantom: {len(_e22)}")
+import json as _json
+_mf = _json.load(open(f"{T}/review/PH3_manifest.json"))["detect"]["parameters"]
+if not {"E12_MM3", "E22_PLANE_MM", "E24_FRAC", "E25_FRAC", "MIN_MM3", "E24_LABELS"} <= set(_mf.get("frozen_rules", {})): fail(f"manifest must record the frozen thresholds: {sorted(_mf.get('frozen_rules', {}))}")
+if _mf["switches"].get("CSS_V53") != "1" or "CSS_3D_SEEDS" not in _mf["switches"]: fail(f"manifest must record the switches: {_mf.get('switches')}")
+print(f"manifest: {len(_mf['frozen_rules'])} frozen thresholds and the switches recorded")
 print(f"plain phantom: true lesions shown {len(_f0)} -> {len(_f1)} with v5.3")
 
 # ---- 1b. v5.7 E24 skull-base cortex zone: PHB = PH3 with the whole LEFT cortex relabelled lateral orbitofrontal (1012):
@@ -116,6 +122,25 @@ _others = [i for i in _pl if i != _victim and float(_dist_v[(_on_lab == _cand_of
 _kept = {int(i) for i in np.unique(_t[(d_lab > 0) & (_t > 0)])}
 if not set(_others) <= _kept: fail(f"E25 must keep the true lesions far from the relabelled region: lost {sorted(set(_others) - _kept)}")
 print(f"E25 fissure: lesion {_victim} (between relabelled hemispheres) excluded, other true lesions {len(_others)} kept")
+
+# ---- 1d. audit branch: CSS_SOFT_GATES=1 (opt-in). OFF = unchanged candidates; ON = the objects that fail a generation gate are the LAST candidates, labelled,
+#      tier >= 4, listed in work/ID_soft_gate.csv; the normal candidates keep their order and values; the fate invariant holds (exit 0)
+run([f"{S}/detect_css.py", "PH3"], CSS_V53="1")
+_n0 = pd.read_csv(f"{T}/review/PH3_candidates.csv"); _drops = len(pd.read_csv(f"{T}/work/PH3_dropped.csv"))
+if not os.path.exists(f"{T}/review/PH3_rule_audit.csv"): fail("the per-rule exclusion audit table must always be written")
+_au = pd.read_csv(f"{T}/review/PH3_rule_audit.csv")
+if list(_au.columns) != ["rule", "n_excluded", "called_cSS_among_excluded", "calls_file"]: fail(f"rule audit columns {list(_au.columns)}")
+run([f"{S}/detect_css.py", "PH3"], CSS_V53="1", CSS_SOFT_GATES="1")
+_s1 = pd.read_csv(f"{T}/review/PH3_candidates.csv"); _sg = pd.read_csv(f"{T}/work/PH3_soft_gate.csv")
+if not len(_s1) > len(_n0): fail(f"soft gates must add the gate-failing objects ({len(_s1)} vs {len(_n0)})")
+_com = [c for c in _n0.columns if c != "soft_gate_fail"]
+if not all(_n0[c].astype(str).equals(_s1.head(len(_n0))[c].astype(str)) for c in _com): fail("soft gates: the normal candidates must keep order and values")
+_tail = _s1.iloc[len(_n0):]
+if not (_tail.soft_gate_fail.fillna("") != "").all() or (_s1.head(len(_n0)).soft_gate_fail.fillna("") != "").any(): fail("soft_gate_fail must mark exactly the added objects")
+if not (_tail.review_priority_rank >= 4).all(): fail("soft-gate objects must have review priority tier >= 4")
+if len(_sg) < len(_tail): fail("work/ID_soft_gate.csv must list the soft-gate objects")
+run([f"{S}/detect_css.py", "PH3"], CSS_V53="1")                       # restore the default outputs for the checks below
+print(f"soft gates: {len(_n0)} normal + {len(_tail)} gate-failing candidates (last, tier >= 4); OFF output unchanged; rule audit table written")
 
 # ---- 2. skull phantom: T1-style mask (labels + 5 mm): dark line just outside the cortex (thin-CSF convexity)
 img = nib.load(f"{T}/data/PH3_swi.nii"); I = img.get_fdata().astype(np.float32); vox = img.header.get_zooms()[:3]
