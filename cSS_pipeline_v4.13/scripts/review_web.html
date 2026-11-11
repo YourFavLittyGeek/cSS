@@ -31,7 +31,7 @@ select,input[type=text]{background:var(--bg);border:1px solid var(--line);border
 .sb{position:absolute;right:8px;top:56px;bottom:34px;width:10px;z-index:5;background:rgba(255,255,255,.12);border-radius:6px;cursor:pointer}
 .sb b{position:absolute;left:-3px;right:-3px;height:16px;border-radius:6px;background:var(--acc);pointer-events:none}
 .lt{position:absolute;left:8px;top:54px;display:flex;flex-direction:column;gap:4px;z-index:8;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px}
-.lt div{width:64px;padding:5px 2px;text-align:center;border-radius:7px;font-size:11px;color:var(--text);cursor:pointer}
+.lt{padding:4px;gap:2px;align-items:center}.lt div[data-tool],.lt div[data-a]{width:28px;height:28px;padding:0;display:flex;align-items:center;justify-content:center;border-radius:7px;color:var(--text);cursor:pointer}.lt .ico{margin:0}.lt .ico svg{width:17px;height:17px}.lt .ahb{width:100%;display:flex;gap:3px;align-items:center;justify-content:center;font-size:9.5px;color:var(--mut);border-top:1px solid var(--line);padding-top:4px;margin-top:2px;cursor:pointer}.lt .ahb input{margin:0;width:11px;height:11px}.lt .tabl{display:none;writing-mode:vertical-rl;font-size:10px;color:var(--mut);padding:30px 0;cursor:pointer}.lt.fold{padding:2px;border-radius:0 8px 8px 0;left:0;border-left:0}.lt.fold>*{display:none!important}.lt.fold>.tabl{display:block!important}
 .lt div:hover{background:var(--bg)}.lt div.on{background:var(--acc);color:#fff}.lt .ico{display:flex;justify-content:center;margin-bottom:2px}.lt hr{border:0;border-top:1px solid var(--line);margin:2px 0;width:100%}
 .pt{position:absolute;left:50%;top:8px;transform:translateX(-50%);display:flex;gap:2px;z-index:8;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:3px;font-size:12.5px;white-space:nowrap}
 .pt span{padding:5px 11px;border-radius:6px;color:var(--mut);cursor:pointer}.pt span:hover{color:var(--text)}.pt span.on{background:var(--acc);color:#fff}.pt i{font-style:normal;width:1px;background:var(--line);margin:3px 4px}
@@ -230,7 +230,7 @@ const BANDCOL={green:"#3aa655",yellow:"#c99a1c",red:"#d64545"};
 const LS=(k,d)=>{try{const v=localStorage.getItem("css_"+k);return v===null?d:JSON.parse(v)}catch(e){return d}};
 const LSS=(k,v)=>{try{localStorage.setItem("css_"+k,JSON.stringify(v))}catch(e){}};
 const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const IC={lens:'<circle cx="10" cy="10" r="6"/><path d="M15 15l6 6"/>',zoomin:'<circle cx="10" cy="10" r="6"/><path d="M15 15l6 6M10 7v6M7 10h6"/>',eye:'<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',layers:'<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',slab:'<rect x="4" y="5" width="16" height="4" rx="1"/><rect x="4" y="11" width="16" height="4" rx="1"/><rect x="4" y="17" width="16" height="3" rx="1"/>',seq:'<rect x="3" y="4" width="12" height="12" rx="2"/><path d="M7 20h12a2 2 0 0 0 2-2V8"/>',plus:'<circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/>',dark:'<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/>',ruler:'<rect x="2" y="8" width="20" height="8" rx="1"/><path d="M6 8v4M10 8v3M14 8v4M18 8v3"/>',cam:'<path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.5"/>',disk:'<path d="M5 3h11l4 4v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M8 3v5h7V3"/><rect x="8" y="14" width="8" height="6"/>',target:'<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.5"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>',reset:'<path d="M4 12a8 8 0 1 0 3-6.2"/><path d="M4 4v5h5"/>',side:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>',pin:'<path d="M9 3h6l-1 6 4 4H6l4-4z"/><path d="M12 13v8"/>',gear:'<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/>',sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>',moon:'<path d="M20 14a8 8 0 1 1-9-11 6.5 6.5 0 0 0 9 11z"/>',hand:'<path d="M8 12V6a1.5 1.5 0 0 1 3 0v5M11 11V4.5a1.5 1.5 0 0 1 3 0V11M14 11V6a1.5 1.5 0 0 1 3 0v8a6 6 0 0 1-6 6h-1a5 5 0 0 1-4-2l-3-4a1.5 1.5 0 0 1 2.4-1.8L8 15"/>',gauge:'<path d="M3 17a9 9 0 0 1 18 0"/><path d="M12 17l4-5"/>',cmp:'<circle cx="12" cy="12" r="9"/><path d="M8.5 12.5l2.3 2.3 4.7-5"/>',next:'<path d="M5 12h14M13 6l6 6-6 6"/>',prev:'<path d="M19 12H5M11 6l-6 6 6 6"/>',text:'<path d="M5 6h14M12 6v13M9 19h6"/>',folder:'<path d="M3 6h6l2 2h10v11H3z"/>',sliders:'<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>',scroll:'<path d="M12 4v16M8 8l4-4 4 4M8 16l4 4 4-4"/>',l1:'<rect x="4" y="5" width="16" height="14" rx="2"/>',l2:'<rect x="3" y="6" width="8" height="12" rx="1"/><rect x="13" y="6" width="8" height="12" rx="1"/>',l4:'<rect x="3" y="4" width="8" height="7" rx="1"/><rect x="13" y="4" width="8" height="7" rx="1"/><rect x="3" y="13" width="8" height="7" rx="1"/><rect x="13" y="13" width="8" height="7" rx="1"/>',fit:'<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',actual:'<rect x="5" y="5" width="14" height="14" rx="1"/><path d="M10 9.5l2-1.5v8"/>',export:'<path d="M12 4v11M7 11l5 5 5-5M4 20h16"/>',undo:'<path d="M4 8h10a5 5 0 0 1 0 10H8"/><path d="M8 4L4 8l4 4"/>',clear:'<path d="M5 6h14M9 6V4h6v2M7 6l1 14h8l1-14"/>',comment:'<path d="M4 5h16v11H9l-5 4z"/>',help:'<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 1-1 1.7M12 17h.01"/>',summary:'<path d="M5 4h14v16H5z"/><path d="M8 9h8M8 13h8M8 17h5"/>',cube:'<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/>'};
+const IC={lens:'<circle cx="10" cy="10" r="6"/><path d="M15 15l6 6"/>',zoomin:'<circle cx="10" cy="10" r="6"/><path d="M15 15l6 6M10 7v6M7 10h6"/>',eye:'<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',layers:'<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',slab:'<rect x="4" y="5" width="16" height="4" rx="1"/><rect x="4" y="11" width="16" height="4" rx="1"/><rect x="4" y="17" width="16" height="3" rx="1"/>',seq:'<rect x="3" y="4" width="12" height="12" rx="2"/><path d="M7 20h12a2 2 0 0 0 2-2V8"/>',plus:'<circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/>',dark:'<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/>',ruler:'<rect x="2" y="8" width="20" height="8" rx="1"/><path d="M6 8v4M10 8v3M14 8v4M18 8v3"/>',cam:'<path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.5"/>',disk:'<path d="M5 3h11l4 4v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M8 3v5h7V3"/><rect x="8" y="14" width="8" height="6"/>',target:'<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.5"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>',reset:'<path d="M4 12a8 8 0 1 0 3-6.2"/><path d="M4 4v5h5"/>',side:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>',pin:'<path d="M9 3h6l-1 6 4 4H6l4-4z"/><path d="M12 13v8"/>',gear:'<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/>',sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>',moon:'<path d="M20 14a8 8 0 1 1-9-11 6.5 6.5 0 0 0 9 11z"/>',hand:'<path d="M8 12V6a1.5 1.5 0 0 1 3 0v5M11 11V4.5a1.5 1.5 0 0 1 3 0V11M14 11V6a1.5 1.5 0 0 1 3 0v8a6 6 0 0 1-6 6h-1a5 5 0 0 1-4-2l-3-4a1.5 1.5 0 0 1 2.4-1.8L8 15"/>',gauge:'<path d="M3 17a9 9 0 0 1 18 0"/><path d="M12 17l4-5"/>',cmp:'<circle cx="12" cy="12" r="9"/><path d="M8.5 12.5l2.3 2.3 4.7-5"/>',next:'<path d="M5 12h14M13 6l6 6-6 6"/>',prev:'<path d="M19 12H5M11 6l-6 6 6 6"/>',text:'<path d="M5 6h14M12 6v13M9 19h6"/>',folder:'<path d="M3 6h6l2 2h10v11H3z"/>',sliders:'<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>',scroll:'<path d="M12 4v16M8 8l4-4 4 4M8 16l4 4 4-4"/>',l1:'<rect x="4" y="5" width="16" height="14" rx="2"/>',l2:'<rect x="3" y="6" width="8" height="12" rx="1"/><rect x="13" y="6" width="8" height="12" rx="1"/>',l4:'<rect x="3" y="4" width="8" height="7" rx="1"/><rect x="13" y="4" width="8" height="7" rx="1"/><rect x="3" y="13" width="8" height="7" rx="1"/><rect x="13" y="13" width="8" height="7" rx="1"/>',fit:'<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',actual:'<rect x="5" y="5" width="14" height="14" rx="1"/><path d="M10 9.5l2-1.5v8"/>',export:'<path d="M12 4v11M7 11l5 5 5-5M4 20h16"/>',undo:'<path d="M4 8h10a5 5 0 0 1 0 10H8"/><path d="M8 4L4 8l4 4"/>',clear:'<path d="M5 6h14M9 6V4h6v2M7 6l1 14h8l1-14"/>',comment:'<path d="M4 5h16v11H9l-5 4z"/>',help:'<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 1-1 1.7M12 17h.01"/>',summary:'<path d="M5 4h14v16H5z"/><path d="M8 9h8M8 13h8M8 17h5"/>',mirror:'<path d="M12 3v18"/><path d="M8 7L3 12l5 5z"/><path d="M16 7l5 5-5 5z" fill="currentColor"/>',flag:'<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',cube:'<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/>'};
 const svg=n=>`<svg viewBox="0 0 24 24">${IC[n]||""}</svg>`;
 const PLN=["Axial","Coronal","Sagittal"];
 // views: h = horizontal source axis, v = vertical, s = slice axis; displayed flipped (radiological: patient right on screen left)
@@ -243,6 +243,7 @@ let layout=LS("layout","1"), panes=[], act=0;
 let ci=0, calls={}, undo=[], tool=LS("tool","pan"), ruler=null, probe=null, missed=[], draft=null, shape="rect", onlyDiffer=false;
 let compareOn=LS("compare",true), revoteMode=false, readerScore=null, finalRec=null;
 let showMark=LS("mark",true), showOther=LS("other",true), autoNext=LS("auto",true), showAI=LS("ai",true), showText=LS("text",true), showCross=LS("cross",true), mag=false, mouse=null;
+let mir=false, showRL=LS("rl",true), ltah=LS("ltah",false), ltopen=false, sideChk=null;
 let ph=LS("ph",false), ah=LS("ah",false), pw=LS("pw",372), peek=false, leaveT=0, resizing=false, lastTab=LS("tab","viewer");
 let snap=Object.assign({mode:"view",text:true,scale:true,outline:true,cross:false,arrow:false,fmt:"png",res:2,folder:"",ask:false,parts:{study:1,cand:1,xyz:1,plane:1,slice:0,time:0},side:true,clip:false},LS("snap",{}));
 const MAGF=2.5;
@@ -260,18 +261,18 @@ function lutFor(seq){if(luts[seq])return luts[seq];const w=WLs[seq]||seqmeta[seq
 
 // ---------- geometry ----------
 function geomWH(p,W,H,z,c){z=z===undefined?zoom:z;c=c||ctr;const V=VIEWS[p.plane],d=[nx,ny,nz];
-  const fit=Math.min(W/(d[V.h]*vox[V.h]),H/(d[V.v]*vox[V.v]))*z,sx=fit*vox[V.h],sy=fit*vox[V.v];
-  return {V,W,H,sx,sy,fit,ox:W/2-(d[V.h]-1-c[V.h]+0.5)*sx,oy:H/2-(d[V.v]-1-c[V.v]+0.5)*sy,nh:d[V.h],nv:d[V.v]}}
+  const fit=Math.min(W/(d[V.h]*vox[V.h]),H/(d[V.v]*vox[V.v]))*z,sx=fit*vox[V.h],sy=fit*vox[V.v],dir=(mir&&V.h===0)?-1:1;
+  return {V,W,H,sx,sy,fit,dir,ox:W/2-(dir>0?d[V.h]-1-c[V.h]+0.5:c[V.h]+0.5)*sx,oy:H/2-(d[V.v]-1-c[V.v]+0.5)*sy,nh:d[V.h],nv:d[V.v]}}
 const geom=p=>geomWH(p,p.cv.clientWidth,p.cv.clientHeight);
-function toVoxF(p,mx,my){const g=geom(p),pt=cur.slice();pt[g.V.h]=g.nh-0.5-(mx-g.ox)/g.sx;pt[g.V.v]=g.nv-0.5-(my-g.oy)/g.sy;
+function toVoxF(p,mx,my){const g=geom(p),pt=cur.slice();pt[g.V.h]=g.dir>0?g.nh-0.5-(mx-g.ox)/g.sx:(mx-g.ox)/g.sx-0.5;pt[g.V.v]=g.nv-0.5-(my-g.oy)/g.sy;
   const d=[nx,ny,nz];for(let a=0;a<3;a++)pt[a]=Math.max(0,Math.min(d[a]-1,pt[a]));return pt}
 const toVox=(p,mx,my)=>toVoxF(p,mx,my).map(Math.round);
-function toScrG(g,pt){return [g.ox+(g.nh-1-pt[g.V.h]+0.5)*g.sx, g.oy+(g.nv-1-pt[g.V.v]+0.5)*g.sy]}
+function toScrG(g,pt){return [g.ox+((g.dir>0?g.nh-1-pt[g.V.h]:pt[g.V.h])+0.5)*g.sx, g.oy+(g.nv-1-pt[g.V.v]+0.5)*g.sy]}
 const IDX=(i,j,k)=>i+nx*(j+ny*k);
 function zoomFrom(p,mx,my,z0,c0,z1){ // keep the voxel under (mx,my) fixed while changing zoom z0 -> z1 (view centre c0 at z0)
   z1=Math.max(0.25,Math.min(24,z1)); const W=p.cv.clientWidth,H=p.cv.clientHeight,g0=geomWH(p,W,H,z0,c0),V=g0.V;
-  const ih=c0[V.h]-(mx-W/2)/g0.sx, iv=c0[V.v]-(my-H/2)/g0.sy, g1=geomWH(p,W,H,z1,c0);
-  zoom=z1; ctr=c0.slice(); ctr[V.h]=ih+(mx-W/2)/g1.sx; ctr[V.v]=iv+(my-H/2)/g1.sy; clampCtr(); draw()}
+  const ih=c0[V.h]-g0.dir*(mx-W/2)/g0.sx, iv=c0[V.v]-(my-H/2)/g0.sy, g1=geomWH(p,W,H,z1,c0);
+  zoom=z1; ctr=c0.slice(); ctr[V.h]=ih+g1.dir*(mx-W/2)/g1.sx; ctr[V.v]=iv+(my-H/2)/g1.sy; clampCtr(); draw()}
 function clampCtr(){const d=[nx,ny,nz];for(let a=0;a<3;a++)ctr[a]=Math.max(0,Math.min(d[a]-1,ctr[a]))}
 function zoomBy(f){const p=panes[act];zoomFrom(p,p.cv.clientWidth/2,p.cv.clientHeight/2,zoom,ctr.slice(),zoom*f)}
 function fitView(){zoom=1;ctr=[(nx-1)/2,(ny-1)/2,(nz-1)/2];draw()}
@@ -291,14 +292,14 @@ function buildSlice(p){ // the slice image + outlines of the pane (offscreen), r
   const VOL=vols[p.seq]; if(!VOL){p.ready=false;return} p.ready=true;
   const V=VIEWS[p.plane],d=[nx,ny,nz],nh=d[V.h],nv=d[V.v],off=p.off; if(off.width!==nh||off.height!==nv){off.width=nh;off.height=nv}
   const octx=off.getContext("2d"),img=octx.createImageData(nh,nv),D=new Uint32Array(img.data.buffer),E=[[],[]],lut=lutFor(p.seq);
-  const st=[1,nx,nx*ny],sh=st[V.h],sv=st[V.v],ss=st[V.s],s0=cur[V.s]*ss,c=cand(),curId=c?c.id:-1;
+  const gd=(mir&&V.h===0)?-1:1,st=[1,nx,nx*ny],sh=st[V.h],sv=st[V.v],ss=st[V.s],s0=cur[V.s]*ss,c=cand(),curId=c?c.id:-1;
   const slab=(p.mip&&p.plane===0&&p.seq!=="phase")?Math.max(1,Math.round(4/vox[2])):0; let x0=1e9,x1=-1,y0=1e9,y1=-1;
-  for(let y=0;y<nv;y++){const vv=(nv-1-y)*sv;for(let x=0;x<nh;x++){const b=(nh-1-x)*sh+vv,q=b+s0;let val=VOL[q];
+  for(let y=0;y<nv;y++){const vv=(nv-1-y)*sv;for(let x=0;x<nh;x++){const b=(gd>0?nh-1-x:x)*sh+vv,q=b+s0;let val=VOL[q];
       if(slab){for(let k=Math.max(0,cur[2]-slab);k<=Math.min(nz-1,cur[2]+slab);k++){const w=VOL[b+k*ss];if(w<val&&w>0)val=w}}
       const gv=lut[val];D[y*nh+x]=0xff000000|(gv<<16)|(gv<<8)|gv;
       if(LAB){const l=LAB[q];if(l){const mine=l===curId; if(mine){if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y}
         if((mine&&showMark)||(!mine&&showOther)){const L=E[mine?0:1];
-          if(x===0||LAB[q+sh]!==l)L.push(x,y,x,y+1);if(x===nh-1||LAB[q-sh]!==l)L.push(x+1,y,x+1,y+1);
+          if(x===0||LAB[q+gd*sh]!==l)L.push(x,y,x,y+1);if(x===nh-1||LAB[q-gd*sh]!==l)L.push(x+1,y,x+1,y+1);
           if(y===0||LAB[q+sv]!==l)L.push(x,y,x+1,y);if(y===nv-1||LAB[q-sv]!==l)L.push(x,y+1,x+1,y+1)}}}}}
   octx.putImageData(img,0,0);p.E=E;p.box=x1>=0?{x0,x1,y0,y1}:null}
 function niceBar(pxPerMm,maxPx){for(const mm of [100,50,20,10,5,2]){if(mm*pxPerMm<=maxPx)return mm}return 2}
@@ -327,15 +328,16 @@ function drawPane(p,x,W,H,o){
     T(`Slice ${cur[V.s]+1} / ${[nx,ny,nz][V.s]}`,W-o.rm,o.tm,"right");T(`Zoom ${zoom.toFixed(1)}×${Math.abs(zoom-1)<0.001?" (fit)":""}`,W-o.rm,o.tm+16,"right");
     const w=getWL(p.seq);T(`C ${Math.round(101-w[0])}  B ${Math.round(w[1])}`,o.lm,H-24);T(`${vox.map(v=>v.toFixed(1)).join("×")} mm`,o.lm,H-8);
     T(`Reviewer ${(o.rev||"")}`,W-o.rm,H-24,"right");if(M.acq&&(M.acq.TE_ms||M.acq.field_T))T(`${M.acq.TE_ms?"TE "+M.acq.TE_ms+" ms":""}${M.acq.TE_ms&&M.acq.field_T?" · ":""}${M.acq.field_T?M.acq.field_T+" T":""}`,W-o.rm,H-8,"right");
-    const O=ORI[p.plane];x.fillStyle="rgba(255,216,102,.85)";T(O[0],o.lm-12>14?o.lm-62:6,H/2);T(O[1],W-o.rm-18+(o.rm>20?8:0),H/2,"right");T(O[2],W/2,o.tm+44,"center");T(O[3],W/2,H-8,"center");
-    if(o.scale){x.shadowBlur=0;const pm=g.sx/vox[V.h],mm=niceBar(pm,H*0.3),px=mm*pm,bx=W-o.rm-6,by=H*0.42;x.strokeStyle="#ffd866";x.lineWidth=2;x.beginPath();x.moveTo(bx,by);x.lineTo(bx,by+px);x.moveTo(bx-4,by);x.lineTo(bx+4,by);x.moveTo(bx-4,by+px);x.lineTo(bx+4,by+px);x.stroke();
+        if(o.scale){x.shadowBlur=0;const pm=g.sx/vox[V.h],mm=niceBar(pm,H*0.3),px=mm*pm,bx=W-o.rm-6,by=H*0.62;x.strokeStyle="#ffd866";x.lineWidth=2;x.beginPath();x.moveTo(bx,by);x.lineTo(bx,by+px);x.moveTo(bx-4,by);x.lineTo(bx+4,by);x.moveTo(bx-4,by+px);x.lineTo(bx+4,by+px);x.stroke();
       x.shadowBlur=3;x.fillStyle="#ffd866";T(mm>=10?(mm/10)+" cm":mm+" mm",bx-8,by+px/2+4,"right")}
-    x.shadowBlur=0;x.textAlign="left"}}
-const DISP={lm:84,rm:30,tm:56};
+    x.shadowBlur=0;x.textAlign="left"}
+  if(o.rl&&p.plane!==2){const left=!(mir),bx=left?o.bl:W-o.br,by=H/2;x.save();x.shadowBlur=0;x.fillStyle="rgba(0,0,0,.55)";x.strokeStyle="#ffd866";x.lineWidth=2;x.beginPath();x.arc(bx,by,15,0,6.3);x.fill();x.stroke();x.fillStyle="#ffd866";x.font="800 16px Georgia,serif";x.textAlign="center";x.textBaseline="middle";x.fillText("R",bx,by+1);x.font="600 9px sans-serif";x.textBaseline="alphabetic";x.fillText("RIGHT",bx,by+29);x.restore()}
+  if(o.rl&&mir&&p.plane!==2){x.save();x.font="600 11px sans-serif";const tw=x.measureText("Mirrored").width+16;x.fillStyle="#7a5b00";x.beginPath();x.roundRect(W/2-tw/2,o.tm-6,tw,18,9);x.fill();x.fillStyle="#fff";x.textAlign="center";x.fillText("Mirrored",W/2,o.tm+7);x.restore()}}
+const DISP={lm:58,rm:30,tm:56,bl:76,br:50};
 function render(p){buildSlice(p);const c=p.cv,dpr=window.devicePixelRatio||1,W=c.clientWidth,H=c.clientHeight;
   if(c.width!==Math.round(W*dpr)||c.height!==Math.round(H*dpr)){c.width=Math.round(W*dpr);c.height=Math.round(H*dpr)}
   const x=c.getContext("2d");x.setTransform(dpr,0,0,dpr,0,0);
-  drawPane(p,x,W,H,Object.assign({text:showText,scale:showText,outline:true,cross:showCross,arrow:showMark,live:true,rev:reviewer()},DISP));
+  drawPane(p,x,W,H,Object.assign({rl:showRL,text:showText,scale:showText,outline:true,cross:showCross,arrow:showMark,live:true,rev:reviewer()},DISP));
   const V=VIEWS[p.plane],n=[nx,ny,nz][V.s],f=n>1?cur[V.s]/(n-1):0,th=p.el.querySelector(".sb b"),sb=p.el.querySelector(".sb");th.style.top=Math.max(0,(1-f)*(sb.clientHeight-16))+"px"}
 function drawLens(){const L=$("#lens");if(!mag||!mouse||!hasVol()||$(".menu")){L.style.display="none";return}
   const p=mouse.p,g=geom(p),r=p.cv.getBoundingClientRect(),R=100,dpr=window.devicePixelRatio||1;if(!p.ready){L.style.display="none";return}
@@ -364,8 +366,9 @@ function paintToolbar(){const p=panes[act];if(!p)return;
   $("#pt").innerHTML=PLN.map((n,i)=>`<span data-pl="${i}" class="${p.plane===i?"on":""}">${n}</span>`).join("")+'<i></i>'+[["1","1×1"],["2","1×2"],["4","2×2"]].map(([k,t])=>`<span data-lay="${k}" class="${layout===k?"on":""}">${t}</span>`).join("")+'<i></i><span data-a="fit">Fit</span><span data-a="actual">1:1</span><span data-a="cand">Candidate</span>';
   $$("#lt div[data-tool]").forEach(e=>e.classList.toggle("on",e.dataset.tool===tool));$("#lt div[data-a=lens]").classList.toggle("on",mag);
   $("#tMark").classList.toggle("on",showMark);$("#tOther").classList.toggle("on",showOther);$("#tMip").classList.toggle("on",!!p.mip);$("#tAuto").classList.toggle("on",autoNext)}
+function applyPalette(){const l=$("#lt");l.classList.toggle("fold",ltah&&!ltopen);const c=$("#ltah");if(c)c.checked=ltah}
 function buildPalette(){const T=[["pan","hand","Pan"],["zoom","zoomin","Zoom"],["wl","sliders","Window"],["scroll","scroll","Scroll"],"-",["ruler","ruler","Ruler"],["dark","dark","Probe"],["lens","lens","Lens"],["miss","plus","Missed"]];
-  $("#lt").innerHTML=T.map(t=>t==="-"?"<hr>":t[0]==="lens"?`<div data-a="lens" title="magnifier (B)"><span class="ico">${svg(t[1])}</span>${t[2]}</div>`:`<div data-tool="${t[0]}" title="${t[2]}"><span class="ico">${svg(t[1])}</span>${t[2]}</div>`).join("")}
+  $("#lt").innerHTML=T.map(t=>t==="-"?"<hr>":t[0]==="lens"?`<div data-a="lens" title="magnifier (B)"><span class="ico">${svg(t[1])}</span></div>`:`<div data-tool="${t[0]}" title="${t[2]}"><span class="ico">${svg(t[1])}</span></div>`).join("")+'<label class="ahb" title="fold the tool strip into a thin tab; hover the tab to open it"><input type="checkbox" id="ltah">auto</label><span class="tabl">tools ▸</span>';applyPalette()}
 
 // ---------- data ----------
 async function api(path,body){const r=await fetch(path,body?{method:"POST",headers:{"Content-Type":"application/json","X-CSS":"1"},body:JSON.stringify(body)}:{});const j=await r.json();if(!r.ok||j.error)throw new Error(j.error||r.statusText);return j}
@@ -381,8 +384,8 @@ async function loadStudy(sid){status("loading study ...");
   $("#seq").innerHTML=M.seqs.map((s,i)=>`<option value="${s.key}">${s.label}  (${i+1})</option>`).join("");
   $("#revlist").innerHTML=M.reviewers.names.map(n=>`<option value="${esc(n)}">`).join("");
   if(!reviewer()&&M.reviewers.last){$("#reviewer").value=M.reviewers.last;M=await api(`/api/meta?study=${M.study}&reviewer=${encodeURIComponent(reviewer())}`)}
-  calls=M.calls||{};undo=[];draft=null;revoteMode=false;readerScore=M.reader_score||null;finalRec=M.final||null;
-  const b=$("#banner"),msg=[M.qc,M.note].filter(Boolean).join("  ·  ");$("#seqnote").textContent=M.missing_seqs.length?("Not imported for this patient: "+M.missing_seqs.join(", ")):"";b.textContent=msg;b.style.display=msg?"block":"none";
+  mir=LS("mir_"+M.study,false);sideChk=M.side_check||null;calls=M.calls||{};undo=[];draft=null;revoteMode=false;readerScore=M.reader_score||null;finalRec=M.final||null;
+  const b=$("#banner"),msg=[M.qc,M.note,sideChk&&sideChk.bad?sideMsg():""].filter(Boolean).join("  ·  ");$("#seqnote").textContent=M.missing_seqs.length?("Not imported for this patient: "+M.missing_seqs.join(", ")):"";b.textContent=msg;b.style.display=msg?"block":"none";
   const lr=await fetch(`/api/labels?study=${M.study}`);LAB=new Uint16Array(await lr.arrayBuffer());
   await loadVol("swi");panes.forEach(p=>{p.seq="swi";p.mip=false});fitView();
   buildStrip();setMissed(M.missed);const first=M.cands.findIndex(c=>!isDone(c));go(first<0?0:first);status("");
@@ -471,6 +474,9 @@ function exportCsv(){const q=s=>'"'+String(s==null?"":s).replace(/"/g,'""')+'"';
     .concat(M.cands.map(c=>[M.study,reviewer(),c.id,c.hemi,c.region,c.volume,c.ai.score,c.ai.band,c.ai.suspect,callOf(c),(calls[c.id]||{}).comment||"",verdict(c)].map(q).join(",")));
   const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([lines.join("\n")+"\n"],{type:"text/csv"}));a.download=`${M.study}_ai_vs_${reviewer().replace(/\W+/g,"_")||"reviewer"}.csv`;a.click();status("Exported "+a.download)}
 
+// ---------- mirror / side check ----------
+function setMirror(v){mir=v;if(M)LSS("mir_"+M.study,v);status(v?"Mirrored: screen left = patient left (letters follow the anatomy)":"Normal view: screen left = patient right");draw()}
+function sideMsg(){const s=sideChk;if(!s||!s.n)return "Side check: not enough information.";return s.bad?`⚠ Side check: only ${s.agree} of ${s.n} candidates lie on the side their FreeSurfer hemisphere label says; the image header and the labels may disagree. Try Mirror (⇧H) and read the R badge.`:`✓ Side check: ${s.agree} of ${s.n} candidates lie on the side of their FreeSurfer hemisphere label (image header agrees).`}
 // ---------- right panel: tabs, rail, auto-hide, resize ----------
 const panelVisible=()=>(!ph&&!ah)||peek;
 function setTab(t){lastTab=t;LSS("tab",t);$$("#tabs button").forEach(b=>b.classList.toggle("on",b.dataset.tab===t));$$(".tab").forEach(e=>e.classList.toggle("on",e.id==="tab-"+t));renderRail()}
@@ -533,7 +539,7 @@ function attachPane(p){const c=p.cv,pos=e=>{const r=c.getBoundingClientRect();re
 window.addEventListener("mousemove",e=>{if(!drag)return;const d=drag,p=d.p,dx=e.clientX-d.x,dy=e.clientY-d.y,V=VIEWS[p.plane];if(Math.abs(dx)+Math.abs(dy)>3)d.moved=true;
   const r=p.cv.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
   if(d.mode==="wl"||d.mode==="wlmenu"){if(d.moved)setWLp(p.seq,d.wl0[0]-dx*0.15,d.wl0[1]-dy*0.15)}
-  else if(d.mode==="pan"){if(d.moved){const g=geom(p);ctr=d.ctr.slice();ctr[V.h]=d.ctr[V.h]+dx/g.sx;ctr[V.v]=d.ctr[V.v]+dy/g.sy;clampCtr();draw()}}
+  else if(d.mode==="pan"){if(d.moved){const g=geom(p);ctr=d.ctr.slice();ctr[V.h]=d.ctr[V.h]+g.dir*dx/g.sx;ctr[V.v]=d.ctr[V.v]+dy/g.sy;clampCtr();draw()}}
   else if(d.mode==="zoom"){if(d.moved)zoomFrom(p,d.mx,d.my,d.zoom0,d.ctr,d.zoom0*Math.exp(-dy*0.008))}
   else if(d.mode==="scroll"){const n=[nx,ny,nz][V.s];cur[V.s]=Math.max(0,Math.min(n-1,d.s0-Math.trunc(dy/6)));draw()}
   else if(d.mode==="ruler"&&ruler){ruler.b=toVox(p,mx,my);ruler.mm=Math.hypot((ruler.b[V.h]-ruler.a[V.h])*vox[V.h],(ruler.b[V.v]-ruler.a[V.v])*vox[V.v]);$("#readout").textContent="Length "+ruler.mm.toFixed(1)+" mm";draw()}
@@ -550,16 +556,16 @@ const pad3=n=>String(Math.round(n)).padStart(3,"0");
 function snapStamp(){const t=new Date(),z=n=>String(n).padStart(2,"0");return `${t.getFullYear()}${z(t.getMonth()+1)}${z(t.getDate())}-${z(t.getHours())}${z(t.getMinutes())}${z(t.getSeconds())}`}
 function snapName(ext,P){P=P||snap.parts;const c=cand(),p=panes[act],parts=[];if(!M)return "snapshot."+ext;
   if(P.study)parts.push(M.study);if(c&&P.cand)parts.push("cand"+String(c.id).padStart(2,"0"));if(c&&P.xyz)parts.push("x"+pad3(c.vox[0]),"y"+pad3(c.vox[1]),"z"+pad3(c.vox[2]));
-  if(P.plane&&p)parts.push(PLN[p.plane].toLowerCase());if(P.slice&&p)parts.push("s"+pad3(cur[VIEWS[p.plane].s]+1));if(P.time)parts.push(snapStamp());
+  if(P.plane&&p)parts.push(PLN[p.plane].toLowerCase()+(mir&&p.plane!==2?"-mirrored":""));if(P.slice&&p)parts.push("s"+pad3(cur[VIEWS[p.plane].s]+1));if(P.time)parts.push(snapStamp());
   return (parts.join("_")||"snapshot")+"."+ext}
-function snapCanvas(){const o=Object.assign({},snap,{live:false,lm:10,rm:16,tm:20,rev:reviewer(),cross:snap.cross,arrow:snap.arrow}),res=snap.res;
+function snapCanvas(){const o=Object.assign({},snap,{rl:showRL,bl:28,br:28,live:false,lm:10,rm:16,tm:30,rev:reviewer(),cross:snap.cross,arrow:snap.arrow}),res=snap.res;
   panes.forEach(buildSlice);
   if(snap.mode==="all"&&panes.length>1){const g=$("#vgrid"),gr=g.getBoundingClientRect(),W=Math.round(gr.width),H=Math.round(gr.height),cv=document.createElement("canvas");cv.width=W*res;cv.height=H*res;const x=cv.getContext("2d");x.scale(res,res);
     panes.forEach(p=>{const r=p.el.getBoundingClientRect(),w=Math.round(r.width),h=Math.round(r.height);x.save();x.translate(r.left-gr.left,r.top-gr.top);x.beginPath();x.rect(0,0,w,h);x.clip();drawPane(p,x,w,h,o);x.restore()});return cv}
   const p=panes[act],W=p.cv.clientWidth,H=p.cv.clientHeight,cv=document.createElement("canvas");cv.width=W*res;cv.height=H*res;const x=cv.getContext("2d");x.scale(res,res);drawPane(p,x,W,H,o);return cv}
 const blobOf=(cv,mime)=>new Promise(r=>cv.toBlob(r,mime,0.92));
 const dataUrlOf=b=>new Promise(r=>{const f=new FileReader();f.onload=()=>r(f.result);f.readAsDataURL(b)});
-function snapMeta(){const c=cand(),p=panes[act];return {cur:cur.slice(),plane:PLN[p.plane].toLowerCase(),slice:cur[VIEWS[p.plane].s]+1,seq:(seqmeta[p.seq]||{}).label||p.seq,zoom:+zoom.toFixed(2),cand_id:c?c.id:null,call:c?callOf(c):"",meter:c?c.ai.score:null}}
+function snapMeta(){const c=cand(),p=panes[act];return {cur:cur.slice(),plane:PLN[p.plane].toLowerCase(),mirrored:mir&&p.plane!==2,slice:cur[VIEWS[p.plane].s]+1,seq:(seqmeta[p.seq]||{}).label||p.seq,zoom:+zoom.toFixed(2),cand_id:c?c.id:null,call:c?callOf(c):"",meter:c?c.ai.score:null}}
 async function doSave(folder,name,dataUrl,blob){
   try{const r=await api("/api/snapshot",{study:M.study,reviewer:reviewer(),folder,name,image:dataUrl,sidecar:snap.side,meta:snapMeta()});
     if(snap.clip&&navigator.clipboard&&window.ClipboardItem){try{await navigator.clipboard.write([new ClipboardItem({[blob.type]:blob})])}catch(e){}}
@@ -593,7 +599,8 @@ const A={
  undo:{l:"Undo last decision",k:"Z",ic:"undo",f:doUndo},clear:{l:"Clear this decision",k:"⌫",ic:"clear",f:()=>decide("")},comment:{l:"Add a comment",k:"C",ic:"comment",f:()=>{if(!panelVisible())openTab("viewer");setTab("viewer");setTimeout(()=>$("#comment").focus(),60)}},
  mark:{l:"Show this marking",k:"M",ic:"eye",f:()=>{showMark=!showMark;tog()},on:()=>showMark},other:{l:"Show other markings",k:"O",ic:"layers",f:()=>{showOther=!showOther;tog()},on:()=>showOther},
  mag:{l:"Magnifier",k:"B",ic:"lens",f:()=>{mag=!mag;tog()},on:()=>mag},mip:{l:"minIP slab",k:"I",ic:"slab",f:()=>{const p=panes[act];p.mip=!p.mip;tog()},on:()=>panes[act]&&panes[act].mip},
- ai:{l:"Show the AI meter",k:"K",ic:"gauge",f:()=>{showAI=!showAI;tog()},on:()=>showAI},text:{l:"Corner text and scale bar",k:"P",ic:"text",f:()=>{showText=!showText;tog()},on:()=>showText},
+ ai:{l:"Show the AI meter",k:"K",ic:"gauge",f:()=>{showAI=!showAI;tog()},on:()=>showAI},mirror:{l:"Mirror left–right",k:"⇧H",ic:"mirror",f:()=>setMirror(!mir),on:()=>mir},rl:{l:"Show R badge",ic:"flag",f:()=>{showRL=!showRL;LSS("rl",showRL);draw()},on:()=>showRL},side:{l:"Side check…",ic:"flag",f:()=>toast(esc(sideMsg()),sideChk&&sideChk.bad,12000)},
+ text:{l:"Corner text and scale bar",k:"P",ic:"text",f:()=>{showText=!showText;tog()},on:()=>showText},
  cross:{l:"Crosshair",ic:"target",f:()=>{showCross=!showCross;tog()},on:()=>showCross},
  zin:{l:"Zoom in",k:"+",ic:"zoomin",f:()=>zoomBy(1.2)},zout:{l:"Zoom out",k:"-",ic:"lens",f:()=>zoomBy(1/1.2)},fit:{l:"Fit to window",k:"0",ic:"fit",f:fitView},actual:{l:"Actual size 1:1",k:"9",ic:"actual",f:actualSize},
  reset:{l:"Reset view",k:"R",ic:"reset",f:resetView},centre:{l:"Go to the candidate",k:"F",ic:"target",f:gotoCandidate},
@@ -616,10 +623,10 @@ const themeItems=()=>["light","dark","blue"].map(t=>({l:t==="blue"?"Eye-preservi
 const studyItems=()=>M.studies.map(s=>({l:s,ic:"folder",f:()=>loadStudy(s),on:()=>s===M.study}));
 const planeItems=()=>PLN.map((n,i)=>({l:n,ic:"cube",f:()=>setPlane(i),on:()=>panes[act]&&panes[act].plane===i}));
 const MENUS={file:()=>[{sub:"Open study",ic:"folder",items:studyItems},"-","summary","exportcsv"],edit:()=>["undo","clear","comment"],
- view:()=>[{sub:"Layout",ic:"l4",k:"\\",items:()=>["lay1","lay2","lay4"]},{sub:"Plane",ic:"cube",k:"Tab",items:planeItems},{sub:"Sequence",ic:"seq",items:seqItems},"-","mark","other","mag","mip","text","cross","ai","-","zin","zout","fit","actual","reset","centre","-","tviewer","tcands","tcalls","hidepanel","autohide","-",{sub:"Theme",ic:"moon",items:themeItems}],
+ view:()=>[{sub:"Layout",ic:"l4",k:"\\",items:()=>["lay1","lay2","lay4"]},{sub:"Plane",ic:"cube",k:"Tab",items:planeItems},{sub:"Sequence",ic:"seq",items:seqItems},"-","mark","other","mag","mip","text","cross","ai","-","mirror","rl","side","-","zin","zout","fit","actual","reset","centre","-","tviewer","tcands","tcalls","hidepanel","autohide","-",{sub:"Theme",ic:"moon",items:themeItems}],
  cand:()=>["prev","next","unread","-","call_y","call_v","call_n","call_a","call_u","call_h","-","auto"],
  tools:()=>["pan","zoomtool","wl","scroll","-","mag","dark","ruler","miss","-","snap","snapas","snapfolder"],
- settings:()=>["autohide","text","compare","ai","auto","-",{sub:"Theme",ic:"moon",items:themeItems},"-","snapset"],help:()=>["help"]};
+ settings:()=>["autohide","text","rl","mirror","compare","ai","auto","-",{sub:"Theme",ic:"moon",items:themeItems},"-","snapset"],help:()=>["help"]};
 function closeMenus(){$$(".menu").forEach(m=>m.remove());$$("#mbar span").forEach(s=>s.classList.remove("on"));drawLens()}
 function openMenu(items,x,y,level){$$(".menu").forEach(m=>{if(+m.dataset.level>=level)m.remove()});
   const m=document.createElement("div");m.className="menu";m.dataset.level=level;
@@ -631,7 +638,7 @@ function openMenu(items,x,y,level){$$(".menu").forEach(m=>{if(+m.dataset.level>=
     m.appendChild(d)}
   document.body.appendChild(m);const r=m.getBoundingClientRect();m.style.left=Math.max(4,Math.min(x,innerWidth-r.width-6))+"px";m.style.top=Math.max(4,Math.min(y,innerHeight-r.height-6))+"px";return m}
 function ctxMenu(x,y,p,pt){closeMenus();$("#lens").style.display="none";
-  openMenu(["mark","other","mag","mip","-",{sub:"Sequence",ic:"seq",items:seqItems},{l:"Mark a missed cSS here…",k:"X",ic:"plus",f:()=>{cur[VIEWS[p.plane].s]=pt[VIEWS[p.plane].s];setTool("miss")}},"dark","ruler","-","snap","snapas","-","centre","reset","-","hidepanel","autohide"],x,y,0)}
+  openMenu(["mark","other","mag","mip","mirror","-",{sub:"Sequence",ic:"seq",items:seqItems},{l:"Mark a missed cSS here…",k:"X",ic:"plus",f:()=>{cur[VIEWS[p.plane].s]=pt[VIEWS[p.plane].s];setTool("miss")}},"dark","ruler","-","snap","snapas","-","centre","reset","-","hidepanel","autohide"],x,y,0)}
 $$("#mbar span").forEach(s=>{const open=()=>{closeMenus();s.classList.add("on");const r=s.getBoundingClientRect();openMenu(MENUS[s.dataset.m](),r.left,r.bottom+2,0)};
   s.addEventListener("click",e=>{e.stopPropagation();if(s.classList.contains("on"))closeMenus();else open()});s.addEventListener("mouseenter",()=>{if($("#mbar span.on")&&!s.classList.contains("on"))open()})});
 window.addEventListener("mousedown",e=>{if(!e.target.closest(".menu")&&!e.target.closest("#mbar"))closeMenus()});
@@ -642,7 +649,9 @@ $("#dec").addEventListener("click",e=>{const b=e.target.closest(".b");if(b)decid
 $("#strip").addEventListener("click",e=>{const d=e.target.dataset.i;if(d!==undefined)go(+d)});
 for(const id of ["#candtable","#cmptable"])$(id).addEventListener("click",e=>{const r=e.target.closest("tr.r");if(r)go(+r.dataset.i)});
 $$("#themes button").forEach(b=>b.onclick=()=>theme(b.dataset.t));
-$("#lt").addEventListener("click",e=>{const d=e.target.closest("div");if(!d)return;if(d.dataset.tool)setTool(d.dataset.tool);else if(d.dataset.a==="lens"){mag=!mag;tog()}});
+$("#lt").addEventListener("change",e=>{if(e.target.id==="ltah"){ltah=e.target.checked;LSS("ltah",ltah);ltopen=false;applyPalette()}});
+$("#lt").addEventListener("mouseenter",()=>{if(ltah){ltopen=true;applyPalette()}});$("#lt").addEventListener("mouseleave",()=>{if(ltah){ltopen=false;applyPalette()}});
+$("#lt").addEventListener("click",e=>{if(e.target.closest(".ahb"))return;const d=e.target.closest("div");if(!d)return;if(d.dataset.tool)setTool(d.dataset.tool);else if(d.dataset.a==="lens"){mag=!mag;tog()}});
 $("#pt").addEventListener("click",e=>{const s=e.target.closest("span");if(!s)return;if(s.dataset.pl!==undefined)setPlane(+s.dataset.pl);else if(s.dataset.lay)setLayout(s.dataset.lay);else if(s.dataset.a==="fit")fitView();else if(s.dataset.a==="actual")actualSize();else if(s.dataset.a==="cand")gotoCandidate()});
 $("#seq").onchange=e=>{setSeq(e.target.value);e.target.blur()};
 $("#study").onchange=e=>{loadStudy(e.target.value);e.target.blur()};
@@ -661,7 +670,7 @@ $("#misslist").addEventListener("click",e=>{const d=e.target.dataset;if(d.del)mi
 $("#misslist").addEventListener("change",e=>{const d=e.target.dataset;if(d.mid)missedApi({action:"comment",id:+d.mid,comment:e.target.value})});
 $$(".modal").forEach(m=>m.addEventListener("click",e=>{if(e.target===m)m.classList.remove("show")}));
 $("#comment").addEventListener("blur",saveComment);
-$("#reviewer").addEventListener("change",async()=>{const n=reviewer();if(!n)return;await api("/api/reviewer",{name:n});await loadStudy(M.study);status("Reviewer: "+n)});
+$("#reviewer").addEventListener("change",async()=>{const n=reviewer();if(!n)return;await api("/api/reviewer",{name:n});await loadStudy(M?M.study:"");status("Reviewer: "+n)});
 new ResizeObserver(()=>draw()).observe($("#vgrid"));
 window.addEventListener("keydown",e=>{const tag=(e.target.tagName||"").toLowerCase(),typing=(tag==="input"&&(e.target.type==="text"||e.target.type==="search"))||tag==="textarea";
   if(e.key==="Escape"){if($(".menu")){closeMenus();return}if(typing){e.target.blur();return}if($(".modal.show")){$$(".modal").forEach(m=>m.classList.remove("show"));return}if(tool==="miss"){cancelDraft();return}setTool("pan");ruler=null;probe=null;draw();return}
@@ -671,7 +680,7 @@ window.addEventListener("keydown",e=>{const tag=(e.target.tagName||"").toLowerCa
   if($(".modal.show")&&e.key!=="?")return;
   const k=e.key.length===1?e.key.toLowerCase():e.key;let used=true;
   if(tool==="miss"&&k==="Enter")saveDraft();else if(tool==="miss"&&k==="w")setShape(shape==="rect"?"pen":"rect");else if(tool==="miss"&&(k==="Backspace"||k==="Delete"))undoStroke();
-  else if(CALLKEYS[k])decide(CALLKEYS[k]);
+  else if(k==="h"&&e.shiftKey)setMirror(!mir);else if(CALLKEYS[k])decide(CALLKEYS[k]);
   else if(k==="ArrowRight")go(ci+1);else if(k==="ArrowLeft")go(ci-1);else if(k==="j")nextUnread();
   else if(k==="ArrowUp")step(panes[act],1);else if(k==="ArrowDown")step(panes[act],-1);else if(k==="PageUp")step(panes[act],5);else if(k==="PageDown")step(panes[act],-5);
   else if(k==="="||k==="+"||e.code==="NumpadAdd")zoomBy(1.2);else if(k==="-"||k==="_"||e.code==="NumpadSubtract")zoomBy(1/1.2);else if(k==="0")fitView();else if(k==="9")actualSize();

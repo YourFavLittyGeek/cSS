@@ -35,3 +35,14 @@ scoring, calls files and reports are unchanged.
 - POSTs now need the `X-CSS: 1` header and a localhost Host header (blocks cross-site requests); filenames are sanitised.
 - Tests: `tests/check_review_web.py` covers snapshot save / sanitising / no-overwrite / sidecar / guards; the browser behaviour
   (zoom stays 1, layouts, panel hide / auto-hide / pin / resize, menu, snapshot flows) was checked with Playwright.
+
+## v5.6.1 - narrow tool strip, R badge, mirror
+- Left tool strip is 34 px wide, icons only (names as tooltips) with an "auto" tick box at the bottom: ticked = the strip folds
+  into a thin "tools" tab and slides out while the pointer is on it (remembered).
+- A small round **R** badge (labelled RIGHT) marks the side of the patient's right on every axial / coronal image (not sagittal);
+  no L badge. It follows the image header: it moves to the other side when the image is mirrored. Settings > "Show R badge".
+- **Mirror left-right** (Shift+H, View / Settings / right-click menus) flips all axial/coronal images of the layout, with a
+  "Mirrored" tag; remembered per study; snapshots keep it (file name `-mirrored`, sidecar says so). Voxel x y z are never flipped.
+- **Side check**: the server compares the FreeSurfer hemisphere label of each candidate with its side of the image
+  (canonical RAS: higher x = patient right) and the viewer warns in the banner when fewer than 30 % agree (View > Side check...
+  shows the numbers).

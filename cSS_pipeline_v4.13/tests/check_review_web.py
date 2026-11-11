@@ -73,7 +73,7 @@ try: urllib.request.urlopen(urllib.request.Request(U + "/api/call", b"{}", {"Con
 except urllib.error.HTTPError as e:
     if e.code != 403: fail(f"POST without X-CSS -> {e.code}")
 import shutil as _sh; _sh.rmtree(sd, ignore_errors=True)
-if not get("/api/meta?study=PH3&reviewer=")["snapdir"].endswith("snapshots/PH3") or "vox" not in get("/api/meta?study=PH3&reviewer=")["cands"][0]: fail("meta snapdir / cand vox")
+if not get("/api/meta?study=PH3&reviewer=")["snapdir"].endswith("snapshots/PH3") or "side_check" not in get("/api/meta?study=PH3&reviewer=") or "vox" not in get("/api/meta?study=PH3&reviewer=")["cands"][0]: fail("meta snapdir / cand vox")
 srv.kill()
 for f in ("PH3_calls.csv", "PH3_calls_Reader_A.csv", "PH3_review_log.csv", "PH3_missed.csv", "reviewers.json"): os.remove(f"{B}/review/{f}")
 print(f"review_web: {n} candidates with meter, name required, calls / comment / missed mark stored with the reviewer, re-loaded per reviewer;\n"

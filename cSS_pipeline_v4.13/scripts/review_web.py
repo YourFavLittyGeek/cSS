@@ -298,6 +298,19 @@ def safe_name(n, exts=("png", "jpg")):
     return f"{base}.{ext.lower()}"
 
 
+def side_check(s):
+    """do the FreeSurfer hemisphere labels agree with the image sides? (canonical RAS: higher x index = patient right)"""
+    try:
+        sw = s.volume("swi"); xs = np.where((sw > 0).any(axis=(1, 2)))[0]; mid = (xs.min() + xs.max()) / 2.0
+        n = ag = 0
+        for _, r in s.df.iterrows():
+            c = s.centre.get(int(r.cand_id)); h = str(r.hemi)[:1].upper()
+            if c is None or h not in "LR" or abs(c[0] - mid) < 3: continue
+            n += 1; ag += int((c[0] > mid) == (h == "R"))
+        return dict(n=n, agree=ag, bad=bool(n >= 3 and ag / n < 0.3))
+    except Exception: return dict(n=0, agree=0, bad=False)
+
+
 def meta(sid, reviewer):
     s = study(sid); calls, note = s.load_calls(reviewer) if reviewer else ({}, "")
     cands = []
@@ -313,7 +326,7 @@ def meta(sid, reviewer):
                 reader_score=_score_json(f"{B}/review/{sid}_score.json") if calls else None,
                 final=(json.load(open(f"{B}/review/{sid}_final.json")) if os.path.exists(f"{B}/review/{sid}_final.json") else None),
                 ref=dict(mu=s.mu, sd=s.sd, src=s.ref_src), missed=s.missed().to_dict("records"), reviewers=reviewers(),
-                call_names=CALLS, snapdir=f"{B}/review/snapshots/{sid}", acq=acq_info(sid))
+                call_names=CALLS, side_check=side_check(s), snapdir=f"{B}/review/snapshots/{sid}", acq=acq_info(sid))
 
 
 class H(BaseHTTPRequestHandler):
@@ -363,7 +376,7 @@ class H(BaseHTTPRequestHandler):
                 if d.get("sidecar"):
                     m = d.get("meta") or {}; c = m.get("cur") or [0, 0, 0]; aff = s.can.affine
                     mm = (aff @ np.array([c[0], c[1], c[2], 1.0]))[:3]
-                    lines = [f"study: {s.sid}", f"reviewer: {rev}", f"candidate: {m.get('cand_id')}", f"plane: {m.get('plane')}  slice: {m.get('slice')}  sequence: {m.get('seq')}",
+                    lines = [f"study: {s.sid}", f"reviewer: {rev}", f"candidate: {m.get('cand_id')}", f"plane: {m.get('plane')}{' (MIRRORED left-right)' if m.get('mirrored') else ''}  slice: {m.get('slice')}  sequence: {m.get('seq')}",
                              f"voxel xyz: {c[0]} {c[1]} {c[2]}", f"mm xyz (SWI space): {mm[0]:.1f} {mm[1]:.1f} {mm[2]:.1f}", f"call: {m.get('call') or '-'}",
                              f"AI meter (rule-based, not validated): {m.get('meter')}", f"zoom: {m.get('zoom')}", f"saved: {time.strftime('%Y-%m-%d %H:%M:%S')}"]
                     open(os.path.splitext(path)[0] + ".txt", "w").write("\n".join(lines) + "\n")
