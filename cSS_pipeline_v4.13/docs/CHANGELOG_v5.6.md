@@ -65,3 +65,9 @@ scoring, calls files and reports are unchanged.
   card text and the meter x0.9. Objects like M02 #4 (occipital fissure, 21 mm) are NOT excluded: their numbers match the real
   pericalcarine cSS M07 #11.
 - Apply: `redetect.py M02,... --v53` (rebuilds the lists; calls inherit by fingerprint), then read.
+
+## v5.6.4 - compare_reads.py (read-only)
+First read vs redo, object by object: old calls (review/old_calls_before_redo/ID_calls.csv) + the pre-redetect snapshot
+(review/changes/ID_before_*) followed into the new detection (kept / merged / excluded by rule / gone), compared with ID_calls_<reviewer>.csv.
+Reports old/new scores, what happened to every old call, cSS lost to rules, exact / cSS-vs-not agreement and kappa of the
+one-to-one pairs, and the list of changed calls. Checked on a fabricated PH3 case (kappa 0.30 hand-verified).
