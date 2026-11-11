@@ -66,3 +66,20 @@ call with another call. Remaining shown artifacts: precentral 11, superior front
 - v53_compare.py now writes each candidate's v5.3 features (v53_* columns) and review/v53_objects.csv (every v5.3
   object, shown and excluded, with the reader calls mapped onto it), so the rule thresholds can be checked against
   the calls without another run.
+
+## v5.3.3 — thresholds from the 287 read candidates (v53_compare.csv of v5.3.2)
+v5.3.2 result: cSS 58 / 61 (M04-32, M04-46, M06-25 excluded by the skull-band rule at skull share 0.51–0.64),
+Artifact 29 / 78, Normal 101 / 114. Using the per-object features of that run, each rule below was set just beyond the
+most extreme of the 61 cSS calls (cSS range in brackets) and checked offline on all 287 calls:
+- E15 skull band: skull share >= 0.70 and outside the surface (cSS max 0.64; was 0.50).
+- E13 midline: >= 50 % within 3 mm of the hemisphere boundary, at any depth (cSS max 0.36) — the fissure is excluded
+  as asked; medial cSS within the fissure would be lost.
+- E18 ill-defined: edge contrast < 1.5 SD (cSS min 1.72).
+- E19 / E20 / E21, only for objects at least 30 % skull-backed: darker than 4.5 SD (cSS max 4.3), larger than
+  1,000 mm³ (cSS max 895), cortex share < 0.33 (cSS min 0.38). Without the skull condition these rules removed every
+  synthetic phantom lesion (darker and larger than any read cSS): absolute darkness and size depend on scanner, TE and
+  disease extent.
+Expected on M02–M11 (offline, from the v5.3.2 features): cSS 61 / 61, Artifact 22 / 78, Normal 90 / 114, Vein 14 / 20,
+Near ICH 5 / 11. The Normal target (< 80) is not reached: the remaining Normal calls are dark normal cortex (medial
+superior frontal, precuneus, insula) that no measured feature separates from the cSS calls.
+These thresholds are FITTED to M02–M11 with little margin; M12–M15 (and M01) are the real test.

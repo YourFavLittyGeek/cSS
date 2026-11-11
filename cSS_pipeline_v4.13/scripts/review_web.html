@@ -56,15 +56,18 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:40}.modal.show{display:flex}
 .dlg{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 22px;max-width:940px;max-height:88vh;overflow:auto;user-select:text}
 .dlg h2{margin:0 0 8px}.dlg h3{margin:14px 0 4px}.dlg td{padding:3px 14px 3px 0;vertical-align:top}.dlg pre{background:var(--bg);padding:10px;border-radius:8px;white-space:pre-wrap;font-size:12.5px}
+.chipbox{border:1px solid var(--line);border-radius:8px;padding:4px 10px;font-size:13px;white-space:nowrap;background:var(--bg)}
+.sc{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:8px 0}.sc .card{background:var(--bg)}.sc .big{font-size:30px;font-weight:800;line-height:1.1}
 .banner{background:#7a5b00;color:#fff;padding:5px 14px;font-size:13px;display:none}
 </style></head><body>
 <div class="top"><b>cSS Reviewer</b>
  <select id="study" title="Study"></select>
  <span class="mut" id="candinfo"></span><div class="prog"><div id="progbar"></div></div><span class="mut" id="progtxt"></span><span class="sp"></span>
+ <span id="scorechip" class="chipbox" title="cSS score 0-4: reviewer (after Q) and AI (rule-based, not validated)"></span>
  <div class="seg" id="themes" title="Theme (T)"><button data-t="light">Light</button><button data-t="dark">Dark</button><button data-t="blue">Blue</button></div>
  <span class="mut">Reviewer</span><input type="text" id="reviewer" list="revlist" placeholder="your name" style="width:150px" autocomplete="off"><datalist id="revlist"></datalist>
 </div>
-<div class="mbar" id="mbar"><span data-m="file">File</span><span data-m="edit">Edit</span><span data-m="view">View</span><span data-m="cand">Candidate</span><span data-m="tools">Tools</span><span data-m="help">Help</span></div>
+<div class="mbar" id="mbar"><span data-m="file">File</span><span data-m="edit">Edit</span><span data-m="view">View</span><span data-m="cand">Candidate</span><span data-m="tools">Tools</span><span data-m="settings">Settings</span><span data-m="help">Help</span></div>
 <div class="banner" id="banner"></div>
 <div class="main">
  <div class="views" id="views">
@@ -105,6 +108,7 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
   <div class="tab" id="tab-cands"><div class="card"><div class="h"><span>Candidates</span><span class="mut sm">click to open</span></div><table class="cmp" id="candtable"></table></div>
    <div class="card"><div class="h"><span>Missed cSS marks</span><span class="mut sm">add with <kbd>X</kbd></span></div><div id="misslist"></div></div></div>
   <div class="tab" id="tab-calls"><div class="card"><div class="h"><span id="cmptitle">AI vs reviewer</span><button class="btn" id="bDiffer" title="show only the candidates where you and the meter differ">Only differ</button></div><table class="cmp" id="cmptable"></table></div>
+   <div class="card"><div class="h"><span>cSS score</span><span class="mut sm">reviewer score updates with <kbd>Q</kbd></span></div><div id="scorecard"></div></div>
    <div class="card"><div class="h">Summary</div><div id="cmpsum"></div>
     <div class="tools" style="margin-top:8px"><button class="btn" id="bScore">Score <kbd>Q</kbd></button><button class="btn" id="bExport">Export CSV <kbd>E</kbd></button><button class="btn" id="bUnread">Next unread <kbd>J</kbd></button></div>
     <div class="mut sm" style="margin-top:6px">The meter is rule-based and not validated: "differ" shows where you and it disagree, not who is right.</div></div></div>
@@ -141,12 +145,18 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
  <tr><td><kbd>S</kbd>, <kbd>1</kbd>&ndash;<kbd>5</kbd></td><td>next sequence / choose a sequence</td><td><kbd>G</kbd></td><td>auto-next after a decision on / off</td></tr>
  <tr><td><kbd>D</kbd> &nbsp; <kbd>L</kbd></td><td>darkness probe: click &nbsp; ruler: drag (mm)</td><td><kbd>?</kbd></td><td>this help</td></tr>
  <tr><td><kbd>X</kbd></td><td>mark a missed cSS (see below)</td><td><kbd>Esc</kbd></td><td>back to navigation / close a menu or window</td></tr></table>
+ <h3>The final score</h3>
+ <p><kbd>Q</kbd> scores your calls. Each hemisphere gets 0 (no cSS), 1 (one sulcus or up to 3 immediately adjacent sulci) or 2 (two or more non-adjacent sulci, or more than 3 adjacent sulci); the total is 0&ndash;4. Category: <b>focal</b> = 1&ndash;3 sulci, <b>disseminated (diffuse)</b> = more than 3 sulci. Several pieces of one continuous lining count as one line and never raise the score. Before the final save a window compares your calls and score with the AI's; from there you can re-review any disagreement, then <b>Save final</b>. The window can be switched off there or in the <b>Settings</b> menu. The final scores go to <code>review/css_report.xlsx</code>. The AI score is the same scoring applied to the candidates in the meter's green band; it is not validated.</p>
  <h3>Marking a cSS the detector missed</h3>
  <p>Press <kbd>X</kbd> (or right-click &rarr; <i>Mark a missed cSS here</i>). A small bar appears: draw a <b>rectangle</b> around the lesion (default) or trace it with the <b>pen</b> (<kbd>W</kbd> switches; several pen strokes are allowed, <kbd>Backspace</kbd> removes the last one). Type a note if you wish, then <b>Save</b> (<kbd>Enter</kbd>); <kbd>Esc</kbd> cancels. Mark the one slice where the lesion is clearest. Saved marks are listed in the <b>Candidates</b> tab with what the detector did at that place (shown, excluded by a rule, below a size gate, or not generated). They are reported next to the score but are <b>not counted</b> in the 0&ndash;4 score.</p>
  <h3>Other tools</h3>
  <p><b>Darkness probe</b>: mean signal of the 3 &times; 3 voxels under the click, as a percentage of the normal cortex and in standard deviations below it (candidates start at about &minus;2.5 SD). <b>Ruler</b>: drag a line, length in mm. <b>Magnifier</b>: a lens follows the mouse. Sequences that are not listed were not imported for this patient.</p>
  <p class="mut">Everything is stored on this computer in the project's <code>review</code> folder, with the reviewer name and time. Close with <kbd>Esc</kbd>.</p>
 </div></div>
+<div class="modal" id="compare"><div class="dlg" style="min-width:640px;max-width:860px"><h2>Before saving: AI vs reviewer</h2><div id="cmpbody"></div>
+ <p class="mut sm">The AI calls and the AI score come from the detector's rule-based evidence. They are not validated: a difference shows where you and the rules disagree, not who is right. Calls you change after seeing this window are recorded as re-votes.</p>
+ <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn" id="cRe">Re-review disagreements</button><button class="btn on" id="cSave">Save final</button><button class="btn" id="cClose">Close <kbd>Esc</kbd></button>
+ <span class="sp"></span><label class="mut sm" style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="cNo"> Do not show this window again (Settings menu turns it back on)</label></div></div></div>
 <div class="modal" id="summary"><div class="dlg" style="min-width:560px"><h2>Summary</h2><div id="sumbody"></div><p class="mut">Close with <kbd>Esc</kbd>.</p></div></div>
 
 <script>
@@ -164,6 +174,7 @@ const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",
 let M=null, VOL=null, LAB=null, seq="swi", vols={}, seqmeta={};
 let nx,ny,nz,vox, cur=[0,0,0], ctr=[0,0,0], zoom=1, wl=[0,65535], lut=new Uint8Array(65536);
 let ci=0, calls={}, undo=[], tool="nav", ruler=null, probe=null, missed=[], draft=null, shape="rect", onlyDiffer=false;
+let compareOn=LS("compare",true), revoteMode=false, readerScore=null, finalRec=null;
 let showMark=LS("mark",true), showOther=LS("other",true), mip=false, autoNext=LS("auto",true), showAI=LS("ai",true), mag=false, hover=0, mouse=null;
 const MAGF=2.5;
 // views: h = horizontal source axis, v = vertical, s = slice axis; displayed flipped (radiological: patient right on screen left)
@@ -250,7 +261,7 @@ async function loadStudy(sid){ status("loading study ...");
   $("#seq").innerHTML=M.seqs.map((s,i)=>`<option value="${s.key}">${s.label}  (${i+1})</option>`).join("");
   $("#revlist").innerHTML=M.reviewers.names.map(n=>`<option value="${esc(n)}">`).join("");
   if(!reviewer()&&M.reviewers.last){ $("#reviewer").value=M.reviewers.last; M=await api(`/api/meta?study=${M.study}&reviewer=${encodeURIComponent(reviewer())}`) }
-  calls=M.calls||{}; undo=[]; draft=null;
+  calls=M.calls||{}; undo=[]; draft=null; revoteMode=false; readerScore=M.reader_score||null; finalRec=M.final||null;
   const b=$("#banner"); const msg=[M.qc,M.note].filter(Boolean).join("  ·  "); $("#seqnote").textContent=M.missing_seqs.length?("Not imported for this patient: "+M.missing_seqs.join(", ")):""; b.textContent=msg; b.style.display=msg?"block":"none";
   const lr=await fetch(`/api/labels?study=${M.study}`); LAB=new Uint16Array(await lr.arrayBuffer());
   seq="swi"; VOL=await loadVol("swi"); ctr=[(nx-1)/2,(ny-1)/2,(nz-1)/2]; wl=seqmeta.swi.win.slice(); setLut();
@@ -277,7 +288,16 @@ function paintLists(){ let n=0; $$("#strip .chip").forEach((e,i)=>{const call=ca
   $("#cmptable").innerHTML="<tr><th>#</th><th>AI meter</th><th>AI suspects</th><th>Your call</th><th></th></tr>"+(rows||'<tr><td colspan="5" class="mut">nothing to show</td></tr>');
   $("#cmpsum").innerHTML=`<table class="cmp"><tr><th></th><th>AI green</th><th>AI yellow</th><th>AI red</th></tr>`+Object.entries(T).map(([r,t])=>`<tr><td>${r==="not read"?"Not read":"You: "+r}</td><td>${r==="not cSS"&&t.green?`<b class="err">${t.green}</b>`:t.green}</td><td>${t.yellow}</td><td>${r==="cSS"&&t.red?`<b class="err">${t.red}</b>`:t.red}</td></tr>`).join("")+`</table>
    <div style="margin-top:8px">Read <b>${n} of ${M.cands.length}</b> · agree <b>${ag}</b> · differ <b>${df}</b> · missed cSS marked <b>${missed.length}</b></div>`;
-  $("#bDiffer").classList.toggle("on",onlyDiffer) }
+  $("#bDiffer").classList.toggle("on",onlyDiffer); paintScores() }
+const CATLBL={absent:"No cSS",focal:"Focal (1–3 sulci)",disseminated:"Disseminated / diffuse (> 3 sulci)"};
+function scoreLine(sc){ if(!sc||sc.multifocality_0_4===undefined)return "—"; return `${sc.multifocality_0_4}/4 (R ${sc.R_score} · L ${sc.L_score}) · ${CATLBL[sc.category]||sc.category}` }
+function scoreCard(title,sc,note){ if(!sc||sc.multifocality_0_4===undefined) return `<div class="card"><div class="h">${title}</div><div class="mut">not scored yet</div></div>`;
+  return `<div class="card"><div class="h">${title}</div><div class="big">${sc.multifocality_0_4}<span class="mut" style="font-size:16px"> / 4</span></div>
+   <div>Right <b>${sc.R_score}</b> · Left <b>${sc.L_score}</b></div><div><b>${esc(CATLBL[sc.category]||sc.category)}</b></div>
+   <div class="mut sm">${sc.n_sulci_total!==undefined?sc.n_sulci_total+" sulci · ":""}${sc.n_lines_total!==undefined?sc.n_lines_total+" continuous cSS line(s)":""}${note?"<br>"+note:""}</div></div>` }
+function paintScores(){ const ai=M.ai_score||{};
+  $("#scorechip").innerHTML=`Reviewer <b>${readerScore&&readerScore.multifocality_0_4!==undefined?readerScore.multifocality_0_4+"/4":"—"}</b> · AI <b>${ai.multifocality_0_4!==undefined?ai.multifocality_0_4+"/4":"—"}</b>`+(finalRec?` · <span class="ok">final saved</span>`:"");
+  $("#scorecard").innerHTML=`<div class="sc">${scoreCard("Reviewer",readerScore,finalRec?("final saved "+esc(finalRec.saved)):"press Q to score")}${scoreCard("AI (not validated)",ai,(ai.n_green||0)+" green-band candidate(s)")}</div>` }
 function gauge(a){ const P=t=>[110-90*Math.cos(Math.PI*t),105-90*Math.sin(Math.PI*t)], arc=(a0,a1,c)=>{const [x0,y0]=P(a0),[x1,y1]=P(a1);return `<path d="M${x0},${y0} A90,90 0 0 1 ${x1},${y1}" stroke="${c}" stroke-width="16" fill="none"/>`};
   const nxp=110-72*Math.cos(Math.PI*a.score), nyp=105-72*Math.sin(Math.PI*a.score);
   $("#gauge").innerHTML=arc(0,.33,"#d64545")+arc(.335,.66,"#e0b030")+arc(.665,1,"#3aa655")+`<line x1="110" y1="105" x2="${nxp}" y2="${nyp}" stroke="var(--text)" stroke-width="4" stroke-linecap="round"/><circle cx="110" cy="105" r="7" fill="var(--text)"/>
@@ -292,21 +312,38 @@ function paintDecision(){ const c=M.cands[ci]; if(!c)return; const st=calls[c.id
 const firstUnread=from=>{const n=M.cands.findIndex((x,j)=>j>from&&!callOf(x)); return n<0?M.cands.findIndex(x=>!callOf(x)):n};
 async function decide(call,isUndo){ const c=M.cands[ci]; if(!c)return; if(!reviewer()){status("Enter your name (upper right) first.",true);$("#reviewer").focus();return}
   const prev=callOf(c); if(!isUndo)undo.push({i:ci,prev});
-  try{ const r=await api("/api/call",{study:M.study,reviewer:reviewer(),cand_id:c.id,call,action:isUndo?"undo":(call?"call":"clear"),meter:showAI?c.ai.score:""}); calls=r.calls; status("✓ Saved automatically · "+r.saved.slice(11));
+  try{ const r=await api("/api/call",{study:M.study,reviewer:reviewer(),cand_id:c.id,call,action:isUndo?"undo":(revoteMode&&call?"revote":(call?"call":"clear")),meter:showAI?c.ai.score:""}); calls=r.calls; status("✓ Saved automatically · "+r.saved.slice(11));
     paintDecision(); paintLists();
-    if(call&&!isUndo&&autoNext){ const m=firstUnread(ci); if(m>=0)setTimeout(()=>go(m),180); else setTimeout(summary,250) } }
+    if(call&&!isUndo&&autoNext){ const m=firstUnread(ci); if(m>=0)setTimeout(()=>go(m),180); else if(!revoteMode)setTimeout(summary,250) } }
   catch(e){ status("NOT SAVED: "+e.message,true) } }
 async function saveComment(){ const c=M.cands[ci]; if(!c)return; const t=$("#comment").value; if(((calls[c.id]||{}).comment||"")===t)return; if(!reviewer()){status("Enter your name first.",true);return}
   try{ const r=await api("/api/call",{study:M.study,reviewer:reviewer(),cand_id:c.id,comment:t,action:"comment"}); calls=r.calls; status("✓ Comment saved · "+r.saved.slice(11)); paintLists() }catch(e){status("NOT SAVED: "+e.message,true)} }
 function doUndo(){ const u=undo.pop(); if(!u){status("Nothing to undo.");return} go(u.i,false); decide(u.prev,true) }
 function nextUnread(){ const m=firstUnread(ci); if(m>=0)go(m); else status("All candidates are read.") }
-async function summary(){ if(!reviewer()){status("Enter your name first.",true);return} $("#sumbody").innerHTML="<p>Saving and scoring ...</p>"; $("#summary").classList.add("show");
-  try{ const r=await api("/api/finish",{study:M.study,reviewer:reviewer()});
-    const rows=Object.entries(r.counts).map(([k,v])=>`<tr><td><span style="color:${CALLCOL[k]}">●</span> ${CALLLBL[k]}</td><td><b>${v}</b></td></tr>`).join("");
-    const ms=r.missed.length?`<h3>Missed cSS marked (not counted in the score)</h3><table>`+r.missed.map(m=>`<tr><td><b>${m.missed_id}</b></td><td>${esc(m.reviewer)}</td><td>${esc(m.comment)}</td><td class="mut">${esc(m.detector_fate)}</td></tr>`).join("")+"</table>":"";
-    $("#sumbody").innerHTML=`<p><b>${esc(M.study)}</b> · reviewer <b>${esc(reviewer())}</b></p><table>${rows}<tr><td>Not read</td><td><b>${r.unread}</b></td></tr><tr><td>Missed cSS marked</td><td><b>${r.missed.length}</b></td></tr></table>`
-      +(r.unread?`<p class="err">${r.unread} candidate(s) not read: the score below is a lower bound.</p>`:"")+`<h3>Score</h3><pre>${esc(r.text||"")}</pre>`+ms }
+const differIdx=()=>M.cands.map((c,i)=>verdict(c)==="differ"?i:-1).filter(i=>i>=0);
+function summaryHtml(r){ const rows=Object.entries(r.counts).map(([k,v])=>`<tr><td><span style="color:${CALLCOL[k]}">●</span> ${CALLLBL[k]}</td><td><b>${v}</b></td></tr>`).join("");
+  const ms=r.missed.length?`<h3>Missed cSS marked (not counted in the score)</h3><table>`+r.missed.map(m=>`<tr><td><b>${m.missed_id}</b></td><td>${esc(m.reviewer)}</td><td>${esc(m.comment)}</td><td class="mut">${esc(m.detector_fate)}</td></tr>`).join("")+"</table>":"";
+  return `<div class="sc">${scoreCard("Final cSS score · reviewer",r.reader_score,"")}${scoreCard("AI score (not validated)",r.ai_score,(r.ai_score.n_green||0)+" green-band candidate(s)")}</div>`
+    +(r.unread?`<p class="err">${r.unread} candidate(s) not read: the reviewer score is a lower bound.</p>`:"")
+    +`<table>${rows}<tr><td>Not read</td><td><b>${r.unread}</b></td></tr><tr><td>Missed cSS marked</td><td><b>${r.missed.length}</b></td></tr></table>`+ms
+    +`<details style="margin-top:8px"><summary class="mut">Scoring details</summary><pre>${esc(r.text||"")}</pre></details>` }
+async function summary(){ if(!reviewer()){status("Enter your name first.",true);return}
+  if(compareOn){ $("#cmpbody").innerHTML="<p>Saving and scoring ...</p>"; $("#compare").classList.add("show") } else { $("#sumbody").innerHTML="<p>Saving and scoring ...</p>"; $("#summary").classList.add("show") }
+  try{ const r=await api("/api/finish",{study:M.study,reviewer:reviewer()}); readerScore=r.reader_score; M.ai_score=r.ai_score; paintScores();
+    if(!compareOn){ await finalSave(false); return }
+    const dx=differIdx(), rowsd=dx.map(i=>{const c=M.cands[i],call=callOf(c); return `<tr class="r" data-i="${i}"><td><b>${c.id}</b></td><td>${c.hemi} · ${esc(c.region)}</td><td>${pill(c.ai.score.toFixed(2),BANDCOL[c.ai.band])} ${esc(c.ai.band==="green"?"cSS":c.ai.suspect.replace(/^I suspect /,""))}</td><td>${pill(CALLLBL[call],CALLCOL[call])}</td><td class="mut">re-review →</td></tr>`}).join("");
+    revoteMode=true;
+    $("#cmpbody").innerHTML=`<p><b>${esc(M.study)}</b> · reviewer <b>${esc(reviewer())}</b></p><div class="sc">${scoreCard("Reviewer",r.reader_score,"")}${scoreCard("AI (not validated)",r.ai_score,(r.ai_score.n_green||0)+" green-band candidate(s)")}</div>`
+      +(r.unread?`<p class="err">${r.unread} candidate(s) not read: the reviewer score is a lower bound.</p>`:"")
+      +`<h3>Calls that differ from the AI (${dx.length})</h3>`+(dx.length?`<table class="cmp" id="cmpdiff"><tr><th>#</th><th>Side · region</th><th>AI</th><th>Your call</th><th></th></tr>${rowsd}</table>`:'<p class="mut">None: every decided candidate agrees with the AI band (yellow counts as neither).</p>') }
+  catch(e){ const b=compareOn?$("#cmpbody"):$("#sumbody"); b.innerHTML=`<p class="err">${esc(e.message)}</p>` } }
+async function finalSave(shown){ $("#compare").classList.remove("show"); $("#sumbody").innerHTML="<p>Saving the final review ...</p>"; $("#summary").classList.add("show");
+  try{ const r=await api("/api/finish",{study:M.study,reviewer:reviewer(),final:true,n_differ:differIdx().length,meter_visible:showAI?1:0,comparison_shown:!!shown});
+    readerScore=r.reader_score; finalRec=r.final; revoteMode=false; paintScores();
+    $("#sumbody").innerHTML=`<p><b>${esc(M.study)}</b> · reviewer <b>${esc(reviewer())}</b> · <span class="ok">final saved ${esc(r.final.saved)}</span></p>`+summaryHtml(r)+`<p class="mut sm">Cohort report: ${esc(r.report||"")}</p>` }
   catch(e){ $("#sumbody").innerHTML=`<p class="err">${esc(e.message)}</p>` } }
+function reReview(){ $("#compare").classList.remove("show"); const dx=differIdx(); if(!dx.length){status("No disagreements to re-review.");return} onlyDiffer=true; setTab("calls"); go(dx[0]); status("Re-reviewing "+dx.length+" disagreement(s). Press Q when done.") }
+function setCompare(v){ compareOn=v; LSS("compare",v); $("#cNo").checked=!v }
 function exportCsv(){ const q=s=>'"'+String(s==null?"":s).replace(/"/g,'""')+'"';
   const lines=[["study","reviewer","cand_id","hemi","region","volume_mm3","ai_meter","ai_band","ai_suspects","reviewer_call","comment","agreement"].join(",")]
     .concat(M.cands.map(c=>[M.study,reviewer(),c.id,c.hemi,c.region,c.volume,c.ai.score,c.ai.band,c.ai.suspect,callOf(c),(calls[c.id]||{}).comment||"",verdict(c)].map(q).join(",")));
@@ -368,6 +405,7 @@ const A={
  auto:{l:"Auto-next after a decision",k:"G",f:()=>{autoNext=!autoNext;tog();status("Auto-next "+(autoNext?"on":"off"))},on:()=>autoNext},
  nav:{l:"Navigate (pan / crosshair)",k:"Esc",f:()=>setTool("nav"),on:()=>tool==="nav"}, dark:{l:"Darkness probe",k:"D",f:()=>setTool(tool==="dark"?"nav":"dark"),on:()=>tool==="dark"},
  ruler:{l:"Ruler",k:"L",f:()=>setTool(tool==="ruler"?"nav":"ruler"),on:()=>tool==="ruler"}, miss:{l:"Mark a missed cSS…",k:"X",f:()=>setTool(tool==="miss"?"nav":"miss"),on:()=>tool==="miss"},
+ compare:{l:"Show the AI comparison before the final save",f:()=>setCompare(!compareOn),on:()=>compareOn},
  help:{l:"Keys and reading rules",k:"?",f:()=>$("#help").classList.toggle("show")} };
 Object.entries(CALLKEYS).forEach(([k,c])=>A["call_"+k]={l:"Decide: "+CALLLBL[c],k:k.toUpperCase(),f:()=>decide(c),on:()=>M&&M.cands[ci]&&callOf(M.cands[ci])===c});
 const seqItems=()=>M.seqs.map((s,i)=>({l:s.label,k:String(i+1),f:()=>setSeq(s.key),on:()=>seq===s.key})).concat(M.missing_seqs.map(n=>({l:n+" (not imported)",dis:true})));
@@ -375,7 +413,7 @@ const themeItems=()=>["light","dark","blue"].map(t=>({l:t==="blue"?"Eye-preservi
 const studyItems=()=>M.studies.map(s=>({l:s,f:()=>loadStudy(s),on:()=>s===M.study}));
 const MENUS={ file:()=>[{sub:"Open study",items:studyItems},"-","summary","exportcsv"], edit:()=>["undo","clear","comment"],
  view:()=>["mark","other","mag","mip","ai","-",{sub:"Sequence",items:seqItems},{sub:"Theme",items:themeItems},"-","zin","zout","reset","centre","-","tviewer","tcands","tcalls"],
- cand:()=>["prev","next","unread","-","call_y","call_v","call_n","call_a","call_u","call_h","-","auto"], tools:()=>["nav","mag","dark","ruler","miss"], help:()=>["help"] };
+ cand:()=>["prev","next","unread","-","call_y","call_v","call_n","call_a","call_u","call_h","-","auto"], tools:()=>["nav","mag","dark","ruler","miss"], settings:()=>["compare","ai","auto","-",{sub:"Theme",items:themeItems}], help:()=>["help"] };
 function closeMenus(){ $$(".menu").forEach(m=>m.remove()); $$("#mbar span").forEach(s=>s.classList.remove("on")); drawLens() }
 function openMenu(items,x,y,level){ $$(".menu").forEach(m=>{if(+m.dataset.level>=level)m.remove()});
   const m=document.createElement("div"); m.className="menu"; m.dataset.level=level;
@@ -407,6 +445,8 @@ $("#win").oninput=e=>setWL(101-e.target.value,getWL()[1]); $("#lev").oninput=e=>
 $("#tMark").onclick=A.mark.f; $("#tOther").onclick=A.other.f; $("#tMip").onclick=A.mip.f; $("#tAuto").onclick=A.auto.f; $("#tMag").onclick=A.mag.f;
 $("#bReset").onclick=resetView; $("#bCentre").onclick=()=>go(ci); $("#bScore").onclick=summary; $("#bExport").onclick=exportCsv; $("#bUnread").onclick=nextUnread;
 $("#bDiffer").onclick=()=>{onlyDiffer=!onlyDiffer;paintLists()};
+$("#cRe").onclick=reReview; $("#cSave").onclick=()=>finalSave(true); $("#cClose").onclick=()=>$("#compare").classList.remove("show"); $("#cNo").onchange=e=>setCompare(!e.target.checked);
+$("#cmpbody").addEventListener("click",e=>{const r=e.target.closest("tr.r"); if(r){$("#compare").classList.remove("show");onlyDiffer=true;setTab("calls");go(+r.dataset.i);status("Re-review this candidate; press Q to return to the comparison.")}});
 $("#dRect").onclick=()=>setShape("rect"); $("#dPen").onclick=()=>setShape("pen"); $("#dUndo").onclick=undoStroke; $("#dSave").onclick=saveDraft; $("#dCancel").onclick=cancelDraft;
 $("#misslist").addEventListener("click",e=>{const d=e.target.dataset; if(d.del)missedApi({action:"delete",id:+d.del}); if(d.go){const m=missed.find(x=>x.missed_id==d.go); if(m){cur=[m.can_i,m.can_j,m.can_k]; if(m.pts){cur[VIEWS[+m.plane].s]=+m.slice} ctr=cur.slice();draw()}}});
 $("#misslist").addEventListener("change",e=>{const d=e.target.dataset; if(d.mid)missedApi({action:"comment",id:+d.mid,comment:e.target.value})});
@@ -435,6 +475,6 @@ window.addEventListener("keydown",e=>{ const tag=(e.target.tagName||"").toLowerC
   else if(k==="q")summary(); else if(k==="e")exportCsv(); else if(k==="F1")setTab("viewer"); else if(k==="F2")setTab("cands"); else if(k==="F3")setTab("calls");
   else if(k==="?"||k==="/")A.help.f(); else used=false;
   if(used)e.preventDefault() });
-theme(LS("theme","dark")); setTab(LS("tab","viewer")); setTool("nav"); tog();
+theme(LS("theme","dark")); setTab(LS("tab","viewer")); setTool("nav"); tog(); setCompare(compareOn);
 loadStudy("").catch(e=>status("Could not load: "+e.message,true));
 </script></body></html>

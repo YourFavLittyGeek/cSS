@@ -120,6 +120,17 @@ MIXED_REVIEW = os.environ.get("CSS_MIXED_REVIEW", "") == "1"
 V53 = os.environ.get("CSS_V53", "") == "1"
 V53_OUT_MM = 1.0                 # E17: voxels further than this outside the labelled pial boundary count as "outside"
 E17_FRAC, E17_CTX = 0.6, 0.4         # E17: >= this share outside AND cortex_frac below this (and no tram-track)
+# v5.3.3 thresholds set just beyond the most extreme of the 61 reader-called cSS of M02-M11 (min / max in brackets).
+# They are fitted to those 10 patients: on new patients some cSS WILL fall outside them - check ID_excluded.csv.
+E15_SKULL = 0.70                     # skull band (cSS max 0.64)
+E18_EDGE = 1.5                       # ill-defined: edge contrast below this (cSS min 1.72; E9 keeps 0.75 for all)
+E19_DARK = 4.5                       # darker than any cSS read (cSS max 4.3) ...
+E20_VOL = 1000.0                     # larger than any cSS focus read (cSS max 895 mm3, after merging) ...
+E21_CTX = 0.33                       # off the cortex (cSS min 0.38) ...
+E19_SKULL = 0.3                      # ... E19 / E20 / E21 only for objects that are also partly skull-backed: darkness,
+                                     # size and cortex share depend on the scanner, TE and disease extent (the synthetic
+                                     # phantom cSS are darker and larger than any read cSS and must not be excluded)
+E13_FRAC_V533 = 0.5                  # midline, any depth (cSS max 0.36)
 V53_GAP_MM, V53_MAX_MM = 5.0, 80.0   # second merge pass: gap (same region label only) and cap on the bounding-box diagonal
 E12_MM3 = 3000.0                     # extent: one connected object above this volume (largest reader-called cSS 830 mm3;
                                      # v5.3.0 also used length > 60 mm, which removed 9 thin cSS)
@@ -887,7 +898,8 @@ FULL_BOTTOM = bool(len(_nz) and _area[_bot] < 0.2 * _area.max())
 RULE_CONF = {"E1": "high" if T1_ANAT else "medium", "E2": "medium", "E3": "medium", "E4": "high",
              "E5": "medium", "E6": "medium", "E7": "medium", "E8": "low", "E9": "medium",
              "E10": "low", "E11": "low",                       # v5.0 mimic rules: no real-data support yet
-             "E12": "low", "E13": "low", "E14": "low", "E15": "low", "E16": "low", "E17": "low"}   # v5.3: chosen on M02-M11, not validated
+             "E12": "low", "E13": "low", "E14": "low", "E15": "low", "E16": "low", "E17": "low",
+             "E18": "low", "E19": "low", "E20": "low", "E21": "low"}   # v5.3: chosen on M02-M11, not validated
 def exclusion(r):
     """-> (rule_version, reason); ("", "") = kept. v5.1.1 CSS_MIXED_REVIEW=1: a mixed merged object (pieces disagree)
     is not removed whole by a vein rule (E5 / E6 / E7); it is shown with mixed_object_review = 1"""
@@ -906,15 +918,23 @@ def exclusion_v4(r):
         return "E3@v4.9.2", "skull base (lowest 20 % of the cerebrum)"
     if r["extent_mm"] < MIN_EXTENT_MM: return "E4@v4.8", f"speck (<{MIN_EXTENT_MM:g} mm)"
     if V53:                          # v5.3 opt-in rules (CSS_V53=1); every excluded object stays in ID_excluded.csv
-        if r["skull_frac"] >= E15_FRAC and r["pial_dist_mm"] > 0:     # v5.3.1: only objects on / outside the surface
-            return "E15@v5.3.1", "skull band: outside the cortex and dark all the way out to the brain-mask edge (inner skull / dura)"
+        if r["skull_frac"] >= E15_SKULL and r["pial_dist_mm"] > 0:    # v5.3.3: 0.70 (0.50 excluded 3 cSS)
+            return "E15@v5.3.3", "skull band: outside the cortex and dark all the way out to the brain-mask edge (inner skull / dura)"
         if r["_band"]:
             return "E12@v5.3.1", f"extent: one connected object larger than any cSS focus (> {E12_MM3:g} mm3) - band artifact"
         if r["vent_frac"] >= E16_FRAC:
             return "E16@v5.3.1", "ventricle / choroid plexus (within 3 mm of a ventricle label)"
         if r["out_frac"] >= E17_FRAC and r["cortex_frac"] < E17_CTX and not (np.isfinite(r["tram_frac"]) and r["tram_frac"] >= 0.2):
             return "E17@v5.3.2", f"outside the cortex: most of it lies > {V53_OUT_MM:g} mm outside the brain surface (skull / dura band)"
-        if r["midline_frac"] >= E13_FRAC and r["pial_dist_mm"] > 0:
+        if r["volume_mm3"] > E20_VOL and r["skull_frac"] >= E19_SKULL:
+            return "E20@v5.3.3", f"skull-backed and larger than any cSS focus read (> {E20_VOL:g} mm3)"
+        if r["darkness_z"] > E19_DARK and r["skull_frac"] >= E19_SKULL:
+            return "E19@v5.3.3", f"skull-backed and darker than any cSS read (> {E19_DARK:g} SD): skull / air-bone signal void"
+        if r["cortex_frac"] < E21_CTX and r["skull_frac"] >= E19_SKULL:
+            return "E21@v5.3.3", f"skull-backed and off the cortex (cortex share < {E21_CTX:g})"
+        if np.isfinite(r["edge_contrast"]) and r["edge_contrast"] < E18_EDGE:
+            return "E18@v5.3.3", f"ill-defined (edge contrast < {E18_EDGE:g} SD)"
+        if r["midline_frac"] >= E13_FRAC_V533:                         # v5.3.3: any depth (user: exclude the fissure)
             return "E13@v5.3", "midline: in the interhemispheric fissure (falx / sagittal sinus / midline veins)"
         if "orbitofrontal" in r["region"] and r["mask_edge_mm"] < E14_EDGE_MM:
             return "E14@v5.3", "orbitofrontal air-bone susceptibility zone"

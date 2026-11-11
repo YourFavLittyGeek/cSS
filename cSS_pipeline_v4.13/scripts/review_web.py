@@ -245,6 +245,24 @@ class Study:
         return m.to_dict("records")
 
 
+SCORE_KEYS = ("L_score", "R_score", "multifocality_0_4", "category", "n_sulci_total", "L_sulci", "R_sulci", "L_lines", "R_lines",
+              "n_lines_total", "scoring_method", "n_unreviewed", "near_ich_candidates", "infratentorial_accepted")
+def _score_json(path):
+    try: j = json.load(open(path))
+    except Exception: return None
+    return {k: j[k] for k in SCORE_KEYS if k in j}
+
+def ai_score(s):
+    """the same scoring applied to the detector's green-band candidates (rule-based meter >= 0.66). NOT validated.
+    Written to review/ID_score_ai.json only; the reader's score files are not touched. Cached per loaded study."""
+    if getattr(s, "_ai", None) is None:
+        ids = [int(r.cand_id) for _, r in s.df.iterrows() if ai_opinion(r)["band"] == "green"]
+        r = subprocess.run([sys.executable, f"{HERE}/score_css.py", s.sid, "--accept-ids", ",".join(map(str, ids)) or "none", "--tag", "ai"],
+                           capture_output=True, text=True, env=dict(os.environ, CSS_BASE=B, PYTHONWARNINGS="ignore"))
+        s._ai = dict(_score_json(f"{B}/review/{s.sid}_score_ai.json") or {}, n_green=len(ids), green_ids=ids,
+                     error="" if r.returncode == 0 else (r.stderr or r.stdout)[-300:])
+    return s._ai
+
 STUDIES = {}; IDS = []
 def study(sid):
     if sid not in IDS: raise KeyError(sid)
@@ -274,7 +292,9 @@ def meta(sid, reviewer):
                                                   "css_evidence", "vein_evidence", "score")}))
     return dict(study=sid, studies=IDS, shape=list(s.shape), vox=s.vox, cands=cands, calls=calls, note=note, qc=s.qc,
                 seqs=[dict(key=k, **{a: b for a, b in s.meta_seq.get(k, dict(label=SEQ_NAMES[k])).items()}) for k in s.avail],
-                missing_seqs=[SEQ_NAMES[k] for k in ("flair", "t1", "t2", "phase") if k not in s.avail],
+                missing_seqs=[SEQ_NAMES[k] for k in ("flair", "t1", "t2", "phase") if k not in s.avail], ai_score=ai_score(s),
+                reader_score=_score_json(f"{B}/review/{sid}_score.json") if calls else None,
+                final=(json.load(open(f"{B}/review/{sid}_final.json")) if os.path.exists(f"{B}/review/{sid}_final.json") else None),
                 ref=dict(mu=s.mu, sd=s.sd, src=s.ref_src), missed=s.missed().to_dict("records"), reviewers=reviewers(),
                 call_names=CALLS)
 
@@ -326,9 +346,23 @@ class H(BaseHTTPRequestHandler):
                 cmd = [sys.executable, f"{HERE}/mark_css.py", s.sid, ",".join(map(str, acc)) or "none", "--reviewed",
                        ",".join(map(str, sorted(c))) or "none"] + (["--ich", ",".join(map(str, ich))] if ich else [])
                 r = subprocess.run(cmd, capture_output=True, text=True, env=dict(os.environ, CSS_BASE=B, PYTHONWARNINGS="ignore"))
-                return self._send(dict(ok=r.returncode == 0, text=(r.stdout + ("\n" + r.stderr[-1500:] if r.returncode else "")).strip(),
-                                       counts={k: sum(v == k for v in c.values()) for k in CALLS}, unread=len(s.df) - len(c),
-                                       missed=s.missed().to_dict("records")))
+                res = dict(ok=r.returncode == 0, text=(r.stdout + ("\n" + r.stderr[-1500:] if r.returncode else "")).strip(),
+                           counts={k: sum(v == k for v in c.values()) for k in CALLS}, unread=len(s.df) - len(c),
+                           missed=s.missed().to_dict("records"), reader_score=_score_json(f"{B}/review/{s.sid}_score.json"),
+                           ai_score=ai_score(s))
+                if d.get("final"):
+                    # final save: one record per study (overwritten by a later final save) + the cohort report
+                    lp = f"{B}/review/{s.sid}_review_log.csv"; nrev = 0
+                    if os.path.exists(lp):
+                        lg = pd.read_csv(lp); nrev = int(((lg.action == "revote") & (lg.reviewer == rev)).sum())
+                    fin = dict(study=s.sid, reviewer=rev, saved=now(), reviewer_score=res["reader_score"], ai_score=res["ai_score"],
+                               n_candidates=int(len(s.df)), n_read=int(len(c)), n_css=int(len(acc)), n_differ=d.get("n_differ", ""),
+                               n_missed=int(len(res["missed"])), n_revoted=nrev, meter_visible=d.get("meter_visible", ""),
+                               comparison_shown=bool(d.get("comparison_shown")))
+                    json.dump(fin, open(f"{B}/review/{s.sid}_final.json", "w"), indent=1)
+                    import css_report
+                    out, n, xl = css_report.build(B); res["final"] = fin; res["report"] = f"{out}.csv{xl}"
+                return self._send(res)
             self._send(dict(error="not found"), code=404)
         except Exception as e:
             self._send(dict(error=f"{type(e).__name__}: {e}"), code=500)

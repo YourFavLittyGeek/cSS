@@ -46,10 +46,20 @@ if use_truth:
     df["accept"] = [int(((lab == c) & truth).any()) for c in df.cand_id]
     df.to_csv(csv, index=False)
 
+# v5.5: --accept-ids 1,4,9 --tag NAME scores a hypothetical set of accepted candidates (e.g. the detector's own green-
+# band candidates = "AI score") WITHOUT touching the reader's files: nothing is written to ID_candidates.csv,
+# ID_score.json or css_scores.csv; the result goes to review/ID_score_<NAME>.json only.
+TAG = sys.argv[sys.argv.index("--tag") + 1] if "--tag" in sys.argv else ""
+if "--accept-ids" in sys.argv:
+    if not TAG: sys.exit("--accept-ids needs --tag NAME (the reader's score files are never overwritten)")
+    _a = sys.argv[sys.argv.index("--accept-ids") + 1]
+    _ids = [] if _a.lower() in ("", "none") else [int(x) for x in _a.split(",") if x.strip()]
+    df["accept"] = df.cand_id.isin(_ids).astype(int); df["near_ich"] = 0; df["reviewed"] = 1
 df["accept"] = pd.to_numeric(df["accept"], errors="coerce")
 if len(df) and df["accept"].isna().any():
     sys.exit(f"Unreviewed candidates (fill accept with 1 or 0): {df.loc[df.accept.isna(), 'cand_id'].tolist()}")
 
+LINE_MM = 6.0                     # v5.5: accepted pieces closer than this are one continuous cSS line (reported only)
 def min_dist(a, b):
     idx = np.argwhere(a | b); pad = int(np.ceil(ADJ_MM / min(vox))) + 1
     lo = np.maximum(idx.min(0) - pad, 0); hi = idx.max(0) + pad + 1
@@ -185,6 +195,7 @@ for h in ["L", "R"]:
     masks = {i: lab == i for i in ids}
     D = {(i, j): min_dist(masks[i], masks[j]) for i in ids for j in ids if i < j}
     foci = groups(ids, D, MERGE_MM); clusters = groups(ids, D, ADJ_MM)
+    result[f"{h}_lines"] = len(groups(ids, D, LINE_MM))      # v5.5: accepted pieces within LINE_MM = one continuous cSS line
     fpc = [sum(1 for f in foci if f[0] in c) for c in clusters]
     if A2 is not None:
         fs = {i: cand_sulci.get(i) or sulci_of(masks[i], h) for i in ids}
@@ -322,18 +333,25 @@ result["n_unreviewed"] = int((df.reviewed == 0).sum()) if "reviewed" in df.colum
 result["near_ich_candidates"] = int(len(ich))
 result["near_ich_volume_mm3"] = round(float(ich.volume_mm3.sum()) if len(ich) else 0.0, 1)
 
-json.dump(result, open(f"{base}/review/{subj}_score.json", "w"), indent=2)
-summ = f"{base}/review/css_scores.csv"
-row = pd.DataFrame([{k: v for k, v in result.items() if k not in ("regions", "sulci")}])
-if os.path.exists(summ):
-    old = pd.read_csv(summ); old = old[old.subject != subj]
-    row = pd.concat([old, row], ignore_index=True)
-row.to_csv(summ, index=False)
+# cSS lines: accepted candidates lying within LINE_MM of each other count as ONE continuous line (reported; the 0-4
+# score itself counts sulci, so several pieces of one lining never raise it)
+result["n_lines_total"] = int(result.get("L_lines", 0)) + int(result.get("R_lines", 0))
+result["line_gap_mm"] = LINE_MM
+if TAG:
+    json.dump(result, open(f"{base}/review/{subj}_score_{TAG}.json", "w"), indent=2)
+else:
+    json.dump(result, open(f"{base}/review/{subj}_score.json", "w"), indent=2)
+    summ = f"{base}/review/css_scores.csv"
+    row = pd.DataFrame([{k: v for k, v in result.items() if k not in ("regions", "sulci")}])
+    if os.path.exists(summ):
+        old = pd.read_csv(summ); old = old[old.subject != subj]
+        row = pd.concat([old, row], ignore_index=True)
+    row.to_csv(summ, index=False)
 
 print(f"\n{subj}  cSS multifocality score: {total}/4   ({result['category']})   [{method}; {seq}"
       + (f" {acq['field_T']}T TE {acq['TE_ms']} ms" if acq.get("TE_ms") != "" and acq else "") + "]")
 for h, nm in (("L", "left "), ("R", "right")):
-    print(f"  {nm}: score {result[f'{h}_score']}  foci {result[f'{h}_foci']}  clusters {result[f'{h}_clusters']}"
+    print(f"  {nm}: score {result[f'{h}_score']}  lines {result[f'{h}_lines']}  foci {result[f'{h}_foci']}  clusters {result[f'{h}_clusters']}"
           + (f"  sulci {result[f'{h}_sulci']} ({result[f'{h}_sulci_pct']}% of sulci)" if A2 is not None else ""))
 if A2 is not None and sulci_names:
     print(f"  sulci: {', '.join(sulci_names)}")

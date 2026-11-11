@@ -492,6 +492,15 @@ v5.1") but are not ranker features; Stage A only, then stop for the user's real-
   9, 6 cross-call merges. Remaining FPs: convexity artifacts (precentral / superior frontal), medial superior frontal /
   precuneus and insula Normal. v5.3.2: no trim; E17 outside-cortex rule (out_frac > 1 mm >= 0.6, cortex_frac < 0.4, no tram); v53_compare writes v53_* features
   and review/v53_objects.csv so thresholds can be studied offline against the calls.
+- v5.3.2 on the Mac: cSS 58/61 (3 lost to E15 at skull 0.51-0.64), Artifact 29/78, Normal 101/114. v5.3.3 thresholds set just
+  beyond the most extreme of the 61 cSS calls from v53_compare.csv features (offline: cSS 61/61, Artifact 22, Normal 90):
+  E15 skull >= 0.70 & pial > 0; E13 midline_frac >= 0.5 any depth; E18 edge < 1.5; E19 dark > 4.5 / E20 vol > 1000 /
+  E21 cortex < 0.33 only when skull_frac >= 0.3 (without it they removed every phantom lesion). check_v53 asserts the
+  plain phantom loses no lesion with v5.3. Fitted to M02-M11; M12-M15 are the test.
+- v5.5 (docs/CHANGELOG_v5.5.md): score_css --accept-ids/--tag (hypothetical accept set -> ID_score_<tag>.json, reader files
+  untouched), L/R_lines + n_lines_total (accepted pieces within 6 mm = one line, reported only). review_web: AI score
+  (green-band candidates scored, not validated) in the top bar, comparison window before the final save (re-review
+  disagreements, revote logged, can be switched off in Settings), ID_final.json, css_report.py -> review/css_report.xlsx.
 
 ## Known issues / decisions
 - SWI-only route (SynthSeg on SWI) gives a coarse pial surface → pial features less reliable.

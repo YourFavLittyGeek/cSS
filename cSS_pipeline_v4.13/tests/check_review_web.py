@@ -43,7 +43,23 @@ if get("/api/meta?study=PH3&reviewer=Reader%20B")["calls"]: fail("another review
 if get("/api/meta?study=PH3&reviewer=")["reviewers"]["last"] != "Reader A": fail("last reviewer name not remembered")
 f = post("/api/finish", dict(study="PH3", reviewer="Reader A"))
 if f["counts"]["cSS"] != 1 or f["unread"] != n - 1: fail(f"summary: {f}")
+# v5.5 final score: reviewer score from the reader's calls, AI score from the green-band candidates (own file), final save
+rs, ai = f.get("reader_score") or {}, f.get("ai_score") or {}
+if rs.get("multifocality_0_4") is None or rs.get("category") not in ("absent", "focal", "disseminated") or "n_lines_total" not in rs: fail(f"reader score: {rs}")
+if ai.get("multifocality_0_4") is None or not os.path.exists(f"{B}/review/PH3_score_ai.json"): fail(f"AI score: {ai}")
+if json.load(open(f"{B}/review/PH3_score.json"))["multifocality_0_4"] != rs["multifocality_0_4"]: fail("the AI scoring must not overwrite the reader's score file")
+if os.path.exists(f"{B}/review/PH3_final.json"): fail("no final record before the final save")
+post("/api/call", dict(study="PH3", reviewer="Reader A", cand_id=ids[1], call="Vein", action="revote"))
+g = post("/api/finish", dict(study="PH3", reviewer="Reader A", final=True, n_differ=1, meter_visible=1, comparison_shown=True))
+fin = json.load(open(f"{B}/review/PH3_final.json"))
+if fin["reviewer"] != "Reader A" or fin["n_revoted"] != 1 or fin["reviewer_score"]["multifocality_0_4"] != g["reader_score"]["multifocality_0_4"]: fail(f"final record: {fin}")
+rep = pd.read_csv(f"{B}/review/css_report.csv")
+if list(rep.Study) != ["PH3"] or "cSS score (0-4)" not in rep.columns or "Category" not in rep.columns: fail(f"report: {rep}")
+if get("/api/meta?study=PH3&reviewer=Reader%20A")["final"]["reviewer"] != "Reader A": fail("final record not returned with the study")
+for x in ("PH3_final.json", "PH3_score_ai.json", "css_report.csv", "css_report.xlsx"):
+    if os.path.exists(f"{B}/review/{x}"): os.remove(f"{B}/review/{x}")
 srv.kill()
 for f in ("PH3_calls.csv", "PH3_calls_Reader_A.csv", "PH3_review_log.csv", "PH3_missed.csv", "reviewers.json"): os.remove(f"{B}/review/{f}")
-print(f"review_web: {n} candidates with meter, name required, calls / comment / missed mark stored with the reviewer, re-loaded per reviewer")
+print(f"review_web: {n} candidates with meter, name required, calls / comment / missed mark stored with the reviewer, re-loaded per reviewer;\n"
+      f"   final score {rs['multifocality_0_4']}/4 ({rs['category']}), AI score {ai['multifocality_0_4']}/4 in its own file, final record + cohort report written")
 print("RESULT review_web OK")

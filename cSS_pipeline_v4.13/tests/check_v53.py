@@ -50,6 +50,13 @@ new = ["midline_frac", "mask_edge_mm", "skull_frac", "v53_active", "vent_frac", 
 if list(off.columns[-6:]) != new: fail(f"new columns must be appended last, got {list(off.columns[-6:])}")
 if off.v53_active.any(): fail("v53_active must be 0 with the switch off")
 print(f"switch off: {len(off)} candidates, 6 new columns appended, v53_active 0")
+# v5.3.3: the absolute thresholds (darkness, volume, cortex share) were fitted to real cSS; the phantom cSS are darker
+# and larger. On the plain phantom (no skull band) switching v5.3 on must not lose a true lesion.
+_t = nib.load(f"{T}/work/PH3_truth.nii.gz").get_fdata().astype(int)
+_on, _on_lab, _x, _, _ = detect("PH3", True)
+_f0 = {int(i) for i in np.unique(_t[(off_lab > 0) & (_t > 0)])}; _f1 = {int(i) for i in np.unique(_t[(_on_lab > 0) & (_t > 0)])}
+if _f0 - _f1: fail(f"plain phantom: v5.3 lost true lesions {sorted(_f0 - _f1)}: " + "; ".join(_x.reason.astype(str).unique()))
+print(f"plain phantom: true lesions shown {len(_f0)} -> {len(_f1)} with v5.3")
 
 # ---- 2. skull phantom: T1-style mask (labels + 5 mm): dark line just outside the cortex (thin-CSF convexity)
 img = nib.load(f"{T}/data/PH3_swi.nii"); I = img.get_fdata().astype(np.float32); vox = img.header.get_zooms()[:3]
