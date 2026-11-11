@@ -403,7 +403,7 @@ async function loadStudy(sid){status("loading study ...");const my=++loadSeq,sta
   $("#revlist").innerHTML=M.reviewers.names.map(n=>`<option value="${esc(n)}">`).join("");
   if(!reviewer()&&M.reviewers.last){$("#reviewer").value=M.reviewers.last;const Mr=await api(`/api/meta?study=${M.study}&reviewer=${encodeURIComponent(reviewer())}`);if(stale())return;M=Mr}
   // v5.7 validation read: default ON when this reviewer has no final record for the study; an explicit choice is remembered
-  {const want=reviewer()?LS("vmode_"+M.study+"|"+reviewer(),!M.final):false;
+  {const want=(reviewer()&&!M.open_read)?LS("vmode_"+M.study+"|"+reviewer(),!M.final):false;if(M.open_read&&typeof showAI!=="undefined"&&!showAI){showAI=true}
    if(want){const M1=await api(`/api/meta?study=${M.study}&reviewer=${encodeURIComponent(reviewer())}&mode=validation`);if(stale())return;M=M1}vmode=want&&M.mode==="validation";
    M.cands.forEach(c=>c.disp=c.id);
    if(vmode){let h=0;for(const ch of M.study+"|"+reviewer())h=(h*31+ch.charCodeAt(0))>>>0;const rnd=()=>{h=(h*1664525+1013904223)>>>0;return h/4294967296};
