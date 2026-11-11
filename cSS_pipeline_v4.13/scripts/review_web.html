@@ -481,19 +481,19 @@ function sideMsg(){const s=sideChk;if(!s||!s.n)return "Side check: not enough in
 const panelVisible=()=>(!ph&&!ah)||peek;
 function setTab(t){lastTab=t;LSS("tab",t);$$("#tabs button").forEach(b=>b.classList.toggle("on",b.dataset.tab===t));$$(".tab").forEach(e=>e.classList.toggle("on",e.id==="tab-"+t));renderRail()}
 function renderRail(){const r=$("#rail"),c=M&&cand(),vis=panelVisible();
-  r.innerHTML=[["viewer","Viewer"],["cands","Candidates"],["calls","Calls summary"],["ai","AI meter"],["dec","Decision"]].map(([k,l])=>`<div data-r="${k}" class="${vis&&k===lastTab?"on":""}">${l}${k==="dec"&&c&&callOf(c)?' <span class="dot"></span>':""}</div>`).join("")+`<div class="pinb" data-r="pin" title="Pin the panel (show it permanently, switch Auto-hide off)">${svg("pin")}</div>`}
+  r.innerHTML=[["viewer","Viewer"],["cands","Candidates"],["calls","Calls summary"]].map(([k,l])=>`<div data-r="${k}" class="${vis&&k===lastTab?"on":""}">${l}${k==="viewer"&&c&&callOf(c)?' <span class="dot"></span>':""}</div>`).join("")+`<div class="pinb" data-r="pin" title="Pin the panel (show it permanently, switch Auto-hide off)">${svg("pin")}</div>`}
 function applyPanel(){const panel=$("#panel"),rail=$("#rail"),pinned=!ph&&!ah,vis=pinned||peek;
   panel.style.width=pw+"px";panel.classList.toggle("ovl",!pinned);panel.style.display=vis?"flex":"none";rail.style.display=pinned?"none":"flex";$("#ahchk").checked=ah;renderRail();requestAnimationFrame(()=>draw())}
 function hidePanel(){if(!ph&&!ah){ph=true;LSS("ph",true)}else peek=false;applyPanel()}
 function togglePanel(){if(!ph&&!ah){ph=true;LSS("ph",true)}else if(ph&&!ah){ph=false;LSS("ph",false)}else peek=!peek;applyPanel()}
 function setAutoHide(v){ah=v;LSS("ah",v);if(v){peek=true;ph=false;LSS("ph",false)}else{peek=false;ph=false;LSS("ph",false)}applyPanel()}
 function pinPanel(){ah=false;ph=false;peek=false;LSS("ah",false);LSS("ph",false);applyPanel()}
-function openTab(k){const t=(k==="ai"||k==="dec")?"viewer":k;if(ph&&!ah){ph=false;LSS("ph",false)}if(ah)peek=true;setTab(t);applyPanel();
-  if(k==="ai"||k==="dec")setTimeout(()=>{const e=$(k==="ai"?"#aicard":"#deccard");if(e)e.scrollIntoView({block:"nearest"})},50)}
+function openTab(k){const t=k;if(ph&&!ah){ph=false;LSS("ph",false)}if(ah)peek=true;setTab(t);applyPanel();
+}
 function armLeave(){clearTimeout(leaveT);if(!ah||!peek)return;leaveT=setTimeout(()=>{const p=$("#panel");if(resizing||p.contains(document.activeElement)&&document.activeElement.tagName==="INPUT"&&document.activeElement.type==="text")return;peek=false;applyPanel()},600)}
 function keepOpen(){clearTimeout(leaveT)}
 $("#rail").addEventListener("mouseenter",e=>{keepOpen()});$("#rail").addEventListener("mouseleave",armLeave);
-$("#rail").addEventListener("mouseover",e=>{const d=e.target.closest("[data-r]");if(d&&ah&&d.dataset.r!=="pin"&&(!peek||(d.dataset.r!==lastTab&&!(["ai","dec"].includes(d.dataset.r)&&lastTab==="viewer"))))openTab(d.dataset.r)});
+$("#rail").addEventListener("mouseover",e=>{const d=e.target.closest("[data-r]");if(d&&ah&&d.dataset.r!=="pin"&&(!peek||d.dataset.r!==lastTab))openTab(d.dataset.r)});
 $("#rail").addEventListener("click",e=>{const d=e.target.closest("[data-r]");if(!d)return;if(d.dataset.r==="pin")pinPanel();else openTab(d.dataset.r)});
 $("#panel").addEventListener("mouseenter",keepOpen);$("#panel").addEventListener("mouseleave",armLeave);
 $("#tabs").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;if(b.dataset.tab===lastTab&&panelVisible()){hidePanel();return}setTab(b.dataset.tab)});

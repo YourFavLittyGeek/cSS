@@ -49,3 +49,7 @@ scoring, calls files and reports are unchanged.
 
 ## v5.6.2
 - Crosshair is hidden by default (Settings / View > Crosshair turns it on) and much fainter when shown (old saved setting ignored).
+- Right-panel rail buttons: only Viewer, Candidates, Calls summary (+ the pin symbol); the green dot (current candidate has a call) is on Viewer.
+- New `scripts/midline_probe.py` (read-only): measures how much each detector object looks like the interhemispheric fissure
+  (mid_local_frac, both3_frac, equi_med_mm, hug_med_mm, plane distance, sheet orientation) next to the reader's calls and tests
+  candidate rules for "cSS calls lost"; used to set the occipital-midline exclusion on real data before any rule is added.
