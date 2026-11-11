@@ -132,6 +132,13 @@ E19_SKULL = 0.3                      # ... E19 / E20 / E21 only for objects that
                                      # phantom cSS are darker and larger than any read cSS and must not be excluded)
 E13_FRAC_V533 = 0.5                  # midline, any depth (cSS max 0.36)
 # v5.3.4 E22 midline sheet (from review/midline_probe on M02-M11: of 55 shown cSS none satisfies all three; 11 non-cSS do):
+# v5.7 E24 skull-base cortex zone (from review/zone_probe on M02-M11: 15 shown non-cSS objects flagged, 0 of 67 protected cSS; the
+# nearest protected cSS has 0.09 of its voxels nearest to this cortex): an object whose nearest cortex is orbitofrontal / frontal pole /
+# temporal pole / entorhinal / pars orbitalis (the air-bone susceptibility surfaces) in >= E24_FRAC of its voxels. Occipital and inferior
+# temporal cortex over the tentorium is NOT in the set (kept when the nearest tissue is cerebral cortex). Needs a parcellated T1 labelling.
+E24_FRAC = 0.5
+E24_LABELS = [1012, 1014, 1032, 1033, 1006, 1019]       # lateral / medial orbitofrontal, frontal pole, temporal pole, entorhinal, pars orbitalis (+2000 = right)
+E24_LABELS = E24_LABELS + [x + 1000 for x in E24_LABELS]
 E22_PLANE_MM, E22_COS, E22_EXT_MM = 8.0, 0.9, 25.0   # within 8 mm of the mid-sagittal plane, thin axis aligned with it, >= 25 mm long
 V53_GAP_MM, V53_MAX_MM = 5.0, 80.0   # second merge pass: gap (same region label only) and cap on the bounding-box diagonal
 E12_MM3 = 3000.0                     # extent: one connected object above this volume (largest reader-called cSS 830 mm3;
@@ -542,6 +549,13 @@ if _Lh.sum() > 1000 and _Rh.sum() > 1000:
     del _P0
 else: PL_C = PL_N = None
 del _Lh, _Rh
+# v5.7 nearest-cortex label map (for the skull-base zone measure): label of the nearest cortical voxel of every voxel
+_cxm = (seg >= 1000) & (seg < 3000)
+if _cxm.any():
+    _ni = ndi.distance_transform_edt(~_cxm, sampling=vox, return_distances=False, return_indices=True)
+    NEAR_CX = seg[tuple(_ni)].astype(np.int32); del _ni
+else: NEAR_CX = np.zeros(seg.shape, np.int32)
+del _cxm
 # v5.7: ONE mid-sagittal plane - the mirror check (section 7) now uses this plane too (it had its own construction from the
 # hemisphere map incl. deep nuclei). Only the recorded mirror columns can change; no rule uses them.
 if PL_N is not None: pc, mvec = PL_C, PL_N
@@ -797,7 +811,8 @@ for p in regionprops(lab, spacing=vox):
                mask_edge_mm=round(float(np.median(dist_mm[pad][mm])), 1),
                skull_frac=round(float(SKULL[pad][mm].mean()), 2), v53_active=int(V53), _band=bool(BAND[pad][mm].any()),
                vent_frac=round(float((d_vent[pad][mm] <= E16_MM).mean()), 2),
-               out_frac=round(float((pial_sd[pad][mm] > V53_OUT_MM).mean()), 2), **plane_feats(mm, pad))
+               out_frac=round(float((pial_sd[pad][mm] > V53_OUT_MM).mean()), 2), **plane_feats(mm, pad),
+               skullbase_frac=round(float(np.isin(NEAR_CX[pad][mm], E24_LABELS).mean()), 2))
     midz      = bool(np.median(dmid[pad][mm]) < 5.0)
     # off-surface tube. vein_tree_mm is recorded only: on real SWI (P006) the dark tubular network
     # along the cortex merges into one brain-wide component (255 mm for most candidates)
@@ -900,7 +915,7 @@ V50_COLS = ["mimic_score", "mimic_class", "mimic_reason", "phase_z", "mb_cluster
             "flair_csf_bright_frac", "feature_qc_flags", "feature_schema_version",
             "review_priority_rank", "review_priority", "review_priority_reason",                # v5.1.3 (css_tiers.py)
             "midline_frac", "mask_edge_mm", "skull_frac", "v53_active",                         # v5.3, appended
-            "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm"]               # v5.3.1 / v5.3.2 / v5.3.4, appended
+            "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac"]               # v5.3.1 / v5.3.2 / v5.3.4 / v5.7, appended
 cols = cols + V50_COLS
 
 # ---- 11. exclusions (v4.8) - each with an explicit, definition-based reason
@@ -925,7 +940,7 @@ RULE_CONF = {"E1": "high" if T1_ANAT else "medium", "E2": "medium", "E3": "mediu
              "E5": "medium", "E6": "medium", "E7": "medium", "E8": "low", "E9": "medium",
              "E10": "low", "E11": "low",                       # v5.0 mimic rules: no real-data support yet
              "E12": "low", "E13": "low", "E14": "low", "E15": "low", "E16": "low", "E17": "low",
-             "E18": "low", "E19": "low", "E20": "low", "E21": "low", "E22": "low"}   # v5.3: chosen on M02-M11, not validated
+             "E18": "low", "E19": "low", "E20": "low", "E21": "low", "E22": "low", "E24": "low"}   # v5.3: chosen on M02-M11, not validated
 def exclusion(r):
     """-> (rule_version, reason); ("", "") = kept. v5.1.1 CSS_MIXED_REVIEW=1: a mixed merged object (pieces disagree)
     is not removed whole by a vein rule (E5 / E6 / E7); it is shown with mixed_object_review = 1"""
@@ -966,6 +981,9 @@ def exclusion_v4(r):
                 and r["ext_major_mm"] >= E22_EXT_MM):
             return "E22@v5.3.4", (f"midline sheet: a flat sheet {r['ext_major_mm']:.0f} mm long lying in the mid-sagittal plane "
                                   f"({r['plane_dist_mm']:.1f} mm from it) - falx / sagittal sinus / fissure veins")
+        if r["skullbase_frac"] >= E24_FRAC:
+            return "E24@v5.7", (f"skull-base cortex zone: {100 * r['skullbase_frac']:.0f} % of the object lies on orbitofrontal / frontal pole / "
+                                f"temporal pole cortex (air-bone susceptibility surface)")
         if "orbitofrontal" in r["region"] and r["mask_edge_mm"] < E14_EDGE_MM:
             return "E14@v5.3", "orbitofrontal air-bone susceptibility zone"
     tub_, tram_ = r["tube_ratio"], r["tram_frac"]

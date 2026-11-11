@@ -52,3 +52,19 @@
   excluded objects also caught. Decisions taken: midline = only objects free in / running along the fissure (not medial-surface hugging);
   skull base = whole orbitofrontal / temporal-pole / inferior surface excluded; occipital / inferior temporal cortex over the tentorium kept
   when the nearest tissue is cerebral cortex.
+
+## v5.7-C - skull-base zone rule E24 (fitted from review/zone_probe on M02-M11)
+Probe result (224 shown objects: 64 protected cSS, 160 non-cSS): OUT (outside the hull) and INFRA (cerebellum / brainstem) flag NO shown object -
+those were audit objects, already excluded by the old rules; the shown non-cSS objects sit on the cortical surface. Zone rules that do pay off:
+- **E24 skull-base cortex zone** (opt-in CSS_V53=1; parcellated T1 labels only): >= 50 % of the object's voxels nearest to lateral / medial
+  orbitofrontal, frontal pole, temporal pole, entorhinal or pars orbitalis cortex -> excluded ("skull-base cortex zone"). Shown non-cSS flagged:
+  15; protected cSS flagged: 0 of 67; nearest protected cSS 0.09 vs threshold 0.5. Fusiform / inferior temporal / parahippocampal are NOT in the
+  set (occipital and inferior temporal cortex over the tentorium is kept). New column skullbase_frac (appended).
+- Still shown after E24 (not separable from real cSS by anatomy): medial-surface cingulate / precuneus objects that hug one surface
+  (M04 #11, #19, M05 #4, #5): same fissure measures as the protected cSS M11 #12 / M07 #11.
+- The three old rules that removed a called cSS in the audit: E13 midline (M03 excluded #5, precuneus, both hemispheres within 3 mm),
+  E17 outside the cortex (M04 excluded #18), E18 ill-defined (M03 excluded #28) - each 1 of 16 / 15 / 21 objects, each called cSS in ONE read
+  only; waiting for the re-decision before touching them.
+- Findings about the installed state: E22 objects (M02 #8, M03 #15, M04 #6 and #12 ...) were still shown in M02-M06 = that detection was made
+  without E22; M07-M11 still carry the v5.2 detection (six objects > 3000 mm3 shown). Both need a redetect with v5.7-C.
+- Test: check_v53.py builds PHB (left cortex relabelled 1012): every left object excluded by E24, right objects unchanged.

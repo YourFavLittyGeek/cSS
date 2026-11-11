@@ -46,11 +46,12 @@ truth = nib.load(f"{T}/work/PH3_truth.nii.gz").get_fdata().astype(int)
 
 # ---- 1. switch off = unchanged list, new columns appended last
 off, off_lab, _, _, _ = detect("PH3", False)
-new = ["midline_frac", "mask_edge_mm", "skull_frac", "v53_active", "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm"]
-if list(off.columns[-9:]) != new: fail(f"new columns must be appended last, got {list(off.columns[-9:])}")
+new = ["midline_frac", "mask_edge_mm", "skull_frac", "v53_active", "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac"]
+if list(off.columns[-10:]) != new: fail(f"new columns must be appended last, got {list(off.columns[-10:])}")
+if (off.skullbase_frac != 0).any(): fail("the plain phantom has no skull-base labels: skullbase_frac must be 0")
 if not off.plane_dist_mm.notna().any() or not (off.cos_plane.dropna().between(0, 1)).all(): fail("plane features (v5.3.4) missing or out of range")
 if off.v53_active.any(): fail("v53_active must be 0 with the switch off")
-print(f"switch off: {len(off)} candidates, 9 new columns appended, v53_active 0")
+print(f"switch off: {len(off)} candidates, 10 new columns appended, v53_active 0")
 # v5.3.3: the absolute thresholds (darkness, volume, cortex share) were fitted to real cSS; the phantom cSS are darker
 # and larger. On the plain phantom (no skull band) switching v5.3 on must not lose a true lesion.
 _t = nib.load(f"{T}/work/PH3_truth.nii.gz").get_fdata().astype(int)
@@ -61,6 +62,21 @@ _e22 = _x[_x.reason.astype(str).str.startswith("midline sheet")] if "reason" in 
 if len(_e22) and not ((_e22.plane_dist_mm <= 8) & (_e22.cos_plane >= 0.9) & (_e22.ext_major_mm >= 25)).all(): fail("E22 excluded an object that does not meet its thresholds")
 print(f"E22 midline sheets excluded on the plain phantom: {len(_e22)}")
 print(f"plain phantom: true lesions shown {len(_f0)} -> {len(_f1)} with v5.3")
+
+# ---- 1b. v5.7 E24 skull-base cortex zone: PHB = PH3 with the whole LEFT cortex relabelled lateral orbitofrontal (1012):
+#      every left object must be excluded by E24, the right-hemisphere objects (incl. true lesions) must be unchanged
+shutil.copy(f"{T}/data/PH3_swi.nii", f"{T}/data/PHB_swi.nii")
+sg = nib.load(f"{T}/work/PH3_seg_swispace.nii.gz"); a_ = np.asanyarray(sg.dataobj).astype(np.int32); a_[(a_ >= 1000) & (a_ < 2000)] = 1012
+for nm_ in ("PHB_seg_swispace.nii.gz", "PHB_t1seg_swispace.nii.gz"): nib.save(nib.Nifti1Image(a_, sg.affine, sg.header), f"{T}/work/{nm_}")
+shutil.copy(f"{T}/work/PH3_truth.nii.gz", f"{T}/work/PHB_truth.nii.gz")
+for f in os.listdir(f"{T}/work"):
+    if f.startswith("PH3_") and "a2009s" in f: shutil.copy(f"{T}/work/{f}", f"{T}/work/{f.replace('PH3_', 'PHB_')}")
+b_on, b_lab, b_x, b_log, _ = detect("PHB", True)
+if len(b_on) and (b_on.hemi == "L").any(): fail(f"E24: left objects still shown: {b_on[b_on.hemi == 'L'].cand_id.tolist()}")
+e24 = b_x[b_x.reason.astype(str).str.startswith("skull-base cortex zone")] if len(b_x) else b_x
+if not len(e24) or not (e24.skullbase_frac >= 0.5).all(): fail(f"E24 must exclude the left objects: {b_x.reason.tolist() if len(b_x) else 'none'}")
+if len(b_on) != int((_on.hemi == "R").sum()): fail(f"E24: right objects must be unchanged ({len(b_on)} vs {int((_on.hemi == 'R').sum())})")
+print(f"E24 skull-base zone: {len(e24)} left objects excluded, {len(b_on)} right objects unchanged, skullbase_frac >= 0.5")
 
 # ---- 2. skull phantom: T1-style mask (labels + 5 mm): dark line just outside the cortex (thin-CSF convexity)
 img = nib.load(f"{T}/data/PH3_swi.nii"); I = img.get_fdata().astype(np.float32); vox = img.header.get_zooms()[:3]
