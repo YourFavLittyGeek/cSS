@@ -36,3 +36,5 @@
   **Primary reviewer...** (shows who; makes you primary after a confirmation).
 - A newer study load always wins (two quick loads could mix candidate lists).
 - Tests: check_review_web.py (audit sample, audit file, never scored, labels, import refused), check_viewer.py (browser).
+- compare_reads.py --old-reviewer NAME: compares two reads of the SAME detection (e.g. Redo_v53 vs Blind_v57).
+- docs/HOW_TO_REDO_M02-M06_v5.7.md: install, primary fixed to Redo_v53, blind read as Blind_v57, reports.

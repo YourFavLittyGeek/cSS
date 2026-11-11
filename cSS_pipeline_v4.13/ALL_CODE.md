@@ -1047,6 +1047,7 @@ if __name__ == "__main__":
 #!/usr/bin/env python3
 """Your first read vs the redo, object by object. Research software; expert review required.
 usage: compare_reads.py M02,M03,...  [--reviewer Redo_v53] [--old-dir DIR]
+       compare_reads.py M02,M03,...  --reviewer Blind_v57 --old-reviewer Redo_v53    (two reads of the SAME detection)
 READ-ONLY. For every candidate you called in the FIRST read (old calls + the candidate list saved before redetect), it follows
 the object into the NEW detection (shown / merged with another / excluded by a rule / gone) and compares your old call with
 your call in the redo (ID_calls_<reviewer>.csv). It also lists new objects that had no old call.
@@ -1067,6 +1068,7 @@ if not a or a[0].startswith("-"): sys.exit(__doc__)
 ids = [s for s in a[0].split(",") if s]
 rev = a[a.index("--reviewer") + 1] if "--reviewer" in a else "Redo_v53"
 odir = a[a.index("--old-dir") + 1] if "--old-dir" in a else f"{B}/review/old_calls_before_redo"
+orev = a[a.index("--old-reviewer") + 1] if "--old-reviewer" in a else ""      # v5.7: both reads on the current detection
 slug = re.sub(r"[^A-Za-z0-9]+", "_", rev.strip()).strip("_") or "reviewer"    # same as review_web.py
 CH = f"{B}/review/changes"
 
@@ -1091,16 +1093,21 @@ def calls_on(cand, path):
     return {int(cid): (call if isinstance(call, str) else "", "") for cid, call in m.items()}
 
 
-rows, text = [], ["Your first read vs the redo (research software; expert review required)", f"redo reviewer: {rev}", ""]
+rows, text = [], ["Your first read vs the redo (research software; expert review required)",
+                   f"redo reviewer: {rev}" + (f"   first read: {orev} (same detection)" if orev else ""), ""]
 tot = dict(old=0, kept=0, excl=0, gone=0, css_lost=0)
 pairs_exact, pairs_bin, pairs_band = [], [], []
 for sid in ids:
     need = [f"{CH}/{sid}_before_candidates.csv", f"{CH}/{sid}_before_candidates.nii.gz", f"{B}/review/{sid}_candidates.csv",
             f"{B}/review/{sid}_candidates.nii.gz"]
+    if orev: need[0], need[1] = need[2], need[3]          # same detection: the "old" list is the current list
     if any(not os.path.exists(p) for p in need):
         text.append(f"{sid}: missing {[os.path.basename(p) for p in need if not os.path.exists(p)]} - skipped"); continue
     oc, nc = pd.read_csv(need[0]), pd.read_csv(need[2])
     op = next((p for p in (f"{odir}/{sid}_calls.csv", f"{CH}/{sid}_before_calls.csv") if os.path.exists(p)), None)
+    if orev:
+        _s = re.sub(r"[^A-Za-z0-9]+", "_", orev.strip()).strip("_") or "reviewer"
+        op = f"{B}/review/{sid}_calls_{_s}.csv" if os.path.exists(f"{B}/review/{sid}_calls_{_s}.csv") else None
     nps = f"{B}/review/{sid}_calls_{slug}.csv"
     if op is None or not os.path.exists(nps): text.append(f"{sid}: old calls ({op}) or redo calls ({nps}) not found - skipped"); continue
     old, new = calls_on(oc, op), calls_on(nc, nps)
@@ -1143,7 +1150,9 @@ for sid in ids:
         rows.append(dict(study=sid, old_id="", old_call="", region=str(nreg.get(nid, "")).replace("ctx-lh-", "").replace("ctx-rh-", ""), volume_mm3=round(float(nc[nc.cand_id == nid].volume_mm3.iloc[0]), 0),
                          fate="new object", rule="", new_id=nid, merged_with_old="", new_call=ncall, outcome="new, no old call", ai_meter=band.get(nid, ("", ""))[1], ai_band=band.get(nid, ("", ""))[0]))
     d = pd.DataFrame([r for r in rows if r["study"] == sid])
-    text += [f"=== {sid} ===", f"score: first read {score(f'{odir}/{sid}_score.json')}  ->  redo {score(f'{B}/review/{sid}_score.json')}",
+    _sr = lambda r_: (f"{B}/review/{sid}_score.json" if not os.path.exists(f"{B}/review/{sid}_score_rev_{re.sub('[^A-Za-z0-9]+', '_', r_.strip()).strip('_')}.json")
+                      else f"{B}/review/{sid}_score_rev_{re.sub('[^A-Za-z0-9]+', '_', r_.strip()).strip('_')}.json")
+    text += [f"=== {sid} ===", f"score: first read {score(_sr(orev) if orev else f'{odir}/{sid}_score.json')}  ->  redo {score(_sr(rev))}",
              f"old calls {len(old)} (cSS {sum(1 for v in old.values() if v[0] == 'cSS')}) -> new calls {len(new)} (cSS {sum(1 for v in new.values() if v[0] == 'cSS')}); "
              f"old candidates {len(oc)} -> {len(nc)}",
              f"old calls in the file {CNT[op][0]}, matched to the old candidate list {CNT[op][1]}" + ("   <-- unmatched old calls: this study is NOT a clean comparison" if CNT[op][1] < CNT[op][0] else ""), "what happened to the old calls:"]
@@ -2149,6 +2158,8 @@ def build(B, out=None):
                      "Calls changed after the AI comparison": f.get("n_revoted", ""), "Inherited calls not re-confirmed": f.get("n_inherited_unconfirmed", ""), "AI meter visible": f.get("meter_visible", ""),
                      "Microbleeds called": f.get("n_microbleed", ""), "Primary reviewer": {True: "yes", False: "no"}.get(f.get("primary"), ""),
                      "Read mode": f.get("read_mode", ""),
+                     "Excluded objects audited": f.get("audit_n_read", ""),
+                     "Excluded objects called cSS (audit)": "; ".join(f"{x['excl_id']} ({x['rule']})" for x in f.get("audit_css", [])) if f.get("audit_n_shown") else "",
                      "Note": "lower bound: not all candidates read" if f.get("n_read", 0) != f.get("n_candidates", 0) else ""})
     d = pd.DataFrame(rows); d.to_csv(out + ".csv", index=False); xl = ""
     try:
@@ -6075,6 +6086,7 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
 <div class="top"><b>cSS Reviewer</b>
  <select id="study" title="Study"></select>
  <span class="mut" id="candinfo"></span><div class="prog"><div id="progbar"></div></div><span class="mut" id="progtxt"></span><span class="sp"></span>
+ <span id="vbadge" style="display:none;background:#1f5f8b;color:#fff;border-radius:10px;padding:4px 12px;font-size:12.5px;font-weight:700;white-space:nowrap" title="AI meter hidden and locked, comparison window off, some excluded objects mixed in (Settings > Validation read)">&#9679; VALIDATION READ</span>
  <span id="scorechip" class="chipbox" title="cSS score 0-4: reviewer (after Q) and AI (rule-based, not validated)"></span>
  <div class="seg" id="themes" title="Theme (T)"><button data-t="light">Light</button><button data-t="dark">Dark</button><button data-t="blue">Blue</button></div>
  <span class="mut">Reviewer</span><input type="text" id="reviewer" list="revlist" placeholder="your name" style="width:150px" autocomplete="off"><datalist id="revlist"></datalist>
@@ -6136,6 +6148,7 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
  <tr><td><kbd>V</kbd> Vein</td><td>tube that continues beyond the candidate, branches, or runs into the white matter or a sinus</td></tr>
  <tr><td><kbd>N</kbd> Normal cortex</td><td>naturally dark cortex or sulcus, nothing abnormal</td></tr>
  <tr><td><kbd>A</kbd> Artifact</td><td>skull, air&ndash;bone interface, motion, mask edge</td></tr>
+ <tr><td><kbd>B</kbd> Microbleed</td><td>round / oval dark blob, not a line along the cortex; not cSS (counted separately)</td></tr>
  <tr><td><kbd>U</kbd> Unsure</td><td>cannot decide; counted as <i>not</i> cSS in the score and listed for re-reading</td></tr>
  <tr><td><kbd>H</kbd> Near ICH</td><td>siderosis connected to a lobar haemorrhage; reported but not scored</td></tr></table>
  <h3>The AI meter</h3>
@@ -6155,7 +6168,7 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
  <tr><td><kbd>R</kbd> &nbsp; <kbd>F</kbd></td><td>reset zoom and window &nbsp; go to the candidate (centres and zooms in on it)</td></tr>
  <tr><td><kbd>M</kbd> &nbsp; <kbd>O</kbd></td><td>show / hide this candidate's marking &nbsp; the other candidates' markings</td></tr>
  <tr><td><kbd>P</kbd></td><td>corner text and scale bar on / off</td></tr>
- <tr><td><kbd>B</kbd> &nbsp; <kbd>I</kbd></td><td>magnifier lens (2.5&times;) &nbsp; minIP slab (about 8 mm), axial view: veins become continuous tubes</td></tr>
+ <tr><td><kbd>W</kbd> &nbsp; <kbd>I</kbd></td><td>magnifier lens (2.5&times;) &nbsp; minIP slab (about 8 mm), axial view: veins become continuous tubes</td></tr>
  <tr><td><kbd>S</kbd>, <kbd>1</kbd>&ndash;<kbd>5</kbd></td><td>next sequence / choose a sequence for the active image</td></tr>
  <tr><td><kbd>D</kbd> &nbsp; <kbd>L</kbd> &nbsp; <kbd>X</kbd></td><td>darkness probe (click) &nbsp; ruler (drag, mm) &nbsp; mark a missed cSS</td></tr>
  </table>
@@ -6186,6 +6199,12 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
  <p class="mut sm">The AI calls and the AI score come from the detector's rule-based evidence. They are not validated: a difference shows where you and the rules disagree, not who is right. Calls you change after seeing this window are recorded as re-votes.</p>
  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn" id="cRe">Re-review disagreements</button><button class="btn on" id="cSave">Save final</button><button class="btn" id="cClose">Close <kbd>Esc</kbd></button>
  <span class="sp"></span><label class="mut sm" style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="cNo"> Do not show this window again (Settings menu turns it back on)</label></div></div></div>
+<div class="modal" id="import"><div class="dlg" style="min-width:620px"><h2>Import earlier calls</h2>
+ <p class="mut">A new reviewer name starts empty. Copy calls from another file onto <b>your</b> list. Imported calls are dashed until you press the same key again; then they count as yours.</p>
+ <div class="r"><b>From</b><select id="imFrom" style="flex:1"></select></div>
+ <div class="r"><b></b><label class="mut sm"><input type="radio" name="imov" checked> only candidates I have not called</label><label class="mut sm"><input type="radio" name="imov" id="imAll"> replace my calls too</label></div>
+ <div class="mut sm">Switched off during a validation read (importing would unblind you).</div>
+ <div class="r" style="justify-content:flex-end;margin-top:10px"><button class="btn" id="imCancel">Cancel</button><button class="btn on" id="imGo">Import</button></div></div></div>
 <div class="modal" id="summary"><div class="dlg" style="min-width:560px"><h2>Summary</h2><div id="sumbody"></div><p class="mut">Close with <kbd>Esc</kbd>.</p></div></div>
 <div class="modal" id="saveas"><div class="dlg" style="min-width:600px"><h2>Save snapshot as</h2>
  <div class="r"><b>Folder</b><input type="text" id="saFolder" autocomplete="off"><button class="btn" id="saChoose" style="display:none">Choose&hellip;</button></div>
@@ -6211,9 +6230,11 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const MAC=/Mac|iPhone|iPad/.test(navigator.platform||navigator.userAgent), MOD=MAC?"⌘":"Ctrl";
 $$(".modk").forEach(e=>e.textContent=MOD);
-const CALLKEYS={y:"cSS",v:"Vein",n:"Normal",a:"Artifact",u:"Unsure",h:"Near ICH"};
-const CALLLBL={cSS:"cSS",Vein:"Vein",Normal:"Normal cortex",Artifact:"Artifact",Unsure:"Unsure","Near ICH":"Near ICH"};
-const CALLCOL={cSS:"#2e9d4a",Vein:"#3b82e0",Normal:"#8a8f98",Artifact:"#e07a1f",Unsure:"#c9a400","Near ICH":"#9b4fc0"};
+const CALLKEYS={y:"cSS",v:"Vein",n:"Normal",a:"Artifact",b:"Microbleed",u:"Unsure",h:"Near ICH"};
+const CALLLBL={cSS:"cSS",Vein:"Vein",Normal:"Normal cortex",Artifact:"Artifact",Microbleed:"Microbleed",Unsure:"Unsure","Near ICH":"Near ICH"};
+const CALLCOL={cSS:"#2e9d4a",Vein:"#3b82e0",Normal:"#8a8f98",Artifact:"#e07a1f",Microbleed:"#b0306a",Unsure:"#c9a400","Near ICH":"#9b4fc0"};
+const did=c=>c.disp||c.id;      // number shown to the reader (shuffled 1..N in a validation read)
+let vmode=false;
 const BANDCOL={green:"#3aa655",yellow:"#c99a1c",red:"#d64545"};
 const LS=(k,d)=>{try{const v=localStorage.getItem("css_"+k);return v===null?d:JSON.parse(v)}catch(e){return d}};
 const LSS=(k,v)=>{try{localStorage.setItem("css_"+k,JSON.stringify(v))}catch(e){}};
@@ -6308,11 +6329,11 @@ function drawPane(p,x,W,H,o){
   if(o.arrow&&p.box&&c){const ax=g.ox+(p.box.x1+1)*g.sx,ay=g.oy+p.box.y0*g.sy,sx0=Math.min(W-90,ax+36),sy0=Math.max(40,ay-36);
     x.strokeStyle="#ffd866";x.fillStyle="#ffd866";x.lineWidth=2.5;x.beginPath();x.moveTo(sx0,sy0);x.lineTo(ax+3,ay-3);x.stroke();
     x.beginPath();x.moveTo(ax+2,ay-2);x.lineTo(ax+14,ay-5);x.lineTo(ax+5,ay-14);x.closePath();x.fill();
-    x.font="12px Menlo,monospace";const t="candidate #"+c.id,tw=x.measureText(t).width;x.fillStyle="rgba(0,0,0,.55)";x.fillRect(sx0-2,sy0-16,tw+8,18);x.fillStyle="#ffd866";x.fillText(t,sx0+2,sy0-3)}
+    x.font="12px Menlo,monospace";const t="candidate #"+did(c),tw=x.measureText(t).width;x.fillStyle="rgba(0,0,0,.55)";x.fillRect(sx0-2,sy0-16,tw+8,18);x.fillStyle="#ffd866";x.fillText(t,sx0+2,sy0-3)}
   if(o.text){
     x.font="12px Menlo,Consolas,monospace";x.fillStyle="#ffd866";x.shadowColor="#000";x.shadowBlur=3;x.textBaseline="alphabetic";
     const T=(t,xx,yy,al)=>{x.textAlign=al||"left";x.fillText(t,xx,yy)},sm=seqmeta[p.seq]||{},lab=(sm.label||p.seq)+(p.mip&&p.plane===0?" · minIP":"");
-    T(`${M.study} · ${PLN[p.plane]}`,o.lm,o.tm);T(lab,o.lm,o.tm+16);if(c)T(`Cand #${c.id} of ${M.cands.length}`,o.lm,o.tm+32);
+    T(`${M.study} · ${PLN[p.plane]}`,o.lm,o.tm);T(lab,o.lm,o.tm+16);if(c)T(`Cand #${did(c)} of ${M.cands.length}`,o.lm,o.tm+32);
     T(`Slice ${cur[V.s]+1} / ${[nx,ny,nz][V.s]}`,W-o.rm,o.tm,"right");T(`Zoom ${zoom.toFixed(1)}×${Math.abs(zoom-1)<0.001?" (fit)":""}`,W-o.rm,o.tm+16,"right");
     const w=getWL(p.seq);T(`C ${Math.round(101-w[0])}  B ${Math.round(w[1])}`,o.lm,H-24);T(`${vox.map(v=>v.toFixed(1)).join("×")} mm`,o.lm,H-8);
     T(`Reviewer ${(o.rev||"")}`,W-o.rm,H-24,"right");if(M.acq&&(M.acq.TE_ms||M.acq.field_T))T(`${M.acq.TE_ms?"TE "+M.acq.TE_ms+" ms":""}${M.acq.TE_ms&&M.acq.field_T?" · ":""}${M.acq.field_T?M.acq.field_T+" T":""}`,W-o.rm,H-8,"right");
@@ -6356,7 +6377,7 @@ function paintToolbar(){const p=panes[act];if(!p)return;
   $("#tMark").classList.toggle("on",showMark);$("#tOther").classList.toggle("on",showOther);$("#tMip").classList.toggle("on",!!p.mip);$("#tAuto").classList.toggle("on",autoNext)}
 function applyPalette(){const l=$("#lt");l.classList.toggle("fold",ltah&&!ltopen);const c=$("#ltah");if(c)c.checked=ltah}
 function buildPalette(){const T=[["pan","hand","Pan"],["zoom","zoomin","Zoom"],["wl","sliders","Window"],["scroll","scroll","Scroll"],"-",["ruler","ruler","Ruler"],["dark","dark","Probe"],["lens","lens","Lens"],["miss","plus","Missed"]];
-  $("#lt").innerHTML=T.map(t=>t==="-"?"<hr>":t[0]==="lens"?`<div data-a="lens" title="magnifier (B)"><span class="ico">${svg(t[1])}</span></div>`:`<div data-tool="${t[0]}" title="${t[2]}"><span class="ico">${svg(t[1])}</span></div>`).join("")+'<label class="ahb" title="fold the tool strip into a thin tab; hover the tab to open it"><input type="checkbox" id="ltah">auto</label><span class="tabl">tools ▸</span>';applyPalette()}
+  $("#lt").innerHTML=T.map(t=>t==="-"?"<hr>":t[0]==="lens"?`<div data-a="lens" title="magnifier (W)"><span class="ico">${svg(t[1])}</span></div>`:`<div data-tool="${t[0]}" title="${t[2]}"><span class="ico">${svg(t[1])}</span></div>`).join("")+'<label class="ahb" title="fold the tool strip into a thin tab; hover the tab to open it"><input type="checkbox" id="ltah">auto</label><span class="tabl">tools ▸</span>';applyPalette()}
 
 // ---------- data ----------
 async function api(path,body){const r=await fetch(path,body?{method:"POST",headers:{"Content-Type":"application/json","X-CSS":"1"},body:JSON.stringify(body)}:{});const j=await r.json();if(!r.ok||j.error)throw new Error(j.error||r.statusText);return j}
@@ -6366,16 +6387,25 @@ async function setSeq(s){if(!M.seqs.some(q=>q.key===s))return;await loadVol(s);p
 function nextSeq(){const i=M.seqs.findIndex(s=>s.key===panes[act].seq);setSeq(M.seqs[(i+1)%M.seqs.length].key)}
 const reviewer=()=>$("#reviewer").value.trim();
 function setMissed(m){missed=(m||[]).map(r=>{let pts=null;try{pts=r.points?JSON.parse(r.points):null}catch(e){}return Object.assign({},r,{pts:(pts&&r.plane!==""&&r.shape!=="point")?pts:null})});renderMissed()}
-async function loadStudy(sid){status("loading study ...");
-  M=await api(`/api/meta?study=${sid||""}&reviewer=${encodeURIComponent(reviewer())}`);[nx,ny,nz]=M.shape;vox=M.vox;vols={};luts={};WLs={};seqmeta={};M.seqs.forEach(s=>seqmeta[s.key]=s);
+let loadSeq=0;
+async function loadStudy(sid){status("loading study ...");const my=++loadSeq,stale=()=>my!==loadSeq;   // a newer load wins
+  const M0=await api(`/api/meta?study=${sid||""}&reviewer=${encodeURIComponent(reviewer())}`);if(stale())return;M=M0;[nx,ny,nz]=M.shape;vox=M.vox;vols={};luts={};WLs={};seqmeta={};M.seqs.forEach(s=>seqmeta[s.key]=s);
   $("#study").innerHTML=M.studies.map(s=>`<option ${s===M.study?"selected":""}>${esc(s)}</option>`).join("");
   $("#seq").innerHTML=M.seqs.map((s,i)=>`<option value="${s.key}">${s.label}  (${i+1})</option>`).join("");
   $("#revlist").innerHTML=M.reviewers.names.map(n=>`<option value="${esc(n)}">`).join("");
-  if(!reviewer()&&M.reviewers.last){$("#reviewer").value=M.reviewers.last;M=await api(`/api/meta?study=${M.study}&reviewer=${encodeURIComponent(reviewer())}`)}
+  if(!reviewer()&&M.reviewers.last){$("#reviewer").value=M.reviewers.last;const Mr=await api(`/api/meta?study=${M.study}&reviewer=${encodeURIComponent(reviewer())}`);if(stale())return;M=Mr}
+  // v5.7 validation read: default ON when this reviewer has no final record for the study; an explicit choice is remembered
+  {const want=reviewer()?LS("vmode_"+M.study+"|"+reviewer(),!M.final):false;
+   if(want){const M1=await api(`/api/meta?study=${M.study}&reviewer=${encodeURIComponent(reviewer())}&mode=validation`);if(stale())return;M=M1}vmode=want&&M.mode==="validation";
+   M.cands.forEach(c=>c.disp=c.id);
+   if(vmode){let h=0;for(const ch of M.study+"|"+reviewer())h=(h*31+ch.charCodeAt(0))>>>0;const rnd=()=>{h=(h*1664525+1013904223)>>>0;return h/4294967296};
+     for(let i=M.cands.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[M.cands[i],M.cands[j]]=[M.cands[j],M.cands[i]]}
+     M.cands.forEach((c,i)=>c.disp=i+1)}
+   paintMode()}
   mir=LS("mir_"+M.study,false);sideChk=M.side_check||null;calls=M.calls||{};undo=[];draft=null;revoteMode=false;readerScore=M.reader_score||null;finalRec=M.final||null;
   const b=$("#banner"),msg=[M.qc,M.note,sideChk&&sideChk.bad?sideMsg():""].filter(Boolean).join("  ·  ");$("#seqnote").textContent=M.missing_seqs.length?("Not imported for this patient: "+M.missing_seqs.join(", ")):"";b.textContent=msg;b.style.display=msg?"block":"none";
-  const lr=await fetch(`/api/labels?study=${M.study}`);LAB=new Uint16Array(await lr.arrayBuffer());
-  await loadVol("swi");panes.forEach(p=>{p.seq="swi";p.mip=false});fitView();
+  const lr=await fetch(`/api/labels?study=${M.study}&reviewer=${encodeURIComponent(reviewer())}&mode=${vmode?"validation":""}`);const LB=new Uint16Array(await lr.arrayBuffer());if(stale())return;LAB=LB;
+  await loadVol("swi");if(stale())return;panes.forEach(p=>{p.seq="swi";p.mip=false});fitView();
   buildStrip();setMissed(M.missed);const first=M.cands.findIndex(c=>!isDone(c));go(first<0?0:first);status("");
   if(!reviewer())status("Enter your name (upper right) before the first decision.",true)}
 
@@ -6386,25 +6416,26 @@ const isDone=c=>!!callOf(c)&&!isInh(c);
 function verdict(c){const call=callOf(c),b=c.ai.band;if(!call)return "not read";if(call==="Unsure")return "you unsure";if(b==="yellow")return "AI unsure";
   const css=call==="cSS";return (css&&b==="green")||(!css&&b==="red")?"agree":"differ"}
 const pill=(t,c)=>`<span class="pill" style="background:${c}">${esc(t)}</span>`;
-function buildStrip(){$("#strip").innerHTML=M.cands.map((c,i)=>`<div class="chip" data-i="${i}" title="${c.hemi} ${esc(c.region)}">${c.id}</div>`).join("")||'<span class="mut">No candidates in this study.</span>';paintLists()}
+function buildStrip(){$("#strip").innerHTML=M.cands.map((c,i)=>`<div class="chip" data-i="${i}" title="${c.hemi} ${esc(c.region)}">${did(c)}</div>`).join("")||'<span class="mut">No candidates in this study.</span>';paintLists()}
 const CATLBL={absent:"No cSS",focal:"Focal (1–3 sulci)",disseminated:"Disseminated / diffuse (> 3 sulci)"};
 function scoreCard(title,sc,note){if(!sc||sc.multifocality_0_4===undefined)return `<div class="card"><div class="h">${title}</div><div class="mut">not scored yet</div></div>`;
   return `<div class="card"><div class="h">${title}</div><div class="big">${sc.multifocality_0_4}<span class="mut" style="font-size:16px"> / 4</span></div><div>Right <b>${sc.R_score}</b> · Left <b>${sc.L_score}</b></div><div><b>${esc(CATLBL[sc.category]||sc.category)}</b></div>
    <div class="mut sm">${sc.n_sulci_total!==undefined?sc.n_sulci_total+" sulci · ":""}${sc.n_lines_total!==undefined?sc.n_lines_total+" continuous cSS line(s)":""}${note?"<br>"+note:""}</div></div>`}
-function paintScores(){const ai=M.ai_score||{};
-  $("#scorechip").innerHTML=`Reviewer <b>${readerScore&&readerScore.multifocality_0_4!==undefined?readerScore.multifocality_0_4+"/4":"—"}</b> · AI <b>${ai.multifocality_0_4!==undefined?ai.multifocality_0_4+"/4":"—"}</b>`+(finalRec?` · <span class="ok">final saved</span>`:"");
-  $("#scorecard").innerHTML=`<div class="sc">${scoreCard("Reviewer",readerScore,finalRec?("final saved "+esc(finalRec.saved)):"press Q to score")}${scoreCard("AI (not validated)",ai,(ai.n_green||0)+" green-band candidate(s)")}</div>`}
-function paintLists(){let n=0;$$("#strip .chip").forEach((e,i)=>{const c=M.cands[i],call=callOf(c);if(call)n++;e.style.background=call?CALLCOL[call]:"";e.style.color=call?"#fff":"";e.style.border=isInh(c)?"2px dashed #fff":"";e.style.opacity=isInh(c)?".75":"";
+function paintScores(){const ai=vmode?{}:(M.ai_score||{});
+  $("#scorechip").innerHTML=`Reviewer <b>${readerScore&&readerScore.multifocality_0_4!==undefined?readerScore.multifocality_0_4+"/4":"—"}</b> · AI <b>${vmode?"hidden":ai.multifocality_0_4!==undefined?ai.multifocality_0_4+"/4":"—"}</b>`+(M.primary?` · primary <b>${esc(M.primary)}</b>`:"")+(finalRec?` · <span class="ok">final saved</span>`:"");
+  $("#scorecard").innerHTML=`<div class="sc">${scoreCard("Reviewer",readerScore,finalRec?("final saved "+esc(finalRec.saved)):"press Q to score")}${vmode?'<div class="card"><div class="h">AI</div><div class="mut">hidden in a validation read</div></div>':scoreCard("AI (not validated)",ai,(ai.n_green||0)+" green-band candidate(s)")}</div>`}
+function paintLists(){let n=0;$$("#strip .chip").forEach((e,i)=>{const c=M.cands[i];if(!c)return;const call=callOf(c);if(call)n++;e.style.background=call?CALLCOL[call]:"";e.style.color=call?"#fff":"";e.style.border=isInh(c)?"2px dashed #fff":"";e.style.opacity=isInh(c)?".75":"";
     e.title=(isInh(c)?"inherited from the earlier detection - press the same key to confirm  ·  ":"")+c.hemi+" "+c.region;e.classList.toggle("cur",i===ci)});
   $("#progbar").style.width=(M.cands.length?100*n/M.cands.length:0)+"%";$("#progtxt").textContent=n+" of "+M.cands.length+" read";
   const e=$("#strip .cur");if(e)e.scrollIntoView({block:"nearest",inline:"nearest"});
   $("#candtable").innerHTML="<tr><th>#</th><th>Side · region</th><th>mm³</th><th>Your call</th></tr>"+M.cands.map((c,i)=>{const call=callOf(c),cm=(calls[c.id]||{}).comment;
-    return `<tr class="r ${i===ci?"cur":""}" data-i="${i}"><td><b>${c.id}</b></td><td>${c.hemi} · ${esc(c.region)}${cm?` <span class="mut" title="${esc(cm)}">✎</span>`:""}</td><td>${Math.round(c.volume)}</td><td>${call?pill(CALLLBL[call],CALLCOL[call]):'<span class="mut">—</span>'}</td></tr>`}).join("");
+    return `<tr class="r ${i===ci?"cur":""}" data-i="${i}"><td><b>${did(c)}</b></td><td>${c.hemi} · ${esc(c.region)}${cm?` <span class="mut" title="${esc(cm)}">✎</span>`:""}</td><td>${Math.round(c.volume)}</td><td>${call?pill(CALLLBL[call],CALLCOL[call]):'<span class="mut">—</span>'}</td></tr>`}).join("");
   const T={};["cSS","not cSS","unsure","not read"].forEach(r=>T[r]={green:0,yellow:0,red:0});let ag=0,df=0;
   const rows=M.cands.map((c,i)=>{const call=callOf(c),v=verdict(c),row=!call?"not read":call==="cSS"?"cSS":call==="Unsure"?"unsure":"not cSS";T[row][c.ai.band]++;if(v==="agree")ag++;if(v==="differ")df++;
     if(onlyDiffer&&v!=="differ")return "";const sus=c.ai.band==="green"?"cSS":c.ai.band==="yellow"?"uncertain":c.ai.suspect.replace(/^I suspect /,"").replace(/^Probably not cSS.*/,"not cSS");
-    return `<tr class="r ${i===ci?"cur":""}" data-i="${i}"><td><b>${c.id}</b></td><td>${pill(c.ai.score.toFixed(2),BANDCOL[c.ai.band])}</td><td>${esc(sus)}</td><td>${call?pill(CALLLBL[call],CALLCOL[call]):'<span class="mut">—</span>'}</td><td class="${v==="differ"?"err":"mut"}">${v}</td></tr>`}).join("");
+    return `<tr class="r ${i===ci?"cur":""}" data-i="${i}"><td><b>${did(c)}</b></td><td>${pill(c.ai.score.toFixed(2),BANDCOL[c.ai.band])}</td><td>${esc(sus)}</td><td>${call?pill(CALLLBL[call],CALLCOL[call]):'<span class="mut">—</span>'}</td><td class="${v==="differ"?"err":"mut"}">${v}</td></tr>`}).join("");
   $("#cmptitle").textContent="AI vs reviewer · "+M.study+(onlyDiffer?" · only differ":"");
+  if(vmode){$("#cmptable").innerHTML='<tr><td class="mut">The AI comparison is hidden during a validation read.</td></tr>';$("#cmpsum").innerHTML=`Read <b>${n} of ${M.cands.length}</b> · missed cSS marked <b>${missed.length}</b>`;$("#bDiffer").classList.toggle("on",false);paintScores();renderRail();return}
   $("#cmptable").innerHTML="<tr><th>#</th><th>AI meter</th><th>AI suspects</th><th>Your call</th><th></th></tr>"+(rows||'<tr><td colspan="5" class="mut">nothing to show</td></tr>');
   $("#cmpsum").innerHTML=`<table class="cmp"><tr><th></th><th>AI green</th><th>AI yellow</th><th>AI red</th></tr>`+Object.entries(T).map(([r,t])=>`<tr><td>${r==="not read"?"Not read":"You: "+r}</td><td>${r==="not cSS"&&t.green?`<b class="err">${t.green}</b>`:t.green}</td><td>${t.yellow}</td><td>${r==="cSS"&&t.red?`<b class="err">${t.red}</b>`:t.red}</td></tr>`).join("")+`</table>
    <div style="margin-top:8px">Read <b>${n} of ${M.cands.length}</b> · agree <b>${ag}</b> · differ <b>${df}</b> · missed cSS marked <b>${missed.length}</b></div>`;
@@ -6417,50 +6448,68 @@ function gauge(a){const P=t=>[110-90*Math.cos(Math.PI*t),105-90*Math.sin(Math.PI
 function go(i,keepView){if(!M.cands.length){paintLists();draw();return}ci=Math.max(0,Math.min(M.cands.length-1,i));const c=M.cands[ci];cur=c.centre.slice();
   if(!keepView&&zoom>1.001){ctr=cur.slice()}            // nothing is zoomed for you: an existing zoom is only re-centred on the candidate
   ruler=null;probe=null;if(tool!=="miss")$("#readout").textContent="";
-  $("#candinfo").textContent=`Candidate ${ci+1} of ${M.cands.length} · #${c.id} · ${c.hemi==="L"?"left":"right"} ${c.region} · ${Math.round(c.volume)} mm³`;
+  $("#candinfo").textContent=`Candidate ${ci+1} of ${M.cands.length} · #${did(c)} · ${c.hemi==="L"?"left":"right"} ${c.region} · ${Math.round(c.volume)} mm³`;
   gauge(c.ai);paintDecision();paintLists();draw()}
 function paintDecision(){const c=cand();if(!c)return;const st=calls[c.id]||{};$$("#dec .b").forEach(b=>{const on=b.dataset.call===st.call;b.classList.toggle("on",on);b.style.borderColor=on?CALLCOL[st.call]:"";b.style.background=on?CALLCOL[st.call]+"33":""});
   $("#curcall").textContent=st.call?("saved: "+CALLLBL[st.call]):"not read yet";if(document.activeElement!==$("#comment"))$("#comment").value=st.comment||""}
 const firstUnread=from=>{const n=M.cands.findIndex((x,j)=>j>from&&!isDone(x));return n<0?M.cands.findIndex(x=>!isDone(x)):n};
 async function decide(call,isUndo){const c=cand();if(!c)return;if(!reviewer()){status("Enter your name (upper right) first.",true);$("#reviewer").focus();return}
   const prev=callOf(c);if(!isUndo)undo.push({i:ci,prev});
-  try{const r=await api("/api/call",{study:M.study,reviewer:reviewer(),cand_id:c.id,call,action:isUndo?"undo":(revoteMode&&call?"revote":(call?"call":"clear")),meter:showAI?c.ai.score:""});calls=r.calls;status("✓ Saved automatically · "+r.saved.slice(11));
+  try{const r=await api("/api/call",{study:M.study,reviewer:reviewer(),cand_id:c.id,mode:vmode?"validation":"",call,action:isUndo?"undo":(revoteMode&&call?"revote":(call?"call":"clear")),meter:showAI&&!vmode?c.ai.score:""});calls=r.calls;status("✓ Saved automatically · "+r.saved.slice(11));
     paintDecision();paintLists();
     if(call&&!isUndo&&autoNext){const m=firstUnread(ci);if(m>=0)setTimeout(()=>go(m),180);else if(!revoteMode)setTimeout(summary,250)}}
   catch(e){status("NOT SAVED: "+e.message,true)}}
 async function saveComment(){const c=cand();if(!c)return;const t=$("#comment").value;if(((calls[c.id]||{}).comment||"")===t)return;if(!reviewer()){status("Enter your name first.",true);return}
-  try{const r=await api("/api/call",{study:M.study,reviewer:reviewer(),cand_id:c.id,comment:t,action:"comment"});calls=r.calls;status("✓ Comment saved · "+r.saved.slice(11));paintLists()}catch(e){status("NOT SAVED: "+e.message,true)}}
+  try{const r=await api("/api/call",{study:M.study,reviewer:reviewer(),cand_id:c.id,mode:vmode?"validation":"",comment:t,action:"comment"});calls=r.calls;status("✓ Comment saved · "+r.saved.slice(11));paintLists()}catch(e){status("NOT SAVED: "+e.message,true)}}
 function doUndo(){const u=undo.pop();if(!u){status("Nothing to undo.");return}go(u.i,false);decide(u.prev,true)}
 function nextUnread(){const m=firstUnread(ci);if(m>=0)go(m);else status("All candidates are read.")}
-const differIdx=()=>M.cands.map((c,i)=>verdict(c)==="differ"?i:-1).filter(i=>i>=0);
+const differIdx=()=>M.cands.map((c,i)=>!c.audit&&verdict(c)==="differ"?i:-1).filter(i=>i>=0);
 function summaryHtml(r){const rows=Object.entries(r.counts).map(([k,v])=>`<tr><td><span style="color:${CALLCOL[k]}">●</span> ${CALLLBL[k]}</td><td><b>${v}</b></td></tr>`).join("");
   const ms=r.missed.length?`<h3>Missed cSS marked (not counted in the score)</h3><table>`+r.missed.map(m=>`<tr><td><b>${m.missed_id}</b></td><td>${esc(m.reviewer)}</td><td>${esc(m.comment)}</td><td class="mut">${esc(m.detector_fate)}</td></tr>`).join("")+"</table>":"";
-  return `<div class="sc">${scoreCard("Final cSS score · reviewer",r.reader_score,"")}${scoreCard("AI score (not validated)",r.ai_score,(r.ai_score.n_green||0)+" green-band candidate(s)")}</div>`
+  return `<div class="sc">${scoreCard("Final cSS score · reviewer",r.reader_score,"")}${vmode?'<div class="card"><div class="h">AI score</div><div class="mut">hidden in a validation read</div></div>':scoreCard("AI score (not validated)",r.ai_score,(r.ai_score.n_green||0)+" green-band candidate(s)")}</div>`
     +(r.unread?`<p class="err">${r.unread} candidate(s) not read: the reviewer score is a lower bound.</p>`:"")
     +`<table>${rows}<tr><td>Not read</td><td><b>${r.unread}</b></td></tr><tr><td>Missed cSS marked</td><td><b>${r.missed.length}</b></td></tr></table>`+ms
     +`<details style="margin-top:8px"><summary class="mut">Scoring details</summary><pre>${esc(r.text||"")}</pre></details>`}
 async function summary(){if(!reviewer()){status("Enter your name first.",true);return}
-  if(compareOn){$("#cmpbody").innerHTML="<p>Saving and scoring ...</p>";$("#compare").classList.add("show")}else{$("#sumbody").innerHTML="<p>Saving and scoring ...</p>";$("#summary").classList.add("show")}
+  const cmpOn=compareOn&&!vmode;
+  if(cmpOn){$("#cmpbody").innerHTML="<p>Saving and scoring ...</p>";$("#compare").classList.add("show")}else{$("#sumbody").innerHTML="<p>Saving and scoring ...</p>";$("#summary").classList.add("show")}
   try{const r=await api("/api/finish",{study:M.study,reviewer:reviewer()});readerScore=r.reader_score;M.ai_score=r.ai_score;paintScores();
-    if(!compareOn){await finalSave(false);return}
-    const dx=differIdx(),rowsd=dx.map(i=>{const c=M.cands[i],call=callOf(c);return `<tr class="r" data-i="${i}"><td><b>${c.id}</b></td><td>${c.hemi} · ${esc(c.region)}</td><td>${pill(c.ai.score.toFixed(2),BANDCOL[c.ai.band])} ${esc(c.ai.band==="green"?"cSS":c.ai.suspect.replace(/^I suspect /,""))}</td><td>${pill(CALLLBL[call],CALLCOL[call])}</td><td class="mut">re-review →</td></tr>`}).join("");
+    if(!cmpOn){await finalSave(false);return}
+    const dx=differIdx(),rowsd=dx.map(i=>{const c=M.cands[i],call=callOf(c);return `<tr class="r" data-i="${i}"><td><b>${did(c)}</b></td><td>${c.hemi} · ${esc(c.region)}</td><td>${pill(c.ai.score.toFixed(2),BANDCOL[c.ai.band])} ${esc(c.ai.band==="green"?"cSS":c.ai.suspect.replace(/^I suspect /,""))}</td><td>${pill(CALLLBL[call],CALLCOL[call])}</td><td class="mut">re-review →</td></tr>`}).join("");
     revoteMode=true;
     $("#cmpbody").innerHTML=`<p><b>${esc(M.study)}</b> · reviewer <b>${esc(reviewer())}</b></p><div class="sc">${scoreCard("Reviewer",r.reader_score,"")}${scoreCard("AI (not validated)",r.ai_score,(r.ai_score.n_green||0)+" green-band candidate(s)")}</div>`
       +(r.unread?`<p class="err">${r.unread} candidate(s) not read: the reviewer score is a lower bound.</p>`:"")
       +(M.cands.filter(isInh).length?`<p class="err">${M.cands.filter(isInh).length} inherited call(s) not re-confirmed (dashed in the strip): press the same key on them to confirm. <button class="btn" id="cInh">Go to the first one</button></p>`:"")
       +`<h3>Calls that differ from the AI (${dx.length})</h3>`+(dx.length?`<table class="cmp" id="cmpdiff"><tr><th>#</th><th>Side · region</th><th>AI</th><th>Your call</th><th></th></tr>${rowsd}</table>`:'<p class="mut">None: every decided candidate agrees with the AI band (yellow counts as neither).</p>')}
-  catch(e){const b=compareOn?$("#cmpbody"):$("#sumbody");b.innerHTML=`<p class="err">${esc(e.message)}</p>`}}
+  catch(e){const b=cmpOn?$("#cmpbody"):$("#sumbody");b.innerHTML=`<p class="err">${esc(e.message)}</p>`}}
 async function finalSave(shown){$("#compare").classList.remove("show");$("#sumbody").innerHTML="<p>Saving the final review ...</p>";$("#summary").classList.add("show");
-  try{const r=await api("/api/finish",{study:M.study,reviewer:reviewer(),final:true,n_inherited_unconfirmed:M.cands.filter(isInh).length,n_differ:differIdx().length,meter_visible:showAI?1:0,comparison_shown:!!shown});
+  try{const r=await api("/api/finish",{study:M.study,reviewer:reviewer(),final:true,n_inherited_unconfirmed:M.cands.filter(isInh).length,n_differ:differIdx().length,meter_visible:showAI&&!vmode?1:0,comparison_shown:!!shown,read_mode:vmode?"validation":"second look"});
     readerScore=r.reader_score;finalRec=r.final;revoteMode=false;paintScores();
     $("#sumbody").innerHTML=`<p><b>${esc(M.study)}</b> · reviewer <b>${esc(reviewer())}</b> · <span class="ok">final saved ${esc(r.final.saved)}</span></p>`+summaryHtml(r)+`<p class="mut sm">Cohort report: ${esc(r.report||"")}</p>`}
   catch(e){$("#sumbody").innerHTML=`<p class="err">${esc(e.message)}</p>`}}
 function reReview(){$("#compare").classList.remove("show");const dx=differIdx();if(!dx.length){status("No disagreements to re-review.");return}onlyDiffer=true;setTab("calls");go(dx[0]);status("Re-reviewing "+dx.length+" disagreement(s). Press Q when done.")}
 function setCompare(v){compareOn=v;LSS("compare",v);$("#cNo").checked=!v}
-function exportCsv(){const q=s=>'"'+String(s==null?"":s).replace(/"/g,'""')+'"';
+function exportCsv(){if(vmode){status("Export is switched off during a validation read.",true);return}const q=s=>'"'+String(s==null?"":s).replace(/"/g,'""')+'"';
   const lines=[["study","reviewer","cand_id","hemi","region","volume_mm3","ai_meter","ai_band","ai_suspects","reviewer_call","comment","agreement"].join(",")]
     .concat(M.cands.map(c=>[M.study,reviewer(),c.id,c.hemi,c.region,c.volume,c.ai.score,c.ai.band,c.ai.suspect,callOf(c),(calls[c.id]||{}).comment||"",verdict(c)].map(q).join(",")));
   const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([lines.join("\n")+"\n"],{type:"text/csv"}));a.download=`${M.study}_ai_vs_${reviewer().replace(/\W+/g,"_")||"reviewer"}.csv`;a.click();status("Exported "+a.download)}
+
+// ---------- v5.7 validation read, primary reviewer, import ----------
+function paintMode(){const b=$("#vbadge");if(b)b.style.display=vmode?"":"none";
+  const h=$("#aicard .h span:last-child");if(h)h.innerHTML=vmode?"hidden in a validation read 🔒":'hide <kbd>K</kbd>';tog()}
+function setVmode(v){if(!M||!reviewer()){status("Enter your name first.",true);return}LSS("vmode_"+M.study+"|"+reviewer(),v);loadStudy(M.study)}
+async function showPrimary(){if(!M)return;const cur=M.primary||"(none yet: the first reviewer who saves)";
+  if(!reviewer()){status("Enter your name first.",true);return}
+  if(M.primary===reviewer()){toast(`You (${esc(reviewer())}) are the primary reviewer of ${esc(M.study)}: your calls are written to the shared files.`);return}
+  if(confirm(`Primary reviewer of ${M.study}: ${cur}.\n\nOnly the primary reviewer's calls go to the shared ${M.study}_calls.csv and ${M.study}_score.json; every other reviewer keeps an own score file.\n\nMake ${reviewer()} the primary reviewer?`)){
+    try{const r=await api("/api/primary",{study:M.study,reviewer:reviewer(),name:reviewer()});M.primary=r.primary;toast(`Primary reviewer of ${esc(M.study)}: ${esc(r.primary)}`)}catch(e){toast(esc(e.message),true)}}}
+function openImport(){if(vmode){status("Import is switched off during a validation read (it would unblind you).",true);return}
+  if(!reviewer()){status("Enter your name first.",true);return}const S=M.import_sources||[];
+  $("#imFrom").innerHTML=S.length?S.map(s=>`<option value="${esc(s.key)}">${esc(s.label)}</option>`).join(""):'<option value="">no earlier calls for this study</option>';
+  $("#imGo").disabled=!S.length;$("#import").classList.add("show")}
+async function doImport(){const src=$("#imFrom").value;if(!src)return;
+  try{const r=await api("/api/import",{study:M.study,reviewer:reviewer(),source:src,overwrite:$("#imAll").checked});calls=r.calls;$("#import").classList.remove("show");
+    paintDecision();paintLists();draw();toast(`Imported ${r.imported} call(s). They stay dashed until you press the same key on each.`)}catch(e){toast("Import failed: "+esc(e.message),true)}}
 
 // ---------- mirror / side check ----------
 function setMirror(v){mir=v;if(M)LSS("mir_"+M.study,v);status(v?"Mirrored: screen left = patient left (letters follow the anatomy)":"Normal view: screen left = patient right");draw()}
@@ -6543,7 +6592,7 @@ window.addEventListener("mouseup",e=>{if(!drag)return;const d=drag,p=d.p,V=VIEWS
 const pad3=n=>String(Math.round(n)).padStart(3,"0");
 function snapStamp(){const t=new Date(),z=n=>String(n).padStart(2,"0");return `${t.getFullYear()}${z(t.getMonth()+1)}${z(t.getDate())}-${z(t.getHours())}${z(t.getMinutes())}${z(t.getSeconds())}`}
 function snapName(ext,P){P=P||snap.parts;const c=cand(),p=panes[act],parts=[];if(!M)return "snapshot."+ext;
-  if(P.study)parts.push(M.study);if(c&&P.cand)parts.push("cand"+String(c.id).padStart(2,"0"));if(c&&P.xyz)parts.push("x"+pad3(c.vox[0]),"y"+pad3(c.vox[1]),"z"+pad3(c.vox[2]));
+  if(P.study)parts.push(M.study);if(c&&P.cand)parts.push("cand"+String(did(c)).padStart(2,"0"));if(c&&P.xyz)parts.push("x"+pad3(c.vox[0]),"y"+pad3(c.vox[1]),"z"+pad3(c.vox[2]));
   if(P.plane&&p)parts.push(PLN[p.plane].toLowerCase()+(mir&&p.plane!==2?"-mirrored":""));if(P.slice&&p)parts.push("s"+pad3(cur[VIEWS[p.plane].s]+1));if(P.time)parts.push(snapStamp());
   return (parts.join("_")||"snapshot")+"."+ext}
 function snapCanvas(){const o=Object.assign({},snap,{rl:showRL,bl:28,br:28,live:false,lm:10,rm:16,tm:30,rev:reviewer(),cross:snap.cross,arrow:snap.arrow}),res=snap.res;
@@ -6581,13 +6630,13 @@ function saveSnapSettings(){snap=Object.assign({},snap,{mode:$('input[name=smode
 function openSnapFolder(){const f=snap.folder||(M&&M.snapdir)||"";api("/api/openfolder",{study:M.study,path:f}).catch(e=>toast("Could not open the folder: "+esc(e.message),true))}
 
 // ---------- actions, menu bar, right-click menu ----------
-function tog(){$("#aibody").style.display=showAI?"":"none";LSS("mark",showMark);LSS("other",showOther);LSS("auto",autoNext);LSS("ai",showAI);LSS("text",showText);LSS("cross2",showCross);draw()}
+function tog(){$("#aibody").style.display=showAI&&!vmode?"":"none";LSS("mark",showMark);LSS("other",showOther);LSS("auto",autoNext);LSS("ai",showAI);LSS("text",showText);LSS("cross2",showCross);draw()}
 const A={
  summary:{l:"Summary and score",k:"Q",ic:"summary",f:summary},exportcsv:{l:"Export AI vs reviewer (CSV)",k:"E",ic:"export",f:exportCsv},
  undo:{l:"Undo last decision",k:"Z",ic:"undo",f:doUndo},clear:{l:"Clear this decision",k:"⌫",ic:"clear",f:()=>decide("")},comment:{l:"Add a comment",k:"C",ic:"comment",f:()=>{if(!panelVisible())openTab("viewer");setTab("viewer");setTimeout(()=>$("#comment").focus(),60)}},
  mark:{l:"Show this marking",k:"M",ic:"eye",f:()=>{showMark=!showMark;tog()},on:()=>showMark},other:{l:"Show other markings",k:"O",ic:"layers",f:()=>{showOther=!showOther;tog()},on:()=>showOther},
- mag:{l:"Magnifier",k:"B",ic:"lens",f:()=>{mag=!mag;tog()},on:()=>mag},mip:{l:"minIP slab",k:"I",ic:"slab",f:()=>{const p=panes[act];p.mip=!p.mip;tog()},on:()=>panes[act]&&panes[act].mip},
- ai:{l:"Show the AI meter",k:"K",ic:"gauge",f:()=>{showAI=!showAI;tog()},on:()=>showAI},mirror:{l:"Mirror left–right",k:"⇧H",ic:"mirror",f:()=>setMirror(!mir),on:()=>mir},rl:{l:"Show R badge",ic:"flag",f:()=>{showRL=!showRL;LSS("rl",showRL);draw()},on:()=>showRL},side:{l:"Side check…",ic:"flag",f:()=>toast(esc(sideMsg()),sideChk&&sideChk.bad,12000)},
+ mag:{l:"Magnifier",k:"W",ic:"lens",f:()=>{mag=!mag;tog()},on:()=>mag},mip:{l:"minIP slab",k:"I",ic:"slab",f:()=>{const p=panes[act];p.mip=!p.mip;tog()},on:()=>panes[act]&&panes[act].mip},
+ ai:{l:"Show the AI meter",k:"K",ic:"gauge",f:()=>{if(vmode){status("The AI meter is locked during a validation read (Settings > Validation read).",true);return}showAI=!showAI;tog()},on:()=>showAI&&!vmode,dis:()=>vmode},mirror:{l:"Mirror left–right",k:"⇧H",ic:"mirror",f:()=>setMirror(!mir),on:()=>mir},rl:{l:"Show R badge",ic:"flag",f:()=>{showRL=!showRL;LSS("rl",showRL);draw()},on:()=>showRL},side:{l:"Side check…",ic:"flag",f:()=>toast(esc(sideMsg()),sideChk&&sideChk.bad,12000)},
  text:{l:"Corner text and scale bar",k:"P",ic:"text",f:()=>{showText=!showText;tog()},on:()=>showText},
  cross:{l:"Crosshair",ic:"target",f:()=>{showCross=!showCross;tog()},on:()=>showCross},
  zin:{l:"Zoom in",k:"+",ic:"zoomin",f:()=>zoomBy(1.2)},zout:{l:"Zoom out",k:"-",ic:"lens",f:()=>zoomBy(1/1.2)},fit:{l:"Fit to window",k:"0",ic:"fit",f:fitView},actual:{l:"Actual size 1:1",k:"9",ic:"actual",f:actualSize},
@@ -6603,6 +6652,8 @@ const A={
  dark:{l:"Darkness probe",k:"D",ic:"dark",f:()=>setTool(tool==="dark"?"pan":"dark"),on:()=>tool==="dark"},ruler:{l:"Ruler",k:"L",ic:"ruler",f:()=>setTool(tool==="ruler"?"pan":"ruler"),on:()=>tool==="ruler"},
  miss:{l:"Mark a missed cSS…",k:"X",ic:"plus",f:()=>setTool(tool==="miss"?"pan":"miss"),on:()=>tool==="miss"},
  snap:{l:"Take snapshot",k:MOD+(MAC?"":"+")+"S",ic:"cam",f:()=>takeSnapshot(false)},snapas:{l:"Save snapshot as…",k:"⇧"+MOD+(MAC?"":"+")+"S",ic:"disk",f:()=>takeSnapshot(true)},snapfolder:{l:"Open snapshot folder",ic:"folder",f:openSnapFolder},snapset:{l:"Snapshot settings…",ic:"gear",f:openSnapSettings},
+ vmode:{l:"Validation read (meter hidden, excluded audit)",ic:"eye",f:()=>setVmode(!vmode),on:()=>vmode},
+ primary:{l:"Primary reviewer…",ic:"flag",f:showPrimary},import:{l:"Import earlier calls…",ic:"undo",f:openImport,dis:()=>vmode},
  compare:{l:"Show the AI comparison before the final save",ic:"cmp",f:()=>setCompare(!compareOn),on:()=>compareOn},
  help:{l:"Keys and reading rules",k:"?",ic:"help",f:()=>$("#help").classList.toggle("show")}};
 Object.entries(CALLKEYS).forEach(([k,c])=>A["call_"+k]={l:"Decide: "+CALLLBL[c],k:k.toUpperCase(),ic:"cmp",f:()=>decide(c),on:()=>M&&cand()&&callOf(cand())===c});
@@ -6610,16 +6661,16 @@ const seqItems=()=>M.seqs.map((s,i)=>({l:s.label,k:String(i+1),ic:"seq",f:()=>se
 const themeItems=()=>["light","dark","blue"].map(t=>({l:t==="blue"?"Eye-preserving blue":"Theme: "+t,ic:t==="light"?"sun":"moon",f:()=>theme(t),on:()=>document.documentElement.dataset.theme===t}));
 const studyItems=()=>M.studies.map(s=>({l:s,ic:"folder",f:()=>loadStudy(s),on:()=>s===M.study}));
 const planeItems=()=>PLN.map((n,i)=>({l:n,ic:"cube",f:()=>setPlane(i),on:()=>panes[act]&&panes[act].plane===i}));
-const MENUS={file:()=>[{sub:"Open study",ic:"folder",items:studyItems},"-","summary","exportcsv"],edit:()=>["undo","clear","comment"],
+const MENUS={file:()=>[{sub:"Open study",ic:"folder",items:studyItems},"import","-","summary","exportcsv"],edit:()=>["undo","clear","comment"],
  view:()=>[{sub:"Layout",ic:"l4",k:"\\",items:()=>["lay1","lay2","lay4"]},{sub:"Plane",ic:"cube",k:"Tab",items:planeItems},{sub:"Sequence",ic:"seq",items:seqItems},"-","mark","other","mag","mip","text","cross","ai","-","mirror","rl","side","-","zin","zout","fit","actual","reset","centre","-","tviewer","tcands","tcalls","hidepanel","autohide","-",{sub:"Theme",ic:"moon",items:themeItems}],
  cand:()=>["prev","next","unread","-","call_y","call_v","call_n","call_a","call_u","call_h","-","auto"],
  tools:()=>["pan","zoomtool","wl","scroll","-","mag","dark","ruler","miss","-","snap","snapas","snapfolder"],
- settings:()=>["autohide","text","rl","mirror","compare","ai","auto","-",{sub:"Theme",ic:"moon",items:themeItems},"-","snapset"],help:()=>["help"]};
+ settings:()=>["vmode","primary","-","autohide","text","rl","mirror","compare","ai","auto","-",{sub:"Theme",ic:"moon",items:themeItems},"-","snapset"],help:()=>["help"]};
 function closeMenus(){$$(".menu").forEach(m=>m.remove());$$("#mbar span").forEach(s=>s.classList.remove("on"));drawLens()}
 function openMenu(items,x,y,level){$$(".menu").forEach(m=>{if(+m.dataset.level>=level)m.remove()});
   const m=document.createElement("div");m.className="menu";m.dataset.level=level;
   for(const it0 of items){if(it0==="-"){m.appendChild(document.createElement("hr"));continue}const it=typeof it0==="string"?A[it0]:it0,d=document.createElement("div");
-    d.innerHTML=`<span class="ck">${it.on&&it.on()?"✓":""}</span><span class="ic">${it.ic?svg(it.ic):""}</span><span>${esc(it.sub||it.l)}</span><span class="k">${it.sub?"▸":esc(it.k||"")}</span>`;if(it.dis)d.className="dis";
+    d.innerHTML=`<span class="ck">${it.on&&it.on()?"✓":""}</span><span class="ic">${it.ic?svg(it.ic):""}</span><span>${esc(it.sub||it.l)}</span><span class="k">${it.sub?"▸":esc(it.k||"")}</span>`;if(typeof it.dis==="function"?it.dis():it.dis)d.className="dis";
     const unhi=()=>$$(".menu div.hi").forEach(e=>{if(e.parentNode===m)e.classList.remove("hi")});
     if(it.sub){const open=()=>{unhi();d.classList.add("hi");const r=d.getBoundingClientRect();openMenu(it.items(),r.right-2,r.top-5,level+1)};d.addEventListener("mouseenter",open);d.addEventListener("click",e=>{e.stopPropagation();open()})}
     else{d.addEventListener("mouseenter",()=>{$$(".menu").forEach(q=>{if(+q.dataset.level>level)q.remove()});unhi()});d.addEventListener("click",e=>{e.stopPropagation();closeMenus();it.f()})}
@@ -6653,6 +6704,7 @@ $("#cRe").onclick=reReview;$("#cSave").onclick=()=>finalSave(true);$("#cClose").
 $("#cmpbody").addEventListener("click",e=>{if(e.target.id==="cInh"){const i=M.cands.findIndex(isInh);$("#compare").classList.remove("show");if(i>=0)go(i);return}
   const r=e.target.closest("tr.r");if(r){$("#compare").classList.remove("show");onlyDiffer=true;setTab("calls");go(+r.dataset.i);status("Re-review this candidate; press Q to return to the comparison.")}});
 $("#saSave").onclick=saveAsGo;$("#saCancel").onclick=()=>{$("#saveas").classList.remove("show");saveCtx=null};$("#saChoose").onclick=saveAsChoose;$("#saName").addEventListener("keydown",e=>{if(e.key==="Enter")saveAsGo()});
+$("#imGo").onclick=doImport;$("#imCancel").onclick=()=>$("#import").classList.remove("show");
 $("#sOk").onclick=saveSnapSettings;$("#sCancel").onclick=()=>$("#snapdlg").classList.remove("show");$("#sOpen").onclick=openSnapFolder;$("#snapdlg").addEventListener("change",snapPrev);
 $("#misslist").addEventListener("click",e=>{const d=e.target.dataset;if(d.del)missedApi({action:"delete",id:+d.del});if(d.go){const m=missed.find(x=>x.missed_id==d.go);if(m){cur=[m.can_i,m.can_j,m.can_k];if(m.pts)cur[VIEWS[+m.plane].s]=+m.slice;if(zoom>1.001)ctr=cur.slice();draw()}}});
 $("#misslist").addEventListener("change",e=>{const d=e.target.dataset;if(d.mid)missedApi({action:"comment",id:+d.mid,comment:e.target.value})});
@@ -6676,7 +6728,7 @@ window.addEventListener("keydown",e=>{const tag=(e.target.tagName||"").toLowerCa
   else if(k==="["){const w=getWL(panes[act].seq);setWLp(panes[act].seq,w[0],w[1]-2)}else if(k==="]"){const w=getWL(panes[act].seq);setWLp(panes[act].seq,w[0],w[1]+2)}
   else if(k===";"){const w=getWL(panes[act].seq);setWLp(panes[act].seq,w[0]*1.1,w[1])}else if(k==="'"){const w=getWL(panes[act].seq);setWLp(panes[act].seq,w[0]/1.1,w[1])}
   else if(k==="r")resetView();else if(k==="f")gotoCandidate();
-  else if(k==="m")A.mark.f();else if(k==="o")A.other.f();else if(k==="i")A.mip.f();else if(k==="g")A.auto.f();else if(k==="k")A.ai.f();else if(k==="b")A.mag.f();else if(k==="p")A.text.f();
+  else if(k==="m")A.mark.f();else if(k==="o")A.other.f();else if(k==="i")A.mip.f();else if(k==="g")A.auto.f();else if(k==="k")A.ai.f();else if(k==="w")A.mag.f();else if(k==="p")A.text.f();
   else if(k==="s")nextSeq();else if(/^[1-5]$/.test(k)){const s=M.seqs[+k-1];if(s)setSeq(s.key)}
   else if(k==="t"){const t=["light","dark","blue"];theme(t[(t.indexOf(document.documentElement.dataset.theme)+1)%3])}
   else if(k==="d")A.dark.f();else if(k==="l")A.ruler.f();else if(k==="x")A.miss.f();
@@ -6729,6 +6781,7 @@ SEQ_NAMES = {"swi": "SWI", "flair": "FLAIR", "t1": "T1", "t2": "T2", "phase": "P
 LOCK = threading.Lock()
 slug = lambda s: re.sub(r"[^A-Za-z0-9]+", "_", s.strip()).strip("_") or "reviewer"
 now = lambda: time.strftime("%Y-%m-%d %H:%M:%S")
+AUDIT_OFFSET, AUDIT_FRAC = 10000, 0.20   # v5.7 validation read: excluded objects shown as ids 10000 + excl_id, 20 % sample
 
 
 def primary(sid, set_to=None, if_missing=False):
@@ -6743,7 +6796,8 @@ def primary(sid, set_to=None, if_missing=False):
 
 def score_path(sid, reviewer):
     """the primary reviewer's score is the shared ID_score.json; every other reviewer has ID_score_rev_<name>.json"""
-    return f"{B}/review/{sid}_score.json" if reviewer and primary(sid) == reviewer.strip() else f"{B}/review/{sid}_score_rev_{slug(reviewer)}.json"
+    pr = primary(sid)                  # no primary yet (studies read before v5.7): the shared file, as before
+    return f"{B}/review/{sid}_score.json" if (not pr or (reviewer and pr == reviewer.strip())) else f"{B}/review/{sid}_score_rev_{slug(reviewer)}.json"
 
 
 def final_path(sid, reviewer): return f"{B}/review/{sid}_final_{slug(reviewer)}.json"
@@ -6846,6 +6900,61 @@ class Study:
         if os.path.exists(qp):
             q = json.load(open(qp))
             if q.get("status") not in (None, "ok"): self.qc = f"Case QC {q.get('status')}: " + "; ".join(q.get("reasons", []))
+
+    # ---------- v5.7 validation read: a sample of EXCLUDED objects mixed into the list (never scored) ----------
+    def _excluded(self):
+        if getattr(self, "_aud_xl", None) is None:
+            xp, xn = f"{B}/review/{self.sid}_excluded.csv", f"{B}/review/{self.sid}_excluded.nii.gz"
+            xd = pd.read_csv(xp) if os.path.exists(xp) else pd.DataFrame()
+            if len(xd) and "excl_id" in xd.columns and os.path.exists(xn):
+                self._aud_xl = self._grid(xn, order=0).astype(np.int32); self._aud_xd = xd
+            else: self._aud_xl = np.zeros(1, np.int32); self._aud_xd = pd.DataFrame()
+        return self._aud_xd, self._aud_xl
+
+    def audit_ids(self, reviewer):
+        """deterministic 20 % sample of the excluded objects (at least 1 when any), seeded by study + reviewer"""
+        xd, _ = self._excluded()
+        if not len(xd): return []
+        ids = sorted(int(i) for i in xd.excl_id)
+        seed = int.from_bytes((self.sid + "|" + slug(reviewer)).encode()[:16].ljust(16, b"_"), "little") % (2 ** 32)
+        rng = np.random.default_rng(seed)
+        n = max(1, int(round(AUDIT_FRAC * len(ids))))
+        return sorted(int(i) for i in rng.choice(ids, size=min(n, len(ids)), replace=False))
+
+    def audit_cands(self, reviewer):
+        xd, xl = self._excluded(); out = []
+        for e in self.audit_ids(reviewer):
+            r = xd[xd.excl_id == e].iloc[0]; pts = np.argwhere(xl == e)
+            if not len(pts): continue
+            c = pts.mean(0); c = pts[np.argmin(((pts - c) ** 2).sum(1))]
+            out.append(dict(id=AUDIT_OFFSET + e, audit=True, hemi=str(r.get("hemi", "")), region=str(r.get("region", "")).replace("ctx-lh-", "").replace("ctx-rh-", ""),
+                            volume=float(r.get("volume_mm3", len(pts) * np.prod(self.vox))), centre=[int(v) for v in c], vox=[int(v) for v in c],
+                            ai=ai_opinion(r), feat={}))
+        return out
+
+    def labels(self, reviewer="", audit=False):
+        if not audit: return self.lab
+        xd, xl = self._excluded(); L = self.lab.copy()
+        for e in self.audit_ids(reviewer):
+            m = (xl == e) & (L == 0); L[m] = AUDIT_OFFSET + e
+        return L
+
+    def apath(self, reviewer): return f"{B}/review/{self.sid}_excluded_audit_{slug(reviewer)}.csv"
+
+    def load_audit(self, reviewer):
+        p = self.apath(reviewer)
+        if not os.path.exists(p): return {}
+        a = pd.read_csv(p); out = {}
+        for _, r in a.iterrows():
+            out[AUDIT_OFFSET + int(r.excl_id)] = dict(call=r.call if isinstance(r.call, str) else "", comment=r.comment if isinstance(r.get("comment"), str) else "",
+                                                     time=r.get("time", "") if isinstance(r.get("time"), str) else "")
+        return out
+
+    def save_audit(self, reviewer, calls):
+        xd, _ = self._excluded(); why = dict(zip(xd.excl_id, xd.reason)) if len(xd) else {}
+        rows = [dict(excl_id=k - AUDIT_OFFSET, call=v.get("call", ""), comment=v.get("comment", ""), reviewer=reviewer, time=v.get("time", ""),
+                     rule=str(why.get(k - AUDIT_OFFSET, "")).split(":")[0]) for k, v in sorted(calls.items()) if k >= AUDIT_OFFSET and (v.get("call") or v.get("comment"))]
+        pd.DataFrame(rows, columns=["excl_id", "call", "comment", "reviewer", "time", "rule"]).to_csv(self.apath(reviewer), index=False)
 
     def _grid(self, path, order=1):
         im = nib.load(path)
@@ -7090,8 +7199,10 @@ def side_check(s):
     except Exception as e: return dict(n=0, agree=0, bad=False, labels_ok=None, error=str(e))
 
 
-def meta(sid, reviewer):
+def meta(sid, reviewer, mode=""):
     s = study(sid); calls, note = s.load_calls(reviewer) if reviewer else ({}, "")
+    audit = mode == "validation" and bool(reviewer)
+    if audit: calls.update(s.load_audit(reviewer))
     cands = []
     for _, r in s.df.iterrows():
         i = int(r.cand_id); g = lambda k: (None if pd.isna(r[k]) else (float(r[k]) if not isinstance(r[k], str) else r[k])) if k in r else None
@@ -7099,7 +7210,8 @@ def meta(sid, reviewer):
                           volume=float(r.volume_mm3), centre=s.centre.get(i, [v // 2 for v in s.shape]), vox=s.centre.get(i, [v // 2 for v in s.shape]), ai=ai_opinion(r),
                           feat={k: g(k) for k in ("darkness_z", "pial_dist_mm", "tube_ratio", "tram_frac", "extent_mm", "n_slices",
                                                   "css_evidence", "vein_evidence", "score")}))
-    return dict(study=sid, studies=IDS, shape=list(s.shape), vox=s.vox, cands=cands, calls=calls, note=note, qc=s.qc,
+    if audit: cands += s.audit_cands(reviewer)
+    return dict(study=sid, studies=IDS, shape=list(s.shape), vox=s.vox, cands=cands, calls=calls, mode="validation" if audit else "", note=note, qc=s.qc,
                 seqs=[dict(key=k, **{a: b for a, b in s.meta_seq.get(k, dict(label=SEQ_NAMES[k])).items()}) for k in s.avail],
                 missing_seqs=[SEQ_NAMES[k] for k in ("flair", "t1", "t2", "phase") if k not in s.avail], ai_score=ai_score(s),
                 reader_score=(_score_json(score_path(sid, reviewer)) if calls else None),
@@ -7123,12 +7235,14 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path); q = {k: v[0] for k, v in parse_qs(u.query).items()}
         try:
             if u.path == "/": return self._send(open(os.path.join(HERE, "review_web.html"), "rb").read(), "text/html; charset=utf-8")
-            if u.path == "/api/meta": return self._send(meta(q.get("study") or IDS[0], q.get("reviewer", "")))
+            if u.path == "/api/meta": return self._send(meta(q.get("study") or IDS[0], q.get("reviewer", ""), q.get("mode", "")))
             if u.path == "/api/vol":
                 s = study(q["study"]); return self._send(s.volume(q.get("seq", "swi")).tobytes(order="F"), "application/octet-stream")
             if u.path == "/api/seqmeta":
                 s = study(q["study"]); s.volume(q["seq"]); return self._send(s.meta_seq[q["seq"]])
-            if u.path == "/api/labels": return self._send(study(q["study"]).lab.astype("<u2").tobytes(order="F"), "application/octet-stream")
+            if u.path == "/api/labels":
+                L = study(q["study"]).labels(q.get("reviewer", ""), q.get("mode") == "validation")
+                return self._send(L.astype("<u2").tobytes(order="F"), "application/octet-stream")
             self._send(dict(error="not found"), code=404)
         except Exception as e:
             self._send(dict(error=f"{type(e).__name__}: {e}"), code=500)
@@ -7168,12 +7282,25 @@ class H(BaseHTTPRequestHandler):
                 try: subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 except Exception as e: return self._send(dict(error=str(e)), code=500)
                 return self._send(dict(ok=True))
+            if u.path == "/api/import" and d.get("mode") == "validation":
+                return self._send(dict(error="import is switched off during a validation read (it would unblind you)"), code=400)
             if u.path == "/api/import":
                 with LOCK: calls, n = s.import_calls(rev, str(d.get("source", "")), bool(d.get("overwrite")))
                 return self._send(dict(ok=True, calls=calls, imported=n, saved=now()))
             if u.path == "/api/primary":
                 name = str(d.get("name") or rev).strip()
                 return self._send(dict(ok=True, primary=primary(s.sid, name)))
+            if u.path == "/api/call" and int(d.get("cand_id", 0)) >= AUDIT_OFFSET:      # v5.7 excluded-object audit call
+                with LOCK:
+                    au = s.load_audit(rev); cid = int(d["cand_id"]); cur = au.get(cid, dict(call="", comment=""))
+                    if "call" in d:
+                        if d["call"] not in CALLS + [""]: return self._send(dict(error="unknown call"), code=400)
+                        cur["call"] = d["call"]; cur["time"] = now()
+                    if "comment" in d: cur["comment"] = str(d["comment"])[:500]
+                    au[cid] = cur
+                    if not cur.get("call") and not cur.get("comment"): au.pop(cid)
+                    s.save_audit(rev, au); calls, _ = s.load_calls(rev); calls.update(au)
+                return self._send(dict(ok=True, calls=calls, saved=now()))
             if u.path == "/api/call":
                 with LOCK:
                     calls, _ = s.load_calls(rev); cid = int(d["cand_id"]); cur = calls.get(cid, dict(call="", comment=""))
@@ -7186,6 +7313,7 @@ class H(BaseHTTPRequestHandler):
                     calls[cid] = cur
                     if not cur.get("call") and not cur.get("comment"): calls.pop(cid)
                     s.save(rev, calls, cid, d.get("action", "call"), d.get("meter"))
+                    if d.get("mode") == "validation": calls.update(s.load_audit(rev))
                 return self._send(dict(ok=True, calls=calls, saved=now()))
             if u.path == "/api/missed":
                 with LOCK: m = s.missed_edit(rev, d["action"], d)
@@ -7216,6 +7344,11 @@ class H(BaseHTTPRequestHandler):
                                n_missed=int(len(res["missed"])), n_revoted=nrev, meter_visible=d.get("meter_visible", ""), n_inherited_unconfirmed=d.get("n_inherited_unconfirmed", ""),
                                comparison_shown=bool(d.get("comparison_shown")), n_microbleed=int(sum(v == "Microbleed" for v in c.values())),
                                primary=bool(primary(s.sid) == rev), read_mode=d.get("read_mode", ""))
+                    au = s.load_audit(rev); xd, _ = s._excluded(); why = dict(zip(xd.excl_id, xd.reason)) if len(xd) else {}
+                    fin["audit_n_shown"] = len(s.audit_ids(rev)) if d.get("read_mode") == "validation" else 0
+                    fin["audit_n_read"] = sum(1 for v in au.values() if v.get("call"))
+                    fin["audit_css"] = [dict(excl_id=k - AUDIT_OFFSET, rule=str(why.get(k - AUDIT_OFFSET, "")).split(":")[0])
+                                        for k, v in sorted(au.items()) if v.get("call") == "cSS"]
                     json.dump(fin, open(final_path(s.sid, rev), "w"), indent=1)
                     import css_report
                     out, n, xl = css_report.build(B); res["final"] = fin; res["report"] = f"{out}.csv{xl}"
@@ -10862,7 +10995,7 @@ print("RESULT region OK")
 meta lists every candidate with a meter value in 0-1 and a band; a call without a reviewer name is refused; calls,
 comment, undo-style clearing and a missed-cSS mark are written with the reviewer name; ID_calls.csv keeps the
 review_css.py format; calls re-load for the same reviewer and not for another; names are remembered."""
-import os, sys, json, time, subprocess, urllib.request, pandas as pd
+import os, sys, json, time, subprocess, urllib.request, pandas as pd, numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); S = os.path.join(HERE, "..", "scripts"); B = os.environ["CSS_BASE"]
 def fail(m): print("FAIL:", m); srv.kill(); sys.exit(1)
 for f in ("PH3_calls.csv", "PH3_calls_Reader_A.csv", "PH3_calls_Reader_B.csv", "PH3_review_log.csv", "PH3_missed.csv", "reviewers.json", "PH3_primary.json"):
@@ -10874,6 +11007,7 @@ def get(p):
         try: return json.load(urllib.request.urlopen(U + p, timeout=60))
         except OSError: time.sleep(0.5)
     fail("server did not answer")
+def get_bytes(p): return urllib.request.urlopen(U + p, timeout=60).read()
 def post(p, d):
     r = urllib.request.Request(U + p, json.dumps(d).encode(), {"Content-Type": "application/json", "X-CSS": "1"})
     try: return json.load(urllib.request.urlopen(r, timeout=120))
@@ -10911,6 +11045,7 @@ if json.load(open(f"{B}/review/PH3_score.json"))["multifocality_0_4"] != rs["mul
 if os.path.exists(f"{B}/review/PH3_final_Reader_A.json"): fail("no final record before the final save")
 post("/api/call", dict(study="PH3", reviewer="Reader A", cand_id=ids[1], call="Vein", action="revote"))
 g = post("/api/finish", dict(study="PH3", reviewer="Reader A", final=True, n_differ=1, meter_visible=1, comparison_shown=True))
+if g.get("error") or not os.path.exists(f"{B}/review/PH3_final_Reader_A.json"): fail(f"final save failed: {g.get('error')}")
 fin = json.load(open(f"{B}/review/PH3_final_Reader_A.json"))
 if not fin.get("primary"): fail("Reader A saved first and must be the primary reviewer")
 if fin["reviewer"] != "Reader A" or fin["n_revoted"] != 1 or fin["reviewer_score"]["multifocality_0_4"] != g["reader_score"]["multifocality_0_4"]: fail(f"final record: {fin}")
@@ -10939,6 +11074,27 @@ if sorted(rep.Reviewer) != ["Reader A", "Reader B"] or "Microbleeds called" not 
 if get("/api/meta?study=PH3&reviewer=Reader%20A")["final"]["reviewer"] != "Reader A": fail("final record must be per reviewer")
 post("/api/primary", dict(study="PH3", reviewer="Reader B", name="Reader B"))
 if get("/api/meta?study=PH3&reviewer=")["primary"] != "Reader B": fail("primary reviewer not changed")
+# v5.7 validation read: excluded-object audit sample, separate audit file, never scored, import refused
+mv = get("/api/meta?study=PH3&reviewer=Reader%20C&mode=validation")
+au = [c_ for c_ in mv["cands"] if c_.get("audit")]
+nx_ = len(pd.read_csv(f"{B}/review/PH3_excluded.csv"))
+if mv.get("mode") != "validation" or (nx_ and len(au) != max(1, round(0.2 * nx_))): fail(f"audit sample: {len(au)} of {nx_} excluded")
+if nx_:
+    aid = au[0]["id"]
+    if aid < 10000 or any(c_["id"] == aid for c_ in get("/api/meta?study=PH3&reviewer=Reader%20C")["cands"]): fail("audit objects must appear only in a validation read")
+    post("/api/call", dict(study="PH3", reviewer="Reader C", cand_id=aid, call="cSS", mode="validation"))
+    post("/api/call", dict(study="PH3", reviewer="Reader C", cand_id=ids[0], call="Vein", mode="validation"))
+    af = pd.read_csv(f"{B}/review/PH3_excluded_audit_Reader_C.csv")
+    if list(af.excl_id) != [aid - 10000] or af.call[0] != "cSS" or not str(af.rule[0]): fail(f"audit file: {af}")
+    gc = post("/api/finish", dict(study="PH3", reviewer="Reader C", final=True, read_mode="validation"))
+    if gc["counts"]["cSS"] != 0 or gc["unread"] != n - 1: fail(f"audit calls must never be scored: {gc['counts']}, unread {gc['unread']}")
+    fc = json.load(open(f"{B}/review/PH3_final_Reader_C.json"))
+    if [x["excl_id"] for x in fc["audit_css"]] != [aid - 10000] or fc["audit_n_read"] != 1: fail(f"final audit record: {fc}")
+    L = get_bytes("/api/labels?study=PH3&reviewer=Reader%20C&mode=validation")
+    if not (np.frombuffer(L, "<u2") == aid).any(): fail("audit object missing from the label volume of the validation read")
+    if "error" not in post("/api/import", dict(study="PH3", reviewer="Reader C", source="legacy", mode="validation")): fail("import must be refused in a validation read")
+    for x in ("PH3_excluded_audit_Reader_C.csv", "PH3_final_Reader_C.json", "PH3_calls_Reader_C.csv", "PH3_score_rev_Reader_C.json"):
+        if os.path.exists(f"{B}/review/{x}"): os.remove(f"{B}/review/{x}")
 sc = get("/api/meta?study=PH3&reviewer=")["side_check"]
 if sc.get("labels_ok") is not True or sc.get("bad"): fail(f"side check (world coordinates): {sc}")
 for x in ("PH3_final_Reader_A.json", "PH3_final_Reader_B.json", "PH3_score_rev_Reader_B.json", "PH3_calls_Reader_B.csv", "PH3_primary.json"):

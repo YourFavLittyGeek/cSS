@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Your first read vs the redo, object by object. Research software; expert review required.
 usage: compare_reads.py M02,M03,...  [--reviewer Redo_v53] [--old-dir DIR]
+       compare_reads.py M02,M03,...  --reviewer Blind_v57 --old-reviewer Redo_v53    (two reads of the SAME detection)
 READ-ONLY. For every candidate you called in the FIRST read (old calls + the candidate list saved before redetect), it follows
 the object into the NEW detection (shown / merged with another / excluded by a rule / gone) and compares your old call with
 your call in the redo (ID_calls_<reviewer>.csv). It also lists new objects that had no old call.
@@ -21,6 +22,7 @@ if not a or a[0].startswith("-"): sys.exit(__doc__)
 ids = [s for s in a[0].split(",") if s]
 rev = a[a.index("--reviewer") + 1] if "--reviewer" in a else "Redo_v53"
 odir = a[a.index("--old-dir") + 1] if "--old-dir" in a else f"{B}/review/old_calls_before_redo"
+orev = a[a.index("--old-reviewer") + 1] if "--old-reviewer" in a else ""      # v5.7: both reads on the current detection
 slug = re.sub(r"[^A-Za-z0-9]+", "_", rev.strip()).strip("_") or "reviewer"    # same as review_web.py
 CH = f"{B}/review/changes"
 
@@ -45,16 +47,21 @@ def calls_on(cand, path):
     return {int(cid): (call if isinstance(call, str) else "", "") for cid, call in m.items()}
 
 
-rows, text = [], ["Your first read vs the redo (research software; expert review required)", f"redo reviewer: {rev}", ""]
+rows, text = [], ["Your first read vs the redo (research software; expert review required)",
+                   f"redo reviewer: {rev}" + (f"   first read: {orev} (same detection)" if orev else ""), ""]
 tot = dict(old=0, kept=0, excl=0, gone=0, css_lost=0)
 pairs_exact, pairs_bin, pairs_band = [], [], []
 for sid in ids:
     need = [f"{CH}/{sid}_before_candidates.csv", f"{CH}/{sid}_before_candidates.nii.gz", f"{B}/review/{sid}_candidates.csv",
             f"{B}/review/{sid}_candidates.nii.gz"]
+    if orev: need[0], need[1] = need[2], need[3]          # same detection: the "old" list is the current list
     if any(not os.path.exists(p) for p in need):
         text.append(f"{sid}: missing {[os.path.basename(p) for p in need if not os.path.exists(p)]} - skipped"); continue
     oc, nc = pd.read_csv(need[0]), pd.read_csv(need[2])
     op = next((p for p in (f"{odir}/{sid}_calls.csv", f"{CH}/{sid}_before_calls.csv") if os.path.exists(p)), None)
+    if orev:
+        _s = re.sub(r"[^A-Za-z0-9]+", "_", orev.strip()).strip("_") or "reviewer"
+        op = f"{B}/review/{sid}_calls_{_s}.csv" if os.path.exists(f"{B}/review/{sid}_calls_{_s}.csv") else None
     nps = f"{B}/review/{sid}_calls_{slug}.csv"
     if op is None or not os.path.exists(nps): text.append(f"{sid}: old calls ({op}) or redo calls ({nps}) not found - skipped"); continue
     old, new = calls_on(oc, op), calls_on(nc, nps)
@@ -97,7 +104,9 @@ for sid in ids:
         rows.append(dict(study=sid, old_id="", old_call="", region=str(nreg.get(nid, "")).replace("ctx-lh-", "").replace("ctx-rh-", ""), volume_mm3=round(float(nc[nc.cand_id == nid].volume_mm3.iloc[0]), 0),
                          fate="new object", rule="", new_id=nid, merged_with_old="", new_call=ncall, outcome="new, no old call", ai_meter=band.get(nid, ("", ""))[1], ai_band=band.get(nid, ("", ""))[0]))
     d = pd.DataFrame([r for r in rows if r["study"] == sid])
-    text += [f"=== {sid} ===", f"score: first read {score(f'{odir}/{sid}_score.json')}  ->  redo {score(f'{B}/review/{sid}_score.json')}",
+    _sr = lambda r_: (f"{B}/review/{sid}_score.json" if not os.path.exists(f"{B}/review/{sid}_score_rev_{re.sub('[^A-Za-z0-9]+', '_', r_.strip()).strip('_')}.json")
+                      else f"{B}/review/{sid}_score_rev_{re.sub('[^A-Za-z0-9]+', '_', r_.strip()).strip('_')}.json")
+    text += [f"=== {sid} ===", f"score: first read {score(_sr(orev) if orev else f'{odir}/{sid}_score.json')}  ->  redo {score(_sr(rev))}",
              f"old calls {len(old)} (cSS {sum(1 for v in old.values() if v[0] == 'cSS')}) -> new calls {len(new)} (cSS {sum(1 for v in new.values() if v[0] == 'cSS')}); "
              f"old candidates {len(oc)} -> {len(nc)}",
              f"old calls in the file {CNT[op][0]}, matched to the old candidate list {CNT[op][1]}" + ("   <-- unmatched old calls: this study is NOT a clean comparison" if CNT[op][1] < CNT[op][0] else ""), "what happened to the old calls:"]
