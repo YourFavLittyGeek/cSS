@@ -34,6 +34,7 @@ SEQ_NAMES = {"swi": "SWI", "flair": "FLAIR", "t1": "T1", "t2": "T2", "phase": "P
 LOCK = threading.Lock()
 slug = lambda s: re.sub(r"[^A-Za-z0-9]+", "_", s.strip()).strip("_") or "reviewer"
 now = lambda: time.strftime("%Y-%m-%d %H:%M:%S")
+AUDIT_OFFSET, AUDIT_FRAC = 10000, 0.20   # v5.7 validation read: excluded objects shown as ids 10000 + excl_id, 20 % sample
 
 
 def primary(sid, set_to=None, if_missing=False):
@@ -152,6 +153,61 @@ class Study:
         if os.path.exists(qp):
             q = json.load(open(qp))
             if q.get("status") not in (None, "ok"): self.qc = f"Case QC {q.get('status')}: " + "; ".join(q.get("reasons", []))
+
+    # ---------- v5.7 validation read: a sample of EXCLUDED objects mixed into the list (never scored) ----------
+    def _excluded(self):
+        if getattr(self, "_aud_xl", None) is None:
+            xp, xn = f"{B}/review/{self.sid}_excluded.csv", f"{B}/review/{self.sid}_excluded.nii.gz"
+            xd = pd.read_csv(xp) if os.path.exists(xp) else pd.DataFrame()
+            if len(xd) and "excl_id" in xd.columns and os.path.exists(xn):
+                self._aud_xl = self._grid(xn, order=0).astype(np.int32); self._aud_xd = xd
+            else: self._aud_xl = np.zeros(1, np.int32); self._aud_xd = pd.DataFrame()
+        return self._aud_xd, self._aud_xl
+
+    def audit_ids(self, reviewer):
+        """deterministic 20 % sample of the excluded objects (at least 1 when any), seeded by study + reviewer"""
+        xd, _ = self._excluded()
+        if not len(xd): return []
+        ids = sorted(int(i) for i in xd.excl_id)
+        seed = int.from_bytes((self.sid + "|" + slug(reviewer)).encode()[:16].ljust(16, b"_"), "little") % (2 ** 32)
+        rng = np.random.default_rng(seed)
+        n = max(1, int(round(AUDIT_FRAC * len(ids))))
+        return sorted(int(i) for i in rng.choice(ids, size=min(n, len(ids)), replace=False))
+
+    def audit_cands(self, reviewer):
+        xd, xl = self._excluded(); out = []
+        for e in self.audit_ids(reviewer):
+            r = xd[xd.excl_id == e].iloc[0]; pts = np.argwhere(xl == e)
+            if not len(pts): continue
+            c = pts.mean(0); c = pts[np.argmin(((pts - c) ** 2).sum(1))]
+            out.append(dict(id=AUDIT_OFFSET + e, audit=True, hemi=str(r.get("hemi", "")), region=str(r.get("region", "")).replace("ctx-lh-", "").replace("ctx-rh-", ""),
+                            volume=float(r.get("volume_mm3", len(pts) * np.prod(self.vox))), centre=[int(v) for v in c], vox=[int(v) for v in c],
+                            ai=ai_opinion(r), feat={}))
+        return out
+
+    def labels(self, reviewer="", audit=False):
+        if not audit: return self.lab
+        xd, xl = self._excluded(); L = self.lab.copy()
+        for e in self.audit_ids(reviewer):
+            m = (xl == e) & (L == 0); L[m] = AUDIT_OFFSET + e
+        return L
+
+    def apath(self, reviewer): return f"{B}/review/{self.sid}_excluded_audit_{slug(reviewer)}.csv"
+
+    def load_audit(self, reviewer):
+        p = self.apath(reviewer)
+        if not os.path.exists(p): return {}
+        a = pd.read_csv(p); out = {}
+        for _, r in a.iterrows():
+            out[AUDIT_OFFSET + int(r.excl_id)] = dict(call=r.call if isinstance(r.call, str) else "", comment=r.comment if isinstance(r.get("comment"), str) else "",
+                                                     time=r.get("time", "") if isinstance(r.get("time"), str) else "")
+        return out
+
+    def save_audit(self, reviewer, calls):
+        xd, _ = self._excluded(); why = dict(zip(xd.excl_id, xd.reason)) if len(xd) else {}
+        rows = [dict(excl_id=k - AUDIT_OFFSET, call=v.get("call", ""), comment=v.get("comment", ""), reviewer=reviewer, time=v.get("time", ""),
+                     rule=str(why.get(k - AUDIT_OFFSET, "")).split(":")[0]) for k, v in sorted(calls.items()) if k >= AUDIT_OFFSET and (v.get("call") or v.get("comment"))]
+        pd.DataFrame(rows, columns=["excl_id", "call", "comment", "reviewer", "time", "rule"]).to_csv(self.apath(reviewer), index=False)
 
     def _grid(self, path, order=1):
         im = nib.load(path)
@@ -396,8 +452,10 @@ def side_check(s):
     except Exception as e: return dict(n=0, agree=0, bad=False, labels_ok=None, error=str(e))
 
 
-def meta(sid, reviewer):
+def meta(sid, reviewer, mode=""):
     s = study(sid); calls, note = s.load_calls(reviewer) if reviewer else ({}, "")
+    audit = mode == "validation" and bool(reviewer)
+    if audit: calls.update(s.load_audit(reviewer))
     cands = []
     for _, r in s.df.iterrows():
         i = int(r.cand_id); g = lambda k: (None if pd.isna(r[k]) else (float(r[k]) if not isinstance(r[k], str) else r[k])) if k in r else None
@@ -405,7 +463,8 @@ def meta(sid, reviewer):
                           volume=float(r.volume_mm3), centre=s.centre.get(i, [v // 2 for v in s.shape]), vox=s.centre.get(i, [v // 2 for v in s.shape]), ai=ai_opinion(r),
                           feat={k: g(k) for k in ("darkness_z", "pial_dist_mm", "tube_ratio", "tram_frac", "extent_mm", "n_slices",
                                                   "css_evidence", "vein_evidence", "score")}))
-    return dict(study=sid, studies=IDS, shape=list(s.shape), vox=s.vox, cands=cands, calls=calls, note=note, qc=s.qc,
+    if audit: cands += s.audit_cands(reviewer)
+    return dict(study=sid, studies=IDS, shape=list(s.shape), vox=s.vox, cands=cands, calls=calls, mode="validation" if audit else "", note=note, qc=s.qc,
                 seqs=[dict(key=k, **{a: b for a, b in s.meta_seq.get(k, dict(label=SEQ_NAMES[k])).items()}) for k in s.avail],
                 missing_seqs=[SEQ_NAMES[k] for k in ("flair", "t1", "t2", "phase") if k not in s.avail], ai_score=ai_score(s),
                 reader_score=(_score_json(score_path(sid, reviewer)) if calls else None),
@@ -429,12 +488,14 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path); q = {k: v[0] for k, v in parse_qs(u.query).items()}
         try:
             if u.path == "/": return self._send(open(os.path.join(HERE, "review_web.html"), "rb").read(), "text/html; charset=utf-8")
-            if u.path == "/api/meta": return self._send(meta(q.get("study") or IDS[0], q.get("reviewer", "")))
+            if u.path == "/api/meta": return self._send(meta(q.get("study") or IDS[0], q.get("reviewer", ""), q.get("mode", "")))
             if u.path == "/api/vol":
                 s = study(q["study"]); return self._send(s.volume(q.get("seq", "swi")).tobytes(order="F"), "application/octet-stream")
             if u.path == "/api/seqmeta":
                 s = study(q["study"]); s.volume(q["seq"]); return self._send(s.meta_seq[q["seq"]])
-            if u.path == "/api/labels": return self._send(study(q["study"]).lab.astype("<u2").tobytes(order="F"), "application/octet-stream")
+            if u.path == "/api/labels":
+                L = study(q["study"]).labels(q.get("reviewer", ""), q.get("mode") == "validation")
+                return self._send(L.astype("<u2").tobytes(order="F"), "application/octet-stream")
             self._send(dict(error="not found"), code=404)
         except Exception as e:
             self._send(dict(error=f"{type(e).__name__}: {e}"), code=500)
@@ -474,12 +535,25 @@ class H(BaseHTTPRequestHandler):
                 try: subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 except Exception as e: return self._send(dict(error=str(e)), code=500)
                 return self._send(dict(ok=True))
+            if u.path == "/api/import" and d.get("mode") == "validation":
+                return self._send(dict(error="import is switched off during a validation read (it would unblind you)"), code=400)
             if u.path == "/api/import":
                 with LOCK: calls, n = s.import_calls(rev, str(d.get("source", "")), bool(d.get("overwrite")))
                 return self._send(dict(ok=True, calls=calls, imported=n, saved=now()))
             if u.path == "/api/primary":
                 name = str(d.get("name") or rev).strip()
                 return self._send(dict(ok=True, primary=primary(s.sid, name)))
+            if u.path == "/api/call" and int(d.get("cand_id", 0)) >= AUDIT_OFFSET:      # v5.7 excluded-object audit call
+                with LOCK:
+                    au = s.load_audit(rev); cid = int(d["cand_id"]); cur = au.get(cid, dict(call="", comment=""))
+                    if "call" in d:
+                        if d["call"] not in CALLS + [""]: return self._send(dict(error="unknown call"), code=400)
+                        cur["call"] = d["call"]; cur["time"] = now()
+                    if "comment" in d: cur["comment"] = str(d["comment"])[:500]
+                    au[cid] = cur
+                    if not cur.get("call") and not cur.get("comment"): au.pop(cid)
+                    s.save_audit(rev, au); calls, _ = s.load_calls(rev); calls.update(au)
+                return self._send(dict(ok=True, calls=calls, saved=now()))
             if u.path == "/api/call":
                 with LOCK:
                     calls, _ = s.load_calls(rev); cid = int(d["cand_id"]); cur = calls.get(cid, dict(call="", comment=""))
@@ -492,6 +566,7 @@ class H(BaseHTTPRequestHandler):
                     calls[cid] = cur
                     if not cur.get("call") and not cur.get("comment"): calls.pop(cid)
                     s.save(rev, calls, cid, d.get("action", "call"), d.get("meter"))
+                    if d.get("mode") == "validation": calls.update(s.load_audit(rev))
                 return self._send(dict(ok=True, calls=calls, saved=now()))
             if u.path == "/api/missed":
                 with LOCK: m = s.missed_edit(rev, d["action"], d)
@@ -522,6 +597,11 @@ class H(BaseHTTPRequestHandler):
                                n_missed=int(len(res["missed"])), n_revoted=nrev, meter_visible=d.get("meter_visible", ""), n_inherited_unconfirmed=d.get("n_inherited_unconfirmed", ""),
                                comparison_shown=bool(d.get("comparison_shown")), n_microbleed=int(sum(v == "Microbleed" for v in c.values())),
                                primary=bool(primary(s.sid) == rev), read_mode=d.get("read_mode", ""))
+                    au = s.load_audit(rev); xd, _ = s._excluded(); why = dict(zip(xd.excl_id, xd.reason)) if len(xd) else {}
+                    fin["audit_n_shown"] = len(s.audit_ids(rev)) if d.get("read_mode") == "validation" else 0
+                    fin["audit_n_read"] = sum(1 for v in au.values() if v.get("call"))
+                    fin["audit_css"] = [dict(excl_id=k - AUDIT_OFFSET, rule=str(why.get(k - AUDIT_OFFSET, "")).split(":")[0])
+                                        for k, v in sorted(au.items()) if v.get("call") == "cSS"]
                     json.dump(fin, open(final_path(s.sid, rev), "w"), indent=1)
                     import css_report
                     out, n, xl = css_report.build(B); res["final"] = fin; res["report"] = f"{out}.csv{xl}"

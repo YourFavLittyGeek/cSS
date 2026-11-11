@@ -39,6 +39,8 @@ def build(B, out=None):
                      "Calls changed after the AI comparison": f.get("n_revoted", ""), "Inherited calls not re-confirmed": f.get("n_inherited_unconfirmed", ""), "AI meter visible": f.get("meter_visible", ""),
                      "Microbleeds called": f.get("n_microbleed", ""), "Primary reviewer": {True: "yes", False: "no"}.get(f.get("primary"), ""),
                      "Read mode": f.get("read_mode", ""),
+                     "Excluded objects audited": f.get("audit_n_read", ""),
+                     "Excluded objects called cSS (audit)": "; ".join(f"{x['excl_id']} ({x['rule']})" for x in f.get("audit_css", [])) if f.get("audit_n_shown") else "",
                      "Note": "lower bound: not all candidates read" if f.get("n_read", 0) != f.get("n_candidates", 0) else ""})
     d = pd.DataFrame(rows); d.to_csv(out + ".csv", index=False); xl = ""
     try:

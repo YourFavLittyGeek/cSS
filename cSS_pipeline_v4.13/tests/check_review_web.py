@@ -2,7 +2,7 @@
 meta lists every candidate with a meter value in 0-1 and a band; a call without a reviewer name is refused; calls,
 comment, undo-style clearing and a missed-cSS mark are written with the reviewer name; ID_calls.csv keeps the
 review_css.py format; calls re-load for the same reviewer and not for another; names are remembered."""
-import os, sys, json, time, subprocess, urllib.request, pandas as pd
+import os, sys, json, time, subprocess, urllib.request, pandas as pd, numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); S = os.path.join(HERE, "..", "scripts"); B = os.environ["CSS_BASE"]
 def fail(m): print("FAIL:", m); srv.kill(); sys.exit(1)
 for f in ("PH3_calls.csv", "PH3_calls_Reader_A.csv", "PH3_calls_Reader_B.csv", "PH3_review_log.csv", "PH3_missed.csv", "reviewers.json", "PH3_primary.json"):
@@ -14,6 +14,7 @@ def get(p):
         try: return json.load(urllib.request.urlopen(U + p, timeout=60))
         except OSError: time.sleep(0.5)
     fail("server did not answer")
+def get_bytes(p): return urllib.request.urlopen(U + p, timeout=60).read()
 def post(p, d):
     r = urllib.request.Request(U + p, json.dumps(d).encode(), {"Content-Type": "application/json", "X-CSS": "1"})
     try: return json.load(urllib.request.urlopen(r, timeout=120))
@@ -51,6 +52,7 @@ if json.load(open(f"{B}/review/PH3_score.json"))["multifocality_0_4"] != rs["mul
 if os.path.exists(f"{B}/review/PH3_final_Reader_A.json"): fail("no final record before the final save")
 post("/api/call", dict(study="PH3", reviewer="Reader A", cand_id=ids[1], call="Vein", action="revote"))
 g = post("/api/finish", dict(study="PH3", reviewer="Reader A", final=True, n_differ=1, meter_visible=1, comparison_shown=True))
+if g.get("error") or not os.path.exists(f"{B}/review/PH3_final_Reader_A.json"): fail(f"final save failed: {g.get('error')}")
 fin = json.load(open(f"{B}/review/PH3_final_Reader_A.json"))
 if not fin.get("primary"): fail("Reader A saved first and must be the primary reviewer")
 if fin["reviewer"] != "Reader A" or fin["n_revoted"] != 1 or fin["reviewer_score"]["multifocality_0_4"] != g["reader_score"]["multifocality_0_4"]: fail(f"final record: {fin}")
@@ -79,6 +81,27 @@ if sorted(rep.Reviewer) != ["Reader A", "Reader B"] or "Microbleeds called" not 
 if get("/api/meta?study=PH3&reviewer=Reader%20A")["final"]["reviewer"] != "Reader A": fail("final record must be per reviewer")
 post("/api/primary", dict(study="PH3", reviewer="Reader B", name="Reader B"))
 if get("/api/meta?study=PH3&reviewer=")["primary"] != "Reader B": fail("primary reviewer not changed")
+# v5.7 validation read: excluded-object audit sample, separate audit file, never scored, import refused
+mv = get("/api/meta?study=PH3&reviewer=Reader%20C&mode=validation")
+au = [c_ for c_ in mv["cands"] if c_.get("audit")]
+nx_ = len(pd.read_csv(f"{B}/review/PH3_excluded.csv"))
+if mv.get("mode") != "validation" or (nx_ and len(au) != max(1, round(0.2 * nx_))): fail(f"audit sample: {len(au)} of {nx_} excluded")
+if nx_:
+    aid = au[0]["id"]
+    if aid < 10000 or any(c_["id"] == aid for c_ in get("/api/meta?study=PH3&reviewer=Reader%20C")["cands"]): fail("audit objects must appear only in a validation read")
+    post("/api/call", dict(study="PH3", reviewer="Reader C", cand_id=aid, call="cSS", mode="validation"))
+    post("/api/call", dict(study="PH3", reviewer="Reader C", cand_id=ids[0], call="Vein", mode="validation"))
+    af = pd.read_csv(f"{B}/review/PH3_excluded_audit_Reader_C.csv")
+    if list(af.excl_id) != [aid - 10000] or af.call[0] != "cSS" or not str(af.rule[0]): fail(f"audit file: {af}")
+    gc = post("/api/finish", dict(study="PH3", reviewer="Reader C", final=True, read_mode="validation"))
+    if gc["counts"]["cSS"] != 0 or gc["unread"] != n - 1: fail(f"audit calls must never be scored: {gc['counts']}, unread {gc['unread']}")
+    fc = json.load(open(f"{B}/review/PH3_final_Reader_C.json"))
+    if [x["excl_id"] for x in fc["audit_css"]] != [aid - 10000] or fc["audit_n_read"] != 1: fail(f"final audit record: {fc}")
+    L = get_bytes("/api/labels?study=PH3&reviewer=Reader%20C&mode=validation")
+    if not (np.frombuffer(L, "<u2") == aid).any(): fail("audit object missing from the label volume of the validation read")
+    if "error" not in post("/api/import", dict(study="PH3", reviewer="Reader C", source="legacy", mode="validation")): fail("import must be refused in a validation read")
+    for x in ("PH3_excluded_audit_Reader_C.csv", "PH3_final_Reader_C.json", "PH3_calls_Reader_C.csv", "PH3_score_rev_Reader_C.json"):
+        if os.path.exists(f"{B}/review/{x}"): os.remove(f"{B}/review/{x}")
 sc = get("/api/meta?study=PH3&reviewer=")["side_check"]
 if sc.get("labels_ok") is not True or sc.get("bad"): fail(f"side check (world coordinates): {sc}")
 for x in ("PH3_final_Reader_A.json", "PH3_final_Reader_B.json", "PH3_score_rev_Reader_B.json", "PH3_calls_Reader_B.csv", "PH3_primary.json"):

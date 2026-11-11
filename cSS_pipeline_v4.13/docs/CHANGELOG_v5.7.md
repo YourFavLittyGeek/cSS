@@ -23,7 +23,16 @@
   tools/make_release.sh, tests/check_viewer.js + check_viewer.py (Playwright; skipped without it; in run_tests.sh),
   check_review_web.py covers the new reviewer rules.
 
-## Stage A, part 2 - visible changes (waiting for approval of the sketches sA/sB/sC)
-Microbleed button + key W; "VALIDATION READ" badge and mode (meter hidden and locked, comparison off, 20 % excluded-object
-audit sample mixed in unmarked, audit calls in ID_excluded_audit_<name>.csv, never scored); File > Import earlier calls...;
-Settings > primary reviewer.
+## Stage A, part 2 - visible changes (sketches approved; Microbleed moved to B at the user's request)
+- **Microbleed** button, key **B** (colour purple-red). The magnifier moved from B to **W** (W still switches rectangle / pen
+  while the missed-cSS drawing tool is active). Help and menus updated.
+- **Validation read** (Settings; default ON for a study this reviewer has not finally saved; the choice is remembered per study
+  and reviewer): blue VALIDATION READ badge; AI meter, AI score, AI column of Calls summary and CSV export hidden and locked
+  (K refused); comparison window off; candidates shown in a shuffled order numbered 1..N; a deterministic 20 % sample of the
+  excluded objects (at least 1) is mixed in, unmarked. Their calls go to ID_excluded_audit_<name>.csv with the rule that
+  excluded them, are never scored, and the final record lists any excluded object called cSS ("Excluded objects called cSS
+  (audit)" in css_report). Final record and report carry the read mode.
+- File > **Import earlier calls...** (window: source, only-uncalled / replace; refused in a validation read) and Settings >
+  **Primary reviewer...** (shows who; makes you primary after a confirmation).
+- A newer study load always wins (two quick loads could mix candidate lists).
+- Tests: check_review_web.py (audit sample, audit file, never scored, labels, import refused), check_viewer.py (browser).
