@@ -146,10 +146,12 @@ print(f"soft gates: {len(_n0)} normal + {len(_tail)} gate-failing candidates (la
 
 # ---- 1d2. CSS_E22_PIECES=1 (opt-in): E22 judged on the first-pass pieces. It can only RELAX E22 (a piece is part of the merged object), never exclude more:
 #      every object shown by default stays shown, the new columns exist, an E22 exclusion needs piece_sheet == 1
-run([f"{S}/detect_css.py", "PH3"], CSS_V53="1", CSS_E22_PIECES="1")
+run([f"{S}/detect_css.py", "PH3"], CSS_V53="1", CSS_E22_PIECES="0")
+_m0 = pd.read_csv(f"{T}/review/PH3_candidates.csv")
+run([f"{S}/detect_css.py", "PH3"], CSS_V53="1")                      # default with v5.3 = pieces
 _p1 = pd.read_csv(f"{T}/review/PH3_candidates.csv"); _px = pd.read_csv(f"{T}/review/PH3_excluded.csv")
 if "piece_sheet" not in _p1.columns or "ext_piece_max_mm" not in _p1.columns: fail("E22 pieces: columns piece_sheet / ext_piece_max_mm missing")
-if len(_p1) < len(_n0): fail(f"E22 pieces may only relax E22: shown {len(_p1)} < default {len(_n0)}")
+if len(_p1) < len(_m0): fail(f"E22 pieces may only relax E22: shown {len(_p1)} < merged-object {len(_m0)}")
 _e22p = _px[_px.reason.astype(str).str.startswith("E22")]
 if len(_e22p) and not (_e22p.piece_sheet == 1).all(): fail("E22 pieces: an E22 exclusion needs a first-pass piece that is a midline sheet")
 if not (_p1.ext_piece_max_mm.dropna() <= _p1.ext_major_mm.dropna().max() + 1e-6).all(): fail("a piece cannot be longer than the longest object")

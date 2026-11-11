@@ -140,7 +140,7 @@ SEEDS3D = os.environ.get("CSS_3D_SEEDS", "") == "1"
 # object is a midline sheet only if one of its first-pass pieces is one (all three E22 conditions on that piece). Reason: the second merge pass (5 mm, same
 # region) can join a short cSS piece with its neighbours into one object that then looks like a long sheet (M11 #12: 15 mm piece -> 29.5 mm merged object).
 # No new threshold. The columns piece_sheet / ext_piece_max_mm are always recorded.
-E22_PIECES = os.environ.get("CSS_E22_PIECES", "") == "1"
+E22_PIECES = V53 and os.environ.get("CSS_E22_PIECES", "1") != "0"   # v5.7-E-fix3: ON with CSS_V53=1 (acceptance 56/56 incl. M11 #12); CSS_E22_PIECES=0 = merged-object E22 as in fix2
 SHEET3D_SIGMAS_MM = (0.6, 1.2, 1.8)
 V53_OUT_MM = 1.0                 # E17: voxels further than this outside the labelled pial boundary count as "outside"
 E17_FRAC, E17_CTX = 0.6, 0.4         # E17: >= this share outside AND cortex_frac below this (and no tram-track)
