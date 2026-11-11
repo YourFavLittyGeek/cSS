@@ -16,7 +16,7 @@ a = sys.argv[1:]
 if not a or a[0].startswith("-") or "--name" not in a: sys.exit(__doc__)
 ids = [s for s in a[0].split(",") if s]; name = a[a.index("--name") + 1]
 flags = dict(kv.split("=", 1) for kv in a[a.index("--flags") + 1].split(",") if "=" in kv) if "--flags" in a else {}
-KNOWN = {"CSS_V53", "CSS_SOFT_GATES", "CSS_3D_SEEDS", "CSS_USE_MIMIC", "CSS_MIXED_REVIEW", "CSS_SATO_LEGACY", "CSS_KEEP_ALL", "CSS_RANK"}
+KNOWN = {"CSS_V53", "CSS_SOFT_GATES", "CSS_3D_SEEDS", "CSS_E22_PIECES", "CSS_USE_MIMIC", "CSS_MIXED_REVIEW", "CSS_SATO_LEGACY", "CSS_KEEP_ALL", "CSS_RANK"}
 bad = [k for k in flags if k not in KNOWN]
 if bad: sys.exit(f"unknown switch(es) {bad}; known: {sorted(KNOWN)}")
 if not name.replace("_", "").replace("-", "").isalnum() or name == "main": sys.exit("--name must be letters / digits / - / _ and not 'main'")

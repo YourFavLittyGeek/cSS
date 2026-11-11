@@ -46,8 +46,8 @@ truth = nib.load(f"{T}/work/PH3_truth.nii.gz").get_fdata().astype(int)
 
 # ---- 1. switch off = unchanged list, new columns appended last
 off, off_lab, _, _, _ = detect("PH3", False)
-new = ["midline_frac", "mask_edge_mm", "skull_frac", "v53_active", "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac", "dual_contact_frac", "soft_gate_fail", "axis_angle_deg", "sheet3d_med", "sheet3d_overlap"]
-if list(off.columns[-15:]) != new: fail(f"new columns must be appended last, got {list(off.columns[-15:])}")
+new = ["midline_frac", "mask_edge_mm", "skull_frac", "v53_active", "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac", "dual_contact_frac", "soft_gate_fail", "axis_angle_deg", "sheet3d_med", "sheet3d_overlap", "piece_sheet", "ext_piece_max_mm"]
+if list(off.columns[-17:]) != new: fail(f"new columns must be appended last, got {list(off.columns[-17:])}")
 if off.sheet3d_med.notna().any() or off.sheet3d_overlap.notna().any(): fail("the 3-D sheet columns must stay empty when CSS_3D_SEEDS is not set")
 if not off.axis_angle_deg.dropna().between(0, 90).all() or not off.axis_angle_deg.notna().all(): fail("axis_angle_deg (always recorded) must be 0-90 degrees")
 if off.soft_gate_fail.fillna("").ne("").any(): fail("soft_gate_fail must be empty when CSS_SOFT_GATES is not set")
@@ -143,6 +143,18 @@ if not (_tail.review_priority_rank >= 4).all(): fail("soft-gate objects must hav
 if len(_sg) < len(_tail): fail("work/ID_soft_gate.csv must list the soft-gate objects")
 run([f"{S}/detect_css.py", "PH3"], CSS_V53="1")                       # restore the default outputs for the checks below
 print(f"soft gates: {len(_n0)} normal + {len(_tail)} gate-failing candidates (last, tier >= 4); OFF output unchanged; rule audit table written")
+
+# ---- 1d2. CSS_E22_PIECES=1 (opt-in): E22 judged on the first-pass pieces. It can only RELAX E22 (a piece is part of the merged object), never exclude more:
+#      every object shown by default stays shown, the new columns exist, an E22 exclusion needs piece_sheet == 1
+run([f"{S}/detect_css.py", "PH3"], CSS_V53="1", CSS_E22_PIECES="1")
+_p1 = pd.read_csv(f"{T}/review/PH3_candidates.csv"); _px = pd.read_csv(f"{T}/review/PH3_excluded.csv")
+if "piece_sheet" not in _p1.columns or "ext_piece_max_mm" not in _p1.columns: fail("E22 pieces: columns piece_sheet / ext_piece_max_mm missing")
+if len(_p1) < len(_n0): fail(f"E22 pieces may only relax E22: shown {len(_p1)} < default {len(_n0)}")
+_e22p = _px[_px.reason.astype(str).str.startswith("E22")]
+if len(_e22p) and not (_e22p.piece_sheet == 1).all(): fail("E22 pieces: an E22 exclusion needs a first-pass piece that is a midline sheet")
+if not (_p1.ext_piece_max_mm.dropna() <= _p1.ext_major_mm.dropna().max() + 1e-6).all(): fail("a piece cannot be longer than the longest object")
+run([f"{S}/detect_css.py", "PH3"], CSS_V53="1")
+print(f"E22 on first-pass pieces: shown {len(_p1)} (default {len(_n0)}), E22 exclusions {len(_e22p)}; columns present")
 
 # ---- 1e. audit branch: CSS_3D_SEEDS=1 (opt-in, RECORDED ONLY): 3-D plate-ness seeds -> work/ID_gen_3d.nii.gz, ID_3d_only.csv, manifest overlap statistics;
 #      every column of the candidate list except the two sheet3d columns is identical to the run without the switch

@@ -136,6 +136,11 @@ SOFT_GATES = os.environ.get("CSS_SOFT_GATES", "") == "1"
 # work/ID_3d_only.csv (3-D objects that touch no 2-D object); nothing shown or excluded changes. A union with the 2-D seeds is NOT implemented: it needs
 # the overlap statistics (manifest: detect > seeds3d) judged first.
 SEEDS3D = os.environ.get("CSS_3D_SEEDS", "") == "1"
+# CSS_E22_PIECES=1 (opt-in, default OFF): E22 (midline sheet) is judged on the FIRST-PASS pieces of an object (as E12 is) instead of the merged object: the
+# object is a midline sheet only if one of its first-pass pieces is one (all three E22 conditions on that piece). Reason: the second merge pass (5 mm, same
+# region) can join a short cSS piece with its neighbours into one object that then looks like a long sheet (M11 #12: 15 mm piece -> 29.5 mm merged object).
+# No new threshold. The columns piece_sheet / ext_piece_max_mm are always recorded.
+E22_PIECES = os.environ.get("CSS_E22_PIECES", "") == "1"
 SHEET3D_SIGMAS_MM = (0.6, 1.2, 1.8)
 V53_OUT_MM = 1.0                 # E17: voxels further than this outside the labelled pial boundary count as "outside"
 E17_FRAC, E17_CTX = 0.6, 0.4         # E17: >= this share outside AND cortex_frac below this (and no tram-track)
@@ -351,7 +356,7 @@ Rm = np.isin(seg, RH) | (seg >= 2000)
 hemiL = ndi.distance_transform_edt(~Lm, sampling=vox) <= ndi.distance_transform_edt(~Rm, sampling=vox)
 dmid = np.where(hemiL, ndi.distance_transform_edt(hemiL, sampling=vox),
                 ndi.distance_transform_edt(~hemiL, sampling=vox))
-lab = np.zeros(I.shape, np.int32); n_raw = 0; nxt = 0; n_seeded = 0
+lab = np.zeros(I.shape, np.int32); n_raw = 0; nxt = 0; n_seeded = 0; LAB1 = lab
 n_pieces = None; n_before_merge = None     # set by the merge step
 PIECES = None                              # v5.1.1: pre-merge piece labels (None = no merging)
 BAND = np.zeros(I.shape, bool)             # v5.3: single objects larger than any cSS focus (E12), set before pass 2
@@ -409,6 +414,7 @@ if MERGE_GAP_MM > 0 and lab.max() > 0:
     # E12 extent is judged on the objects of the FIRST pass (one connected dark structure, e.g. the inner skull)
     _vol1 = np.bincount(lab.ravel()) * float(np.prod(vox))
     BAND = (_vol1 > E12_MM3)[lab] & (lab > 0); del _vol1
+    LAB1 = lab                     # first-pass objects (before the v5.3 second merge pass rebinds `lab`); E22 per piece
     if V53 and V53_GAP_MM > MERGE_GAP_MM and lab.max() > 0:
         objs = ndi.find_objects(lab); n1 = len(objs); code1 = np.zeros(n1 + 1, np.int32)
         for g, sl in enumerate(objs, 1):
@@ -600,6 +606,16 @@ def plane_feats(mm_, pad_):
     w_, v_ = np.linalg.eigh(np.cov(Q.T)); ext = np.ptp(Q @ v_, axis=0)
     return dict(plane_dist_mm=round(float(np.median(np.abs((P - PL_C) @ PL_N))), 1), cos_plane=round(float(abs(v_[:, 0] @ PL_N)), 2),
                 ext_major_mm=round(float(ext[2]), 1))
+def piece_sheet_feats(mm_, pad_):
+    """E22 judged per first-pass piece: -> piece_sheet (1 if any piece of the object meets all three E22 conditions), ext_piece_max_mm (longest piece)"""
+    if PL_N is None: return dict(piece_sheet=0, ext_piece_max_mm=np.nan)
+    sub = LAB1[pad_]; ids = [g for g in np.unique(sub[mm_]) if g > 0]; best = 0.0; sheet = 0
+    for g in ids:
+        pm = mm_ & (sub == g)
+        if pm.sum() < 5: continue
+        f = plane_feats(pm, pad_); best = max(best, f["ext_major_mm"])
+        if f["plane_dist_mm"] <= E22_PLANE_MM and f["cos_plane"] >= E22_COS and f["ext_major_mm"] >= E22_EXT_MM: sheet = 1
+    return dict(piece_sheet=sheet, ext_piece_max_mm=round(best, 1) if ids else np.nan)
 
 # ---- 8. lobar ICH: reader-drawn mask, else dark compact blobs in lobar tissue
 ich_p = f"{base}/work/{subj}_ich.nii.gz"
@@ -887,7 +903,7 @@ for p in regionprops(lab, spacing=vox):
                mask_edge_mm=round(float(np.median(dist_mm[pad][mm])), 1),
                skull_frac=round(float(SKULL[pad][mm].mean()), 2), v53_active=int(V53), _band=bool(BAND[pad][mm].any()),
                vent_frac=round(float((d_vent[pad][mm] <= E16_MM).mean()), 2),
-               out_frac=round(float((pial_sd[pad][mm] > V53_OUT_MM).mean()), 2), **plane_feats(mm, pad),
+               out_frac=round(float((pial_sd[pad][mm] > V53_OUT_MM).mean()), 2), **plane_feats(mm, pad), **piece_sheet_feats(mm, pad),
                skullbase_frac=round(float(np.isin(NEAR_CX[pad][mm], E24_LABELS).mean()), 2),
                dual_contact_frac=round(float(DUALC[pad][mm].mean()), 2), axis_angle_deg=axis_angle(mm, pad),
                sheet3d_med=round(float(np.median(S3[pad][mm])), 4) if S3 is not None else np.nan,
@@ -995,7 +1011,7 @@ V50_COLS = ["mimic_score", "mimic_class", "mimic_reason", "phase_z", "mb_cluster
             "review_priority_rank", "review_priority", "review_priority_reason",                # v5.1.3 (css_tiers.py)
             "midline_frac", "mask_edge_mm", "skull_frac", "v53_active",                         # v5.3, appended
             "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac", "dual_contact_frac",               # v5.3.1 / v5.3.2 / v5.3.4 / v5.7, appended
-            "soft_gate_fail", "axis_angle_deg", "sheet3d_med", "sheet3d_overlap"]                                                                    # v5.7 audit branch: "" or the generation gate the object failed (CSS_SOFT_GATES=1)
+            "soft_gate_fail", "axis_angle_deg", "sheet3d_med", "sheet3d_overlap", "piece_sheet", "ext_piece_max_mm"]                                                                    # v5.7 audit branch: "" or the generation gate the object failed (CSS_SOFT_GATES=1)
 cols = cols + V50_COLS
 
 # ---- 11. exclusions (v4.8) - each with an explicit, definition-based reason
@@ -1060,8 +1076,8 @@ def exclusion_v4(r):
                                 f"of the object (between the hemispheres: falx / sinus / fissure vessels)")
         if r["midline_frac"] >= E13_FRAC_V533:                         # v5.3.3: any depth (user: exclude the fissure)
             return "E13@v5.3", "midline: in the interhemispheric fissure (falx / sagittal sinus / midline veins)"
-        if (np.isfinite(r["plane_dist_mm"]) and r["plane_dist_mm"] <= E22_PLANE_MM and r["cos_plane"] >= E22_COS
-                and r["ext_major_mm"] >= E22_EXT_MM):
+        if ((r["piece_sheet"] == 1) if E22_PIECES else (np.isfinite(r["plane_dist_mm"]) and r["plane_dist_mm"] <= E22_PLANE_MM and r["cos_plane"] >= E22_COS
+                and r["ext_major_mm"] >= E22_EXT_MM)):
             return "E22@v5.3.4", (f"midline sheet: a flat sheet {r['ext_major_mm']:.0f} mm long lying in the mid-sagittal plane "
                                   f"({r['plane_dist_mm']:.1f} mm from it) - falx / sagittal sinus / fissure veins")
         if r["skullbase_frac"] >= E24_FRAC:
@@ -1238,7 +1254,7 @@ def frozen_rules():
 def active_switches():
     """every experimental environment switch read by the detector, as set for this run"""
     return {k: os.environ.get(k, "") for k in ("CSS_V53", "CSS_USE_MIMIC", "CSS_MIXED_REVIEW", "CSS_QC_STRICT", "CSS_KEEP_ALL", "CSS_SATO_LEGACY",
-                                              "CSS_RANK", "CSS_ALLOW_ORIENT", "CSS_SURFACE_ZONE", "CSS_SOFT_GATES", "CSS_3D_SEEDS")}
+                                              "CSS_RANK", "CSS_ALLOW_ORIENT", "CSS_SURFACE_ZONE", "CSS_SOFT_GATES", "CSS_3D_SEEDS", "CSS_E22_PIECES")}
 # v4.17 provenance: inputs (sha256), parameters, versions -> review/ID_manifest.json
 _inputs = {k: p_ for k, p_ in (("swi", f"{base}/data/{subj}_swi.nii"), ("labels", f"{base}/work/{subj}_seg_swispace.nii.gz"),
                                ("t1_labels", _t1p), ("destrieux", f"{base}/work/{subj}_a2009s_swispace.nii.gz"),
