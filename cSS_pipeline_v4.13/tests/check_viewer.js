@@ -24,6 +24,15 @@ const {chromium} = require('playwright');
   if (await ev(() => getComputedStyle($('#panel')).display) !== 'none' || await ev(() => getComputedStyle($('#rail')).display) === 'none') await fail('Space must hide the panel and show the rail');
   await pg.click('#rail [data-r=pin]'); await pg.waitForTimeout(250);
   if (await ev(() => getComputedStyle($('#panel')).display) === 'none') await fail('pin must show the panel');
+  // v5.7-B: theme switch with symbols (click + drag), validation symbol, decision buttons not cut
+  const th0 = await ev(() => document.documentElement.dataset.theme);
+  await pg.click('#themes span[data-t=light]'); if (await ev(() => document.documentElement.dataset.theme) !== 'light') await fail('theme symbol click');
+  const bx = await pg.locator('#themes').boundingBox(); await pg.mouse.move(bx.x + 50, bx.y + 15); await pg.mouse.down(); await pg.mouse.move(bx.x + 12, bx.y + 15, {steps: 4}); await pg.mouse.up();
+  if (await ev(() => document.documentElement.dataset.theme) !== 'dark') await fail('theme knob drag to the moon');
+  await ev(t => theme(t), th0);
+  const cut = await ev(() => [...document.querySelectorAll('#dec .b')].filter(b => b.scrollWidth > b.clientWidth + 1).map(b => b.textContent));
+  if (cut.length) await fail('decision buttons cut: ' + cut.join(','));
+  if (await ev(() => !!document.querySelector('#vbadge'))) await fail('the text badge must be gone');
   const nm = await ev(() => snapName('png'));
   if (!/^PH3_cand\d\d_x\d{3}_y\d{3}_z\d{3}_axial\.png$/.test(nm)) await fail('snapshot name ' + nm);
   if (errs.length) await fail('page errors: ' + errs.join(' | '));

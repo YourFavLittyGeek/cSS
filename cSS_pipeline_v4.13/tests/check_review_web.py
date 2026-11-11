@@ -85,8 +85,10 @@ if get("/api/meta?study=PH3&reviewer=")["primary"] != "Reader B": fail("primary 
 mv = get("/api/meta?study=PH3&reviewer=Reader%20C&mode=validation")
 au = [c_ for c_ in mv["cands"] if c_.get("audit")]
 nx_ = len(pd.read_csv(f"{B}/review/PH3_excluded.csv"))
-if mv.get("mode") != "validation" or (nx_ and len(au) != max(1, round(0.2 * nx_))): fail(f"audit sample: {len(au)} of {nx_} excluded")
-if nx_:
+_xr = pd.read_csv(f"{B}/review/PH3_excluded.csv"); _ok = int((~_xr.reason.astype(str).str.lower().str.startswith("infratentorial")).sum())
+if mv.get("mode") != "validation" or (_ok and len(au) != max(1, round(0.2 * _ok))): fail(f"audit sample: {len(au)} of {_ok} eligible excluded objects")
+if any(str(_xr[_xr.excl_id == c_["id"] - 10000].reason.iloc[0]).lower().startswith("infratentorial") for c_ in au): fail("infratentorial objects must never be in the audit sample")
+if nx_ and au:
     aid = au[0]["id"]
     if aid < 10000 or any(c_["id"] == aid for c_ in get("/api/meta?study=PH3&reviewer=Reader%20C")["cands"]): fail("audit objects must appear only in a validation read")
     post("/api/call", dict(study="PH3", reviewer="Reader C", cand_id=aid, call="cSS", mode="validation"))
@@ -95,6 +97,10 @@ if nx_:
     if list(af.excl_id) != [aid - 10000] or af.call[0] != "cSS" or not str(af.rule[0]): fail(f"audit file: {af}")
     gc = post("/api/finish", dict(study="PH3", reviewer="Reader C", final=True, read_mode="validation"))
     if gc["counts"]["cSS"] != 0 or gc["unread"] != n - 1: fail(f"audit calls must never be scored: {gc['counts']}, unread {gc['unread']}")
+    if [x_["id"] for x_ in gc["audit"]] != [aid] or gc["audit"][0]["call"] != "cSS" or not gc["audit"][0]["rule"]: fail(f"audit list after the final save: {gc['audit']}")
+    if any(c_.get("rule") for c_ in get("/api/meta?study=PH3&reviewer=Reader%20D&mode=validation")["cands"] if c_.get("audit")): fail("the excluded rule must stay hidden before the final save")
+    rv = [c_ for c_ in get("/api/meta?study=PH3&reviewer=Reader%20C&mode=validation")["cands"] if c_.get("audit")]
+    if not rv or not all(c_.get("rule") for c_ in rv): fail("the rule must be revealed after the final save")
     fc = json.load(open(f"{B}/review/PH3_final_Reader_C.json"))
     if [x["excl_id"] for x in fc["audit_css"]] != [aid - 10000] or fc["audit_n_read"] != 1: fail(f"final audit record: {fc}")
     L = get_bytes("/api/labels?study=PH3&reviewer=Reader%20C&mode=validation")

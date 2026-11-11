@@ -168,21 +168,22 @@ class Study:
         """deterministic 20 % sample of the excluded objects (at least 1 when any), seeded by study + reviewer"""
         xd, _ = self._excluded()
         if not len(xd): return []
-        ids = sorted(int(i) for i in xd.excl_id)
+        ids = sorted(int(r.excl_id) for _, r in xd.iterrows() if not str(r.get("reason", "")).lower().startswith("infratentorial"))
+        if not ids: return []
         seed = int.from_bytes((self.sid + "|" + slug(reviewer)).encode()[:16].ljust(16, b"_"), "little") % (2 ** 32)
         rng = np.random.default_rng(seed)
         n = max(1, int(round(AUDIT_FRAC * len(ids))))
         return sorted(int(i) for i in rng.choice(ids, size=min(n, len(ids)), replace=False))
 
     def audit_cands(self, reviewer):
-        xd, xl = self._excluded(); out = []
+        xd, xl = self._excluded(); out = []; revealed = load_final(self.sid, reviewer) is not None
         for e in self.audit_ids(reviewer):
             r = xd[xd.excl_id == e].iloc[0]; pts = np.argwhere(xl == e)
             if not len(pts): continue
             c = pts.mean(0); c = pts[np.argmin(((pts - c) ** 2).sum(1))]
             out.append(dict(id=AUDIT_OFFSET + e, audit=True, hemi=str(r.get("hemi", "")), region=str(r.get("region", "")).replace("ctx-lh-", "").replace("ctx-rh-", ""),
                             volume=float(r.get("volume_mm3", len(pts) * np.prod(self.vox))), centre=[int(v) for v in c], vox=[int(v) for v in c],
-                            ai=ai_opinion(r), feat={}))
+                            ai=ai_opinion(r), feat={}, rule=(str(r.get("reason", "")).split(":")[0] if revealed else "")))
         return out
 
     def labels(self, reviewer="", audit=False):
@@ -583,7 +584,11 @@ class H(BaseHTTPRequestHandler):
                            "--ich-ids", ",".join(map(str, ich)) or "none", "--reviewed-ids", ",".join(map(str, sorted(c))) or "none",
                            "--tag", f"rev_{slug(rev)}"]
                 r = subprocess.run(cmd, capture_output=True, text=True, env=dict(os.environ, CSS_BASE=B, PYTHONWARNINGS="ignore"))
-                res = dict(ok=r.returncode == 0, text=(r.stdout + ("\n" + r.stderr[-1500:] if r.returncode else "")).strip(),
+                xd_, _ = s._excluded(); au_ = s.load_audit(rev) if d.get("read_mode") == "validation" or d.get("final") else {}
+                audit = [dict(id=AUDIT_OFFSET + int(e.excl_id), rule=str(e.get("reason", "")).split(":")[0], region=str(e.get("region", "")).replace("ctx-lh-", "").replace("ctx-rh-", ""),
+                              call=au_.get(AUDIT_OFFSET + int(e.excl_id), {}).get("call", "")) for _, e in xd_.iterrows()
+                         if (AUDIT_OFFSET + int(e.excl_id)) in au_] if len(xd_) else []
+                res = dict(ok=r.returncode == 0, audit=audit, text=(r.stdout + ("\n" + r.stderr[-1500:] if r.returncode else "")).strip(),
                            counts={k: sum(v == k for v in c.values()) for k in CALLS}, unread=len(s.df) - len(c),
                            missed=s.missed().to_dict("records"), reader_score=_score_json(score_path(s.sid, rev)),
                            ai_score=ai_score(s))

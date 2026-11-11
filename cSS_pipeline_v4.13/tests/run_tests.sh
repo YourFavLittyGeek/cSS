@@ -199,6 +199,9 @@ grep -q "RESULT review_web OK" $T/rweb.log || { echo "FAIL: review_web checks"; 
 echo "== v5.7 reviewer in a browser (skipped without node + Playwright)"
 python $ROOT/tests/check_viewer.py | tee $T/viewer.log | grep -v "^RESULT"
 grep -q "RESULT viewer OK" $T/viewer.log || { echo "FAIL: viewer checks"; exit 1; }
+echo "== v5.7 zone probe (read-only anatomical zones vs calls)"
+python $ROOT/tests/check_zone_probe.py | tee $T/zone.log | grep -v "^RESULT"
+grep -q "RESULT zone_probe OK" $T/zone.log || { echo "FAIL: zone_probe checks"; exit 1; }
 echo "== v5.5.2 change report + inherited calls (PH3): snapshot, redetect --v53, after, inherit, confirmation in the reviewer"
 python $ROOT/tests/check_inherit.py | tee $T/inherit.log | grep -v "^RESULT"
 grep -q "RESULT inherit OK" $T/inherit.log || { echo "FAIL: inherit checks"; exit 1; }

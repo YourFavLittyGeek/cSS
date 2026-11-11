@@ -38,3 +38,17 @@
 - Tests: check_review_web.py (audit sample, audit file, never scored, labels, import refused), check_viewer.py (browser).
 - compare_reads.py --old-reviewer NAME: compares two reads of the SAME detection (e.g. Redo_v53 vs Blind_v57).
 - docs/HOW_TO_REDO_M02-M06_v5.7.md: install, primary fixed to Redo_v53, blind read as Blind_v57, reports.
+
+## Stage A, part 3 (viewer) + zone probe
+- Theme switch is a symbol slider (moon = dark, drop = eye-preserving blue, sun = light): click a symbol or drag the knob; T cycles.
+- Validation read is the eye-with-a-lock symbol (click: Settings menu); the text badge is gone.
+- Decision buttons: sized to their text, wrapped, text centred, shorter padding; the button label "Normal cortex" is "Normal" (tooltip keeps the full name).
+- Audit reveal: the excluded objects mixed into a validation read are listed in the summary after the final save (rule, region, your call;
+  those called cSS are flagged), outlined dotted in the strip, and Candidate > Excluded audit objects jumps between them. Before the final
+  save the rule stays hidden (also in the API). Infratentorial objects are never in the audit sample (not cSS by definition).
+- scripts/zone_probe.py (read-only) + tests/check_zone_probe.py: where does each object lie in an anatomical compartment map
+  (outside a smooth hull of the cerebrum / cortex contact / free CSF / cerebellum-brainstem / skull-base cortex / interhemispheric fissure),
+  next to the calls of two reads (css_any = PROTECTED when rules are fitted). Rule grid: protected cSS flagged, shown non-cSS flagged,
+  excluded objects also caught. Decisions taken: midline = only objects free in / running along the fissure (not medial-surface hugging);
+  skull base = whole orbitofrontal / temporal-pole / inferior surface excluded; occipital / inferior temporal cortex over the tentorium kept
+  when the nearest tissue is cerebral cortex.
