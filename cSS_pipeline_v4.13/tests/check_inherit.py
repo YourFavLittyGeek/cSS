@@ -22,7 +22,13 @@ shutil.copy(f"{T}/work/PH3_seg_swispace.nii.gz", f"{T}/work/PH3_t1seg_swispace.n
 run(f"{S}/detect_css.py", "PH3"); run(f"{S}/review_css.py", "PH3", "--redo")          # test mode: calls cycle cSS / Vein / Near ICH / Normal
 json.dump(dict(names=["Tester"], last="Tester"), open(f"{T}/review/reviewers.json", "w"))
 n0 = len(pd.read_csv(f"{T}/review/PH3_candidates.csv"))
-run(f"{S}/v53_change_report.py", "snapshot", "PH3"); run(f"{S}/redetect.py", "PH3", "--v53")
+import hashlib
+run(f"{S}/redetect.py", "PH3", "--v53")                                           # snapshot FORGOTTEN: made afterwards from the redetect backup
+_new = {f: hashlib.sha256(open(f, "rb").read()).hexdigest() for f in glob.glob(f"{T}/review/PH3_*") if os.path.isfile(f)}
+run(f"{S}/snapshot_from_backup.py", "PH3")
+_now = {f: hashlib.sha256(open(f, "rb").read()).hexdigest() for f in glob.glob(f"{T}/review/PH3_*") if os.path.isfile(f)}
+if any(_now.get(f) != h for f, h in _new.items()): fail("snapshot_from_backup must restore every new file unchanged: " + str([f for f, h in _new.items() if _now.get(f) != h]))
+if os.path.isdir(f"{T}/review/_new_stash_PH3"): fail("stash folder left behind")
 out = run(f"{S}/v53_change_report.py", "after", "PH3")
 rep = pd.read_csv(f"{T}/review/changes/change_report.csv")
 if list(rep.study) != ["PH3"] or int(rep.cand_before[0]) != n0 or int(rep.old_kept[0]) + int(rep.old_excluded[0]) + int(rep.old_gone[0]) != n0:
