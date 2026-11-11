@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Interactive cSS reviewer in the browser (v5.4). Research software; expert review required.
-usage: review_web.py M12[,M13,...] [--port 8765] [--no-browser] [--reviewer "NAME"]
+usage: review_web.py M12[,M13,...] [--port 8765] [--no-browser] [--reviewer "NAME"] [--audit]
+Only the detector's SHOWN candidates are listed: objects the exclusion rules removed are never shown (v5.7-E-fix5 default).
+  --audit   validation-read audit: mix a 20 % sample of the EXCLUDED objects into the list (shuffled numbering) to check the rules
 Starts a server on this computer only (127.0.0.1) and opens the page: a scrollable three-plane viewer (wheel =
 slices, Ctrl+wheel or = / - = zoom, right-drag = window / level), the detector's outlines, an evidence meter, the
 decision keys (Y cSS, V vein, N normal cortex, A artifact, U unsure, H near ICH), comments, missed-cSS marks, a
@@ -35,6 +37,7 @@ LOCK = threading.Lock()
 slug = lambda s: re.sub(r"[^A-Za-z0-9]+", "_", s.strip()).strip("_") or "reviewer"
 now = lambda: time.strftime("%Y-%m-%d %H:%M:%S")
 AUDIT_OFFSET, AUDIT_FRAC = 10000, 0.20   # v5.7 validation read: excluded objects shown as ids 10000 + excl_id, 20 % sample
+AUDIT_ON = False                          # v5.7-E-fix5: the excluded-object audit sample only with --audit (user: show the final list, exclusions applied)
 
 
 def primary(sid, set_to=None, if_missing=False):
@@ -166,6 +169,7 @@ class Study:
 
     def audit_ids(self, reviewer):
         """deterministic 20 % sample of the excluded objects (at least 1 when any), seeded by study + reviewer"""
+        if not AUDIT_ON: return []
         xd, _ = self._excluded()
         if not len(xd): return []
         ids = sorted(int(r.excl_id) for _, r in xd.iterrows() if not str(r.get("reason", "")).lower().startswith("infratentorial"))
@@ -622,6 +626,7 @@ if __name__ == "__main__":
     IDS = [s for s in a[0].split(",") if s]
     port = int(a[a.index("--port") + 1]) if "--port" in a else 8765
     if "--reviewer" in a: reviewers(a[a.index("--reviewer") + 1])
+    AUDIT_ON = "--audit" in a
     for sid in IDS:
         for f in (f"{B}/data/{sid}_swi.nii", f"{B}/review/{sid}_candidates.csv", f"{B}/review/{sid}_candidates.nii.gz"):
             if not os.path.exists(f): sys.exit(f"{sid}: {f} not found - run the detection first")
@@ -631,6 +636,7 @@ if __name__ == "__main__":
     else: sys.exit(f"no free port between {port} and {port + 19}")
     url = f"http://127.0.0.1:{srv.server_address[1]}/"
     print(f"cSS reviewer for {', '.join(IDS)}: {url}   (this computer only; Ctrl+C here to stop)", flush=True)
+    print("shown candidates only (rule-excluded objects hidden)" if not AUDIT_ON else "AUDIT: a 20 % sample of the rule-excluded objects is mixed into validation reads", flush=True)
     study(IDS[0])
     if "--no-browser" not in a: threading.Timer(0.5, lambda: webbrowser.open(url)).start()
     try: srv.serve_forever()

@@ -7,7 +7,7 @@ HERE = os.path.dirname(os.path.abspath(__file__)); S = os.path.join(HERE, "..", 
 def fail(m): print("FAIL:", m); srv.kill(); sys.exit(1)
 for f in ("PH3_calls.csv", "PH3_calls_Reader_A.csv", "PH3_calls_Reader_B.csv", "PH3_review_log.csv", "PH3_missed.csv", "reviewers.json", "PH3_primary.json"):
     if os.path.exists(f"{B}/review/{f}"): os.remove(f"{B}/review/{f}")
-srv = subprocess.Popen([sys.executable, f"{S}/review_web.py", "PH3", "--no-browser", "--port", "8931"], stdout=subprocess.PIPE, text=True)
+srv = subprocess.Popen([sys.executable, f"{S}/review_web.py", "PH3", "--no-browser", "--port", "8931", "--audit"], stdout=subprocess.PIPE, text=True)
 U = srv.stdout.readline().split("http://")[1].split()[0]; U = "http://" + U.rstrip("/")
 def get(p):
     for _ in range(60):
@@ -131,6 +131,14 @@ except urllib.error.HTTPError as e:
 import shutil as _sh; _sh.rmtree(sd, ignore_errors=True)
 if not get("/api/meta?study=PH3&reviewer=")["snapdir"].endswith("snapshots/PH3") or "side_check" not in get("/api/meta?study=PH3&reviewer=") or "vox" not in get("/api/meta?study=PH3&reviewer=")["cands"][0]: fail("meta snapdir / cand vox")
 srv.kill()
+# v5.7-E-fix5 default: without --audit no rule-excluded object is ever listed, also in a validation read of a new reviewer
+srv2 = subprocess.Popen([sys.executable, f"{S}/review_web.py", "PH3", "--no-browser", "--port", "8932"], stdout=subprocess.PIPE, text=True)
+U = "http://127.0.0.1:8932"
+_m2 = get("/api/meta?study=PH3&reviewer=Reader%20Z&mode=validation")
+srv2.kill()
+if any(c_.get("audit") or c_["id"] >= 10000 for c_ in _m2["cands"]): fail("without --audit no excluded object may be shown")
+if len(_m2["cands"]) != n: fail(f"without --audit the list must be exactly the shown candidates: {len(_m2['cands'])} vs {n}")
+print(f"default (no --audit): a new reviewer's validation read lists only the {n} shown candidates")
 for f in ("PH3_calls.csv", "PH3_calls_Reader_A.csv", "PH3_review_log.csv", "PH3_missed.csv", "reviewers.json"): os.remove(f"{B}/review/{f}")
 print(f"review_web: {n} candidates with meter, name required, calls / comment / missed mark stored with the reviewer, re-loaded per reviewer;\n"
       f"   final score {rs['multifocality_0_4']}/4 ({rs['category']}), AI score {ai['multifocality_0_4']}/4 in its own file, final record + cohort report written")
