@@ -534,3 +534,7 @@ No FreeSurfer or patient data needed.
 - Python 3.11, numpy/scipy/nibabel only (+matplotlib for the reviewer); no network calls.
 - Every script: CLI with `sys.argv`, reads `$CSS_BASE`, prints a one-line summary first.
 - Prefer small, verifiable changes; run tests/run_tests.sh after any change to detect/score logic.
+
+
+## v5.6 viewer (current)
+Reviewer viewer rebuilt (docs/CHANGELOG_v5.6.md): single un-zoomed image, layouts 1/2/4, tool palette, collapsible/auto-hide/resizable right panel with rail, icon menus, snapshots (+ settings). POSTs need `X-CSS: 1`. Changes in `scripts/review_web.html` + snapshot endpoints in `review_web.py`.

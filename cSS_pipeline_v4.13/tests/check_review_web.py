@@ -15,7 +15,7 @@ def get(p):
         except OSError: time.sleep(0.5)
     fail("server did not answer")
 def post(p, d):
-    r = urllib.request.Request(U + p, json.dumps(d).encode(), {"Content-Type": "application/json"})
+    r = urllib.request.Request(U + p, json.dumps(d).encode(), {"Content-Type": "application/json", "X-CSS": "1"})
     try: return json.load(urllib.request.urlopen(r, timeout=120))
     except urllib.error.HTTPError as e: return json.load(e)
 m = get("/api/meta?study=PH3&reviewer="); n = len(m["cands"])
@@ -58,6 +58,22 @@ if list(rep.Study) != ["PH3"] or "cSS score (0-4)" not in rep.columns or "Catego
 if get("/api/meta?study=PH3&reviewer=Reader%20A")["final"]["reviewer"] != "Reader A": fail("final record not returned with the study")
 for x in ("PH3_final.json", "PH3_score_ai.json", "css_report.csv", "css_report.xlsx"):
     if os.path.exists(f"{B}/review/{x}"): os.remove(f"{B}/review/{x}")
+# v5.6 snapshots + request guards
+import base64, urllib.error
+png = "data:image/png;base64," + base64.b64encode(b"\x89PNG\r\n\x1a\n" + bytes(200)).decode()
+sd = f"{B}/review/snap_test"
+r = post("/api/snapshot", dict(study="PH3", reviewer="Reader A", folder=sd, name="../../evil name.png", image=png, sidecar=True, meta=dict(cur=[1, 2, 3], plane="axial", slice=4, cand_id=1)))
+if os.path.dirname(r["path"]) != os.path.abspath(sd) or ".." in os.path.basename(r["path"]) or not os.path.exists(r["path"]): fail(f"snapshot path: {r}")
+if not os.path.exists(os.path.splitext(r["path"])[0] + ".txt") or "voxel xyz: 1 2 3" not in open(os.path.splitext(r["path"])[0] + ".txt").read(): fail("sidecar")
+r2 = post("/api/snapshot", dict(study="PH3", reviewer="Reader A", folder=sd, name="../../evil name.png", image=png))
+if r2["path"] == r["path"]: fail("a snapshot must never overwrite an earlier one")
+if "error" not in post("/api/snapshot", dict(study="PH3", reviewer="Reader A", folder=sd, name="a.png", image="data:image/png;base64,AAAA")): fail("tiny image accepted")
+if "error" not in post("/api/snapshot", dict(study="PH3", reviewer="", folder=sd, name="a.png", image=png)): fail("snapshot without reviewer accepted")
+try: urllib.request.urlopen(urllib.request.Request(U + "/api/call", b"{}", {"Content-Type": "application/json"}), timeout=20); fail("POST without X-CSS accepted")
+except urllib.error.HTTPError as e:
+    if e.code != 403: fail(f"POST without X-CSS -> {e.code}")
+import shutil as _sh; _sh.rmtree(sd, ignore_errors=True)
+if not get("/api/meta?study=PH3&reviewer=")["snapdir"].endswith("snapshots/PH3") or "vox" not in get("/api/meta?study=PH3&reviewer=")["cands"][0]: fail("meta snapdir / cand vox")
 srv.kill()
 for f in ("PH3_calls.csv", "PH3_calls_Reader_A.csv", "PH3_review_log.csv", "PH3_missed.csv", "reviewers.json"): os.remove(f"{B}/review/{f}")
 print(f"review_web: {n} candidates with meter, name required, calls / comment / missed mark stored with the reviewer, re-loaded per reviewer;\n"

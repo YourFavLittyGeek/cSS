@@ -20,7 +20,7 @@ the review-priority tiers 2-4 and for the v5.3 skull / midline measures (or the 
 rank_candidates.py has written score_model). It has not been validated against expert labels, and showing it
 before the reader decides can bias the call: use the K key (hide) for any read that is used to test the detector.
 No data leaves the computer; no packages beyond the pipeline's own are needed."""
-import sys, os, json, re, time, threading, subprocess, webbrowser, shutil
+import sys, os, json, re, time, threading, subprocess, webbrowser, shutil, base64
 import numpy as np, nibabel as nib, pandas as pd
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
@@ -281,13 +281,30 @@ def reviewers(add=None):
         json.dump(d, open(p, "w"), indent=1)
     return d
 
+def acq_info(sid):
+    """TE / field strength for the corner text, from the JSON sidecar when there is one (else empty)"""
+    for f in (f"{B}/data/{sid}_swi.json", f"{B}/data/{sid}.json"):
+        try:
+            j = json.load(open(f)); te = j.get("EchoTime"); fs = j.get("MagneticFieldStrength")
+            return dict(TE_ms=round(float(te) * (1000 if te < 1 else 1), 1) if te else None, field_T=fs)
+        except Exception: pass
+    return {}
+
+
+def safe_name(n, exts=("png", "jpg")):
+    n = re.sub(r"[^A-Za-z0-9._-]+", "_", os.path.basename(str(n))).strip("._") or "snapshot"
+    base, _, ext = n.rpartition(".")
+    if not base or ext.lower() not in exts: base, ext = n, exts[0]
+    return f"{base}.{ext.lower()}"
+
+
 def meta(sid, reviewer):
     s = study(sid); calls, note = s.load_calls(reviewer) if reviewer else ({}, "")
     cands = []
     for _, r in s.df.iterrows():
         i = int(r.cand_id); g = lambda k: (None if pd.isna(r[k]) else (float(r[k]) if not isinstance(r[k], str) else r[k])) if k in r else None
         cands.append(dict(id=i, hemi=r.hemi, region=str(r.region).replace("ctx-lh-", "").replace("ctx-rh-", ""),
-                          volume=float(r.volume_mm3), centre=s.centre.get(i, [v // 2 for v in s.shape]), ai=ai_opinion(r),
+                          volume=float(r.volume_mm3), centre=s.centre.get(i, [v // 2 for v in s.shape]), vox=s.centre.get(i, [v // 2 for v in s.shape]), ai=ai_opinion(r),
                           feat={k: g(k) for k in ("darkness_z", "pial_dist_mm", "tube_ratio", "tram_frac", "extent_mm", "n_slices",
                                                   "css_evidence", "vein_evidence", "score")}))
     return dict(study=sid, studies=IDS, shape=list(s.shape), vox=s.vox, cands=cands, calls=calls, note=note, qc=s.qc,
@@ -296,7 +313,7 @@ def meta(sid, reviewer):
                 reader_score=_score_json(f"{B}/review/{sid}_score.json") if calls else None,
                 final=(json.load(open(f"{B}/review/{sid}_final.json")) if os.path.exists(f"{B}/review/{sid}_final.json") else None),
                 ref=dict(mu=s.mu, sd=s.sd, src=s.ref_src), missed=s.missed().to_dict("records"), reviewers=reviewers(),
-                call_names=CALLS)
+                call_names=CALLS, snapdir=f"{B}/review/snapshots/{sid}", acq=acq_info(sid))
 
 
 class H(BaseHTTPRequestHandler):
@@ -305,7 +322,11 @@ class H(BaseHTTPRequestHandler):
         if not isinstance(body, (bytes, bytearray, memoryview)): body = json.dumps(body, default=str).encode()
         self.send_response(code); self.send_header("Content-Type", ctype); self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(body)
+    def _host_ok(self):
+        h = (self.headers.get("Host") or "").split(":")[0]
+        return h in ("127.0.0.1", "localhost")
     def do_GET(self):
+        if not self._host_ok(): return self._send(dict(error="forbidden host"), code=403)
         u = urlparse(self.path); q = {k: v[0] for k, v in parse_qs(u.query).items()}
         try:
             if u.path == "/": return self._send(open(os.path.join(HERE, "review_web.html"), "rb").read(), "text/html; charset=utf-8")
@@ -319,12 +340,41 @@ class H(BaseHTTPRequestHandler):
         except Exception as e:
             self._send(dict(error=f"{type(e).__name__}: {e}"), code=500)
     def do_POST(self):
+        if not self._host_ok() or self.headers.get("X-CSS") != "1": return self._send(dict(error="forbidden"), code=403)
         u = urlparse(self.path)
         try:
             d = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
             if u.path == "/api/reviewer": return self._send(reviewers(d.get("name", "")))
             s = study(d["study"]); rev = (d.get("reviewer") or "").strip()
             if not rev: return self._send(dict(error="Enter the reviewer name first (upper right)."), code=400)
+            if u.path == "/api/snapshot":
+                name = safe_name(d.get("name", ""))
+                folder = os.path.abspath(os.path.expanduser(str(d.get("folder") or f"{B}/review/snapshots/{s.sid}").replace("{study}", s.sid)))
+                os.makedirs(folder, exist_ok=True)
+                raw = str(d.get("image", "")); raw = raw.split(",", 1)[1] if raw.startswith("data:") else raw
+                img = base64.b64decode(raw)
+                if len(img) < 100 or len(img) > 80_000_000: return self._send(dict(error="empty or too large image"), code=400)
+                path = os.path.join(folder, name)
+                if os.path.exists(path):
+                    b0, e0 = os.path.splitext(name); k = 2
+                    while os.path.exists(os.path.join(folder, f"{b0}_{k}{e0}")): k += 1
+                    path = os.path.join(folder, f"{b0}_{k}{e0}")
+                open(path, "wb").write(img)
+                if d.get("sidecar"):
+                    m = d.get("meta") or {}; c = m.get("cur") or [0, 0, 0]; aff = s.can.affine
+                    mm = (aff @ np.array([c[0], c[1], c[2], 1.0]))[:3]
+                    lines = [f"study: {s.sid}", f"reviewer: {rev}", f"candidate: {m.get('cand_id')}", f"plane: {m.get('plane')}  slice: {m.get('slice')}  sequence: {m.get('seq')}",
+                             f"voxel xyz: {c[0]} {c[1]} {c[2]}", f"mm xyz (SWI space): {mm[0]:.1f} {mm[1]:.1f} {mm[2]:.1f}", f"call: {m.get('call') or '-'}",
+                             f"AI meter (rule-based, not validated): {m.get('meter')}", f"zoom: {m.get('zoom')}", f"saved: {time.strftime('%Y-%m-%d %H:%M:%S')}"]
+                    open(os.path.splitext(path)[0] + ".txt", "w").write("\n".join(lines) + "\n")
+                return self._send(dict(ok=True, path=path, folder=folder))
+            if u.path == "/api/openfolder":
+                f = os.path.abspath(os.path.expanduser(str(d.get("path") or "").replace("{study}", s.sid)))
+                if not os.path.isdir(f): return self._send(dict(error="folder does not exist yet"), code=400)
+                cmd = ["open", f] if sys.platform == "darwin" else ["explorer", f] if os.name == "nt" else ["xdg-open", f]
+                try: subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except Exception as e: return self._send(dict(error=str(e)), code=500)
+                return self._send(dict(ok=True))
             if u.path == "/api/call":
                 with LOCK:
                     calls, _ = s.load_calls(rev); cid = int(d["cand_id"]); cur = calls.get(cid, dict(call="", comment=""))

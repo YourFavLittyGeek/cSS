@@ -60,7 +60,7 @@ print("inherit_calls: unanimous -> inherited + marker, conflict -> hint only, ex
 srv = subprocess.Popen([py, f"{S}/review_web.py", "PH3", "--no-browser", "--port", "8941"], env=env, stdout=subprocess.PIPE, text=True)
 U = "http://" + srv.stdout.readline().split("http://")[1].split()[0].rstrip("/")
 def post(p, d):
-    r = urllib.request.Request(U + p, json.dumps(d).encode(), {"Content-Type": "application/json"}); return json.load(urllib.request.urlopen(r, timeout=120))
+    r = urllib.request.Request(U + p, json.dumps(d).encode(), {"Content-Type": "application/json", "X-CSS": "1"}); return json.load(urllib.request.urlopen(r, timeout=120))
 for _ in range(60):
     try: urllib.request.urlopen(U + "/api/meta?study=PH3&reviewer=Tester", timeout=60); break
     except OSError: time.sleep(0.5)
