@@ -242,7 +242,7 @@ let nx,ny,nz,vox, cur=[0,0,0], ctr=[0,0,0], zoom=1;
 let layout=LS("layout","1"), panes=[], act=0;
 let ci=0, calls={}, undo=[], tool=LS("tool","pan"), ruler=null, probe=null, missed=[], draft=null, shape="rect", onlyDiffer=false;
 let compareOn=LS("compare",true), revoteMode=false, readerScore=null, finalRec=null;
-let showMark=LS("mark",true), showOther=LS("other",true), autoNext=LS("auto",true), showAI=LS("ai",true), showText=LS("text",true), showCross=LS("cross",true), mag=false, mouse=null;
+let showMark=LS("mark",true), showOther=LS("other",true), autoNext=LS("auto",true), showAI=LS("ai",true), showText=LS("text",true), showCross=LS("cross2",false), mag=false, mouse=null;
 let mir=false, showRL=LS("rl",true), ltah=LS("ltah",false), ltopen=false, sideChk=null;
 let ph=LS("ph",false), ah=LS("ah",false), pw=LS("pw",372), peek=false, leaveT=0, resizing=false, lastTab=LS("tab","viewer");
 let snap=Object.assign({mode:"view",text:true,scale:true,outline:true,cross:false,arrow:false,fmt:"png",res:2,folder:"",ask:false,parts:{study:1,cand:1,xyz:1,plane:1,slice:0,time:0},side:true,clip:false},LS("snap",{}));
@@ -309,7 +309,7 @@ function drawPane(p,x,W,H,o){
   x.imageSmoothingEnabled=true;x.imageSmoothingQuality="high";x.drawImage(p.off,g.ox,g.oy,g.nh*g.sx,g.nv*g.sy);
   const V=g.V,c=cand();
   if(o.outline)strokeEdges(x,g,p.E,1);
-  if(o.cross){const [cx,cy]=toScrG(g,cur);x.strokeStyle="rgba(120,200,255,.35)";x.lineWidth=1;x.beginPath();x.moveTo(0,cy);x.lineTo(W,cy);x.moveTo(cx,0);x.lineTo(cx,H);x.stroke()}
+  if(o.cross){const [cx,cy]=toScrG(g,cur);x.strokeStyle="rgba(120,200,255,.16)";x.lineWidth=1;x.beginPath();x.moveTo(0,cy);x.lineTo(W,cy);x.moveTo(cx,0);x.lineTo(cx,H);x.stroke()}
   if(o.outline)for(const m of missed){const pt=[m.can_i,m.can_j,m.can_k];
     if(m.pts&&+m.plane===p.plane){if(+m.slice===cur[V.s])drawShape(x,g,m.shape,m.pts,"missed "+m.missed_id,false)}
     else if(Math.abs(pt[V.s]-cur[V.s])*vox[V.s]<=2.5){const [a,b]=toScrG(g,pt);x.strokeStyle="#35d0ff";x.lineWidth=2;x.beginPath();x.arc(a,b,9,0,6.3);x.stroke();x.fillStyle="#35d0ff";x.font="12px Menlo,monospace";x.fillText("missed "+m.missed_id,a+12,b+4)}}
@@ -593,7 +593,7 @@ function saveSnapSettings(){snap=Object.assign({},snap,{mode:$('input[name=smode
 function openSnapFolder(){const f=snap.folder||(M&&M.snapdir)||"";api("/api/openfolder",{study:M.study,path:f}).catch(e=>toast("Could not open the folder: "+esc(e.message),true))}
 
 // ---------- actions, menu bar, right-click menu ----------
-function tog(){$("#aibody").style.display=showAI?"":"none";LSS("mark",showMark);LSS("other",showOther);LSS("auto",autoNext);LSS("ai",showAI);LSS("text",showText);LSS("cross",showCross);draw()}
+function tog(){$("#aibody").style.display=showAI?"":"none";LSS("mark",showMark);LSS("other",showOther);LSS("auto",autoNext);LSS("ai",showAI);LSS("text",showText);LSS("cross2",showCross);draw()}
 const A={
  summary:{l:"Summary and score",k:"Q",ic:"summary",f:summary},exportcsv:{l:"Export AI vs reviewer (CSV)",k:"E",ic:"export",f:exportCsv},
  undo:{l:"Undo last decision",k:"Z",ic:"undo",f:doUndo},clear:{l:"Clear this decision",k:"⌫",ic:"clear",f:()=>decide("")},comment:{l:"Add a comment",k:"C",ic:"comment",f:()=>{if(!panelVisible())openTab("viewer");setTab("viewer");setTimeout(()=>$("#comment").focus(),60)}},

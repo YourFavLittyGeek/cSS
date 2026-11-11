@@ -46,3 +46,6 @@ scoring, calls files and reports are unchanged.
 - **Side check**: the server compares the FreeSurfer hemisphere label of each candidate with its side of the image
   (canonical RAS: higher x = patient right) and the viewer warns in the banner when fewer than 30 % agree (View > Side check...
   shows the numbers).
+
+## v5.6.2
+- Crosshair is hidden by default (Settings / View > Crosshair turns it on) and much fainter when shown (old saved setting ignored).
