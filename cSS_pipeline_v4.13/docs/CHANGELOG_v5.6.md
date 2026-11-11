@@ -53,3 +53,15 @@ scoring, calls files and reports are unchanged.
 - New `scripts/midline_probe.py` (read-only): measures how much each detector object looks like the interhemispheric fissure
   (mid_local_frac, both3_frac, equi_med_mm, hug_med_mm, plane distance, sheet orientation) next to the reader's calls and tests
   candidate rules for "cSS calls lost"; used to set the occipital-midline exclusion on real data before any rule is added.
+
+## v5.6.3 - midline sheet rule (E22) + midline hint (from midline_probe.py on M02-M11)
+- **E22 midline sheet** (detector, only with CSS_V53=1): excluded when the object lies within 8 mm of the fitted mid-sagittal plane,
+  its thin axis is aligned with the plane (|cos| >= 0.9) and it is >= 25 mm long. Offline on your 224 shown objects: flags 11
+  (6 Normal, 4 Artifact, 1 Artifact+Normal), loses 0 of the 55 cSS calls (nearest cSS: M11 #31, cos 0.99 but only 8 mm long).
+  Fitted on the same 10 patients - M12-M15 are the test. New columns plane_dist_mm, cos_plane, ext_major_mm (appended).
+  Excluded objects stay in ID_excluded.csv with the reason "midline sheet ...".
+- **Midline hint** (viewer, not an exclusion): a thin sheet within 8 mm of the plane (cos >= 0.5, >= 15 mm long) gets
+  "lies N mm from the midline plane as a thin sheet ... could be the interhemispheric fissure (check coronal / sagittal)" in the AI
+  card text and the meter x0.9. Objects like M02 #4 (occipital fissure, 21 mm) are NOT excluded: their numbers match the real
+  pericalcarine cSS M07 #11.
+- Apply: `redetect.py M02,... --v53` (rebuilds the lists; calls inherit by fingerprint), then read.

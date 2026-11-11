@@ -538,3 +538,4 @@ No FreeSurfer or patient data needed.
 
 ## v5.6 viewer (current)
 Reviewer viewer rebuilt (docs/CHANGELOG_v5.6.md): single un-zoomed image, layouts 1/2/4, tool palette, collapsible/auto-hide/resizable right panel with rail, icon menus, snapshots (+ settings). POSTs need `X-CSS: 1`. Changes in `scripts/review_web.html` + snapshot endpoints in `review_web.py`.
+- v5.6.3: E22 midline sheet rule (CSS_V53=1; plane_dist<=8 mm, cos_plane>=0.9, ext_major>=25 mm; 0/55 cSS lost offline, thresholds fitted on M02-M11) + viewer midline hint (meter x0.9). midline_probe.py is the read-only probe that set it. Occipital fissure objects like M02 #4 are not separable from real pericalcarine cSS by geometry/labels.

@@ -52,6 +52,9 @@ def ai_opinion(r):
     elif tier == 3: mimic = "a vein"; s *= 0.6
     elif tier == 2: mimic = "a mimic (" + treason.split(";")[0] + ")"; s *= 0.8
     elif tier == 5: mimic = "nothing reliable (case quality insufficient)"; s *= 0.3
+    mid = ""                       # v5.6.3 hint only (not an exclusion): a thin sheet close to the mid-sagittal plane
+    if f("plane_dist_mm", 99) <= 8 and f("cos_plane", 0) >= 0.5 and f("ext_major_mm", 0) >= 15 and not mimic:
+        mid = f"lies {f('plane_dist_mm'):.0f} mm from the midline plane as a thin sheet ({f('ext_major_mm'):.0f} mm long): could be the interhemispheric fissure (check coronal / sagittal)"; s *= 0.9
     s = float(np.clip(s, 0, 1)); band = "green" if s >= 0.66 else "yellow" if s >= 0.33 else "red"
     why = []
     pd_, tub, tram = f("pial_dist_mm"), f("tube_ratio"), f("tram_frac")
@@ -62,6 +65,7 @@ def ai_opinion(r):
     if f("local_cont_max_mm", 0) >= 10: why.append(f"dark structure runs on for {f('local_cont_max_mm'):.0f} mm")
     if f("artifact_zone", 0) >= 1: why.append("in an air-bone artifact zone")
     if f("cmb_like", 0) >= 1: why.append("small and compact")
+    if mid: why.append(mid)
     if band == "green": suspect = "I suspect cSS"
     elif band == "yellow": suspect = "Uncertain: could be cSS" + (f" or {mimic}" if mimic else " or normal dark cortex / a vein")
     else: suspect = f"I suspect {mimic}" if mimic else "Probably not cSS (weak evidence: vein or normal cortex more likely)"

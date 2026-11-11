@@ -131,6 +131,8 @@ E19_SKULL = 0.3                      # ... E19 / E20 / E21 only for objects that
                                      # size and cortex share depend on the scanner, TE and disease extent (the synthetic
                                      # phantom cSS are darker and larger than any read cSS and must not be excluded)
 E13_FRAC_V533 = 0.5                  # midline, any depth (cSS max 0.36)
+# v5.3.4 E22 midline sheet (from review/midline_probe on M02-M11: of 55 shown cSS none satisfies all three; 11 non-cSS do):
+E22_PLANE_MM, E22_COS, E22_EXT_MM = 8.0, 0.9, 25.0   # within 8 mm of the mid-sagittal plane, thin axis aligned with it, >= 25 mm long
 V53_GAP_MM, V53_MAX_MM = 5.0, 80.0   # second merge pass: gap (same region label only) and cap on the bounding-box diagonal
 E12_MM3 = 3000.0                     # extent: one connected object above this volume (largest reader-called cSS 830 mm3;
                                      # v5.3.0 also used length > 60 mm, which removed 9 thin cSS)
@@ -527,6 +529,27 @@ def mirror_dark(pts):
     qi = np.round(q[ok] / vox).astype(int)
     return float((zmin3[qi[:, 0], qi[:, 1], qi[:, 2]] < Z_LOW).mean())
 
+# ---- 7b. v5.3.4 mid-sagittal plane (same construction as scripts/midline_probe.py) for the E22 midline-sheet rule and the
+#      viewer's midline hint: boundary between the two hemisphere territories (cortex + cerebral white matter labels)
+_Lh = ((seg >= 1000) & (seg < 2000)) | (seg == 3) | (seg == 2); _Rh = ((seg >= 2000) & (seg < 3000)) | (seg == 42) | (seg == 41)
+if _Lh.sum() > 1000 and _Rh.sum() > 1000:
+    _dL = ndi.distance_transform_edt(~_Lh, sampling=vox); _dR = ndi.distance_transform_edt(~_Rh, sampling=vox)
+    _hl = _dL <= _dR; _bd = _hl & ndi.binary_dilation(~_hl) & (_dL <= 8) & (_dR <= 8); _P0 = np.argwhere(_bd) * vox
+    del _dL, _dR, _hl, _bd
+    if len(_P0) >= 100:
+        PL_C = _P0.mean(0); PL_N = np.linalg.svd(_P0[:: max(1, len(_P0) // 20000)] - PL_C, full_matrices=False)[2][2]
+    else: PL_C = PL_N = None
+    del _P0
+else: PL_C = PL_N = None
+del _Lh, _Rh
+def plane_feats(mm_, pad_):
+    """-> plane_dist_mm (median), cos_plane (|cos| thin axis vs plane normal), ext_major_mm; NaN without a plane"""
+    if PL_N is None or mm_.sum() < 5: return dict(plane_dist_mm=np.nan, cos_plane=np.nan, ext_major_mm=np.nan)
+    P = (np.argwhere(mm_) + np.array([s_.start for s_ in pad_])) * vox; Q = P - P.mean(0)
+    w_, v_ = np.linalg.eigh(np.cov(Q.T)); ext = np.ptp(Q @ v_, axis=0)
+    return dict(plane_dist_mm=round(float(np.median(np.abs((P - PL_C) @ PL_N))), 1), cos_plane=round(float(abs(v_[:, 0] @ PL_N)), 2),
+                ext_major_mm=round(float(ext[2]), 1))
+
 # ---- 8. lobar ICH: reader-drawn mask, else dark compact blobs in lobar tissue
 ich_p = f"{base}/work/{subj}_ich.nii.gz"
 lut = load_lut()
@@ -771,7 +794,7 @@ for p in regionprops(lab, spacing=vox):
                mask_edge_mm=round(float(np.median(dist_mm[pad][mm])), 1),
                skull_frac=round(float(SKULL[pad][mm].mean()), 2), v53_active=int(V53), _band=bool(BAND[pad][mm].any()),
                vent_frac=round(float((d_vent[pad][mm] <= E16_MM).mean()), 2),
-               out_frac=round(float((pial_sd[pad][mm] > V53_OUT_MM).mean()), 2))
+               out_frac=round(float((pial_sd[pad][mm] > V53_OUT_MM).mean()), 2), **plane_feats(mm, pad))
     midz      = bool(np.median(dmid[pad][mm]) < 5.0)
     # off-surface tube. vein_tree_mm is recorded only: on real SWI (P006) the dark tubular network
     # along the cortex merges into one brain-wide component (255 mm for most candidates)
@@ -874,7 +897,7 @@ V50_COLS = ["mimic_score", "mimic_class", "mimic_reason", "phase_z", "mb_cluster
             "flair_csf_bright_frac", "feature_qc_flags", "feature_schema_version",
             "review_priority_rank", "review_priority", "review_priority_reason",                # v5.1.3 (css_tiers.py)
             "midline_frac", "mask_edge_mm", "skull_frac", "v53_active",                         # v5.3, appended
-            "vent_frac", "out_frac"]                                                             # v5.3.1 / v5.3.2, appended
+            "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm"]               # v5.3.1 / v5.3.2 / v5.3.4, appended
 cols = cols + V50_COLS
 
 # ---- 11. exclusions (v4.8) - each with an explicit, definition-based reason
@@ -899,7 +922,7 @@ RULE_CONF = {"E1": "high" if T1_ANAT else "medium", "E2": "medium", "E3": "mediu
              "E5": "medium", "E6": "medium", "E7": "medium", "E8": "low", "E9": "medium",
              "E10": "low", "E11": "low",                       # v5.0 mimic rules: no real-data support yet
              "E12": "low", "E13": "low", "E14": "low", "E15": "low", "E16": "low", "E17": "low",
-             "E18": "low", "E19": "low", "E20": "low", "E21": "low"}   # v5.3: chosen on M02-M11, not validated
+             "E18": "low", "E19": "low", "E20": "low", "E21": "low", "E22": "low"}   # v5.3: chosen on M02-M11, not validated
 def exclusion(r):
     """-> (rule_version, reason); ("", "") = kept. v5.1.1 CSS_MIXED_REVIEW=1: a mixed merged object (pieces disagree)
     is not removed whole by a vein rule (E5 / E6 / E7); it is shown with mixed_object_review = 1"""
@@ -936,6 +959,10 @@ def exclusion_v4(r):
             return "E18@v5.3.3", f"ill-defined (edge contrast < {E18_EDGE:g} SD)"
         if r["midline_frac"] >= E13_FRAC_V533:                         # v5.3.3: any depth (user: exclude the fissure)
             return "E13@v5.3", "midline: in the interhemispheric fissure (falx / sagittal sinus / midline veins)"
+        if (np.isfinite(r["plane_dist_mm"]) and r["plane_dist_mm"] <= E22_PLANE_MM and r["cos_plane"] >= E22_COS
+                and r["ext_major_mm"] >= E22_EXT_MM):
+            return "E22@v5.3.4", (f"midline sheet: a flat sheet {r['ext_major_mm']:.0f} mm long lying in the mid-sagittal plane "
+                                  f"({r['plane_dist_mm']:.1f} mm from it) - falx / sagittal sinus / fissure veins")
         if "orbitofrontal" in r["region"] and r["mask_edge_mm"] < E14_EDGE_MM:
             return "E14@v5.3", "orbitofrontal air-bone susceptibility zone"
     tub_, tram_ = r["tube_ratio"], r["tram_frac"]

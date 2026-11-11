@@ -46,16 +46,20 @@ truth = nib.load(f"{T}/work/PH3_truth.nii.gz").get_fdata().astype(int)
 
 # ---- 1. switch off = unchanged list, new columns appended last
 off, off_lab, _, _, _ = detect("PH3", False)
-new = ["midline_frac", "mask_edge_mm", "skull_frac", "v53_active", "vent_frac", "out_frac"]
-if list(off.columns[-6:]) != new: fail(f"new columns must be appended last, got {list(off.columns[-6:])}")
+new = ["midline_frac", "mask_edge_mm", "skull_frac", "v53_active", "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm"]
+if list(off.columns[-9:]) != new: fail(f"new columns must be appended last, got {list(off.columns[-9:])}")
+if not off.plane_dist_mm.notna().any() or not (off.cos_plane.dropna().between(0, 1)).all(): fail("plane features (v5.3.4) missing or out of range")
 if off.v53_active.any(): fail("v53_active must be 0 with the switch off")
-print(f"switch off: {len(off)} candidates, 6 new columns appended, v53_active 0")
+print(f"switch off: {len(off)} candidates, 9 new columns appended, v53_active 0")
 # v5.3.3: the absolute thresholds (darkness, volume, cortex share) were fitted to real cSS; the phantom cSS are darker
 # and larger. On the plain phantom (no skull band) switching v5.3 on must not lose a true lesion.
 _t = nib.load(f"{T}/work/PH3_truth.nii.gz").get_fdata().astype(int)
 _on, _on_lab, _x, _, _ = detect("PH3", True)
 _f0 = {int(i) for i in np.unique(_t[(off_lab > 0) & (_t > 0)])}; _f1 = {int(i) for i in np.unique(_t[(_on_lab > 0) & (_t > 0)])}
 if _f0 - _f1: fail(f"plain phantom: v5.3 lost true lesions {sorted(_f0 - _f1)}: " + "; ".join(_x.reason.astype(str).unique()))
+_e22 = _x[_x.reason.astype(str).str.startswith("midline sheet")] if "reason" in _x.columns else _x.iloc[0:0]
+if len(_e22) and not ((_e22.plane_dist_mm <= 8) & (_e22.cos_plane >= 0.9) & (_e22.ext_major_mm >= 25)).all(): fail("E22 excluded an object that does not meet its thresholds")
+print(f"E22 midline sheets excluded on the plain phantom: {len(_e22)}")
 print(f"plain phantom: true lesions shown {len(_f0)} -> {len(_f1)} with v5.3")
 
 # ---- 2. skull phantom: T1-style mask (labels + 5 mm): dark line just outside the cortex (thin-CSF convexity)

@@ -1,4 +1,4 @@
-# All code — cSS pipeline v5.6.1
+# All code — cSS pipeline v5.6.3
 
 Generated from the files below; the files are authoritative.
 
@@ -2493,6 +2493,8 @@ E19_SKULL = 0.3                      # ... E19 / E20 / E21 only for objects that
                                      # size and cortex share depend on the scanner, TE and disease extent (the synthetic
                                      # phantom cSS are darker and larger than any read cSS and must not be excluded)
 E13_FRAC_V533 = 0.5                  # midline, any depth (cSS max 0.36)
+# v5.3.4 E22 midline sheet (from review/midline_probe on M02-M11: of 55 shown cSS none satisfies all three; 11 non-cSS do):
+E22_PLANE_MM, E22_COS, E22_EXT_MM = 8.0, 0.9, 25.0   # within 8 mm of the mid-sagittal plane, thin axis aligned with it, >= 25 mm long
 V53_GAP_MM, V53_MAX_MM = 5.0, 80.0   # second merge pass: gap (same region label only) and cap on the bounding-box diagonal
 E12_MM3 = 3000.0                     # extent: one connected object above this volume (largest reader-called cSS 830 mm3;
                                      # v5.3.0 also used length > 60 mm, which removed 9 thin cSS)
@@ -2889,6 +2891,27 @@ def mirror_dark(pts):
     qi = np.round(q[ok] / vox).astype(int)
     return float((zmin3[qi[:, 0], qi[:, 1], qi[:, 2]] < Z_LOW).mean())
 
+# ---- 7b. v5.3.4 mid-sagittal plane (same construction as scripts/midline_probe.py) for the E22 midline-sheet rule and the
+#      viewer's midline hint: boundary between the two hemisphere territories (cortex + cerebral white matter labels)
+_Lh = ((seg >= 1000) & (seg < 2000)) | (seg == 3) | (seg == 2); _Rh = ((seg >= 2000) & (seg < 3000)) | (seg == 42) | (seg == 41)
+if _Lh.sum() > 1000 and _Rh.sum() > 1000:
+    _dL = ndi.distance_transform_edt(~_Lh, sampling=vox); _dR = ndi.distance_transform_edt(~_Rh, sampling=vox)
+    _hl = _dL <= _dR; _bd = _hl & ndi.binary_dilation(~_hl) & (_dL <= 8) & (_dR <= 8); _P0 = np.argwhere(_bd) * vox
+    del _dL, _dR, _hl, _bd
+    if len(_P0) >= 100:
+        PL_C = _P0.mean(0); PL_N = np.linalg.svd(_P0[:: max(1, len(_P0) // 20000)] - PL_C, full_matrices=False)[2][2]
+    else: PL_C = PL_N = None
+    del _P0
+else: PL_C = PL_N = None
+del _Lh, _Rh
+def plane_feats(mm_, pad_):
+    """-> plane_dist_mm (median), cos_plane (|cos| thin axis vs plane normal), ext_major_mm; NaN without a plane"""
+    if PL_N is None or mm_.sum() < 5: return dict(plane_dist_mm=np.nan, cos_plane=np.nan, ext_major_mm=np.nan)
+    P = (np.argwhere(mm_) + np.array([s_.start for s_ in pad_])) * vox; Q = P - P.mean(0)
+    w_, v_ = np.linalg.eigh(np.cov(Q.T)); ext = np.ptp(Q @ v_, axis=0)
+    return dict(plane_dist_mm=round(float(np.median(np.abs((P - PL_C) @ PL_N))), 1), cos_plane=round(float(abs(v_[:, 0] @ PL_N)), 2),
+                ext_major_mm=round(float(ext[2]), 1))
+
 # ---- 8. lobar ICH: reader-drawn mask, else dark compact blobs in lobar tissue
 ich_p = f"{base}/work/{subj}_ich.nii.gz"
 lut = load_lut()
@@ -3133,7 +3156,7 @@ for p in regionprops(lab, spacing=vox):
                mask_edge_mm=round(float(np.median(dist_mm[pad][mm])), 1),
                skull_frac=round(float(SKULL[pad][mm].mean()), 2), v53_active=int(V53), _band=bool(BAND[pad][mm].any()),
                vent_frac=round(float((d_vent[pad][mm] <= E16_MM).mean()), 2),
-               out_frac=round(float((pial_sd[pad][mm] > V53_OUT_MM).mean()), 2))
+               out_frac=round(float((pial_sd[pad][mm] > V53_OUT_MM).mean()), 2), **plane_feats(mm, pad))
     midz      = bool(np.median(dmid[pad][mm]) < 5.0)
     # off-surface tube. vein_tree_mm is recorded only: on real SWI (P006) the dark tubular network
     # along the cortex merges into one brain-wide component (255 mm for most candidates)
@@ -3236,7 +3259,7 @@ V50_COLS = ["mimic_score", "mimic_class", "mimic_reason", "phase_z", "mb_cluster
             "flair_csf_bright_frac", "feature_qc_flags", "feature_schema_version",
             "review_priority_rank", "review_priority", "review_priority_reason",                # v5.1.3 (css_tiers.py)
             "midline_frac", "mask_edge_mm", "skull_frac", "v53_active",                         # v5.3, appended
-            "vent_frac", "out_frac"]                                                             # v5.3.1 / v5.3.2, appended
+            "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm"]               # v5.3.1 / v5.3.2 / v5.3.4, appended
 cols = cols + V50_COLS
 
 # ---- 11. exclusions (v4.8) - each with an explicit, definition-based reason
@@ -3261,7 +3284,7 @@ RULE_CONF = {"E1": "high" if T1_ANAT else "medium", "E2": "medium", "E3": "mediu
              "E5": "medium", "E6": "medium", "E7": "medium", "E8": "low", "E9": "medium",
              "E10": "low", "E11": "low",                       # v5.0 mimic rules: no real-data support yet
              "E12": "low", "E13": "low", "E14": "low", "E15": "low", "E16": "low", "E17": "low",
-             "E18": "low", "E19": "low", "E20": "low", "E21": "low"}   # v5.3: chosen on M02-M11, not validated
+             "E18": "low", "E19": "low", "E20": "low", "E21": "low", "E22": "low"}   # v5.3: chosen on M02-M11, not validated
 def exclusion(r):
     """-> (rule_version, reason); ("", "") = kept. v5.1.1 CSS_MIXED_REVIEW=1: a mixed merged object (pieces disagree)
     is not removed whole by a vein rule (E5 / E6 / E7); it is shown with mixed_object_review = 1"""
@@ -3298,6 +3321,10 @@ def exclusion_v4(r):
             return "E18@v5.3.3", f"ill-defined (edge contrast < {E18_EDGE:g} SD)"
         if r["midline_frac"] >= E13_FRAC_V533:                         # v5.3.3: any depth (user: exclude the fissure)
             return "E13@v5.3", "midline: in the interhemispheric fissure (falx / sagittal sinus / midline veins)"
+        if (np.isfinite(r["plane_dist_mm"]) and r["plane_dist_mm"] <= E22_PLANE_MM and r["cos_plane"] >= E22_COS
+                and r["ext_major_mm"] >= E22_EXT_MM):
+            return "E22@v5.3.4", (f"midline sheet: a flat sheet {r['ext_major_mm']:.0f} mm long lying in the mid-sagittal plane "
+                                  f"({r['plane_dist_mm']:.1f} mm from it) - falx / sagittal sinus / fissure veins")
         if "orbitofrontal" in r["region"] and r["mask_edge_mm"] < E14_EDGE_MM:
             return "E14@v5.3", "orbitofrontal air-bone susceptibility zone"
     tub_, tram_ = r["tube_ratio"], r["tram_frac"]
@@ -4880,6 +4907,145 @@ subprocess.run([sys.executable, f"{base}/scripts/score_css.py", subj], check=Tru
 
 ````
 
+## scripts/midline_probe.py
+
+````python
+#!/usr/bin/env python3
+"""Midline / interhemispheric-fissure probe. Research software; expert review required.
+usage: midline_probe.py M02,M03,...  [--calls-dir DIR]
+READ-ONLY: measures, for every object the detector produced (shown candidates + excluded objects), how much it looks like
+the interhemispheric fissure (falx / sagittal sinus / fissure veins between the two hemispheres) rather than a sulcus
+inside one hemisphere (calcarine, parieto-occipital, ...), and prints it next to your calls. Nothing in the project is changed.
+Measures per object (labels = work/ID_seg_swispace.nii.gz, the same labels the detector uses):
+  mid_local_frac  share of the object's voxels that sit in the gap BETWEEN the hemispheres: nearest left and right
+                  hemisphere tissue (cortex + white matter) equally far (+-1.5 mm) and both within 4 mm   (local, follows a curved fissure)
+  both3_frac      share of voxels with LEFT cortex and RIGHT cortex both within 3 mm (a sulcus has one hemisphere on both banks)
+  equi_med_mm     median |distance to left cortex - distance to right cortex|  (small = in the middle of the fissure)
+  hug_med_mm      median distance to the NEAREST cortex (cSS hugging the pial surface is ~0-1.5 mm)
+  plane_dist_mm   median distance to the fitted mid-sagittal plane (global)
+  cos_plane       |cosine| between the object's thin axis and the plane normal (1 = a flat sheet lying in the sagittal plane)
+  thin_ratio      thin / middle axis length (small = sheet);  ext_major_mm, ext_mid_mm, ext_thin_mm: extents along its axes
+Reader call per object: from review/changes/ID_before_* (snapshot made before redetect --v53: old calls mapped by voxel overlap),
+else from ID_calls.csv (also looked up in review/old_calls_before_redo or --calls-dir) matched by fingerprint.
+Writes review/midline_probe.csv and review/midline_probe_summary.txt: call-by-call distributions and a grid of candidate rules
+with how many of your cSS calls each would remove (the safe ones remove none)."""
+import sys, os, itertools, numpy as np, pandas as pd, nibabel as nib
+from scipy import ndimage as ndi
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from css_common import base as _base, match_calls
+
+B = _base()
+a = sys.argv[1:]
+if not a or a[0].startswith("-"): sys.exit(__doc__)
+ids = [s for s in a[0].split(",") if s]
+cdir = a[a.index("--calls-dir") + 1] if "--calls-dir" in a else None
+
+
+def lab(p): return np.asanyarray(nib.load(p).dataobj).astype(np.int32)
+
+
+def old_calls_onto_objects(sid, new_lab):
+    """{label in new_lab: set(call)} from the pre-redetect snapshot (old candidate voxels carry the old calls)"""
+    ch = f"{B}/review/changes"
+    pc, pl, pk = f"{ch}/{sid}_before_candidates.csv", f"{ch}/{sid}_before_candidates.nii.gz", f"{ch}/{sid}_before_calls.csv"
+    if not all(os.path.exists(p) for p in (pc, pl, pk)): return None
+    oc, calls = pd.read_csv(pc), pd.read_csv(pk); m, _ = match_calls(oc, calls)
+    if not m: return None
+    old = lab(pl); out = {}
+    for cid, call in m.items():
+        if not isinstance(call, str) or not call: continue
+        v = new_lab[old == cid]; v = v[v > 0]
+        for l in np.unique(v):
+            if (v == l).sum() >= max(3, 0.1 * (old == cid).sum()): out.setdefault(int(l), set()).add(call)
+    return out
+
+
+def current_calls(sid, cand):
+    for d in [x for x in (cdir, f"{B}/review/old_calls_before_redo", f"{B}/review") if x]:
+        p = f"{d}/{sid}_calls.csv"
+        if os.path.exists(p):
+            m, _ = match_calls(cand, pd.read_csv(p))
+            if m: return {int(k): {v} for k, v in m.items() if isinstance(v, str) and v}
+    return {}
+
+
+rows = []
+for sid in ids:
+    need = [f"{B}/data/{sid}_swi.nii", f"{B}/work/{sid}_seg_swispace.nii.gz", f"{B}/review/{sid}_candidates.csv", f"{B}/review/{sid}_candidates.nii.gz"]
+    if any(not os.path.exists(p) for p in need): print(f"{sid}: missing input - skipped"); continue
+    swi = nib.load(need[0]); vox = np.array(swi.header.get_zooms()[:3], float); seg = lab(need[1])
+    Lcx = ((seg >= 1000) & (seg < 2000)) | (seg == 3); Rcx = ((seg >= 2000) & (seg < 3000)) | (seg == 42)
+    Lh, Rh = Lcx | (seg == 2), Rcx | (seg == 41)
+    if Lh.sum() < 1000 or Rh.sum() < 1000: print(f"{sid}: labels have no two hemispheres - skipped"); continue
+    edt = lambda m: ndi.distance_transform_edt(~m, sampling=vox)
+    dLc, dRc, dLh, dRh = edt(Lcx), edt(Rcx), edt(Lh), edt(Rh)
+    hemiL = dLh <= dRh; bd = hemiL & ndi.binary_dilation(~hemiL) & (dLh <= 8) & (dRh <= 8); P0 = np.argwhere(bd) * vox   # boundary between the two hemisphere territories (as the detector)
+    if len(P0) < 100: print(f"{sid}: no hemisphere boundary found - skipped"); continue
+    pc = P0.mean(0); mvec = np.linalg.svd(P0[:: max(1, len(P0) // 20000)] - pc, full_matrices=False)[2][2]
+    objs = []
+    cand = pd.read_csv(need[2]); L1 = lab(need[3]); objs.append(("shown", cand.set_index("cand_id"), L1))
+    xp, xl = f"{B}/review/{sid}_excluded.csv", f"{B}/review/{sid}_excluded.nii.gz"
+    if os.path.exists(xp) and os.path.exists(xl):
+        xd = pd.read_csv(xp)
+        if len(xd) and "excl_id" in xd.columns: objs.append(("excluded", xd.set_index("excl_id"), lab(xl)))
+    calls_new = None
+    for fate, tab, L in objs:
+        cmap = old_calls_onto_objects(sid, L) if calls_new is None else None
+        if fate == "shown":
+            if cmap is None: cmap = {}
+            cur = current_calls(sid, cand) if not cmap else {}
+            for k, v in cur.items(): cmap.setdefault(k, set()).update(v)
+        for oid, r in tab.iterrows():
+            idx = np.argwhere(L == int(oid))
+            if len(idx) < 5: continue
+            P = idx * vox; sel = tuple(idx.T)
+            dl, dr, hl, hr = dLc[sel], dRc[sel], dLh[sel], dRh[sel]
+            C = np.cov((P - P.mean(0)).T); w, v = np.linalg.eigh(C)
+            pr = (P - P.mean(0)) @ v; ext = np.ptp(pr, axis=0)
+            rows.append(dict(study_id=sid, fate=fate, obj_id=int(oid), reader_call="+".join(sorted(cmap.get(int(oid), set()))) if cmap else "",
+                             hemi=r.get("hemi", ""), region=str(r.get("region", "")), volume_mm3=round(len(idx) * vox.prod(), 1),
+                             reason=str(r.get("reason", "")).split(":")[0].split(" (")[0] if fate == "excluded" else "",
+                             midline_frac_detector=r.get("midline_frac", np.nan),
+                             mid_local_frac=round(float(((np.abs(hl - hr) <= 1.5) & (hl <= 4) & (hr <= 4)).mean()), 2),
+                             both3_frac=round(float(((dl <= 3) & (dr <= 3)).mean()), 2),
+                             equi_med_mm=round(float(np.median(np.abs(dl - dr))), 1), hug_med_mm=round(float(np.median(np.minimum(dl, dr))), 1),
+                             plane_dist_mm=round(float(np.median(np.abs((P - pc) @ mvec))), 1),
+                             cos_plane=round(float(abs(v[:, 0] @ mvec)), 2), thin_ratio=round(float(np.sqrt(max(w[0], 0) / max(w[1], 1e-6))), 2),
+                             ext_major_mm=round(float(ext[2]), 1), ext_mid_mm=round(float(ext[1]), 1), ext_thin_mm=round(float(ext[0]), 1)))
+    calls_new = True
+    print(f"{sid}: {sum(1 for r in rows if r['study_id'] == sid)} objects measured", flush=True)
+if not rows: sys.exit("nothing measured")
+d = pd.DataFrame(rows); d["call"] = d.reader_call.replace("", "(not read)")
+d.to_csv(f"{B}/review/midline_probe.csv", index=False)
+out = ["Midline probe (research software; expert review required)", f"studies: {', '.join(ids)}", ""]
+out.append("Objects by fate and reader call:"); out.append(pd.crosstab(d.call, d.fate, margins=True).to_string()); out.append("")
+feats = ["mid_local_frac", "both3_frac", "equi_med_mm", "hug_med_mm", "plane_dist_mm", "cos_plane", "thin_ratio"]
+for f in feats:
+    out.append(f"{f}: median [10th-90th percentile] by call")
+    for c, g in d.groupby("call"):
+        q = g[f].quantile([.1, .5, .9]).round(2).tolist(); out.append(f"   {c:<12} n={len(g):<4} {q[1]}  [{q[0]} - {q[2]}]")
+    out.append("")
+css = d[d.call.str.contains("cSS")]
+if len(css):
+    out.append("The cSS objects that look most like the fissure (the ones a rule must NOT catch):")
+    out.append(css.sort_values("mid_local_frac", ascending=False).head(8)[["study_id", "obj_id", "fate", "region", "mid_local_frac", "both3_frac", "equi_med_mm", "hug_med_mm", "cos_plane", "volume_mm3"]].to_string(index=False)); out.append("")
+rd = d[d.call != "(not read)"]
+res = []
+for a_, b_, c_ in itertools.product([.3, .4, .5, .6, .7], [0, .6, .8], [0, .3, .5]):
+    flag = (d.mid_local_frac >= a_) & (d.cos_plane >= b_) & (d.both3_frac >= c_) & (d.fate == "shown")
+    fr = flag[rd.index.intersection(d.index)] if False else flag.loc[rd.index]
+    res.append(dict(mid_local_ge=a_, cos_plane_ge=b_, both3_ge=c_, cSS_lost=int((fr & rd.call.str.contains("cSS")).sum()),
+                    of_cSS=int(rd.call.str.contains("cSS").sum()), non_cSS_removed=int((fr & ~rd.call.str.contains("cSS")).sum()),
+                    unread_removed=int((flag & (d.call == "(not read)")).sum())))
+g = pd.DataFrame(res); safe = g[g.cSS_lost == 0].sort_values(["non_cSS_removed", "mid_local_ge"], ascending=[False, False])
+out.append("Candidate rules applied to the objects still SHOWN (rule = all three conditions): cSS calls lost / other calls removed")
+out.append("Rules that lose no cSS call (best first):"); out.append(safe.head(12).to_string(index=False) if len(safe) else "   none: every rule tried loses a cSS call")
+out.append(""); out.append("Nothing was changed. Send review/midline_probe.csv and midline_probe_summary.txt back to set the rule.")
+open(f"{B}/review/midline_probe_summary.txt", "w").write("\n".join(out) + "\n"); print("\n".join(out))
+print(f"\nwrote {B}/review/midline_probe.csv and midline_probe_summary.txt")
+
+````
+
 ## scripts/mimic_rules.py
 
 ````python
@@ -5920,7 +6086,7 @@ let nx,ny,nz,vox, cur=[0,0,0], ctr=[0,0,0], zoom=1;
 let layout=LS("layout","1"), panes=[], act=0;
 let ci=0, calls={}, undo=[], tool=LS("tool","pan"), ruler=null, probe=null, missed=[], draft=null, shape="rect", onlyDiffer=false;
 let compareOn=LS("compare",true), revoteMode=false, readerScore=null, finalRec=null;
-let showMark=LS("mark",true), showOther=LS("other",true), autoNext=LS("auto",true), showAI=LS("ai",true), showText=LS("text",true), showCross=LS("cross",true), mag=false, mouse=null;
+let showMark=LS("mark",true), showOther=LS("other",true), autoNext=LS("auto",true), showAI=LS("ai",true), showText=LS("text",true), showCross=LS("cross2",false), mag=false, mouse=null;
 let mir=false, showRL=LS("rl",true), ltah=LS("ltah",false), ltopen=false, sideChk=null;
 let ph=LS("ph",false), ah=LS("ah",false), pw=LS("pw",372), peek=false, leaveT=0, resizing=false, lastTab=LS("tab","viewer");
 let snap=Object.assign({mode:"view",text:true,scale:true,outline:true,cross:false,arrow:false,fmt:"png",res:2,folder:"",ask:false,parts:{study:1,cand:1,xyz:1,plane:1,slice:0,time:0},side:true,clip:false},LS("snap",{}));
@@ -5987,7 +6153,7 @@ function drawPane(p,x,W,H,o){
   x.imageSmoothingEnabled=true;x.imageSmoothingQuality="high";x.drawImage(p.off,g.ox,g.oy,g.nh*g.sx,g.nv*g.sy);
   const V=g.V,c=cand();
   if(o.outline)strokeEdges(x,g,p.E,1);
-  if(o.cross){const [cx,cy]=toScrG(g,cur);x.strokeStyle="rgba(120,200,255,.35)";x.lineWidth=1;x.beginPath();x.moveTo(0,cy);x.lineTo(W,cy);x.moveTo(cx,0);x.lineTo(cx,H);x.stroke()}
+  if(o.cross){const [cx,cy]=toScrG(g,cur);x.strokeStyle="rgba(120,200,255,.16)";x.lineWidth=1;x.beginPath();x.moveTo(0,cy);x.lineTo(W,cy);x.moveTo(cx,0);x.lineTo(cx,H);x.stroke()}
   if(o.outline)for(const m of missed){const pt=[m.can_i,m.can_j,m.can_k];
     if(m.pts&&+m.plane===p.plane){if(+m.slice===cur[V.s])drawShape(x,g,m.shape,m.pts,"missed "+m.missed_id,false)}
     else if(Math.abs(pt[V.s]-cur[V.s])*vox[V.s]<=2.5){const [a,b]=toScrG(g,pt);x.strokeStyle="#35d0ff";x.lineWidth=2;x.beginPath();x.arc(a,b,9,0,6.3);x.stroke();x.fillStyle="#35d0ff";x.font="12px Menlo,monospace";x.fillText("missed "+m.missed_id,a+12,b+4)}}
@@ -6159,19 +6325,19 @@ function sideMsg(){const s=sideChk;if(!s||!s.n)return "Side check: not enough in
 const panelVisible=()=>(!ph&&!ah)||peek;
 function setTab(t){lastTab=t;LSS("tab",t);$$("#tabs button").forEach(b=>b.classList.toggle("on",b.dataset.tab===t));$$(".tab").forEach(e=>e.classList.toggle("on",e.id==="tab-"+t));renderRail()}
 function renderRail(){const r=$("#rail"),c=M&&cand(),vis=panelVisible();
-  r.innerHTML=[["viewer","Viewer"],["cands","Candidates"],["calls","Calls summary"],["ai","AI meter"],["dec","Decision"]].map(([k,l])=>`<div data-r="${k}" class="${vis&&k===lastTab?"on":""}">${l}${k==="dec"&&c&&callOf(c)?' <span class="dot"></span>':""}</div>`).join("")+`<div class="pinb" data-r="pin" title="Pin the panel (show it permanently, switch Auto-hide off)">${svg("pin")}</div>`}
+  r.innerHTML=[["viewer","Viewer"],["cands","Candidates"],["calls","Calls summary"]].map(([k,l])=>`<div data-r="${k}" class="${vis&&k===lastTab?"on":""}">${l}${k==="viewer"&&c&&callOf(c)?' <span class="dot"></span>':""}</div>`).join("")+`<div class="pinb" data-r="pin" title="Pin the panel (show it permanently, switch Auto-hide off)">${svg("pin")}</div>`}
 function applyPanel(){const panel=$("#panel"),rail=$("#rail"),pinned=!ph&&!ah,vis=pinned||peek;
   panel.style.width=pw+"px";panel.classList.toggle("ovl",!pinned);panel.style.display=vis?"flex":"none";rail.style.display=pinned?"none":"flex";$("#ahchk").checked=ah;renderRail();requestAnimationFrame(()=>draw())}
 function hidePanel(){if(!ph&&!ah){ph=true;LSS("ph",true)}else peek=false;applyPanel()}
 function togglePanel(){if(!ph&&!ah){ph=true;LSS("ph",true)}else if(ph&&!ah){ph=false;LSS("ph",false)}else peek=!peek;applyPanel()}
 function setAutoHide(v){ah=v;LSS("ah",v);if(v){peek=true;ph=false;LSS("ph",false)}else{peek=false;ph=false;LSS("ph",false)}applyPanel()}
 function pinPanel(){ah=false;ph=false;peek=false;LSS("ah",false);LSS("ph",false);applyPanel()}
-function openTab(k){const t=(k==="ai"||k==="dec")?"viewer":k;if(ph&&!ah){ph=false;LSS("ph",false)}if(ah)peek=true;setTab(t);applyPanel();
-  if(k==="ai"||k==="dec")setTimeout(()=>{const e=$(k==="ai"?"#aicard":"#deccard");if(e)e.scrollIntoView({block:"nearest"})},50)}
+function openTab(k){const t=k;if(ph&&!ah){ph=false;LSS("ph",false)}if(ah)peek=true;setTab(t);applyPanel();
+}
 function armLeave(){clearTimeout(leaveT);if(!ah||!peek)return;leaveT=setTimeout(()=>{const p=$("#panel");if(resizing||p.contains(document.activeElement)&&document.activeElement.tagName==="INPUT"&&document.activeElement.type==="text")return;peek=false;applyPanel()},600)}
 function keepOpen(){clearTimeout(leaveT)}
 $("#rail").addEventListener("mouseenter",e=>{keepOpen()});$("#rail").addEventListener("mouseleave",armLeave);
-$("#rail").addEventListener("mouseover",e=>{const d=e.target.closest("[data-r]");if(d&&ah&&d.dataset.r!=="pin"&&(!peek||(d.dataset.r!==lastTab&&!(["ai","dec"].includes(d.dataset.r)&&lastTab==="viewer"))))openTab(d.dataset.r)});
+$("#rail").addEventListener("mouseover",e=>{const d=e.target.closest("[data-r]");if(d&&ah&&d.dataset.r!=="pin"&&(!peek||d.dataset.r!==lastTab))openTab(d.dataset.r)});
 $("#rail").addEventListener("click",e=>{const d=e.target.closest("[data-r]");if(!d)return;if(d.dataset.r==="pin")pinPanel();else openTab(d.dataset.r)});
 $("#panel").addEventListener("mouseenter",keepOpen);$("#panel").addEventListener("mouseleave",armLeave);
 $("#tabs").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;if(b.dataset.tab===lastTab&&panelVisible()){hidePanel();return}setTab(b.dataset.tab)});
@@ -6271,7 +6437,7 @@ function saveSnapSettings(){snap=Object.assign({},snap,{mode:$('input[name=smode
 function openSnapFolder(){const f=snap.folder||(M&&M.snapdir)||"";api("/api/openfolder",{study:M.study,path:f}).catch(e=>toast("Could not open the folder: "+esc(e.message),true))}
 
 // ---------- actions, menu bar, right-click menu ----------
-function tog(){$("#aibody").style.display=showAI?"":"none";LSS("mark",showMark);LSS("other",showOther);LSS("auto",autoNext);LSS("ai",showAI);LSS("text",showText);LSS("cross",showCross);draw()}
+function tog(){$("#aibody").style.display=showAI?"":"none";LSS("mark",showMark);LSS("other",showOther);LSS("auto",autoNext);LSS("ai",showAI);LSS("text",showText);LSS("cross2",showCross);draw()}
 const A={
  summary:{l:"Summary and score",k:"Q",ic:"summary",f:summary},exportcsv:{l:"Export AI vs reviewer (CSV)",k:"E",ic:"export",f:exportCsv},
  undo:{l:"Undo last decision",k:"Z",ic:"undo",f:doUndo},clear:{l:"Clear this decision",k:"⌫",ic:"clear",f:()=>decide("")},comment:{l:"Add a comment",k:"C",ic:"comment",f:()=>{if(!panelVisible())openTab("viewer");setTab("viewer");setTimeout(()=>$("#comment").focus(),60)}},
@@ -6437,6 +6603,9 @@ def ai_opinion(r):
     elif tier == 3: mimic = "a vein"; s *= 0.6
     elif tier == 2: mimic = "a mimic (" + treason.split(";")[0] + ")"; s *= 0.8
     elif tier == 5: mimic = "nothing reliable (case quality insufficient)"; s *= 0.3
+    mid = ""                       # v5.6.3 hint only (not an exclusion): a thin sheet close to the mid-sagittal plane
+    if f("plane_dist_mm", 99) <= 8 and f("cos_plane", 0) >= 0.5 and f("ext_major_mm", 0) >= 15 and not mimic:
+        mid = f"lies {f('plane_dist_mm'):.0f} mm from the midline plane as a thin sheet ({f('ext_major_mm'):.0f} mm long): could be the interhemispheric fissure (check coronal / sagittal)"; s *= 0.9
     s = float(np.clip(s, 0, 1)); band = "green" if s >= 0.66 else "yellow" if s >= 0.33 else "red"
     why = []
     pd_, tub, tram = f("pial_dist_mm"), f("tube_ratio"), f("tram_frac")
@@ -6447,6 +6616,7 @@ def ai_opinion(r):
     if f("local_cont_max_mm", 0) >= 10: why.append(f"dark structure runs on for {f('local_cont_max_mm'):.0f} mm")
     if f("artifact_zone", 0) >= 1: why.append("in an air-bone artifact zone")
     if f("cmb_like", 0) >= 1: why.append("small and compact")
+    if mid: why.append(mid)
     if band == "green": suspect = "I suspect cSS"
     elif band == "yellow": suspect = "Uncertain: could be cSS" + (f" or {mimic}" if mimic else " or normal dark cortex / a vein")
     else: suspect = f"I suspect {mimic}" if mimic else "Probably not cSS (weak evidence: vein or normal cortex more likely)"
@@ -9087,7 +9257,7 @@ FEAT = ["pial_dist_mm", "cortex_frac", "bank_frac", "midline_frac", "skull_frac"
         "basal_frac", "rel_height", "tube_ratio", "tram_frac", "surface_alignment", "axis_normal", "vessel_wm_mm",
         "local_cont_max_mm", "extent_mm", "n_pieces", "darkness_z", "edge_contrast", "region_z", "css_evidence",
         "vein_evidence", "score_v4", "artifact_zone", "cmb_like", "out_frac", "pial_sd_p10_mm", "pial_sd_p90_mm",
-        "surface_contact_frac_1mm", "csf_depth_mm", "elongation", "volume_mm3"]
+        "surface_contact_frac_1mm", "csf_depth_mm", "elongation", "volume_mm3", "plane_dist_mm", "cos_plane", "ext_major_mm"]
 def feats(tab, i):
     """features of the v5.3 object this old candidate became (NaN when it was dropped / gone)"""
     if tab is None or not i or i not in tab.index: return {f"v53_{k}": np.nan for k in FEAT}
@@ -11579,16 +11749,20 @@ truth = nib.load(f"{T}/work/PH3_truth.nii.gz").get_fdata().astype(int)
 
 # ---- 1. switch off = unchanged list, new columns appended last
 off, off_lab, _, _, _ = detect("PH3", False)
-new = ["midline_frac", "mask_edge_mm", "skull_frac", "v53_active", "vent_frac", "out_frac"]
-if list(off.columns[-6:]) != new: fail(f"new columns must be appended last, got {list(off.columns[-6:])}")
+new = ["midline_frac", "mask_edge_mm", "skull_frac", "v53_active", "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm"]
+if list(off.columns[-9:]) != new: fail(f"new columns must be appended last, got {list(off.columns[-9:])}")
+if not off.plane_dist_mm.notna().any() or not (off.cos_plane.dropna().between(0, 1)).all(): fail("plane features (v5.3.4) missing or out of range")
 if off.v53_active.any(): fail("v53_active must be 0 with the switch off")
-print(f"switch off: {len(off)} candidates, 6 new columns appended, v53_active 0")
+print(f"switch off: {len(off)} candidates, 9 new columns appended, v53_active 0")
 # v5.3.3: the absolute thresholds (darkness, volume, cortex share) were fitted to real cSS; the phantom cSS are darker
 # and larger. On the plain phantom (no skull band) switching v5.3 on must not lose a true lesion.
 _t = nib.load(f"{T}/work/PH3_truth.nii.gz").get_fdata().astype(int)
 _on, _on_lab, _x, _, _ = detect("PH3", True)
 _f0 = {int(i) for i in np.unique(_t[(off_lab > 0) & (_t > 0)])}; _f1 = {int(i) for i in np.unique(_t[(_on_lab > 0) & (_t > 0)])}
 if _f0 - _f1: fail(f"plain phantom: v5.3 lost true lesions {sorted(_f0 - _f1)}: " + "; ".join(_x.reason.astype(str).unique()))
+_e22 = _x[_x.reason.astype(str).str.startswith("midline sheet")] if "reason" in _x.columns else _x.iloc[0:0]
+if len(_e22) and not ((_e22.plane_dist_mm <= 8) & (_e22.cos_plane >= 0.9) & (_e22.ext_major_mm >= 25)).all(): fail("E22 excluded an object that does not meet its thresholds")
+print(f"E22 midline sheets excluded on the plain phantom: {len(_e22)}")
 print(f"plain phantom: true lesions shown {len(_f0)} -> {len(_f1)} with v5.3")
 
 # ---- 2. skull phantom: T1-style mask (labels + 5 mm): dark line just outside the cortex (thin-CSF convexity)
