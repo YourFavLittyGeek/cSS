@@ -37,5 +37,15 @@ Plan and verdicts: docs/AUDIT_IMPLEMENTATION_PLAN_v5.7.md. Every default output 
 - Always recorded (appended columns, default output otherwise unchanged): axis_angle_deg (long axis vs the axial plane), sheet3d_med and sheet3d_overlap (empty
   unless CSS_3D_SEEDS=1) so later analysis can stratify detection and the reader's calls by orientation. shape_probe.py has the same angle for the real cases.
 
-## Next
-Phase 4: run_experiment.py (detect with chosen switches on COPIES of the studies) + compare_pipelines.py (two runs at candidate level), how-to.
+## Phase 4 - comparison tooling
+- scripts/run_experiment.py: runs detect_css.py with chosen switches on COPIES (hard links) of the studies into experiments/<name>/; the project is untouched;
+  EXPERIMENT.json records studies, switches, build id.
+- scripts/compare_pipelines.py A B IDS: follows every object of A (shown, excluded, gate-dropped) into B by voxel overlap (same / lost / gained / still out / only_B) and
+  attaches the reader's calls (the project's reads + adjudication.csv): objects called cSS LOST or GAINED, shown non-cSS removed per B rule, soft-gate objects by gate,
+  per-study counts. "main" = the project. Test: tests/check_compare_pipelines.py (A vs A all same; A vs B on the phantom: 4 shown unchanged, 30 gate-dropped objects shown
+  as soft-gate objects, 0 cSS lost, project files untouched).
+- docs/HOW_TO_audit_experiments.md: how to run the surface / soft-gate / 3-D experiments on the Mac.
+
+## Definition of done (branch)
+All new behaviour is opt-in or read-only; with every switch off the existing columns of the candidate and excluded lists keep identical values; thresholds are frozen and
+recorded in the manifest; comparison tooling exists; tests/run_tests.sh passes. Merge into a release only after the held-out evaluation (M12-M15 + M01, adjudicated labels).
