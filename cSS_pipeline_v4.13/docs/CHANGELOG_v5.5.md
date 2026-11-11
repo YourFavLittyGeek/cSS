@@ -27,3 +27,10 @@ Research software; expert review required. Detector rules: v5.3.3 (docs/CHANGELO
 Showing the AI score and the comparison before the final save lets the reviewer change calls towards the AI. For a
 reading that is meant to test the detector (M12–M15), switch the comparison off, or use the recorded number of
 re-votes to report it.
+
+## v5.5.1 — v53_change_report.py
+`v53_change_report.py snapshot M02,...` (before `redetect.py --v53`) and `... after M02,...` (after) show per study: candidates
+before -> after, what happened to each old candidate (kept / merged / excluded by rule / gone), which reader calls carry over
+and which need a new read, the AI meter bands and AI score before and after, the reader score before and with the carried
+calls only, and the reader-vs-AI agreement before and after. Output: review/changes/change_report.txt / .csv. Reader files are
+never changed by it. Tested on the phantom only; the rest of the suite was not changed by this addition.
