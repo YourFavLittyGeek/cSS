@@ -73,7 +73,7 @@ from skimage.measure import regionprops
 from skimage.morphology import skeletonize
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from css_common import match_calls, base as _base, load_lut, fresh, sha256, update_manifest, environment_record, skeleton_length, radius_profile
-import css_qc, css_vessel, mimic_rules, css_pieces, css_features, css_tiers
+import css_qc, css_vessel, mimic_rules, css_pieces, css_features, css_tiers, css_sheet3d
 
 subj   = sys.argv[1]
 z_thr  = float(sys.argv[2]) if len(sys.argv) > 2 else -2.5
@@ -131,6 +131,12 @@ V53 = os.environ.get("CSS_V53", "") == "1"
 # work/ID_soft_gate.csv (measured value and threshold) instead of ID_dropped.csv (an object has exactly one fate). Objects with < 5 voxels and G4 (no
 # cortex label within 2 voxels) stay hard drops.
 SOFT_GATES = os.environ.get("CSS_SOFT_GATES", "") == "1"
+# CSS_3D_SEEDS=1 (audit F2, opt-in, default OFF; RECORDED ONLY): a second, orientation-free seed source next to the per-slice 2-D ridge. A 3-D plate-ness (dark
+# sheet) filter on the same image, the same zone, the same darkness thresholds and the same hysteresis percentiles gives work/ID_gen_3d.nii.gz and
+# work/ID_3d_only.csv (3-D objects that touch no 2-D object); nothing shown or excluded changes. A union with the 2-D seeds is NOT implemented: it needs
+# the overlap statistics (manifest: detect > seeds3d) judged first.
+SEEDS3D = os.environ.get("CSS_3D_SEEDS", "") == "1"
+SHEET3D_SIGMAS_MM = (0.6, 1.2, 1.8)
 V53_OUT_MM = 1.0                 # E17: voxels further than this outside the labelled pial boundary count as "outside"
 E17_FRAC, E17_CTX = 0.6, 0.4         # E17: >= this share outside AND cortex_frac below this (and no tram-track)
 # v5.3.3 thresholds set just beyond the most extreme of the 61 reader-called cSS of M02-M11 (min / max in brackets).
@@ -582,6 +588,11 @@ del _Lcx, _Rcx
 # v5.7: ONE mid-sagittal plane - the mirror check (section 7) now uses this plane too (it had its own construction from the
 # hemisphere map incl. deep nuclei). Only the recorded mirror columns can change; no rule uses them.
 if PL_N is not None: pc, mvec = PL_C, PL_N
+def axis_angle(mm_, pad_):
+    """angle (degrees) between the object's long axis and the axial plane (array axis 2 = S-I): 0 = in the slice, 90 = through the slices; NaN if < 5 voxels"""
+    if mm_.sum() < 5: return np.nan
+    P = (np.argwhere(mm_) + np.array([s_.start for s_ in pad_])) * vox; Q = P - P.mean(0)
+    w_, v_ = np.linalg.eigh(np.cov(Q.T)); return round(float(np.degrees(np.arcsin(min(abs(v_[2, -1]), 1.0)))), 0)
 def plane_feats(mm_, pad_):
     """-> plane_dist_mm (median), cos_plane (|cos| thin axis vs plane normal), ext_major_mm; NaN without a plane"""
     if PL_N is None or mm_.sum() < 5: return dict(plane_dist_mm=np.nan, cos_plane=np.nan, ext_major_mm=np.nan)
@@ -683,6 +694,39 @@ def tram_track(pts):
         if zo < Z_LOW and zc_ > max(zs[i], zo) + 1.0: tram += 1
     return (tram / hits if hits >= 5 else np.nan), hits
 
+S3 = None; LAB3 = None; SEEDS3D_STATS = dict(active=False)
+if SEEDS3D:
+    S3, NZ3 = css_sheet3d.plate_filter(If, vox, shell, SHEET3D_SIGMAS_MM)
+    s_hi3 = float(np.percentile(S3[shell], r_pct)); s_lo3 = float(np.percentile(S3[shell], R_PCT_LOW))
+    strong3 = zone & (z < z_thr) & (S3 > s_hi3); weak3 = zone & (z < Z_LOW) & (S3 > s_lo3)
+    LAB3 = np.zeros(I.shape, np.int32); _n3 = 0
+    for side in (hemiL, ~hemiL):
+        wl3, nw3 = ndi.label(weak3 & side, structure=s3)
+        keep3 = np.unique(wl3[strong3 & side]); keep3 = keep3[keep3 > 0]
+        rm3 = np.zeros(nw3 + 1, np.int32); rm3[keep3] = np.arange(1, len(keep3) + 1) + _n3
+        nz3 = wl3 > 0; LAB3[nz3] = rm3[wl3[nz3]]; _n3 += len(keep3)
+    GEN3 = ((zone * 1) + ((brain & (z < Z_LOW)) * 8) + ((brain & (z < z_thr)) * 16) + ((brain & (S3 > s_lo3)) * 32)
+            + ((brain & (S3 > s_hi3)) * 64) + ((LAB3 > 0) * 128)).astype(np.uint8)
+    nib.save(nib.Nifti1Image(GEN3, swi.affine), f"{base}/work/{subj}_gen_3d.nii.gz"); del GEN3, strong3, weak3
+    _in2d = lab > 0; _near2d = ndi.binary_dilation(_in2d, structure=s3)
+    _ids3 = np.unique(LAB3[LAB3 > 0]); _touch = np.unique(LAB3[_near2d & (LAB3 > 0)]); _only = np.setdiff1d(_ids3, _touch)
+    _vv = float(np.prod(vox)); _cnt3 = np.bincount(LAB3.ravel(), minlength=int(LAB3.max()) + 1)
+    _rows3 = []
+    for _i in _only:
+        if _cnt3[_i] * _vv < MIN_MM3: continue
+        _c3 = np.argwhere(LAB3 == _i)
+        if len(np.unique(_c3[:, 2])) < MIN_SLICES: continue
+        _cm = np.round(_c3.mean(0)).astype(int)
+        _rows3.append(dict(obj3d=int(_i), vox_i=int(_cm[0]), vox_j=int(_cm[1]), vox_k=int(_cm[2]), volume_mm3=round(float(_cnt3[_i] * _vv), 1),
+                           hemi="L" if hemiL[tuple(_cm)] else "R", nearest_cortex_label=int(NEAR_CX[tuple(_cm)]),
+                           sheet_med=round(float(np.median(S3[tuple(_c3.T)])), 4),
+                           sheet_angle_deg=round(float(np.median(css_sheet3d.orientation_angle(NZ3[tuple(_c3.T)]))), 0), n_slices=int(len(np.unique(_c3[:, 2])))))
+    pd.DataFrame(_rows3, columns=["obj3d", "vox_i", "vox_j", "vox_k", "volume_mm3", "hemi", "nearest_cortex_label", "sheet_med", "sheet_angle_deg", "n_slices"]) \
+        .to_csv(f"{base}/work/{subj}_3d_only.csv", index=False)
+    SEEDS3D_STATS = dict(active=True, sigmas_mm=list(SHEET3D_SIGMAS_MM), sheet_pct_strong=r_pct, sheet_pct_weak=R_PCT_LOW, s_hi=round(s_hi3, 4), s_lo=round(s_lo3, 4),
+                         n_objects_3d=int(len(_ids3)), n_objects_2d=int(lab.max()), voxels_2d_covered_by_3d=round(float(LAB3[_in2d].astype(bool).mean()) if _in2d.any() else 0.0, 3),
+                         n_3d_only_all=int(len(_only)), n_3d_only_listed=len(_rows3))
+    del _in2d, _near2d, NZ3
 objs = ndi.find_objects(lab)
 rows = []
 # v4.14: components removed by the generation gates are logged (work/ID_dropped.csv/.nii.gz), not shown
@@ -845,7 +889,9 @@ for p in regionprops(lab, spacing=vox):
                vent_frac=round(float((d_vent[pad][mm] <= E16_MM).mean()), 2),
                out_frac=round(float((pial_sd[pad][mm] > V53_OUT_MM).mean()), 2), **plane_feats(mm, pad),
                skullbase_frac=round(float(np.isin(NEAR_CX[pad][mm], E24_LABELS).mean()), 2),
-               dual_contact_frac=round(float(DUALC[pad][mm].mean()), 2))
+               dual_contact_frac=round(float(DUALC[pad][mm].mean()), 2), axis_angle_deg=axis_angle(mm, pad),
+               sheet3d_med=round(float(np.median(S3[pad][mm])), 4) if S3 is not None else np.nan,
+               sheet3d_overlap=round(float((LAB3[pad][mm] > 0).mean()), 2) if LAB3 is not None else np.nan)
     midz      = bool(np.median(dmid[pad][mm]) < 5.0)
     # off-surface tube. vein_tree_mm is recorded only: on real SWI (P006) the dark tubular network
     # along the cortex merges into one brain-wide component (255 mm for most candidates)
@@ -949,7 +995,7 @@ V50_COLS = ["mimic_score", "mimic_class", "mimic_reason", "phase_z", "mb_cluster
             "review_priority_rank", "review_priority", "review_priority_reason",                # v5.1.3 (css_tiers.py)
             "midline_frac", "mask_edge_mm", "skull_frac", "v53_active",                         # v5.3, appended
             "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac", "dual_contact_frac",               # v5.3.1 / v5.3.2 / v5.3.4 / v5.7, appended
-            "soft_gate_fail"]                                                                    # v5.7 audit branch: "" or the generation gate the object failed (CSS_SOFT_GATES=1)
+            "soft_gate_fail", "axis_angle_deg", "sheet3d_med", "sheet3d_overlap"]                                                                    # v5.7 audit branch: "" or the generation gate the object failed (CSS_SOFT_GATES=1)
 cols = cols + V50_COLS
 
 # ---- 11. exclusions (v4.8) - each with an explicit, definition-based reason
@@ -1205,7 +1251,7 @@ update_manifest(base, subj, "detect", dict(
                     use_mimic=USE_MIMIC, qc_strict=QC_STRICT, mixed_review=MIXED_REVIEW, phase=MIM.phase_note,
                     sato_sigmas_mm=list(SATO_SIGMAS_MM), sato_sigmas_px=[round(v, 2) for v in SATO_PX],
                     v53=V53, v53_out_mm=V53_OUT_MM, v53_gap_mm=V53_GAP_MM, v53_max_mm=V53_MAX_MM, v53_same_region_merge=True,
-                    frozen_rules=frozen_rules(), switches=active_switches()),
+                    frozen_rules=frozen_rules(), switches=active_switches(), seeds3d=SEEDS3D_STATS),
     anatomy="T1" if T1_ANAT else "SWI-only", flair_used=FL is not None, qc_status=QC["status"],
     n_candidates=int(len(df)), n_excluded=len(excluded), n_dropped=len(dropped), fates=FATES,
     inputs={k: dict(path=p_, sha256=sha256(p_), mtime=os.path.getmtime(p_)) for k, p_ in _inputs.items()},

@@ -24,5 +24,18 @@ Plan and verdicts: docs/AUDIT_IMPLEMENTATION_PLAN_v5.7.md. Every default output 
   (fingerprint match).
 - Test (check_v53): OFF = unchanged; ON = normal candidates keep order and values, added objects last with tier >= 4, fate invariant holds.
 
+## Phase 3 - orientation (F2): measured, then a recorded-only 3-D path
+- Measured first (tests/check_sheet3d.py, synthetic dark sheet 24 x 24 mm, 1.6 mm thick, 0.8 mm voxels): the detector's 2-D axial Sato filter responds 0.000 to a
+  sheet PARALLEL to the slices, 0.35 at 45 degrees and 0.27 perpendicular (min/max 0.00); the new 3-D plate-ness filter responds 0.27 / 0.32 / 0.27 (min/max 0.85) and
+  recovers the orientation (0 / 45 / 90 degrees). A tube keeps about 0.4 of the sheet response (suppressed ~2x, not removed), a blob 0.05.
+- scripts/css_sheet3d.py: scale-normalised dark-sheet measure from the 3-D Hessian (sigmas 0.6 / 1.2 / 1.8 mm) and the sheet orientation.
+- detect_css.py, **CSS_3D_SEEDS=1 (default OFF, recorded only)**: same image, same zone, same darkness thresholds, same hysteresis percentiles (85 / 80 of the
+  shell) and per-hemisphere hysteresis give work/ID_gen_3d.nii.gz (bits as ID_gen: 8 z<-2, 16 z<-2.5, 32 plate>weak pct, 64 plate>strong pct, 128 kept) and
+  work/ID_3d_only.csv (3-D objects >= 25 mm3 and >= 2 slices touching no 2-D object: centroid, hemisphere, nearest cortex label, plate-ness, sheet angle);
+  the manifest (detect > parameters > seeds3d) records the overlap statistics. Nothing shown or excluded changes (test: candidates identical on / off).
+  A union with the 2-D seeds is NOT implemented: judge the overlap first (PH3 phantom: 488 3-D objects vs 247 2-D, 89 % of the 2-D object voxels covered, 55 3-D-only).
+- Always recorded (appended columns, default output otherwise unchanged): axis_angle_deg (long axis vs the axial plane), sheet3d_med and sheet3d_overlap (empty
+  unless CSS_3D_SEEDS=1) so later analysis can stratify detection and the reader's calls by orientation. shape_probe.py has the same angle for the real cases.
+
 ## Next
-Phase 3 recorded-only 3-D sheetness seeds (CSS_3D_SEEDS=1), Phase 4 compare_pipelines.py + how-to.
+Phase 4: run_experiment.py (detect with chosen switches on COPIES of the studies) + compare_pipelines.py (two runs at candidate level), how-to.

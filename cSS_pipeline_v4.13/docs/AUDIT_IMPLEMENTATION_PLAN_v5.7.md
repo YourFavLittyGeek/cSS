@@ -26,8 +26,8 @@ of M02-M11, what is built on this branch, and what was changed from the plan. No
 |---|---|---|
 | 0 | freeze statement at the top of the rule constants in detect_css.py; manifest records all thresholds + the experimental switches on every run; this document | done |
 | 1 | `pial_compare.py` (read-only): mesh vs mask pial distance per object, bias / spread / sign disagreement / sulcal-depth dependence, and which of the two separates cSS from not-cSS better (AUC) | done; run on the Mac (HOW_TO) |
-| 2 | soft generation gates, `CSS_SOFT_GATES=1`: gate failures also written to the candidates table with `soft_gate_fail` and lowest priority; per-rule exclusion audit table always written | next |
-| 3 | recorded-only 3-D sheetness seeds, `CSS_3D_SEEDS=1` (work/ID_gen_3d.nii.gz, overlap with the 2-D seeds, orientation column) | after 2 |
+| 2 | soft generation gates, `CSS_SOFT_GATES=1`: gate failures also written to the candidates table with `soft_gate_fail` and lowest priority; per-rule exclusion audit table always written | done |
+| 3 | recorded-only 3-D sheetness seeds, `CSS_3D_SEEDS=1` (work/ID_gen_3d.nii.gz, ID_3d_only.csv, overlap statistics in the manifest, axis_angle_deg column) | done |
 | 4 | compare_pipelines.py (two runs at candidate level), changelog, how-to | after 3 |
 
 ## Out of scope on this branch

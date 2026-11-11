@@ -46,14 +46,16 @@ truth = nib.load(f"{T}/work/PH3_truth.nii.gz").get_fdata().astype(int)
 
 # ---- 1. switch off = unchanged list, new columns appended last
 off, off_lab, _, _, _ = detect("PH3", False)
-new = ["midline_frac", "mask_edge_mm", "skull_frac", "v53_active", "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac", "dual_contact_frac", "soft_gate_fail"]
-if list(off.columns[-12:]) != new: fail(f"new columns must be appended last, got {list(off.columns[-12:])}")
+new = ["midline_frac", "mask_edge_mm", "skull_frac", "v53_active", "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac", "dual_contact_frac", "soft_gate_fail", "axis_angle_deg", "sheet3d_med", "sheet3d_overlap"]
+if list(off.columns[-15:]) != new: fail(f"new columns must be appended last, got {list(off.columns[-15:])}")
+if off.sheet3d_med.notna().any() or off.sheet3d_overlap.notna().any(): fail("the 3-D sheet columns must stay empty when CSS_3D_SEEDS is not set")
+if not off.axis_angle_deg.dropna().between(0, 90).all() or not off.axis_angle_deg.notna().all(): fail("axis_angle_deg (always recorded) must be 0-90 degrees")
 if off.soft_gate_fail.fillna("").ne("").any(): fail("soft_gate_fail must be empty when CSS_SOFT_GATES is not set")
 if not off.dual_contact_frac.between(0, 1).all(): fail("dual_contact_frac out of range")
 if (off.skullbase_frac != 0).any(): fail("the plain phantom has no skull-base labels: skullbase_frac must be 0")
 if not off.plane_dist_mm.notna().any() or not (off.cos_plane.dropna().between(0, 1)).all(): fail("plane features (v5.3.4) missing or out of range")
 if off.v53_active.any(): fail("v53_active must be 0 with the switch off")
-print(f"switch off: {len(off)} candidates, 12 new columns appended, v53_active 0")
+print(f"switch off: {len(off)} candidates, 15 new columns appended, v53_active 0")
 # v5.3.3: the absolute thresholds (darkness, volume, cortex share) were fitted to real cSS; the phantom cSS are darker
 # and larger. On the plain phantom (no skull band) switching v5.3 on must not lose a true lesion.
 _t = nib.load(f"{T}/work/PH3_truth.nii.gz").get_fdata().astype(int)
@@ -141,6 +143,23 @@ if not (_tail.review_priority_rank >= 4).all(): fail("soft-gate objects must hav
 if len(_sg) < len(_tail): fail("work/ID_soft_gate.csv must list the soft-gate objects")
 run([f"{S}/detect_css.py", "PH3"], CSS_V53="1")                       # restore the default outputs for the checks below
 print(f"soft gates: {len(_n0)} normal + {len(_tail)} gate-failing candidates (last, tier >= 4); OFF output unchanged; rule audit table written")
+
+# ---- 1e. audit branch: CSS_3D_SEEDS=1 (opt-in, RECORDED ONLY): 3-D plate-ness seeds -> work/ID_gen_3d.nii.gz, ID_3d_only.csv, manifest overlap statistics;
+#      every column of the candidate list except the two sheet3d columns is identical to the run without the switch
+run([f"{S}/detect_css.py", "PH3"], CSS_V53="1", CSS_3D_SEEDS="1")
+_c3 = pd.read_csv(f"{T}/review/PH3_candidates.csv")
+if not os.path.exists(f"{T}/work/PH3_gen_3d.nii.gz") or not os.path.exists(f"{T}/work/PH3_3d_only.csv"): fail("3-D seeds: work files missing")
+_st = _json.load(open(f"{T}/review/PH3_manifest.json"))["detect"]["parameters"]["seeds3d"]
+if not _st.get("active") or not 0 <= _st["voxels_2d_covered_by_3d"] <= 1 or _st["n_objects_3d"] < 1: fail(f"3-D seeds: manifest statistics {_st}")
+_com3 = [c for c in _n0.columns if c not in ("sheet3d_med", "sheet3d_overlap")]
+if len(_c3) != len(_n0) or not all(_n0[c].astype(str).equals(_c3[c].astype(str)) for c in _com3): fail("3-D seeds are recorded only: candidates must be unchanged")
+if not _c3.sheet3d_med.notna().all() or not _c3.sheet3d_overlap.between(0, 1).all(): fail("3-D seeds: sheet3d columns must be filled")
+_g3 = np.asanyarray(nib.load(f"{T}/work/PH3_gen_3d.nii.gz").dataobj).astype(np.uint8)
+if not ((_g3 & 128) > 0).any(): fail("3-D seeds: no object kept by the 3-D hysteresis")
+_tl = [int(r.cand_id) for r in _c3.itertuples() if ((nib.load(f"{T}/review/PH3_candidates.nii.gz").get_fdata().astype(int) == r.cand_id) & (truth > 0)).any()]
+if not _tl or not (_c3[_c3.cand_id.isin(_tl)].sheet3d_overlap >= 0.5).all(): fail(f"3-D seeds must cover the true lesions (overlap >= 0.5): {_c3[_c3.cand_id.isin(_tl)][['cand_id', 'sheet3d_overlap']].to_dict('records')}")
+run([f"{S}/detect_css.py", "PH3"], CSS_V53="1")
+print(f"3-D seeds: {_st['n_objects_3d']} 3-D objects vs {_st['n_objects_2d']} 2-D, {100 * _st['voxels_2d_covered_by_3d']:.0f} % of the 2-D object voxels covered, {_st['n_3d_only_all']} 3-D-only; candidates unchanged; true lesions covered")
 
 # ---- 2. skull phantom: T1-style mask (labels + 5 mm): dark line just outside the cortex (thin-CSF convexity)
 img = nib.load(f"{T}/data/PH3_swi.nii"); I = img.get_fdata().astype(np.float32); vox = img.header.get_zooms()[:3]
