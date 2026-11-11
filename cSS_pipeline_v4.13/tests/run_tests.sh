@@ -210,6 +210,9 @@ grep -q "RESULT shape_probe OK" $T/shapeprobe.log || { echo "FAIL: shape_probe c
 echo "== audit branch: 3-D plate-ness filter (sheet at 0 / 45 / 90 deg, tube, blob) and the 2-D axial orientation dependence"
 python $ROOT/tests/check_sheet3d.py | tee $T/sheet3d.log | grep -v "^RESULT"
 grep -q "RESULT sheet3d OK" $T/sheet3d.log || { echo "FAIL: sheet3d checks"; exit 1; }
+echo "== audit branch: run_experiment + compare_pipelines (switches on copies, object-level comparison, project untouched)"
+python $ROOT/tests/check_compare_pipelines.py | tee $T/cmppipe.log | grep -v "^RESULT"
+grep -q "RESULT compare_pipelines OK" $T/cmppipe.log || { echo "FAIL: compare_pipelines checks"; exit 1; }
 echo "== audit branch: mesh vs mask pial distance comparison (constructed answer)"
 python $ROOT/tests/check_pial_compare.py | tee $T/pial.log | grep -v "^RESULT"
 grep -q "RESULT pial_compare OK" $T/pial.log || { echo "FAIL: pial_compare checks"; exit 1; }
