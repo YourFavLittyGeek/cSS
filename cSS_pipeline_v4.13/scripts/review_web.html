@@ -265,17 +265,19 @@ async function loadStudy(sid){ status("loading study ...");
   const b=$("#banner"); const msg=[M.qc,M.note].filter(Boolean).join("  ·  "); $("#seqnote").textContent=M.missing_seqs.length?("Not imported for this patient: "+M.missing_seqs.join(", ")):""; b.textContent=msg; b.style.display=msg?"block":"none";
   const lr=await fetch(`/api/labels?study=${M.study}`); LAB=new Uint16Array(await lr.arrayBuffer());
   seq="swi"; VOL=await loadVol("swi"); ctr=[(nx-1)/2,(ny-1)/2,(nz-1)/2]; wl=seqmeta.swi.win.slice(); setLut();
-  buildStrip(); setMissed(M.missed); const first=M.cands.findIndex(c=>!(calls[c.id]&&calls[c.id].call)); go(first<0?0:first); status("");
+  buildStrip(); setMissed(M.missed); const first=M.cands.findIndex(c=>!isDone(c)); go(first<0?0:first); status("");
   if(!reviewer()) status("Enter your name (upper right) before the first decision.",true) }
 function status(t,err){ const s=$("#saved"); s.textContent=t||""; s.className="saved "+(err?"err":"ok") }
 
 // ---------- candidates ----------
 const callOf=c=>(calls[c.id]||{}).call||"";
+const isInh=c=>{const m=(calls[c.id]||{}); return !!m.call&&String(m.comment||"").startsWith("[inherited")};
+const isDone=c=>!!callOf(c)&&!isInh(c);
 function verdict(c){ const call=callOf(c),b=c.ai.band; if(!call)return "not read"; if(call==="Unsure")return "you unsure"; if(b==="yellow")return "AI unsure";
   const css=call==="cSS"; return (css&&b==="green")||(!css&&b==="red")?"agree":"differ" }
 function pill(t,c){return `<span class="pill" style="background:${c}">${esc(t)}</span>`}
 function buildStrip(){ $("#strip").innerHTML=M.cands.map((c,i)=>`<div class="chip" data-i="${i}" title="${c.hemi} ${esc(c.region)}">${c.id}</div>`).join("")||'<span class="mut">No candidates in this study.</span>'; paintLists() }
-function paintLists(){ let n=0; $$("#strip .chip").forEach((e,i)=>{const call=callOf(M.cands[i]); if(call)n++; e.style.background=call?CALLCOL[call]:""; e.style.color=call?"#fff":""; e.classList.toggle("cur",i===ci)});
+function paintLists(){ let n=0; $$("#strip .chip").forEach((e,i)=>{const call=callOf(M.cands[i]); if(call)n++; e.style.background=call?CALLCOL[call]:""; e.style.color=call?"#fff":""; e.style.border=isInh(M.cands[i])?"2px dashed #fff":""; e.style.opacity=isInh(M.cands[i])?".75":""; e.title=(isInh(M.cands[i])?"inherited from the earlier detection - press the same key to confirm  \u00b7 ":"")+M.cands[i].hemi+" "+M.cands[i].region; e.classList.toggle("cur",i===ci)});
   $("#progbar").style.width=(M.cands.length?100*n/M.cands.length:0)+"%"; $("#progtxt").textContent=n+" of "+M.cands.length+" read";
   const e=$("#strip .cur"); if(e)e.scrollIntoView({block:"nearest",inline:"nearest"});
   $("#candtable").innerHTML="<tr><th>#</th><th>Side · region</th><th>mm³</th><th>Your call</th></tr>"+M.cands.map((c,i)=>{const call=callOf(c),cm=(calls[c.id]||{}).comment;
@@ -309,7 +311,7 @@ function go(i,keepView){ if(!M.cands.length){paintLists();draw();return} ci=Math
   gauge(c.ai); paintDecision(); paintLists(); draw() }
 function paintDecision(){ const c=M.cands[ci]; if(!c)return; const st=calls[c.id]||{}; $$("#dec .b").forEach(b=>{const on=b.dataset.call===st.call; b.classList.toggle("on",on); b.style.borderColor=on?CALLCOL[st.call]:""; b.style.background=on?CALLCOL[st.call]+"33":""});
   $("#curcall").textContent=st.call?("saved: "+CALLLBL[st.call]):"not read yet"; if(document.activeElement!==$("#comment")) $("#comment").value=st.comment||"" }
-const firstUnread=from=>{const n=M.cands.findIndex((x,j)=>j>from&&!callOf(x)); return n<0?M.cands.findIndex(x=>!callOf(x)):n};
+const firstUnread=from=>{const n=M.cands.findIndex((x,j)=>j>from&&!isDone(x)); return n<0?M.cands.findIndex(x=>!isDone(x)):n};
 async function decide(call,isUndo){ const c=M.cands[ci]; if(!c)return; if(!reviewer()){status("Enter your name (upper right) first.",true);$("#reviewer").focus();return}
   const prev=callOf(c); if(!isUndo)undo.push({i:ci,prev});
   try{ const r=await api("/api/call",{study:M.study,reviewer:reviewer(),cand_id:c.id,call,action:isUndo?"undo":(revoteMode&&call?"revote":(call?"call":"clear")),meter:showAI?c.ai.score:""}); calls=r.calls; status("✓ Saved automatically · "+r.saved.slice(11));
@@ -335,10 +337,11 @@ async function summary(){ if(!reviewer()){status("Enter your name first.",true);
     revoteMode=true;
     $("#cmpbody").innerHTML=`<p><b>${esc(M.study)}</b> · reviewer <b>${esc(reviewer())}</b></p><div class="sc">${scoreCard("Reviewer",r.reader_score,"")}${scoreCard("AI (not validated)",r.ai_score,(r.ai_score.n_green||0)+" green-band candidate(s)")}</div>`
       +(r.unread?`<p class="err">${r.unread} candidate(s) not read: the reviewer score is a lower bound.</p>`:"")
+      +(M.cands.filter(isInh).length?`<p class="err">${M.cands.filter(isInh).length} inherited call(s) not re-confirmed (dashed in the strip): press the same key on them to confirm. <button class="btn" id="cInh">Go to the first one</button></p>`:"")
       +`<h3>Calls that differ from the AI (${dx.length})</h3>`+(dx.length?`<table class="cmp" id="cmpdiff"><tr><th>#</th><th>Side · region</th><th>AI</th><th>Your call</th><th></th></tr>${rowsd}</table>`:'<p class="mut">None: every decided candidate agrees with the AI band (yellow counts as neither).</p>') }
   catch(e){ const b=compareOn?$("#cmpbody"):$("#sumbody"); b.innerHTML=`<p class="err">${esc(e.message)}</p>` } }
 async function finalSave(shown){ $("#compare").classList.remove("show"); $("#sumbody").innerHTML="<p>Saving the final review ...</p>"; $("#summary").classList.add("show");
-  try{ const r=await api("/api/finish",{study:M.study,reviewer:reviewer(),final:true,n_differ:differIdx().length,meter_visible:showAI?1:0,comparison_shown:!!shown});
+  try{ const r=await api("/api/finish",{study:M.study,reviewer:reviewer(),final:true,n_inherited_unconfirmed:M.cands.filter(isInh).length,n_differ:differIdx().length,meter_visible:showAI?1:0,comparison_shown:!!shown});
     readerScore=r.reader_score; finalRec=r.final; revoteMode=false; paintScores();
     $("#sumbody").innerHTML=`<p><b>${esc(M.study)}</b> · reviewer <b>${esc(reviewer())}</b> · <span class="ok">final saved ${esc(r.final.saved)}</span></p>`+summaryHtml(r)+`<p class="mut sm">Cohort report: ${esc(r.report||"")}</p>` }
   catch(e){ $("#sumbody").innerHTML=`<p class="err">${esc(e.message)}</p>` } }
@@ -446,7 +449,8 @@ $("#tMark").onclick=A.mark.f; $("#tOther").onclick=A.other.f; $("#tMip").onclick
 $("#bReset").onclick=resetView; $("#bCentre").onclick=()=>go(ci); $("#bScore").onclick=summary; $("#bExport").onclick=exportCsv; $("#bUnread").onclick=nextUnread;
 $("#bDiffer").onclick=()=>{onlyDiffer=!onlyDiffer;paintLists()};
 $("#cRe").onclick=reReview; $("#cSave").onclick=()=>finalSave(true); $("#cClose").onclick=()=>$("#compare").classList.remove("show"); $("#cNo").onchange=e=>setCompare(!e.target.checked);
-$("#cmpbody").addEventListener("click",e=>{const r=e.target.closest("tr.r"); if(r){$("#compare").classList.remove("show");onlyDiffer=true;setTab("calls");go(+r.dataset.i);status("Re-review this candidate; press Q to return to the comparison.")}});
+$("#cmpbody").addEventListener("click",e=>{ if(e.target.id==="cInh"){const i=M.cands.findIndex(isInh); $("#compare").classList.remove("show"); if(i>=0)go(i); return}
+  const r=e.target.closest("tr.r"); if(r){$("#compare").classList.remove("show");onlyDiffer=true;setTab("calls");go(+r.dataset.i);status("Re-review this candidate; press Q to return to the comparison.")}});
 $("#dRect").onclick=()=>setShape("rect"); $("#dPen").onclick=()=>setShape("pen"); $("#dUndo").onclick=undoStroke; $("#dSave").onclick=saveDraft; $("#dCancel").onclick=cancelDraft;
 $("#misslist").addEventListener("click",e=>{const d=e.target.dataset; if(d.del)missedApi({action:"delete",id:+d.del}); if(d.go){const m=missed.find(x=>x.missed_id==d.go); if(m){cur=[m.can_i,m.can_j,m.can_k]; if(m.pts){cur[VIEWS[+m.plane].s]=+m.slice} ctr=cur.slice();draw()}}});
 $("#misslist").addEventListener("change",e=>{const d=e.target.dataset; if(d.mid)missedApi({action:"comment",id:+d.mid,comment:e.target.value})});

@@ -331,6 +331,8 @@ class H(BaseHTTPRequestHandler):
                     if "call" in d:
                         if d["call"] not in CALLS + [""]: return self._send(dict(error="unknown call"), code=400)
                         cur["call"] = d["call"]; cur["time"] = now()
+                        if d["call"] and isinstance(cur.get("comment"), str):      # an explicit call confirms an inherited call / answers a hint
+                            cur["comment"] = re.sub(r"^\[(inherited|old calls)[^\]]*\]\s*", "", cur["comment"])
                     if "comment" in d: cur["comment"] = str(d["comment"])[:500]
                     calls[cid] = cur
                     if not cur.get("call") and not cur.get("comment"): calls.pop(cid)
@@ -357,7 +359,7 @@ class H(BaseHTTPRequestHandler):
                         lg = pd.read_csv(lp); nrev = int(((lg.action == "revote") & (lg.reviewer == rev)).sum())
                     fin = dict(study=s.sid, reviewer=rev, saved=now(), reviewer_score=res["reader_score"], ai_score=res["ai_score"],
                                n_candidates=int(len(s.df)), n_read=int(len(c)), n_css=int(len(acc)), n_differ=d.get("n_differ", ""),
-                               n_missed=int(len(res["missed"])), n_revoted=nrev, meter_visible=d.get("meter_visible", ""),
+                               n_missed=int(len(res["missed"])), n_revoted=nrev, meter_visible=d.get("meter_visible", ""), n_inherited_unconfirmed=d.get("n_inherited_unconfirmed", ""),
                                comparison_shown=bool(d.get("comparison_shown")))
                     json.dump(fin, open(f"{B}/review/{s.sid}_final.json", "w"), indent=1)
                     import css_report

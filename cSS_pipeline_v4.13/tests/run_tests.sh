@@ -196,4 +196,7 @@ grep -q "RESULT v53 OK" $T/v53.log || { echo "FAIL: v5.3 checks"; exit 1; }
 echo "== v5.4 browser reviewer server (review_web.py): calls, comments, missed marks, reviewer names"
 python $ROOT/tests/check_review_web.py | tee $T/rweb.log | grep -v "^RESULT"
 grep -q "RESULT review_web OK" $T/rweb.log || { echo "FAIL: review_web checks"; exit 1; }
+echo "== v5.5.2 change report + inherited calls (PH3): snapshot, redetect --v53, after, inherit, confirmation in the reviewer"
+python $ROOT/tests/check_inherit.py | tee $T/inherit.log | grep -v "^RESULT"
+grep -q "RESULT inherit OK" $T/inherit.log || { echo "FAIL: inherit checks"; exit 1; }
 echo; echo "ALL TESTS PASSED  (temp dir $T)"

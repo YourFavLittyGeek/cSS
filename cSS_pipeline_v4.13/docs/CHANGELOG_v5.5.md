@@ -34,3 +34,15 @@ before -> after, what happened to each old candidate (kept / merged / excluded b
 and which need a new read, the AI meter bands and AI score before and after, the reader score before and with the carried
 calls only, and the reader-vs-AI agreement before and after. Output: review/changes/change_report.txt / .csv. Reader files are
 never changed by it. Tested on the phantom only; the rest of the suite was not changed by this addition.
+
+## v5.5.2 — inherit_calls.py: carry earlier calls over to a new detection
+After `redetect.py --v53`, calls only follow candidates whose centroid and volume are unchanged (fingerprint), so most calls
+looked "unread" although the object was the same (M02–M06: 94 of 152 calls would have to be re-read). `inherit_calls.py` uses
+the old->new object mapping of `v53_change_report.py after`:
+- all old calls on the new object are the same -> the call is written, marked `[inherited from old #n: cSS - press the key to confirm]`
+- the old calls disagree (e.g. cSS + Near ICH merged into one object) -> no call, a hint `[old calls: ... - please read]`
+- calls already made on the new list are never overwritten; the current files are backed up to review/changes/ first.
+Reviewer: inherited candidates are dashed in the strip and count as not confirmed (J, auto-next and the first candidate opened stop on
+them); pressing the same decision key confirms (the marker is removed), another key changes it; the comparison window warns about
+unconfirmed ones and the final record / Excel report list their number ("Inherited calls not re-confirmed").
+Tests: tests/check_inherit.py (phantom). Not used on patients yet.

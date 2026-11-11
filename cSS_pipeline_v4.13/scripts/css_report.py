@@ -32,7 +32,7 @@ def build(B, out=None):
                      if "multifocality_0_4" in r and "multifocality_0_4" in a else "",
                      "Candidates": f.get("n_candidates", ""), "Read": f.get("n_read", ""), "Called cSS": f.get("n_css", ""),
                      "Calls differing from AI": f.get("n_differ", ""), "Missed cSS marked": f.get("n_missed", ""),
-                     "Calls changed after the AI comparison": f.get("n_revoted", ""), "AI meter visible": f.get("meter_visible", ""),
+                     "Calls changed after the AI comparison": f.get("n_revoted", ""), "Inherited calls not re-confirmed": f.get("n_inherited_unconfirmed", ""), "AI meter visible": f.get("meter_visible", ""),
                      "Note": "lower bound: not all candidates read" if f.get("n_read", 0) != f.get("n_candidates", 0) else ""})
     d = pd.DataFrame(rows); d.to_csv(out + ".csv", index=False); xl = ""
     try:

@@ -501,6 +501,10 @@ v5.1") but are not ranker features; Stage A only, then stop for the user's real-
   untouched), L/R_lines + n_lines_total (accepted pieces within 6 mm = one line, reported only). review_web: AI score
   (green-band candidates scored, not validated) in the top bar, comparison window before the final save (re-review
   disagreements, revote logged, can be switched off in Settings), ID_final.json, css_report.py -> review/css_report.xlsx.
+- v5.5.1/2: v53_change_report.py (snapshot before redetect, after = per-study kept / merged / excluded by rule, calls carried vs
+  needing a read, AI band + AI score before/after; M02-M06 on the Mac: AI 3->2, 1->1, 4->4, 4->3, 4->4 vs reader 1, 1, 2, 2, 4; reader
+  "carried only" scores are lower bounds, not real changes). inherit_calls.py carries unanimous old calls to the new objects with an
+  "[inherited ...]" marker (dashed in the reviewer until the same key is pressed), conflicts (e.g. cSS + Near ICH merged) get a hint only.
 
 ## Known issues / decisions
 - SWI-only route (SynthSeg on SWI) gives a coarse pial surface → pial features less reliable.
