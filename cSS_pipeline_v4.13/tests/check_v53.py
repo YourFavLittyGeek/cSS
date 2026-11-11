@@ -168,7 +168,7 @@ run([f"{S}/detect_css.py", "PH3"], CSS_V53="1")
 _zb = pd.read_csv(f"{T}/review/PH3_candidates.csv"); _zbl = np.asanyarray(nib.load(f"{T}/review/PH3_candidates.nii.gz").dataobj).astype(int)
 _tb = [k for k in np.unique(truth[truth > 0]) if ((truth == k) & (_zbl > 0)).any()]
 if set(_tb) - set(_tz): fail(f"CSS_ZONE2 lost true lesions {sorted(set(_tb) - set(_tz))}")
-if not (_z1.zone2_frac >= 0.5).all(): fail("E26 must exclude every shown object below the threshold")
+if not (_z1.sylvian_frac < 0.4).all(): fail("E27 must exclude every shown object at or above its threshold")
 print(f"v5.8 zone2: true lesions shown {len(_tb)} -> {len(_tz)} with CSS_ZONE2=1; candidates {len(_zb)} -> {len(_z1)}")
 
 # ---- 1e. audit branch: CSS_3D_SEEDS=1 (opt-in, RECORDED ONLY): 3-D plate-ness seeds -> work/ID_gen_3d.nii.gz, ID_3d_only.csv, manifest overlap statistics;

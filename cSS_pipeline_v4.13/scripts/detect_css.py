@@ -145,8 +145,8 @@ SEEDS3D = os.environ.get("CSS_3D_SEEDS", "") == "1"
 #                the fissure) -> low = convexity CSF / dura / skull or fissure;  E26: zone2_frac < ZONE2_FRAC
 #   sylvian_frac share within 3 mm of insula AND of opercular cortex (frontal / parietal operculum, superior temporal) -> Sylvian vessels; E27: >= SYLV_FRAC
 ZONE2 = os.environ.get("CSS_ZONE2", "") == "1"
-ZONE2_R_MM, ZONE2_FRAC = 4.0, float(os.environ.get("CSS_ZONE2_FRAC", "0.5"))
-SYLV_MM, SYLV_FRAC = 3.0, float(os.environ.get("CSS_SYLV_FRAC", "0.6"))
+ZONE2_R_MM, ZONE2_FRAC = 4.0, float(os.environ.get("CSS_ZONE2_FRAC", "0"))   # v5.8.1: E26 OFF (M02-M11: lost M04 #28 at 0.42, gained <= 1 non-cSS)
+SYLV_MM, SYLV_FRAC = 3.0, float(os.environ.get("CSS_SYLV_FRAC", "0.4"))   # v5.8.1: cSS max 0.09 on M02-M11, 7 non-cSS >= 0.4
 E22_PIECES = V53 and os.environ.get("CSS_E22_PIECES", "1") != "0"   # v5.7-E-fix3: ON with CSS_V53=1 (acceptance 56/56 incl. M11 #12); CSS_E22_PIECES=0 = merged-object E22 as in fix2
 SHEET3D_SIGMAS_MM = (0.6, 1.2, 1.8)
 V53_OUT_MM = 1.0                 # E17: voxels further than this outside the labelled pial boundary count as "outside"
