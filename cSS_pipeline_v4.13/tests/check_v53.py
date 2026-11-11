@@ -46,12 +46,13 @@ truth = nib.load(f"{T}/work/PH3_truth.nii.gz").get_fdata().astype(int)
 
 # ---- 1. switch off = unchanged list, new columns appended last
 off, off_lab, _, _, _ = detect("PH3", False)
-new = ["midline_frac", "mask_edge_mm", "skull_frac", "v53_active", "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac"]
-if list(off.columns[-10:]) != new: fail(f"new columns must be appended last, got {list(off.columns[-10:])}")
+new = ["midline_frac", "mask_edge_mm", "skull_frac", "v53_active", "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac", "dual_contact_frac"]
+if list(off.columns[-11:]) != new: fail(f"new columns must be appended last, got {list(off.columns[-11:])}")
+if not off.dual_contact_frac.between(0, 1).all(): fail("dual_contact_frac out of range")
 if (off.skullbase_frac != 0).any(): fail("the plain phantom has no skull-base labels: skullbase_frac must be 0")
 if not off.plane_dist_mm.notna().any() or not (off.cos_plane.dropna().between(0, 1)).all(): fail("plane features (v5.3.4) missing or out of range")
 if off.v53_active.any(): fail("v53_active must be 0 with the switch off")
-print(f"switch off: {len(off)} candidates, 10 new columns appended, v53_active 0")
+print(f"switch off: {len(off)} candidates, 11 new columns appended, v53_active 0")
 # v5.3.3: the absolute thresholds (darkness, volume, cortex share) were fitted to real cSS; the phantom cSS are darker
 # and larger. On the plain phantom (no skull band) switching v5.3 on must not lose a true lesion.
 _t = nib.load(f"{T}/work/PH3_truth.nii.gz").get_fdata().astype(int)
@@ -60,6 +61,10 @@ _f0 = {int(i) for i in np.unique(_t[(off_lab > 0) & (_t > 0)])}; _f1 = {int(i) f
 if _f0 - _f1: fail(f"plain phantom: v5.3 lost true lesions {sorted(_f0 - _f1)}: " + "; ".join(_x.reason.astype(str).unique()))
 _e22 = _x[_x.reason.astype(str).str.startswith("midline sheet")] if "reason" in _x.columns else _x.iloc[0:0]
 if len(_e22) and not ((_e22.plane_dist_mm <= 8) & (_e22.cos_plane >= 0.9) & (_e22.ext_major_mm >= 25)).all(): fail("E22 excluded an object that does not meet its thresholds")
+if len(_on) and (_on.dual_contact_frac >= 0.3).any(): fail("E25: a shown object lies between the hemispheres")
+_e25 = _x[_x.reason.astype(str).str.startswith("interhemispheric fissure")] if "reason" in _x.columns else _x.iloc[0:0]
+if len(_e25) and not (_e25.dual_contact_frac >= 0.3).all(): fail("E25 excluded an object below its threshold")
+print(f"E25 fissure objects excluded on the plain phantom: {len(_e25)}")
 print(f"E22 midline sheets excluded on the plain phantom: {len(_e22)}")
 print(f"plain phantom: true lesions shown {len(_f0)} -> {len(_f1)} with v5.3")
 
@@ -77,6 +82,40 @@ e24 = b_x[b_x.reason.astype(str).str.startswith("skull-base cortex zone")] if le
 if not len(e24) or not (e24.skullbase_frac >= 0.5).all(): fail(f"E24 must exclude the left objects: {b_x.reason.tolist() if len(b_x) else 'none'}")
 if len(b_on) != int((_on.hemi == "R").sum()): fail(f"E24: right objects must be unchanged ({len(b_on)} vs {int((_on.hemi == 'R').sum())})")
 print(f"E24 skull-base zone: {len(e24)} left objects excluded, {len(b_on)} right objects unchanged, skullbase_frac >= 0.5")
+
+# ---- 1c. v5.7 E25 interhemispheric fissure: PHD = PH3 with the cortex around ONE true lesion relabelled half left / half right (x parity),
+#      so that left AND right cortex both lie within 3 mm of it: that object must be excluded by E25, the other true lesions kept
+_pl = [int(i) for i in np.unique(_t[(_on_lab > 0) & (_t > 0)])]
+_cand_of = {}
+for _i in _pl:
+    _ids = np.unique(_on_lab[(_on_lab > 0) & (_t == _i)])
+    if len(_ids): _cand_of[_i] = int(_ids[0])
+if len(_cand_of) < 2: fail("E25 test needs two shown true lesions on the phantom")
+_victim = sorted(_cand_of)[0]; _vobj = _on_lab == _cand_of[_victim]
+shutil.copy(f"{T}/data/PH3_swi.nii", f"{T}/data/PHD_swi.nii")
+_sg = nib.load(f"{T}/work/PH3_seg_swispace.nii.gz"); _a = np.asanyarray(_sg.dataobj).astype(np.int32)
+_vv = img_vox = nib.load(f"{T}/data/PH3_swi.nii").header.get_zooms()[:3]
+_near = ndi.distance_transform_edt(~_vobj, sampling=_vv) <= 5.0
+_xi = np.indices(_a.shape)[0]
+_cx = (_a >= 1000) & _near
+_left = _cx & (_a < 2000); _right = _cx & (_a >= 2000)
+_a[_left & (_xi % 2 == 1)] += 1000                 # odd x of the left cortex -> right label
+_a[_right & (_xi % 2 == 0)] -= 1000                # even x of the right cortex -> left label
+if not ((_a >= 1000) & (_a < 2000) & _near).any() or not ((_a >= 2000) & _near).any(): fail("E25 test setup: both hemispheres must have cortex near the lesion")
+for _nm in ("PHD_seg_swispace.nii.gz", "PHD_t1seg_swispace.nii.gz"): nib.save(nib.Nifti1Image(_a, _sg.affine, _sg.header), f"{T}/work/{_nm}")
+shutil.copy(f"{T}/work/PH3_truth.nii.gz", f"{T}/work/PHD_truth.nii.gz")
+for _f in os.listdir(f"{T}/work"):
+    if _f.startswith("PH3_") and "a2009s" in _f: shutil.copy(f"{T}/work/{_f}", f"{T}/work/{_f.replace('PH3_', 'PHD_')}")
+d_on, d_lab, d_x, d_log, _ = detect("PHD", True)
+_dv = np.unique(d_lab[(d_lab > 0) & (_t == _victim)])
+if len(_dv): fail(f"E25: the lesion between the hemispheres is still shown (cand {_dv.tolist()})")
+_e25d = d_x[d_x.reason.astype(str).str.startswith("interhemispheric fissure")] if len(d_x) else d_x
+if not len(_e25d) or not (_e25d.dual_contact_frac >= 0.3).all(): fail(f"E25 must exclude it: {d_x.reason.tolist() if len(d_x) else 'none'}")
+_dist_v = ndi.distance_transform_edt(~_vobj, sampling=_vv)            # lesions within 15 mm of the relabelled region are legitimately affected by the speckled labels
+_others = [i for i in _pl if i != _victim and float(_dist_v[(_on_lab == _cand_of.get(i, -1))].min() if (_on_lab == _cand_of.get(i, -1)).any() else 0) > 15.0]
+_kept = {int(i) for i in np.unique(_t[(d_lab > 0) & (_t > 0)])}
+if not set(_others) <= _kept: fail(f"E25 must keep the true lesions far from the relabelled region: lost {sorted(set(_others) - _kept)}")
+print(f"E25 fissure: lesion {_victim} (between relabelled hemispheres) excluded, other true lesions {len(_others)} kept")
 
 # ---- 2. skull phantom: T1-style mask (labels + 5 mm): dark line just outside the cortex (thin-CSF convexity)
 img = nib.load(f"{T}/data/PH3_swi.nii"); I = img.get_fdata().astype(np.float32); vox = img.header.get_zooms()[:3]

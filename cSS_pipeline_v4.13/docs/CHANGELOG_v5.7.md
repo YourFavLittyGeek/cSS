@@ -68,3 +68,17 @@ those were audit objects, already excluded by the old rules; the shown non-cSS o
 - Findings about the installed state: E22 objects (M02 #8, M03 #15, M04 #6 and #12 ...) were still shown in M02-M06 = that detection was made
   without E22; M07-M11 still carry the v5.2 detection (six objects > 3000 mm3 shown). Both need a redetect with v5.7-C.
 - Test: check_v53.py builds PHB (left cortex relabelled 1012): every left object excluded by E24, right objects unchanged.
+
+## v5.7-D (reader's final decisions applied; fissure rule E25; shape probe)
+- docs/adjudication_M02-M11_v1.csv = the reader's final decisions (M03 excluded #5 and #28, M04 excluded #18, M04 #13: not cSS; M05 #3: cSS). Copy to
+  review/adjudication.csv: zone_probe / shape_probe then use them instead of the individual reads (probe_common.apply_adjudication).
+- With these decisions all three old rules that "removed a cSS" in the audit are vindicated: E13 midline, E17 outside the cortex, E18 ill-defined
+  removed no protected cSS (63 protected, 0 excluded).
+- **E25 interhemispheric fissure** (CSS_V53=1): left AND right cortex both within 3 mm of >= 30 % of the object's voxels (dual_contact_frac, appended):
+  8 shown non-cSS flagged, 0 of 63 cSS (highest cSS 0.17 = M05 #3, which curves into adjacent cortex). Checked before the older E13. Test: PHD
+  relabels the cortex around one true lesion half left / half right -> that lesion is excluded by E25, lesions >= 15 mm away are kept.
+- scripts/css_shape.py + shape_probe.py + tests/check_shape.py, check_shape_probe.py: blob (l_over_m, m_over_s, fill, support) and sulcus measures
+  (bend_ratio, depth range, crown / deep share, regions touched) next to the calls, plus axis_angle_deg (long axis vs the axial plane). Findings from the unit
+  test: on 3 mm slices a round 4.8 mm blob reads l_over_m 1.5 (slice quantisation), and bend only ranks shapes (slice thickness dominates) - thresholds must
+  be set per slice thickness. Rule grids BLOB (microbleed) and STRAIGHT (straight in a sulcus without tracking into the adjacent cortex) are fitted offline
+  from shape_probe.csv; nothing is switched on until then.

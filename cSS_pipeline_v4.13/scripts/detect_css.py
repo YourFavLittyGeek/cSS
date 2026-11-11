@@ -136,6 +136,11 @@ E13_FRAC_V533 = 0.5                  # midline, any depth (cSS max 0.36)
 # nearest protected cSS has 0.09 of its voxels nearest to this cortex): an object whose nearest cortex is orbitofrontal / frontal pole /
 # temporal pole / entorhinal / pars orbitalis (the air-bone susceptibility surfaces) in >= E24_FRAC of its voxels. Occipital and inferior
 # temporal cortex over the tentorium is NOT in the set (kept when the nearest tissue is cerebral cortex). Needs a parcellated T1 labelling.
+# v5.7 E25 interhemispheric fissure (zone_probe on M02-M11 with the reader's final decisions: 8 shown non-cSS flagged, 0 of 63 cSS; the
+# highest cSS value is 0.17 [M05 #3, pericalcarine] vs threshold 0.3): the object lies BETWEEN the hemispheres - left cortex AND right cortex both
+# within E25_REACH_MM of at least E25_FRAC of its voxels (falx, sagittal sinus, pericallosal / fissure vessels; a sulcal cSS has one hemisphere
+# on both banks). Objects hugging ONE medial surface are not flagged.
+E25_FRAC, E25_REACH_MM = 0.3, 3.0
 E24_FRAC = 0.5
 E24_LABELS = [1012, 1014, 1032, 1033, 1006, 1019]       # lateral / medial orbitofrontal, frontal pole, temporal pole, entorhinal, pars orbitalis (+2000 = right)
 E24_LABELS = E24_LABELS + [x + 1000 for x in E24_LABELS]
@@ -556,6 +561,11 @@ if _cxm.any():
     NEAR_CX = seg[tuple(_ni)].astype(np.int32); del _ni
 else: NEAR_CX = np.zeros(seg.shape, np.int32)
 del _cxm
+_Lcx = ((seg >= 1000) & (seg < 2000)) | (seg == 3); _Rcx = ((seg >= 2000) & (seg < 3000)) | (seg == 42)
+if _Lcx.any() and _Rcx.any():
+    DUALC = (ndi.distance_transform_edt(~_Lcx, sampling=vox) <= E25_REACH_MM) & (ndi.distance_transform_edt(~_Rcx, sampling=vox) <= E25_REACH_MM)
+else: DUALC = np.zeros(seg.shape, bool)
+del _Lcx, _Rcx
 # v5.7: ONE mid-sagittal plane - the mirror check (section 7) now uses this plane too (it had its own construction from the
 # hemisphere map incl. deep nuclei). Only the recorded mirror columns can change; no rule uses them.
 if PL_N is not None: pc, mvec = PL_C, PL_N
@@ -812,7 +822,8 @@ for p in regionprops(lab, spacing=vox):
                skull_frac=round(float(SKULL[pad][mm].mean()), 2), v53_active=int(V53), _band=bool(BAND[pad][mm].any()),
                vent_frac=round(float((d_vent[pad][mm] <= E16_MM).mean()), 2),
                out_frac=round(float((pial_sd[pad][mm] > V53_OUT_MM).mean()), 2), **plane_feats(mm, pad),
-               skullbase_frac=round(float(np.isin(NEAR_CX[pad][mm], E24_LABELS).mean()), 2))
+               skullbase_frac=round(float(np.isin(NEAR_CX[pad][mm], E24_LABELS).mean()), 2),
+               dual_contact_frac=round(float(DUALC[pad][mm].mean()), 2))
     midz      = bool(np.median(dmid[pad][mm]) < 5.0)
     # off-surface tube. vein_tree_mm is recorded only: on real SWI (P006) the dark tubular network
     # along the cortex merges into one brain-wide component (255 mm for most candidates)
@@ -915,7 +926,7 @@ V50_COLS = ["mimic_score", "mimic_class", "mimic_reason", "phase_z", "mb_cluster
             "flair_csf_bright_frac", "feature_qc_flags", "feature_schema_version",
             "review_priority_rank", "review_priority", "review_priority_reason",                # v5.1.3 (css_tiers.py)
             "midline_frac", "mask_edge_mm", "skull_frac", "v53_active",                         # v5.3, appended
-            "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac"]               # v5.3.1 / v5.3.2 / v5.3.4 / v5.7, appended
+            "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac", "dual_contact_frac"]               # v5.3.1 / v5.3.2 / v5.3.4 / v5.7, appended
 cols = cols + V50_COLS
 
 # ---- 11. exclusions (v4.8) - each with an explicit, definition-based reason
@@ -940,7 +951,7 @@ RULE_CONF = {"E1": "high" if T1_ANAT else "medium", "E2": "medium", "E3": "mediu
              "E5": "medium", "E6": "medium", "E7": "medium", "E8": "low", "E9": "medium",
              "E10": "low", "E11": "low",                       # v5.0 mimic rules: no real-data support yet
              "E12": "low", "E13": "low", "E14": "low", "E15": "low", "E16": "low", "E17": "low",
-             "E18": "low", "E19": "low", "E20": "low", "E21": "low", "E22": "low", "E24": "low"}   # v5.3: chosen on M02-M11, not validated
+             "E18": "low", "E19": "low", "E20": "low", "E21": "low", "E22": "low", "E24": "low", "E25": "low"}   # v5.3: chosen on M02-M11, not validated
 def exclusion(r):
     """-> (rule_version, reason); ("", "") = kept. v5.1.1 CSS_MIXED_REVIEW=1: a mixed merged object (pieces disagree)
     is not removed whole by a vein rule (E5 / E6 / E7); it is shown with mixed_object_review = 1"""
@@ -975,6 +986,9 @@ def exclusion_v4(r):
             return "E21@v5.3.3", f"skull-backed and off the cortex (cortex share < {E21_CTX:g})"
         if np.isfinite(r["edge_contrast"]) and r["edge_contrast"] < E18_EDGE:
             return "E18@v5.3.3", f"ill-defined (edge contrast < {E18_EDGE:g} SD)"
+        if r["dual_contact_frac"] >= E25_FRAC:
+            return "E25@v5.7", (f"interhemispheric fissure: left and right cortex both within {E25_REACH_MM:g} mm of {100 * r['dual_contact_frac']:.0f} % "
+                                f"of the object (between the hemispheres: falx / sinus / fissure vessels)")
         if r["midline_frac"] >= E13_FRAC_V533:                         # v5.3.3: any depth (user: exclude the fissure)
             return "E13@v5.3", "midline: in the interhemispheric fissure (falx / sagittal sinus / midline veins)"
         if (np.isfinite(r["plane_dist_mm"]) and r["plane_dist_mm"] <= E22_PLANE_MM and r["cos_plane"] >= E22_COS

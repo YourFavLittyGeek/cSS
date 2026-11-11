@@ -1,0 +1,6 @@
+study_id,fate,obj_id,call,note
+M03,excluded,5,not cSS,re-decided by the reader: not cSS
+M03,excluded,28,not cSS,re-decided by the reader: object not there / not cSS
+M04,excluded,18,not cSS,re-decided by the reader: normal cortex (a sulcus)
+M04,shown,13,not cSS,re-decided by the reader: not cSS
+M05,shown,3,cSS,re-decided by the reader: cSS - starts in the occipital sulcus but curves and continues into the adjacent cortex

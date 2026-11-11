@@ -22,6 +22,7 @@ with none of those files falls back to the shared ID_calls.csv of the first read
 calls of excluded objects from ID_excluded_audit_<name>.csv and from the pre-redetect snapshot (review/changes, old calls mapped by
 voxel overlap). css_any = any read called it cSS (these are PROTECTED when rules are fitted); css_all = every read of it said cSS;
 non_css = read at least once and never called cSS.
+review/adjudication.csv (study_id,fate,obj_id,call), if present, holds your FINAL decisions and replaces the reads for those objects.
 Writes review/zone_probe.csv and zone_probe_summary.txt: distributions by group, the protected cSS objects closest to each zone, and a grid
 per rule: protected cSS flagged / shown non-cSS flagged / margin of the nearest protected cSS."""
 import sys, os, re, itertools, numpy as np, pandas as pd, nibabel as nib
@@ -147,7 +148,8 @@ for sid in ids:
     print(f"{sid}: {sum(1 for r in rows if r['study_id'] == sid)} objects measured", flush=True)
     del idx, dCx, dLc, dRc, dLh, dRh, dInf, dHull
 if not rows: sys.exit("nothing measured")
-d = pd.DataFrame(rows); d["group"] = np.where(d.css_any == 1, "cSS (any read)", np.where(d.non_css == 1, "not cSS (read)", "not read"))
+import probe_common as _pc
+d = _pc.apply_adjudication(pd.DataFrame(rows), B); d["group"] = np.where(d.css_any == 1, "cSS (any read)", np.where(d.non_css == 1, "not cSS (read)", "not read"))
 d.to_csv(f"{B}/review/zone_probe.csv", index=False)
 out = ["Anatomical zone probe (research software; expert review required)", f"studies: {', '.join(ids)}   reads: {', '.join(reads)}", "",
        "Objects by fate and group (cSS (any read) = PROTECTED when rules are fitted):", pd.crosstab(d.group, d.fate, margins=True).to_string(), ""]
