@@ -41,7 +41,8 @@ for sid in ids:
     for fate, tab, key in (("shown", cand, "cand_id"), ("excluded", xd, "excl_id")):
         if not len(tab) or key not in tab.columns: continue
         s_ = sf[sf["list"] == ("candidate" if fate == "shown" else "excluded")].set_index("obj_id") if "list" in sf.columns else sf.set_index("obj_id")
-        L = np.zeros(1, np.int32)
+        _nii = f"{B}/review/{sid}_candidates.nii.gz" if fate == "shown" else f"{B}/review/{sid}_excluded.nii.gz"
+        L = pc.lab(_nii) if os.path.exists(_nii) else np.zeros((1, 1, 1), np.int32)
         cl = pc.object_calls(B, sid, fate, L, reads, cand) if fate == "shown" else pc.object_calls(B, sid, fate, L, reads)
         for _, r in tab.iterrows():
             oid = int(r[key]); srow = s_.loc[oid] if oid in s_.index else None

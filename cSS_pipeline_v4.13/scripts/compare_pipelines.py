@@ -91,7 +91,7 @@ for sid in ids:
                 rows.append(dict(study_id=sid, A_fate="", A_id=0, A_rule="", A_gate="", B_soft_gate_fail=str(r.get("soft_gate_fail", "") if pd.notna(r.get("soft_gate_fail", "")) else ""), B_fate="shown", B_id=int(oid), B_overlap=0.0, B_rule="", calls="", n_calls=0, n_css=0,
                                  css_any=0, css_all=0, non_css=0, only_B=1))
 if not rows: sys.exit("\n".join(notes) + "\nnothing to compare")
-d = pc.apply_adjudication(pd.DataFrame(rows), P)
+d = pc.apply_adjudication(pd.DataFrame(rows), P, fate_col="A_fate", id_col="A_id")
 d["only_B"] = d.get("only_B", 0); d["only_B"] = d["only_B"].fillna(0).astype(int)
 d["transition"] = np.where(d.only_B == 1, "only_B",
                   np.where((d.A_fate == "shown") & (d.B_fate == "shown"), "same",

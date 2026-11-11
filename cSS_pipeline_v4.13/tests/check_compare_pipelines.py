@@ -12,6 +12,8 @@ def run(args):
 before = {f: hashlib.md5(open(f, "rb").read()).hexdigest() for f in glob.glob(f"{B}/review/PH3_*") + glob.glob(f"{B}/work/PH3_*") + glob.glob(f"{B}/data/PH3_*") if os.path.isfile(f)}
 cand = pd.read_csv(f"{B}/review/PH3_candidates.csv"); x = cand[["cand_id", "vox_i", "vox_j", "vox_k", "volume_mm3"]].copy()
 x["call"] = (["cSS", "cSS", "Vein", "Artifact", "Normal", "Normal", "Vein"] * 8)[:len(x)]; x["comment"] = ""; cf = f"{B}/review/PH3_calls_CpT.csv"; x.to_csv(cf, index=False)
+adj = f"{B}/review/adjudication.csv"; had_adj = os.path.exists(adj)
+if not had_adj: pd.DataFrame([dict(study_id="PH3", fate="shown", obj_id=2, call="not cSS", note="t")]).to_csv(adj, index=False)   # exercises the A_fate / A_id adjudication path
 try:
     run([f"{S}/run_experiment.py", "PH3", "--name", "cpA", "--flags", "CSS_V53=1"])
     run([f"{S}/run_experiment.py", "PH3", "--name", "cpB", "--flags", "CSS_V53=1,CSS_SOFT_GATES=1,CSS_3D_SEEDS=1"])
@@ -31,10 +33,12 @@ try:
     if not len(ob) or not (ob.B_soft_gate_fail.fillna("") != "").all(): fail(f"gate-dropped objects of A must be shown in B with a soft gate id: {len(ob)}")
     if int(((d.transition == "lost") & (d.css_any == 1)).sum()) != 0: fail("no cSS may be lost")
     if int(sh.css_any.sum()) < 1: fail("the calls must be attached to the A objects")
+    if not had_adj and not (d.calls.astype(str) == "ADJ:not cSS").any(): fail("the adjudication must be applied to the A objects")
     sm = open(f"{B}/review/compare_pipelines_cpA_vs_cpB_summary.txt").read()
     if "objects you called cSS LOST in B: 0" not in sm or "gate-dropped in A, shown in B (soft gates)" not in sm: fail("summary text\n" + sm)
 finally:
     os.remove(cf)
+    if not had_adj: os.remove(adj)
     shutil.rmtree(f"{B}/experiments", ignore_errors=True)
     for f in glob.glob(f"{B}/review/compare_pipelines_*"): os.remove(f)
 after = {f: hashlib.md5(open(f, "rb").read()).hexdigest() for f in before}

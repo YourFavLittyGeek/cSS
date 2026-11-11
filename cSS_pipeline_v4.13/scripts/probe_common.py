@@ -26,6 +26,7 @@ def old_calls_onto(B, sid, new_lab):
     oc, calls = pd.read_csv(pc), pd.read_csv(pk); m, _ = match_calls(oc, calls)
     if not m: return {}
     old = lab(pl); out = {}
+    if getattr(new_lab, "ndim", 0) != 3 or new_lab.shape != old.shape: return {}          # no usable label volume of the same grid: no mapping (never a crash)
     for cid, call in m.items():
         if not isinstance(call, str) or not call: continue
         v = new_lab[old == cid]; v = v[v > 0]
@@ -67,12 +68,13 @@ def summarize(cl):
                 css_all=int(len(names) > 0 and n_css == len(names)), non_css=int(len(names) > 0 and n_css == 0))
 
 
-def apply_adjudication(df, B):
+def apply_adjudication(df, B, fate_col="fate", id_col="obj_id"):
+    """fate_col / id_col name the columns of df that hold the object's fate (shown / excluded) and id (compare_pipelines uses A_fate / A_id)"""
     p = f"{B}/review/adjudication.csv"
     if not os.path.exists(p): return df
     a = pd.read_csv(p); df = df.copy(); n = 0
     for _, r in a.iterrows():
-        m = (df.study_id == r.study_id) & (df.fate == r.fate) & (df.obj_id == int(r.obj_id))
+        m = (df.study_id == r.study_id) & (df[fate_col] == r.fate) & (df[id_col] == int(r.obj_id))
         if not m.any(): continue
         css = str(r.call).strip() == "cSS"
         df.loc[m, "calls"] = f"ADJ:{r.call}"; df.loc[m, "n_calls"] = 1; df.loc[m, "n_css"] = int(css)

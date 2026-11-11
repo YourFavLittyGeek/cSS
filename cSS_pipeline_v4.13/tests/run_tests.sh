@@ -213,6 +213,9 @@ grep -q "RESULT sheet3d OK" $T/sheet3d.log || { echo "FAIL: sheet3d checks"; exi
 echo "== audit branch: run_experiment + compare_pipelines (switches on copies, object-level comparison, project untouched)"
 python $ROOT/tests/check_compare_pipelines.py | tee $T/cmppipe.log | grep -v "^RESULT"
 grep -q "RESULT compare_pipelines OK" $T/cmppipe.log || { echo "FAIL: compare_pipelines checks"; exit 1; }
+echo "== probe_common: snapshot calls mapped onto new objects, adjudication on both column conventions"
+python $ROOT/tests/check_probe_common.py | tee $T/probecommon.log | grep -v "^RESULT\|^adjudication:"
+grep -q "RESULT probe_common OK" $T/probecommon.log || { echo "FAIL: probe_common checks"; exit 1; }
 echo "== audit branch: mesh vs mask pial distance comparison (constructed answer)"
 python $ROOT/tests/check_pial_compare.py | tee $T/pial.log | grep -v "^RESULT"
 grep -q "RESULT pial_compare OK" $T/pial.log || { echo "FAIL: pial_compare checks"; exit 1; }
