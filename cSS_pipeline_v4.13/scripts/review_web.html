@@ -393,7 +393,7 @@ async function loadStudy(sid){status("loading study ...");
 
 // ---------- candidates ----------
 const callOf=c=>(calls[c.id]||{}).call||"";
-const isInh=c=>{const m=(calls[c.id]||{});return !!m.call&&String(m.comment||"").startsWith("[inherited")};
+const isInh=c=>{const m=(calls[c.id]||{});return !!m.call&&/^\[(inherited|imported)/.test(String(m.comment||""))};
 const isDone=c=>!!callOf(c)&&!isInh(c);
 function verdict(c){const call=callOf(c),b=c.ai.band;if(!call)return "not read";if(call==="Unsure")return "you unsure";if(b==="yellow")return "AI unsure";
   const css=call==="cSS";return (css&&b==="green")||(!css&&b==="red")?"agree":"differ"}

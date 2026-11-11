@@ -20,7 +20,7 @@ the review-priority tiers 2-4 and for the v5.3 skull / midline measures (or the 
 rank_candidates.py has written score_model). It has not been validated against expert labels, and showing it
 before the reader decides can bias the call: use the K key (hide) for any read that is used to test the detector.
 No data leaves the computer; no packages beyond the pipeline's own are needed."""
-import sys, os, json, re, time, threading, subprocess, webbrowser, shutil, base64
+import sys, os, json, re, time, threading, subprocess, webbrowser, shutil, base64, glob
 import numpy as np, nibabel as nib, pandas as pd
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
@@ -29,11 +29,42 @@ HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 from css_common import base as _base, save_calls, FP
 
 B = _base()
-CALLS = ["cSS", "Vein", "Normal", "Artifact", "Unsure", "Near ICH"]
+CALLS = ["cSS", "Vein", "Normal", "Artifact", "Unsure", "Near ICH", "Microbleed"]   # v5.7: Microbleed (fine code MB) = not cSS
 SEQ_NAMES = {"swi": "SWI", "flair": "FLAIR", "t1": "T1", "t2": "T2", "phase": "Phase (filtered)"}
 LOCK = threading.Lock()
 slug = lambda s: re.sub(r"[^A-Za-z0-9]+", "_", s.strip()).strip("_") or "reviewer"
 now = lambda: time.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def primary(sid, set_to=None, if_missing=False):
+    """v5.7: the study's primary reviewer (review/ID_primary.json). Only the primary reviewer's calls are written to the
+    shared legacy ID_calls.csv / ID_candidates.csv accept column / ID_score.json. Returns the current name ("" = none)."""
+    p = f"{B}/review/{sid}_primary.json"
+    cur = json.load(open(p)).get("reviewer", "") if os.path.exists(p) else ""
+    if set_to and (not if_missing or not cur):
+        json.dump(dict(reviewer=set_to.strip(), set=now()), open(p, "w"), indent=1); cur = set_to.strip()
+    return cur
+
+
+def score_path(sid, reviewer):
+    """the primary reviewer's score is the shared ID_score.json; every other reviewer has ID_score_rev_<name>.json"""
+    pr = primary(sid)                  # no primary yet (studies read before v5.7): the shared file, as before
+    return f"{B}/review/{sid}_score.json" if (not pr or (reviewer and pr == reviewer.strip())) else f"{B}/review/{sid}_score_rev_{slug(reviewer)}.json"
+
+
+def final_path(sid, reviewer): return f"{B}/review/{sid}_final_{slug(reviewer)}.json"
+
+
+def load_final(sid, reviewer):
+    """the reviewer's own final record; the legacy single ID_final.json only when it was made by this reviewer"""
+    for p in (final_path(sid, reviewer), f"{B}/review/{sid}_final.json"):
+        if os.path.exists(p):
+            try:
+                f = json.load(open(p))
+                if p.endswith(f"{sid}_final.json") and f.get("reviewer") != reviewer: continue
+                return f
+            except Exception: pass
+    return None
 
 
 def ai_opinion(r):
@@ -55,6 +86,14 @@ def ai_opinion(r):
     mid = ""                       # v5.6.3 hint only (not an exclusion): a thin sheet close to the mid-sagittal plane
     if f("plane_dist_mm", 99) <= 8 and f("cos_plane", 0) >= 0.5 and f("ext_major_mm", 0) >= 15 and not mimic:
         mid = f"lies {f('plane_dist_mm'):.0f} mm from the midline plane as a thin sheet ({f('ext_major_mm'):.0f} mm long): could be the interhemispheric fissure (check coronal / sagittal)"; s *= 0.9
+    # v5.7 caps: never green for a blob-like or fissure-like object or a tier 3-5 object (stage-D columns when present)
+    blob = f("e23_blob", 0) >= 1 or f("cmb_like", 0) >= 1
+    fis = f("fissure_frac", 0) >= 0.5 or bool(mid) or (f("midline_frac", 0) >= 0.5)
+    cap = ""
+    if blob: cap = "compact blob (microbleed-like)"
+    elif fis: cap = "in or next to the interhemispheric fissure"
+    elif tier >= 3: cap = f"review tier {tier}"
+    if cap: s = min(s, 0.65)
     s = float(np.clip(s, 0, 1)); band = "green" if s >= 0.66 else "yellow" if s >= 0.33 else "red"
     why = []
     pd_, tub, tram = f("pial_dist_mm"), f("tube_ratio"), f("tram_frac")
@@ -66,6 +105,7 @@ def ai_opinion(r):
     if f("artifact_zone", 0) >= 1: why.append("in an air-bone artifact zone")
     if f("cmb_like", 0) >= 1: why.append("small and compact")
     if mid: why.append(mid)
+    if cap and band != "red": why.append(f"meter capped below green: {cap}")
     if band == "green": suspect = "I suspect cSS"
     elif band == "yellow": suspect = "Uncertain: could be cSS" + (f" or {mimic}" if mimic else " or normal dark cortex / a vein")
     else: suspect = f"I suspect {mimic}" if mimic else "Probably not cSS (weak evidence: vein or normal cortex more likely)"
@@ -157,14 +197,43 @@ class Study:
     def rpath(self, reviewer): return f"{B}/review/{self.sid}_calls_{slug(reviewer)}.csv"
 
     def load_calls(self, reviewer):
-        """-> ({cand_id: {call, comment, time}}, note). Matched by fingerprint, so a detector re-run cannot move a call"""
+        """-> ({cand_id: {call, comment, time}}, note). Matched by fingerprint, so a detector re-run cannot move a call.
+        v5.7: a reviewer name with no file of its own starts EMPTY (earlier calls only through import_calls)."""
         p, note = self.rpath(reviewer), ""
-        if not os.path.exists(p):
-            legacy = f"{B}/review/{self.sid}_calls.csv"
-            import glob
-            if os.path.exists(legacy) and not glob.glob(f"{B}/review/{self.sid}_calls_*.csv"):
-                p = legacy; note = "Calls made with the old reviewer were loaded under this name."
-            else: return {}, ""
+        if not os.path.exists(p): return {}, ""
+        return self._read_calls(p, note)
+
+    def import_sources(self, reviewer):
+        """files whose calls can be imported: the legacy ID_calls.csv and every other reviewer's file"""
+        out = []
+        lp = f"{B}/review/{self.sid}_calls.csv"
+        if os.path.exists(lp): out.append(dict(key="legacy", label=f"{self.sid}_calls.csv (shared file, {len(pd.read_csv(lp))} calls)"))
+        for f in sorted(glob.glob(f"{B}/review/{self.sid}_calls_*.csv")):
+            if f == self.rpath(reviewer): continue
+            try: c = pd.read_csv(f); nm = str(c.reviewer.dropna().iloc[0]) if "reviewer" in c.columns and c.reviewer.notna().any() else os.path.basename(f)
+            except Exception: continue
+            out.append(dict(key=os.path.basename(f), label=f"{nm} ({len(c)} calls)"))
+        return out
+
+    def import_calls(self, reviewer, key, overwrite=False):
+        """copy calls from a source file onto this reviewer's calls (only candidates without a call unless overwrite).
+        Imported calls carry the comment marker '[imported from X]' and stay dashed until the same key is pressed."""
+        src = f"{B}/review/{self.sid}_calls.csv" if key == "legacy" else f"{B}/review/{os.path.basename(key)}"
+        if not os.path.exists(src): raise FileNotFoundError(f"no such calls file: {key}")
+        other, _ = self._read_calls(src, ""); mine, _ = self.load_calls(reviewer); n = 0
+        tag = "shared file" if key == "legacy" else key.split("_calls_", 1)[-1].rsplit(".", 1)[0]
+        for k, v in other.items():
+            if not v.get("call") or (k in mine and mine[k].get("call") and not overwrite): continue
+            mine[k] = dict(call=v["call"], comment=f"[imported from {tag}] " + re.sub(r"^\[(inherited|old calls|imported)[^\]]*\]\s*", "", v.get("comment", "") or ""),
+                           time=now()); n += 1
+        self.save(reviewer, mine)
+        lp = f"{B}/review/{self.sid}_review_log.csv"; new = not os.path.exists(lp)
+        with open(lp, "a") as f:
+            if new: f.write("time,reviewer,action,cand_id,call,comment,meter_shown,vox_i,vox_j,vox_k,volume_mm3\n")
+            f.write(f'{now()},"{reviewer}",import,,,"{n} calls from {tag}",,,,,\n')
+        return mine, n
+
+    def _read_calls(self, p, note):
         c = pd.read_csv(p)
         if not len(c) or not all(k in c.columns for k in FP): return {}, note
         C = self.df[["cand_id"] + FP].to_numpy(float); out = {}; lost = 0
@@ -185,7 +254,8 @@ class Study:
         rows = [dict(cand_id=k, call=v["call"], comment=v.get("comment", ""), reviewer=reviewer, time=v.get("time", ""),
                      **{f: c.loc[k, f] for f in FP}) for k, v in sorted(calls.items()) if v.get("call") or v.get("comment")]
         pd.DataFrame(rows, columns=["cand_id", "call", "comment", "reviewer", "time"] + FP).to_csv(self.rpath(reviewer), index=False)
-        save_calls(B, self.sid, self.df, {k: v["call"] for k, v in calls.items() if v.get("call")})
+        if primary(self.sid, reviewer, if_missing=True) == reviewer.strip():     # v5.7: shared legacy file = primary reviewer only
+            save_calls(B, self.sid, self.df, {k: v["call"] for k, v in calls.items() if v.get("call")})
         if cand_id is not None:
             v = calls.get(cand_id, {}); lp = f"{B}/review/{self.sid}_review_log.csv"; new = not os.path.exists(lp)
             with open(lp, "a") as f:
@@ -303,16 +373,27 @@ def safe_name(n, exts=("png", "jpg")):
 
 
 def side_check(s):
-    """do the FreeSurfer hemisphere labels agree with the image sides? (canonical RAS: higher x index = patient right)"""
+    """v5.7: do the FreeSurfer hemisphere labels agree with the image sides? World coordinates (RAS, x+ = patient right):
+    (1) the left-labelled tissue must lie at smaller x than the right-labelled tissue; (2) each candidate's centre must lie
+    on the side of the mid-point between the two hemisphere centroids that its hemisphere label says."""
     try:
-        sw = s.volume("swi"); xs = np.where((sw > 0).any(axis=(1, 2)))[0]; mid = (xs.min() + xs.max()) / 2.0
+        sp = f"{B}/work/{s.sid}_seg_swispace.nii.gz"
+        if not os.path.exists(sp): return dict(n=0, agree=0, bad=False, labels_ok=None)
+        seg = s._grid(sp, order=0).astype(np.int32); A = s.can.affine
+        L = ((seg >= 1000) & (seg < 2000)) | np.isin(seg, (2, 3)); Rt = (seg >= 2000) | np.isin(seg, (41, 42))
+        if L.sum() < 1000 or Rt.sum() < 1000: return dict(n=0, agree=0, bad=False, labels_ok=None)
+        wx = lambda m: float((A @ np.r_[np.argwhere(m)[:: 50].mean(0), 1.0])[0])
+        xl, xr = wx(L), wx(Rt); mid = (xl + xr) / 2; labels_ok = bool(xl < xr)
         n = ag = 0
         for _, r in s.df.iterrows():
             c = s.centre.get(int(r.cand_id)); h = str(r.hemi)[:1].upper()
-            if c is None or h not in "LR" or abs(c[0] - mid) < 3: continue
-            n += 1; ag += int((c[0] > mid) == (h == "R"))
-        return dict(n=n, agree=ag, bad=bool(n >= 3 and ag / n < 0.3))
-    except Exception: return dict(n=0, agree=0, bad=False)
+            if c is None or h not in "LR": continue
+            x = float((A @ np.r_[c, 1.0])[0])
+            if abs(x - mid) < 3: continue
+            n += 1; ag += int((x > mid) == (h == "R"))
+        return dict(n=n, agree=ag, bad=bool((n >= 3 and ag / n < 0.3) or not labels_ok), labels_ok=labels_ok,
+                    left_x_mm=round(xl, 1), right_x_mm=round(xr, 1))
+    except Exception as e: return dict(n=0, agree=0, bad=False, labels_ok=None, error=str(e))
 
 
 def meta(sid, reviewer):
@@ -327,8 +408,9 @@ def meta(sid, reviewer):
     return dict(study=sid, studies=IDS, shape=list(s.shape), vox=s.vox, cands=cands, calls=calls, note=note, qc=s.qc,
                 seqs=[dict(key=k, **{a: b for a, b in s.meta_seq.get(k, dict(label=SEQ_NAMES[k])).items()}) for k in s.avail],
                 missing_seqs=[SEQ_NAMES[k] for k in ("flair", "t1", "t2", "phase") if k not in s.avail], ai_score=ai_score(s),
-                reader_score=_score_json(f"{B}/review/{sid}_score.json") if calls else None,
-                final=(json.load(open(f"{B}/review/{sid}_final.json")) if os.path.exists(f"{B}/review/{sid}_final.json") else None),
+                reader_score=(_score_json(score_path(sid, reviewer)) if calls else None),
+                final=load_final(sid, reviewer) if reviewer else None, primary=primary(sid),
+                import_sources=s.import_sources(reviewer) if reviewer else [],
                 ref=dict(mu=s.mu, sd=s.sd, src=s.ref_src), missed=s.missed().to_dict("records"), reviewers=reviewers(),
                 call_names=CALLS, side_check=side_check(s), snapdir=f"{B}/review/snapshots/{sid}", acq=acq_info(sid))
 
@@ -392,6 +474,12 @@ class H(BaseHTTPRequestHandler):
                 try: subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 except Exception as e: return self._send(dict(error=str(e)), code=500)
                 return self._send(dict(ok=True))
+            if u.path == "/api/import":
+                with LOCK: calls, n = s.import_calls(rev, str(d.get("source", "")), bool(d.get("overwrite")))
+                return self._send(dict(ok=True, calls=calls, imported=n, saved=now()))
+            if u.path == "/api/primary":
+                name = str(d.get("name") or rev).strip()
+                return self._send(dict(ok=True, primary=primary(s.sid, name)))
             if u.path == "/api/call":
                 with LOCK:
                     calls, _ = s.load_calls(rev); cid = int(d["cand_id"]); cur = calls.get(cid, dict(call="", comment=""))
@@ -399,7 +487,7 @@ class H(BaseHTTPRequestHandler):
                         if d["call"] not in CALLS + [""]: return self._send(dict(error="unknown call"), code=400)
                         cur["call"] = d["call"]; cur["time"] = now()
                         if d["call"] and isinstance(cur.get("comment"), str):      # an explicit call confirms an inherited call / answers a hint
-                            cur["comment"] = re.sub(r"^\[(inherited|old calls)[^\]]*\]\s*", "", cur["comment"])
+                            cur["comment"] = re.sub(r"^\[(inherited|old calls|imported)[^\]]*\]\s*", "", cur["comment"])
                     if "comment" in d: cur["comment"] = str(d["comment"])[:500]
                     calls[cid] = cur
                     if not cur.get("call") and not cur.get("comment"): calls.pop(cid)
@@ -412,12 +500,17 @@ class H(BaseHTTPRequestHandler):
                 calls, _ = s.load_calls(rev); c = {k: v["call"] for k, v in calls.items() if v.get("call")}
                 acc = sorted(k for k, v in c.items() if v == "cSS"); ich = sorted(k for k, v in c.items() if v == "Near ICH")
                 with LOCK: s.save(rev, calls)
-                cmd = [sys.executable, f"{HERE}/mark_css.py", s.sid, ",".join(map(str, acc)) or "none", "--reviewed",
-                       ",".join(map(str, sorted(c))) or "none"] + (["--ich", ",".join(map(str, ich))] if ich else [])
+                if primary(s.sid) == rev:          # v5.7: only the primary reviewer writes the shared accept column / ID_score.json
+                    cmd = [sys.executable, f"{HERE}/mark_css.py", s.sid, ",".join(map(str, acc)) or "none", "--reviewed",
+                           ",".join(map(str, sorted(c))) or "none"] + (["--ich", ",".join(map(str, ich))] if ich else [])
+                else:
+                    cmd = [sys.executable, f"{HERE}/score_css.py", s.sid, "--accept-ids", ",".join(map(str, acc)) or "none",
+                           "--ich-ids", ",".join(map(str, ich)) or "none", "--reviewed-ids", ",".join(map(str, sorted(c))) or "none",
+                           "--tag", f"rev_{slug(rev)}"]
                 r = subprocess.run(cmd, capture_output=True, text=True, env=dict(os.environ, CSS_BASE=B, PYTHONWARNINGS="ignore"))
                 res = dict(ok=r.returncode == 0, text=(r.stdout + ("\n" + r.stderr[-1500:] if r.returncode else "")).strip(),
                            counts={k: sum(v == k for v in c.values()) for k in CALLS}, unread=len(s.df) - len(c),
-                           missed=s.missed().to_dict("records"), reader_score=_score_json(f"{B}/review/{s.sid}_score.json"),
+                           missed=s.missed().to_dict("records"), reader_score=_score_json(score_path(s.sid, rev)),
                            ai_score=ai_score(s))
                 if d.get("final"):
                     # final save: one record per study (overwritten by a later final save) + the cohort report
@@ -427,8 +520,9 @@ class H(BaseHTTPRequestHandler):
                     fin = dict(study=s.sid, reviewer=rev, saved=now(), reviewer_score=res["reader_score"], ai_score=res["ai_score"],
                                n_candidates=int(len(s.df)), n_read=int(len(c)), n_css=int(len(acc)), n_differ=d.get("n_differ", ""),
                                n_missed=int(len(res["missed"])), n_revoted=nrev, meter_visible=d.get("meter_visible", ""), n_inherited_unconfirmed=d.get("n_inherited_unconfirmed", ""),
-                               comparison_shown=bool(d.get("comparison_shown")))
-                    json.dump(fin, open(f"{B}/review/{s.sid}_final.json", "w"), indent=1)
+                               comparison_shown=bool(d.get("comparison_shown")), n_microbleed=int(sum(v == "Microbleed" for v in c.values())),
+                               primary=bool(primary(s.sid) == rev), read_mode=d.get("read_mode", ""))
+                    json.dump(fin, open(final_path(s.sid, rev), "w"), indent=1)
                     import css_report
                     out, n, xl = css_report.build(B); res["final"] = fin; res["report"] = f"{out}.csv{xl}"
                 return self._send(res)

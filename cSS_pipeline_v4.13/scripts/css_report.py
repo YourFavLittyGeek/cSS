@@ -17,9 +17,13 @@ CAT = {"absent": "Absent", "focal": "Focal (1-3 sulci)", "disseminated": "Dissem
 
 def build(B, out=None):
     out = out or f"{B}/review/css_report"; rows = []
-    for p in sorted(glob.glob(f"{B}/review/*_final.json")):
+    recs = {}
+    for p in sorted(glob.glob(f"{B}/review/*_final.json")) + sorted(glob.glob(f"{B}/review/*_final_*.json")):
         try: f = json.load(open(p))
         except Exception: continue
+        k = (f.get("study", ""), f.get("reviewer", ""))                # v5.7: one row per study and reviewer, newest wins
+        if k not in recs or str(f.get("saved", "")) >= str(recs[k].get("saved", "")): recs[k] = f
+    for f in [recs[k] for k in sorted(recs)]:
         r, a = f.get("reviewer_score") or {}, f.get("ai_score") or {}
         g = lambda d, k: d.get(k, "")
         rows.append({"Study": f.get("study", ""), "Reviewer": f.get("reviewer", ""), "Saved": f.get("saved", ""),
@@ -33,6 +37,8 @@ def build(B, out=None):
                      "Candidates": f.get("n_candidates", ""), "Read": f.get("n_read", ""), "Called cSS": f.get("n_css", ""),
                      "Calls differing from AI": f.get("n_differ", ""), "Missed cSS marked": f.get("n_missed", ""),
                      "Calls changed after the AI comparison": f.get("n_revoted", ""), "Inherited calls not re-confirmed": f.get("n_inherited_unconfirmed", ""), "AI meter visible": f.get("meter_visible", ""),
+                     "Microbleeds called": f.get("n_microbleed", ""), "Primary reviewer": {True: "yes", False: "no"}.get(f.get("primary"), ""),
+                     "Read mode": f.get("read_mode", ""),
                      "Note": "lower bound: not all candidates read" if f.get("n_read", 0) != f.get("n_candidates", 0) else ""})
     d = pd.DataFrame(rows); d.to_csv(out + ".csv", index=False); xl = ""
     try:

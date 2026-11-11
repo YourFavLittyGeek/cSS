@@ -93,7 +93,7 @@ def after(sid):
     tb["fate"] = tb.cand_id.map(fate); tb["new_id"] = tb.cand_id.map(tgt)
     nold = tb[tb.fate == "kept"].groupby("new_id").cand_id.count()
     tb["merged"] = tb.new_id.map(lambda i: bool(i == i and nold.get(i, 0) > 1))
-    carried = ta[ta.call != ""]; lost = tb[(tb.call != "") & ~tb.cand_id.isin([])]
+    carried = ta[ta.call != ""]
     n_lost = int(b["n_read"]) - len(carried)
     css_lost = [(int(r.cand_id), r.region, r.fate) for r in tb.itertuples() if r.call == "cSS" and not (
         r.fate == "kept" and not r.merged)]

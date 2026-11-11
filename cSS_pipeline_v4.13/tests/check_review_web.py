@@ -5,7 +5,7 @@ review_css.py format; calls re-load for the same reviewer and not for another; n
 import os, sys, json, time, subprocess, urllib.request, pandas as pd
 HERE = os.path.dirname(os.path.abspath(__file__)); S = os.path.join(HERE, "..", "scripts"); B = os.environ["CSS_BASE"]
 def fail(m): print("FAIL:", m); srv.kill(); sys.exit(1)
-for f in ("PH3_calls.csv", "PH3_calls_Reader_A.csv", "PH3_review_log.csv", "PH3_missed.csv", "reviewers.json"):
+for f in ("PH3_calls.csv", "PH3_calls_Reader_A.csv", "PH3_calls_Reader_B.csv", "PH3_review_log.csv", "PH3_missed.csv", "reviewers.json", "PH3_primary.json"):
     if os.path.exists(f"{B}/review/{f}"): os.remove(f"{B}/review/{f}")
 srv = subprocess.Popen([sys.executable, f"{S}/review_web.py", "PH3", "--no-browser", "--port", "8931"], stdout=subprocess.PIPE, text=True)
 U = srv.stdout.readline().split("http://")[1].split()[0]; U = "http://" + U.rstrip("/")
@@ -48,14 +48,41 @@ rs, ai = f.get("reader_score") or {}, f.get("ai_score") or {}
 if rs.get("multifocality_0_4") is None or rs.get("category") not in ("absent", "focal", "disseminated") or "n_lines_total" not in rs: fail(f"reader score: {rs}")
 if ai.get("multifocality_0_4") is None or not os.path.exists(f"{B}/review/PH3_score_ai.json"): fail(f"AI score: {ai}")
 if json.load(open(f"{B}/review/PH3_score.json"))["multifocality_0_4"] != rs["multifocality_0_4"]: fail("the AI scoring must not overwrite the reader's score file")
-if os.path.exists(f"{B}/review/PH3_final.json"): fail("no final record before the final save")
+if os.path.exists(f"{B}/review/PH3_final_Reader_A.json"): fail("no final record before the final save")
 post("/api/call", dict(study="PH3", reviewer="Reader A", cand_id=ids[1], call="Vein", action="revote"))
 g = post("/api/finish", dict(study="PH3", reviewer="Reader A", final=True, n_differ=1, meter_visible=1, comparison_shown=True))
-fin = json.load(open(f"{B}/review/PH3_final.json"))
+fin = json.load(open(f"{B}/review/PH3_final_Reader_A.json"))
+if not fin.get("primary"): fail("Reader A saved first and must be the primary reviewer")
 if fin["reviewer"] != "Reader A" or fin["n_revoted"] != 1 or fin["reviewer_score"]["multifocality_0_4"] != g["reader_score"]["multifocality_0_4"]: fail(f"final record: {fin}")
 rep = pd.read_csv(f"{B}/review/css_report.csv")
 if list(rep.Study) != ["PH3"] or "cSS score (0-4)" not in rep.columns or "Category" not in rep.columns: fail(f"report: {rep}")
 if get("/api/meta?study=PH3&reviewer=Reader%20A")["final"]["reviewer"] != "Reader A": fail("final record not returned with the study")
+# v5.7: a second reviewer starts empty, can import, has own score + final, never touches the shared files
+if get("/api/meta?study=PH3&reviewer=Reader%20B")["calls"]: fail("a new reviewer must start empty")
+shared_before = open(f"{B}/review/PH3_calls.csv").read(); score_before = open(f"{B}/review/PH3_score.json").read()
+srcs = get("/api/meta?study=PH3&reviewer=Reader%20B")["import_sources"]
+if not any(s_["key"] == "PH3_calls_Reader_A.csv" for s_ in srcs): fail(f"import sources: {srcs}")
+im = post("/api/import", dict(study="PH3", reviewer="Reader B", source="PH3_calls_Reader_A.csv"))
+if im.get("imported", 0) < 1 or not str(im["calls"][str(ids[0])]["comment"]).startswith("[imported from Reader_A]"): fail(f"import: {im}")
+post("/api/call", dict(study="PH3", reviewer="Reader B", cand_id=ids[0], call="Microbleed"))
+mb = get("/api/meta?study=PH3&reviewer=Reader%20B")["calls"][str(ids[0])]
+if mb["call"] != "Microbleed" or mb["comment"].startswith("[imported"): fail(f"Microbleed call / import marker not cleared: {mb}")
+gb = post("/api/finish", dict(study="PH3", reviewer="Reader B", final=True, read_mode="validation"))
+if gb["counts"].get("Microbleed") != 1 or gb["counts"].get("cSS", 0) != 0: fail(f"Reader B counts: {gb['counts']}")
+if open(f"{B}/review/PH3_calls.csv").read() != shared_before or open(f"{B}/review/PH3_score.json").read() != score_before:
+    fail("a non-primary reviewer changed the shared ID_calls.csv / ID_score.json")
+if not os.path.exists(f"{B}/review/PH3_score_rev_Reader_B.json") or gb["reader_score"]["multifocality_0_4"] != 0: fail(f"Reader B own score: {gb.get('reader_score')}")
+fb = json.load(open(f"{B}/review/PH3_final_Reader_B.json"))
+if fb["primary"] or fb["n_microbleed"] != 1 or fb["read_mode"] != "validation": fail(f"Reader B final: {fb}")
+rep = pd.read_csv(f"{B}/review/css_report.csv")
+if sorted(rep.Reviewer) != ["Reader A", "Reader B"] or "Microbleeds called" not in rep.columns: fail(f"report rows per reviewer: {rep[['Study', 'Reviewer']]}")
+if get("/api/meta?study=PH3&reviewer=Reader%20A")["final"]["reviewer"] != "Reader A": fail("final record must be per reviewer")
+post("/api/primary", dict(study="PH3", reviewer="Reader B", name="Reader B"))
+if get("/api/meta?study=PH3&reviewer=")["primary"] != "Reader B": fail("primary reviewer not changed")
+sc = get("/api/meta?study=PH3&reviewer=")["side_check"]
+if sc.get("labels_ok") is not True or sc.get("bad"): fail(f"side check (world coordinates): {sc}")
+for x in ("PH3_final_Reader_A.json", "PH3_final_Reader_B.json", "PH3_score_rev_Reader_B.json", "PH3_calls_Reader_B.csv", "PH3_primary.json"):
+    if os.path.exists(f"{B}/review/{x}"): os.remove(f"{B}/review/{x}")
 for x in ("PH3_final.json", "PH3_score_ai.json", "css_report.csv", "css_report.xlsx"):
     if os.path.exists(f"{B}/review/{x}"): os.remove(f"{B}/review/{x}")
 # v5.6 snapshots + request guards

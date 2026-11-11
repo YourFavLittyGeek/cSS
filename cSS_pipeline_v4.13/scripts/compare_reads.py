@@ -58,7 +58,7 @@ for sid in ids:
     nps = f"{B}/review/{sid}_calls_{slug}.csv"
     if op is None or not os.path.exists(nps): text.append(f"{sid}: old calls ({op}) or redo calls ({nps}) not found - skipped"); continue
     old, new = calls_on(oc, op), calls_on(nc, nps)
-    band = {int(r.cand_id): (ai_opinion(r)["band"], ai_opinion(r)["score"]) for _, r in nc.iterrows()}
+    band = {int(r.cand_id): (lambda o: (o["band"], o["score"]))(ai_opinion(r)) for _, r in nc.iterrows()}
     if not old or new is None: text.append(f"{sid}: calls files have no fingerprint columns - skipped"); continue
     nl, xl = lab(need[3]), lab(f"{B}/review/{sid}_excluded.nii.gz")
     ol = lab(need[1]); xc = pd.read_csv(f"{B}/review/{sid}_excluded.csv")

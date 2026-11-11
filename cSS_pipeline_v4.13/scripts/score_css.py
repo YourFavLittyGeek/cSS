@@ -55,6 +55,11 @@ if "--accept-ids" in sys.argv:
     _a = sys.argv[sys.argv.index("--accept-ids") + 1]
     _ids = [] if _a.lower() in ("", "none") else [int(x) for x in _a.split(",") if x.strip()]
     df["accept"] = df.cand_id.isin(_ids).astype(int); df["near_ich"] = 0; df["reviewed"] = 1
+    # v5.7: a second reviewer's own score (review_web.py, non-primary reviewer): near-ICH and reviewed sets too
+    _opt = lambda k: ([] if sys.argv[sys.argv.index(k) + 1].lower() in ("", "none") else
+                      [int(x) for x in sys.argv[sys.argv.index(k) + 1].split(",") if x.strip()]) if k in sys.argv else None
+    if _opt("--ich-ids") is not None: df["near_ich"] = df.cand_id.isin(_opt("--ich-ids")).astype(int)
+    if _opt("--reviewed-ids") is not None: df["reviewed"] = df.cand_id.isin(_opt("--reviewed-ids")).astype(int)
 df["accept"] = pd.to_numeric(df["accept"], errors="coerce")
 if len(df) and df["accept"].isna().any():
     sys.exit(f"Unreviewed candidates (fill accept with 1 or 0): {df.loc[df.accept.isna(), 'cand_id'].tolist()}")

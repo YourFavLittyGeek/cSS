@@ -542,6 +542,9 @@ if _Lh.sum() > 1000 and _Rh.sum() > 1000:
     del _P0
 else: PL_C = PL_N = None
 del _Lh, _Rh
+# v5.7: ONE mid-sagittal plane - the mirror check (section 7) now uses this plane too (it had its own construction from the
+# hemisphere map incl. deep nuclei). Only the recorded mirror columns can change; no rule uses them.
+if PL_N is not None: pc, mvec = PL_C, PL_N
 def plane_feats(mm_, pad_):
     """-> plane_dist_mm (median), cos_plane (|cos| thin axis vs plane normal), ext_major_mm; NaN without a plane"""
     if PL_N is None or mm_.sum() < 5: return dict(plane_dist_mm=np.nan, cos_plane=np.nan, ext_major_mm=np.nan)
