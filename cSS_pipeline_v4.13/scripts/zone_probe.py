@@ -17,7 +17,8 @@ Compartments (labels = work/ID_seg_swispace.nii.gz):
   fissure_side_bias    median |dL - dR| / (dL + dR) over the fissure voxels (0 = centred between the hemispheres, 1 = hugging one side; NaN = none)
   dual_contact_frac    share with left cortex AND right cortex both within 3 mm
   cos_plane / plane_dist_mm / ext_major_mm   sheet orientation vs the mid-sagittal plane (as midline_probe.py)
-Reads: every name in --reads (default Redo_v53,Blind_v57): calls of shown objects from ID_calls_<name>.csv (fingerprint match);
+Reads: every name in --reads (default Redo_v53,Blind_v57): calls of shown objects from ID_calls_<name>.csv (fingerprint match; a study
+with none of those files falls back to the shared ID_calls.csv of the first read);
 calls of excluded objects from ID_excluded_audit_<name>.csv and from the pre-redetect snapshot (review/changes, old calls mapped by
 voxel overlap). css_any = any read called it cSS (these are PROTECTED when rules are fitted); css_all = every read of it said cSS;
 non_css = read at least once and never called cSS.
@@ -92,12 +93,21 @@ for sid in ids:
     for fate, tab, L in objs:
         calls_of = {}                                                    # object id -> list of "read:call"
         if fate == "shown":
+            have = False
             for rd in reads:
                 f = f"{B}/review/{sid}_calls_{slug(rd)}.csv"
                 if os.path.exists(f):
+                    have = True
                     m, _ = match_calls(cand, pd.read_csv(f))
                     for k, v in (m or {}).items():
                         if isinstance(v, str) and v: calls_of.setdefault(int(k), []).append(f"{rd}:{v}")
+            if not have:                      # studies without a named read (e.g. M07-M11): the shared file of the first read
+                for f in (f"{B}/review/{sid}_calls.csv", f"{B}/review/old_calls_before_redo/{sid}_calls.csv"):
+                    if os.path.exists(f):
+                        m, _ = match_calls(cand, pd.read_csv(f))
+                        for k, v in (m or {}).items():
+                            if isinstance(v, str) and v: calls_of.setdefault(int(k), []).append(f"shared:{v}")
+                        break
         else:
             for rd in reads:
                 f = f"{B}/review/{sid}_excluded_audit_{slug(rd)}.csv"
