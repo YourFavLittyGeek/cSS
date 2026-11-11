@@ -140,6 +140,13 @@ SEEDS3D = os.environ.get("CSS_3D_SEEDS", "") == "1"
 # object is a midline sheet only if one of its first-pass pieces is one (all three E22 conditions on that piece). Reason: the second merge pass (5 mm, same
 # region) can join a short cSS piece with its neighbours into one object that then looks like a long sheet (M11 #12: 15 mm piece -> 29.5 mm merged object).
 # No new threshold. The columns piece_sheet / ext_piece_max_mm are always recorded.
+# v5.8 (plan docs/PLAN_v5.8_search_zone.md) compartments, RECORDED always; E26 / E27 exclude only with CSS_ZONE2=1 (opt-in, default OFF, needs CSS_V53=1)
+#   zone2_frac   share of the object in RIBBON (labelled cortex) or SULCAL CSF (inside the 4 mm morphological closing of ONE hemisphere's cortex, not in
+#                the fissure) -> low = convexity CSF / dura / skull or fissure;  E26: zone2_frac < ZONE2_FRAC
+#   sylvian_frac share within 3 mm of insula AND of opercular cortex (frontal / parietal operculum, superior temporal) -> Sylvian vessels; E27: >= SYLV_FRAC
+ZONE2 = os.environ.get("CSS_ZONE2", "") == "1"
+ZONE2_R_MM, ZONE2_FRAC = 4.0, float(os.environ.get("CSS_ZONE2_FRAC", "0.5"))
+SYLV_MM, SYLV_FRAC = 3.0, float(os.environ.get("CSS_SYLV_FRAC", "0.6"))
 E22_PIECES = V53 and os.environ.get("CSS_E22_PIECES", "1") != "0"   # v5.7-E-fix3: ON with CSS_V53=1 (acceptance 56/56 incl. M11 #12); CSS_E22_PIECES=0 = merged-object E22 as in fix2
 SHEET3D_SIGMAS_MM = (0.6, 1.2, 1.8)
 V53_OUT_MM = 1.0                 # E17: voxels further than this outside the labelled pial boundary count as "outside"
@@ -590,6 +597,17 @@ _Lcx = ((seg >= 1000) & (seg < 2000)) | (seg == 3); _Rcx = ((seg >= 2000) & (seg
 if _Lcx.any() and _Rcx.any():
     DUALC = (ndi.distance_transform_edt(~_Lcx, sampling=vox) <= E25_REACH_MM) & (ndi.distance_transform_edt(~_Rcx, sampling=vox) <= E25_REACH_MM)
 else: DUALC = np.zeros(seg.shape, bool)
+# v5.8 compartments (recorded; see ZONE2 above)
+_ctxL = (seg >= 1000) & (seg < 2000); _ctxR = (seg >= 2000) & (seg < 3000)
+SULC = np.zeros(seg.shape, bool)
+for _c in (_ctxL, _ctxR):
+    if _c.any():
+        _dil = ndi.distance_transform_edt(~_c, sampling=vox) <= ZONE2_R_MM
+        SULC |= ndi.distance_transform_edt(_dil, sampling=vox) > ZONE2_R_MM
+RIBSUL = (_ctxL | _ctxR | (SULC & ~DUALC)); del _dil
+_ins = np.isin(seg, [1035, 2035]); _op = np.isin(seg, [1018, 1020, 1030, 1034, 1031, 1024, 1022, 2018, 2020, 2030, 2034, 2031, 2024, 2022])
+SYLV = ((ndi.distance_transform_edt(~_ins, sampling=vox) <= SYLV_MM) & (ndi.distance_transform_edt(~_op, sampling=vox) <= SYLV_MM)) if _ins.any() and _op.any() else np.zeros(seg.shape, bool)
+del _ctxL, _ctxR, _ins, _op, SULC
 del _Lcx, _Rcx
 # v5.7: ONE mid-sagittal plane - the mirror check (section 7) now uses this plane too (it had its own construction from the
 # hemisphere map incl. deep nuclei). Only the recorded mirror columns can change; no rule uses them.
@@ -905,7 +923,7 @@ for p in regionprops(lab, spacing=vox):
                vent_frac=round(float((d_vent[pad][mm] <= E16_MM).mean()), 2),
                out_frac=round(float((pial_sd[pad][mm] > V53_OUT_MM).mean()), 2), **plane_feats(mm, pad), **piece_sheet_feats(mm, pad),
                skullbase_frac=round(float(np.isin(NEAR_CX[pad][mm], E24_LABELS).mean()), 2),
-               dual_contact_frac=round(float(DUALC[pad][mm].mean()), 2), axis_angle_deg=axis_angle(mm, pad),
+               dual_contact_frac=round(float(DUALC[pad][mm].mean()), 2), zone2_frac=round(float(RIBSUL[pad][mm].mean()), 2), sylvian_frac=round(float(SYLV[pad][mm].mean()), 2), axis_angle_deg=axis_angle(mm, pad),
                sheet3d_med=round(float(np.median(S3[pad][mm])), 4) if S3 is not None else np.nan,
                sheet3d_overlap=round(float((LAB3[pad][mm] > 0).mean()), 2) if LAB3 is not None else np.nan)
     midz      = bool(np.median(dmid[pad][mm]) < 5.0)
@@ -1011,7 +1029,7 @@ V50_COLS = ["mimic_score", "mimic_class", "mimic_reason", "phase_z", "mb_cluster
             "review_priority_rank", "review_priority", "review_priority_reason",                # v5.1.3 (css_tiers.py)
             "midline_frac", "mask_edge_mm", "skull_frac", "v53_active",                         # v5.3, appended
             "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac", "dual_contact_frac",               # v5.3.1 / v5.3.2 / v5.3.4 / v5.7, appended
-            "soft_gate_fail", "axis_angle_deg", "sheet3d_med", "sheet3d_overlap", "piece_sheet", "ext_piece_max_mm"]                                                                    # v5.7 audit branch: "" or the generation gate the object failed (CSS_SOFT_GATES=1)
+            "soft_gate_fail", "axis_angle_deg", "sheet3d_med", "sheet3d_overlap", "piece_sheet", "ext_piece_max_mm", "zone2_frac", "sylvian_frac"]                                                                    # v5.7 audit branch: "" or the generation gate the object failed (CSS_SOFT_GATES=1)
 cols = cols + V50_COLS
 
 # ---- 11. exclusions (v4.8) - each with an explicit, definition-based reason
@@ -1036,7 +1054,7 @@ RULE_CONF = {"E1": "high" if T1_ANAT else "medium", "E2": "medium", "E3": "mediu
              "E5": "medium", "E6": "medium", "E7": "medium", "E8": "low", "E9": "medium",
              "E10": "low", "E11": "low",                       # v5.0 mimic rules: no real-data support yet
              "E12": "low", "E13": "low", "E14": "low", "E15": "low", "E16": "low", "E17": "low",
-             "E18": "low", "E19": "low", "E20": "low", "E21": "low", "E22": "low", "E24": "low", "E25": "low"}   # v5.3: chosen on M02-M11, not validated
+             "E18": "low", "E19": "low", "E20": "low", "E21": "low", "E22": "low", "E24": "low", "E25": "low", "E26": "low", "E27": "low"}   # v5.3: chosen on M02-M11, not validated
 def exclusion(r):
     """-> (rule_version, reason); ("", "") = kept. v5.1.1 CSS_MIXED_REVIEW=1: a mixed merged object (pieces disagree)
     is not removed whole by a vein rule (E5 / E6 / E7); it is shown with mixed_object_review = 1"""
@@ -1071,6 +1089,10 @@ def exclusion_v4(r):
             return "E21@v5.3.3", f"skull-backed and off the cortex (cortex share < {E21_CTX:g})"
         if np.isfinite(r["edge_contrast"]) and r["edge_contrast"] < E18_EDGE:
             return "E18@v5.3.3", f"ill-defined (edge contrast < {E18_EDGE:g} SD)"
+        if ZONE2 and r["zone2_frac"] < ZONE2_FRAC:
+            return "E26@v5.8", f"outside cortex and sulci: only {100 * r['zone2_frac']:.0f} % in cortex or sulcal CSF (convexity CSF / dura / skull / fissure)"
+        if ZONE2 and r["sylvian_frac"] >= SYLV_FRAC:
+            return "E27@v5.8", f"Sylvian fissure: {100 * r['sylvian_frac']:.0f} % between insula and operculum (middle cerebral artery branches / Sylvian veins)"
         if r["dual_contact_frac"] >= E25_FRAC:
             return "E25@v5.7", (f"interhemispheric fissure: left and right cortex both within {E25_REACH_MM:g} mm of {100 * r['dual_contact_frac']:.0f} % "
                                 f"of the object (between the hemispheres: falx / sinus / fissure vessels)")
@@ -1247,14 +1269,14 @@ if len(df):
                        "vox_i", "vox_j", "vox_k"]].to_string(index=False))
 FROZEN_NAMES = ["MIN_MM3", "MIN_SLICES", "MIN_ELONG", "MIN_EXTENT_MM", "MERGE_GAP_MM", "MERGE_MAX_MM", "V53_GAP_MM", "V53_MAX_MM", "V53_OUT_MM",
                 "E12_MM3", "E13_FRAC_V533", "E14_EDGE_MM", "E15_SKULL", "E16_FRAC", "E16_MM", "E17_FRAC", "E17_CTX", "E18_EDGE", "E19_DARK", "E19_SKULL",
-                "E20_VOL", "E21_CTX", "E22_PLANE_MM", "E22_COS", "E22_EXT_MM", "E24_FRAC", "E24_LABELS", "E25_FRAC", "E25_REACH_MM", "Z_LOW", "R_PCT_LOW"]
+                "E20_VOL", "E21_CTX", "E22_PLANE_MM", "E22_COS", "E22_EXT_MM", "E24_FRAC", "E24_LABELS", "E25_FRAC", "E25_REACH_MM", "ZONE2_R_MM", "ZONE2_FRAC", "SYLV_MM", "SYLV_FRAC", "Z_LOW", "R_PCT_LOW"]
 def frozen_rules():
     """thresholds in force for this run (the rule set is frozen pending held-out validation) -> manifest"""
     return {n: (list(globals()[n]) if isinstance(globals().get(n), (list, tuple)) else globals().get(n)) for n in FROZEN_NAMES if n in globals()}
 def active_switches():
     """every experimental environment switch read by the detector, as set for this run"""
     return {k: os.environ.get(k, "") for k in ("CSS_V53", "CSS_USE_MIMIC", "CSS_MIXED_REVIEW", "CSS_QC_STRICT", "CSS_KEEP_ALL", "CSS_SATO_LEGACY",
-                                              "CSS_RANK", "CSS_ALLOW_ORIENT", "CSS_SURFACE_ZONE", "CSS_SOFT_GATES", "CSS_3D_SEEDS", "CSS_E22_PIECES")}
+                                              "CSS_RANK", "CSS_ALLOW_ORIENT", "CSS_SURFACE_ZONE", "CSS_SOFT_GATES", "CSS_3D_SEEDS", "CSS_E22_PIECES", "CSS_ZONE2", "CSS_ZONE2_FRAC", "CSS_SYLV_FRAC")}
 # v4.17 provenance: inputs (sha256), parameters, versions -> review/ID_manifest.json
 _inputs = {k: p_ for k, p_ in (("swi", f"{base}/data/{subj}_swi.nii"), ("labels", f"{base}/work/{subj}_seg_swispace.nii.gz"),
                                ("t1_labels", _t1p), ("destrieux", f"{base}/work/{subj}_a2009s_swispace.nii.gz"),

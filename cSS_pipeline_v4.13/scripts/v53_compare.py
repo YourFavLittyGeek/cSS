@@ -23,7 +23,7 @@ FEAT = ["pial_dist_mm", "cortex_frac", "bank_frac", "midline_frac", "skull_frac"
         "basal_frac", "rel_height", "tube_ratio", "tram_frac", "surface_alignment", "axis_normal", "vessel_wm_mm",
         "local_cont_max_mm", "extent_mm", "n_pieces", "darkness_z", "edge_contrast", "region_z", "css_evidence",
         "vein_evidence", "score_v4", "artifact_zone", "cmb_like", "out_frac", "pial_sd_p10_mm", "pial_sd_p90_mm",
-        "surface_contact_frac_1mm", "csf_depth_mm", "elongation", "volume_mm3", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac"]
+        "surface_contact_frac_1mm", "csf_depth_mm", "elongation", "volume_mm3", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac", "dual_contact_frac", "zone2_frac", "sylvian_frac"]
 def feats(tab, i):
     """features of the v5.3 object this old candidate became (NaN when it was dropped / gone)"""
     if tab is None or not i or i not in tab.index: return {f"v53_{k}": np.nan for k in FEAT}

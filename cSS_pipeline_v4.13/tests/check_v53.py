@@ -46,8 +46,8 @@ truth = nib.load(f"{T}/work/PH3_truth.nii.gz").get_fdata().astype(int)
 
 # ---- 1. switch off = unchanged list, new columns appended last
 off, off_lab, _, _, _ = detect("PH3", False)
-new = ["midline_frac", "mask_edge_mm", "skull_frac", "v53_active", "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac", "dual_contact_frac", "soft_gate_fail", "axis_angle_deg", "sheet3d_med", "sheet3d_overlap", "piece_sheet", "ext_piece_max_mm"]
-if list(off.columns[-17:]) != new: fail(f"new columns must be appended last, got {list(off.columns[-17:])}")
+new = ["midline_frac", "mask_edge_mm", "skull_frac", "v53_active", "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac", "dual_contact_frac", "soft_gate_fail", "axis_angle_deg", "sheet3d_med", "sheet3d_overlap", "piece_sheet", "ext_piece_max_mm", "zone2_frac", "sylvian_frac"]
+if list(off.columns[-19:]) != new: fail(f"new columns must be appended last, got {list(off.columns[-19:])}")
 if off.sheet3d_med.notna().any() or off.sheet3d_overlap.notna().any(): fail("the 3-D sheet columns must stay empty when CSS_3D_SEEDS is not set")
 if not off.axis_angle_deg.dropna().between(0, 90).all() or not off.axis_angle_deg.notna().all(): fail("axis_angle_deg (always recorded) must be 0-90 degrees")
 if off.soft_gate_fail.fillna("").ne("").any(): fail("soft_gate_fail must be empty when CSS_SOFT_GATES is not set")
@@ -157,6 +157,19 @@ if len(_e22p) and not (_e22p.piece_sheet == 1).all(): fail("E22 pieces: an E22 e
 if not (_p1.ext_piece_max_mm.dropna() <= _p1.ext_major_mm.dropna().max() + 1e-6).all(): fail("a piece cannot be longer than the longest object")
 run([f"{S}/detect_css.py", "PH3"], CSS_V53="1")
 print(f"E22 on first-pass pieces: shown {len(_p1)} (default {len(_n0)}), E22 exclusions {len(_e22p)}; columns present")
+
+# ---- 1d3. v5.8 CSS_ZONE2=1 (opt-in): E26 outside cortex+sulci, E27 Sylvian. Columns always recorded; ON never loses a true lesion on the phantom
+run([f"{S}/detect_css.py", "PH3"], CSS_V53="1", CSS_ZONE2="1")
+_z1 = pd.read_csv(f"{T}/review/PH3_candidates.csv"); _zl = np.asanyarray(nib.load(f"{T}/review/PH3_candidates.nii.gz").dataobj).astype(int)
+if not _z1.zone2_frac.between(0, 1).all() or not _z1.sylvian_frac.between(0, 1).all(): fail("zone2 / sylvian columns must be filled")
+_tz = [k for k in np.unique(truth[truth > 0]) if ((truth == k) & (_zl > 0)).any()]
+_t0 = [k for k in np.unique(truth[truth > 0]) if ((truth == k) & (off_lab > 0)).any()] if "off_lab" in dir() else _tz
+run([f"{S}/detect_css.py", "PH3"], CSS_V53="1")
+_zb = pd.read_csv(f"{T}/review/PH3_candidates.csv"); _zbl = np.asanyarray(nib.load(f"{T}/review/PH3_candidates.nii.gz").dataobj).astype(int)
+_tb = [k for k in np.unique(truth[truth > 0]) if ((truth == k) & (_zbl > 0)).any()]
+if set(_tb) - set(_tz): fail(f"CSS_ZONE2 lost true lesions {sorted(set(_tb) - set(_tz))}")
+if not (_z1.zone2_frac >= 0.5).all(): fail("E26 must exclude every shown object below the threshold")
+print(f"v5.8 zone2: true lesions shown {len(_tb)} -> {len(_tz)} with CSS_ZONE2=1; candidates {len(_zb)} -> {len(_z1)}")
 
 # ---- 1e. audit branch: CSS_3D_SEEDS=1 (opt-in, RECORDED ONLY): 3-D plate-ness seeds -> work/ID_gen_3d.nii.gz, ID_3d_only.csv, manifest overlap statistics;
 #      every column of the candidate list except the two sheet3d columns is identical to the run without the switch
