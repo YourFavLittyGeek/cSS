@@ -3,6 +3,7 @@
 usage: review_web.py M12[,M13,...] [--port 8765] [--no-browser] [--reviewer "NAME"] [--audit]
 Only the detector's SHOWN candidates are listed: objects the exclusion rules removed are never shown (v5.7-E-fix5 default).
   --open    open read: no validation (blind) read - AI meter, AI score, comparison, import and export all available from the start
+  --show-excluded  list EVERY rule-excluded object after the candidates (ids 10001.., rule shown, calls in ID_excluded_audit_<name>.csv, never scored)
   --audit   validation-read audit: mix a 20 % sample of the EXCLUDED objects into the list (shuffled numbering) to check the rules
 Starts a server on this computer only (127.0.0.1) and opens the page: a scrollable three-plane viewer (wheel =
 slices, Ctrl+wheel or = / - = zoom, right-drag = window / level), the detector's outlines, an evidence meter, the
@@ -38,6 +39,7 @@ LOCK = threading.Lock()
 slug = lambda s: re.sub(r"[^A-Za-z0-9]+", "_", s.strip()).strip("_") or "reviewer"
 now = lambda: time.strftime("%Y-%m-%d %H:%M:%S")
 AUDIT_OFFSET, AUDIT_FRAC = 10000, 0.20   # v5.7 validation read: excluded objects shown as ids 10000 + excl_id, 20 % sample
+SHOW_EXCL = False                         # v5.8.3: --show-excluded = every excluded object listed with its rule
 OPEN_READ = False                         # v5.8.1: --open = full viewer, no blind validation read
 AUDIT_ON = False                          # v5.7-E-fix5: the excluded-object audit sample only with --audit (user: show the final list, exclusions applied)
 
@@ -171,8 +173,9 @@ class Study:
 
     def audit_ids(self, reviewer):
         """deterministic 20 % sample of the excluded objects (at least 1 when any), seeded by study + reviewer"""
-        if not AUDIT_ON: return []
         xd, _ = self._excluded()
+        if SHOW_EXCL: return sorted(int(r.excl_id) for _, r in xd.iterrows()) if len(xd) else []
+        if not AUDIT_ON: return []
         if not len(xd): return []
         ids = sorted(int(r.excl_id) for _, r in xd.iterrows() if not str(r.get("reason", "")).lower().startswith("infratentorial"))
         if not ids: return []
@@ -182,7 +185,7 @@ class Study:
         return sorted(int(i) for i in rng.choice(ids, size=min(n, len(ids)), replace=False))
 
     def audit_cands(self, reviewer):
-        xd, xl = self._excluded(); out = []; revealed = load_final(self.sid, reviewer) is not None
+        xd, xl = self._excluded(); out = []; revealed = SHOW_EXCL or load_final(self.sid, reviewer) is not None
         for e in self.audit_ids(reviewer):
             r = xd[xd.excl_id == e].iloc[0]; pts = np.argwhere(xl == e)
             if not len(pts): continue
@@ -461,7 +464,7 @@ def side_check(s):
 
 def meta(sid, reviewer, mode=""):
     s = study(sid); calls, note = s.load_calls(reviewer) if reviewer else ({}, "")
-    audit = mode == "validation" and bool(reviewer)
+    audit = (mode == "validation" or SHOW_EXCL) and bool(reviewer)
     if audit: calls.update(s.load_audit(reviewer))
     cands = []
     for _, r in s.df.iterrows():
@@ -501,7 +504,7 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/seqmeta":
                 s = study(q["study"]); s.volume(q["seq"]); return self._send(s.meta_seq[q["seq"]])
             if u.path == "/api/labels":
-                L = study(q["study"]).labels(q.get("reviewer", ""), q.get("mode") == "validation")
+                L = study(q["study"]).labels(q.get("reviewer", ""), q.get("mode") == "validation" or SHOW_EXCL)
                 return self._send(L.astype("<u2").tobytes(order="F"), "application/octet-stream")
             self._send(dict(error="not found"), code=404)
         except Exception as e:
@@ -573,7 +576,7 @@ class H(BaseHTTPRequestHandler):
                     calls[cid] = cur
                     if not cur.get("call") and not cur.get("comment"): calls.pop(cid)
                     s.save(rev, calls, cid, d.get("action", "call"), d.get("meter"))
-                    if d.get("mode") == "validation": calls.update(s.load_audit(rev))
+                    if d.get("mode") == "validation" or SHOW_EXCL: calls.update(s.load_audit(rev))
                 return self._send(dict(ok=True, calls=calls, saved=now()))
             if u.path == "/api/missed":
                 with LOCK: m = s.missed_edit(rev, d["action"], d)
@@ -628,7 +631,7 @@ if __name__ == "__main__":
     IDS = [s for s in a[0].split(",") if s]
     port = int(a[a.index("--port") + 1]) if "--port" in a else 8765
     if "--reviewer" in a: reviewers(a[a.index("--reviewer") + 1])
-    AUDIT_ON = "--audit" in a; OPEN_READ = "--open" in a
+    AUDIT_ON = "--audit" in a; OPEN_READ = "--open" in a; SHOW_EXCL = "--show-excluded" in a
     for sid in IDS:
         for f in (f"{B}/data/{sid}_swi.nii", f"{B}/review/{sid}_candidates.csv", f"{B}/review/{sid}_candidates.nii.gz"):
             if not os.path.exists(f): sys.exit(f"{sid}: {f} not found - run the detection first")
@@ -638,6 +641,7 @@ if __name__ == "__main__":
     else: sys.exit(f"no free port between {port} and {port + 19}")
     url = f"http://127.0.0.1:{srv.server_address[1]}/"
     print(f"cSS reviewer for {', '.join(IDS)}: {url}   (this computer only; Ctrl+C here to stop)", flush=True)
+    if SHOW_EXCL: print("SHOW EXCLUDED: every rule-excluded object is listed after the candidates (number 10000 + id, rule shown); its calls are never scored", flush=True)
     if OPEN_READ: print("OPEN READ: AI meter and AI score visible, no blind validation read", flush=True)
     print("shown candidates only (rule-excluded objects hidden)" if not AUDIT_ON else "AUDIT: a 20 % sample of the rule-excluded objects is mixed into validation reads", flush=True)
     study(IDS[0])

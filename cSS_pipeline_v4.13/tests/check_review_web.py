@@ -139,6 +139,21 @@ srv2.kill()
 if any(c_.get("audit") or c_["id"] >= 10000 for c_ in _m2["cands"]): fail("without --audit no excluded object may be shown")
 if _m2.get("open_read") is not True: fail("--open must be passed to the page (open_read)")
 if len(_m2["cands"]) != n: fail(f"without --audit the list must be exactly the shown candidates: {len(_m2['cands'])} vs {n}")
+# v5.8.3 --show-excluded: every excluded object listed with its rule; a call on one goes to the audit file, never into the calls / score
+srv3 = subprocess.Popen([sys.executable, f"{S}/review_web.py", "PH3", "--no-browser", "--port", "8933", "--open", "--show-excluded"], stdout=subprocess.PIPE, text=True)
+U = "http://127.0.0.1:8933"
+try:
+    _m3 = get("/api/meta?study=PH3&reviewer=Reader%20X"); _xe = pd.read_csv(f"{B}/review/PH3_excluded.csv")
+    _ex = [c_ for c_ in _m3["cands"] if c_["id"] >= 10000]
+    if len(_ex) != len(_xe) or not all(c_.get("rule") for c_ in _ex): fail(f"--show-excluded must list all {len(_xe)} excluded objects with their rule: {len(_ex)}")
+    if _ex:
+        post("/api/call", dict(study="PH3", reviewer="Reader X", cand_id=_ex[0]["id"], call="cSS", action="call"))
+        if not os.path.exists(f"{B}/review/PH3_excluded_audit_Reader_X.csv"): fail("excluded-object call must go to the audit file")
+        _cx = f"{B}/review/PH3_calls_Reader_X.csv"
+        if os.path.exists(_cx) and (pd.read_csv(_cx).cand_id >= 10000).any(): fail("excluded-object calls must never enter the calls file")
+        os.remove(f"{B}/review/PH3_excluded_audit_Reader_X.csv")
+finally: srv3.kill()
+print(f"--show-excluded: {len(_ex)} excluded objects listed with their rule; calls kept apart from the score")
 print(f"default (no --audit): a new reviewer's validation read lists only the {n} shown candidates")
 for f in ("PH3_calls.csv", "PH3_calls_Reader_A.csv", "PH3_review_log.csv", "PH3_missed.csv", "reviewers.json"): os.remove(f"{B}/review/{f}")
 print(f"review_web: {n} candidates with meter, name required, calls / comment / missed mark stored with the reviewer, re-loaded per reviewer;\n"
