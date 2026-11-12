@@ -6,7 +6,7 @@ HERE = os.path.dirname(os.path.abspath(__file__)); S = os.path.join(HERE, "..", 
 def fail(m): print("FAIL:", m); sys.exit(1)
 c = pd.read_csv(f"{B}/review/PH3_candidates.csv"); x = c[["cand_id", "vox_i", "vox_j", "vox_k", "volume_mm3"]].copy()
 made = []
-for name, calls in (("ZpA", ["cSS", "cSS", "Vein", "Artifact", "Normal", "Normal", "Vein"]), ("ZpB", ["cSS", "Microbleed", "Vein", "Artifact", "Normal", "cSS", "Vein"])):
+for name, calls in (("ZpA", ["cSS", "cSS", "Vessel", "Artifact", "Normal", "Normal", "Vessel"]), ("ZpB", ["cSS", "Microbleed", "Vessel", "Artifact", "Normal", "cSS", "Vessel"])):
     x["call"] = calls[:len(x)]; x["comment"] = ""; p = f"{B}/review/PH3_calls_{name}.csv"; x.to_csv(p, index=False); made.append(p)
 before = {f: hashlib.md5(open(f, "rb").read()).hexdigest() for f in glob.glob(f"{B}/review/PH3_candidates*") + glob.glob(f"{B}/review/PH3_excluded*.csv")}
 r = subprocess.run([sys.executable, f"{S}/zone_probe.py", "PH3", "--reads", "ZpA,ZpB"], capture_output=True, text=True, env=dict(os.environ, CSS_BASE=B))

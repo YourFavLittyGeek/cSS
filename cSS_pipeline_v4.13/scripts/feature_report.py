@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare candidate features between calls (cSS vs Vein/Normal/Artifact) across all reviewed subjects.
+"""Compare candidate features between calls (cSS vs Vessel/Normal/Artifact) across all reviewed subjects.
 usage: feature_report.py [--source expert|reader]
 Default: for each subject the EXPERT reference (review/ID_expert_*.csv from expert_import.py) is used
 when it exists, otherwise the reader's own calls (review/ID_calls.csv from review_css.py)."""
@@ -32,7 +32,7 @@ for s in subjects:
 print("labels: " + ", ".join(f"{s}={u}" for s, u in used.items()))
 if not rows: sys.exit("no reviewed cases yet (run review_css.py first)")
 D = pd.concat(rows, ignore_index=True)
-D = D[D.call.isin(["cSS", "Vein", "Normal", "Artifact"])]
+D = D[D.call.isin(["cSS", "Vessel", "Normal", "Artifact"])]
 print(f"{D.subject.nunique()} subject(s), {len(D)} decided candidates: {D.call.value_counts().to_dict()}\n")
 def auc(x, y):
     x, y = np.asarray(x, float), np.asarray(y, float); x, y = x[~np.isnan(x)], y[~np.isnan(y)]
@@ -43,12 +43,12 @@ feats = ["darkness_z", "volume_mm3", "n_slices", "elongation", "surface_contact"
          "pial_dist_mm", "bank_frac", "tube_ratio", "surface_alignment", "tram_frac", "vein_tree_mm",
          "mirror_dark_frac", "flair_csf_z", "parenchyma_frac", "css_evidence", "vein_evidence",
          "score_v3", "score_v4", "score"]
-print(f"{'feature':18s} {'cSS':>8s} {'Vein':>8s} {'Normal':>8s} {'Artifact':>9s}   AUC cSS vs rest")
+print(f"{'feature':18s} {'cSS':>8s} {'Vessel':>8s} {'Normal':>8s} {'Artifact':>9s}   AUC cSS vs rest")
 for f in feats:
     if f not in D: continue
     med = D.groupby("call")[f].median()
     a = auc(D[D.call == "cSS"][f], D[D.call != "cSS"][f])
     tag = "  <- useful" if a >= 0.75 or a <= 0.25 else ""
-    print(f"{f:18s} " + " ".join(f"{med.get(k, np.nan):8.2f}" for k in ["cSS", "Vein", "Normal"]) +
+    print(f"{f:18s} " + " ".join(f"{med.get(k, np.nan):8.2f}" for k in ["cSS", "Vessel", "Normal"]) +
           f" {med.get('Artifact', np.nan):9.2f}   {a:5.2f}{tag}")
 print("\nAUC near 0.5 = no help; >0.75 = higher in cSS; <0.25 = lower in cSS.")

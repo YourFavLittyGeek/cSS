@@ -80,3 +80,39 @@ def touch_stats(cortex_labels, obj, vox, reach_mm=1.5):
     if not len(lab): return dict(n_labels=0, label_spread=np.nan)
     u, n = np.unique(lab, return_counts=True); fr = n / n.sum()
     return dict(n_labels=int((fr >= 0.15).sum()), label_spread=round(float(1 - fr.max()), 2))
+
+
+# ---- v5.9 3-D structure of the whole dark object (struct_probe.py, detect_css.py columns struct_*) ----
+BALL_MM, TUBE_R, RIB_R, MIN_VOX_S3 = 9.0, 2.5, 2.0, 1.5
+
+
+def classify3d(s1, s2, s3, vmax):
+    """BALL (compact, microbleed-like) / TUBE (long, round cross-section: vessel-like) / RIBBON (flat, long: sheet / band) / OTHER;
+    UNRESOLVED when the thinnest extent is below 1.5 voxels across (3 mm slices cannot tell a short tube from a small ball)"""
+    if s3 < MIN_VOX_S3 * vmax: return "UNRESOLVED"
+    if s1 <= BALL_MM and s1 / s3 <= 3.0: return "BALL"
+    if s1 / s2 >= TUBE_R and s2 / s3 <= 2.0: return "TUBE"
+    if s2 / s3 >= RIB_R and s1 >= BALL_MM: return "RIBBON"
+    return "OTHER"
+
+
+def struct_measures(dark, obj, cortex, psd, vox, cap_mm=20.0):
+    """regrow the whole dark structure of `obj` inside `dark` (cap_mm) and measure it: dict(s1, s2, s3, thick, cls, cont, ctx, cos, verdict)
+    cont = structure length / object length (a vessel runs on beyond the object); ctx = share inside cortex (`cortex` bool);
+    cos = |cos| of the long axis to the pial normal from `psd` (signed pial distance; ~0 = runs along the surface); verdict = plain-language reading."""
+    vox = np.asarray(vox, float); st = dark_support(dark, obj, vox, cap_mm=cap_mm, grow=1)
+    if st.sum() < 3: return dict(s1=np.nan, s2=np.nan, s3=np.nan, thick=np.nan, cls="UNRESOLVED", cont=np.nan, ctx=np.nan, cos=np.nan, verdict="not measurable")
+    c = np.argwhere(st); o1 = principal(np.argwhere(obj), vox)[0]; s1, s2, s3, ev = principal(c, vox)
+    edt = ndi.distance_transform_edt(ndi.binary_fill_holes(st) | st, sampling=vox); thick = 2 * float(np.percentile(edt[st], 90))
+    cos = np.nan
+    if psd is not None:
+        g = np.stack(np.gradient(psd.astype(np.float32), *vox)); cen = tuple(np.round(c.mean(0)).astype(int).clip(0, np.array(st.shape) - 1)); n = g[(slice(None),) + cen]
+        if np.linalg.norm(n) > 1e-6: cos = abs(float(ev[:, 0] @ (n / np.linalg.norm(n))))
+    cls = classify3d(s1, s2, s3, float(vox.max())); cont = s1 / max(o1, 1e-6); ctx = float(cortex[st].mean())
+    if cls == "BALL": v = "compact ball: microbleed-like"
+    elif cls == "TUBE": v = "round tube" + (" that runs on beyond the object: vessel-like" if cont >= 2.0 else ": vessel-like if it continues")
+    elif cls == "RIBBON": v = "flat ribbon" + (" along the cortex: cSS-like" if (ctx >= 0.5 and (not np.isfinite(cos) or cos <= 0.5)) else ", not on the cortex: sheet / artifact-like")
+    elif cls == "UNRESOLVED": v = "too thin to resolve at this slice thickness"
+    else: v = "no clear 3-D form"
+    return dict(s1=round(s1, 1), s2=round(s2, 1), s3=round(s3, 1), thick=round(thick, 1), cls=cls, cont=round(cont, 2), ctx=round(ctx, 2),
+                cos=round(cos, 2) if np.isfinite(cos) else np.nan, verdict=v)

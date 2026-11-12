@@ -9,9 +9,9 @@ aff = np.eye(4); old = np.zeros((12, 12, 12), np.int32); old[2:5, 2:5, 2:5] = 1;
 new = np.zeros_like(old); new[2:5, 2:5, 2:5] = 1; new[7:10, 7:10, 7:10] = 2                                          # same objects in the new list (ids 1, 2)
 nib.save(nib.Nifti1Image(old, aff), f"{T}/review/changes/PX_before_candidates.nii.gz")
 oc = pd.DataFrame(dict(cand_id=[1, 2], vox_i=[3, 8], vox_j=[3, 8], vox_k=[3, 8], volume_mm3=[27.0, 27.0])); oc.to_csv(f"{T}/review/changes/PX_before_candidates.csv", index=False)
-oc.assign(call=["cSS", "Vein"]).to_csv(f"{T}/review/changes/PX_before_calls.csv", index=False)
+oc.assign(call=["cSS", "Vessel"]).to_csv(f"{T}/review/changes/PX_before_calls.csv", index=False)
 got = pc.old_calls_onto(T, "PX", new)
-if got != {1: ["first:cSS"], 2: ["first:Vein"]}: fail(f"old calls mapped onto the new objects: {got}")
+if got != {1: ["first:cSS"], 2: ["first:Vessel"]}: fail(f"old calls mapped onto the new objects: {got}")
 if pc.old_calls_onto(T, "PX", np.zeros(1, np.int32)) != {} or pc.old_calls_onto(T, "PX", np.zeros((1, 1, 1), np.int32)) != {}: fail("a non-3-D or wrong-grid label array must give {} (no crash)")
 cand = pd.DataFrame(dict(cand_id=[1, 2], vox_i=[3, 8], vox_j=[3, 8], vox_k=[3, 8], volume_mm3=[27.0, 27.0]))
 oc_ = pc.object_calls(T, "PX", "shown", np.zeros(1, np.int32), ["nobody"], cand)          # the exact call pial_compare used to crash on

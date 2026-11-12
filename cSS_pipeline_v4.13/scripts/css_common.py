@@ -20,6 +20,11 @@ def load_lut():
     return lut
 
 
+def norm_call(c):
+    """v5.9: the call class 'Vein' is now 'Vessel'; old files are read as Vessel (files are not rewritten)"""
+    return "Vessel" if isinstance(c, str) and c.strip() == "Vein" else c
+
+
 def match_calls(cand, calls, tol_vox=2.0, tol_vol=0.15):
     """Re-attach reader calls to the CURRENT candidate list by fingerprint (centroid within
     tol_vox voxels, volume within tol_vol), so re-running the detector can never move a call
@@ -34,7 +39,7 @@ def match_calls(cand, calls, tol_vox=2.0, tol_vol=0.15):
         dv = np.abs(C[:, 4] - float(r.volume_mm3)) / max(float(r.volume_mm3), 1.0)
         ok = np.where((d <= tol_vox) & (dv <= tol_vol))[0]
         if len(ok):
-            out[int(C[ok[d[ok].argmin()], 0])] = r.call
+            out[int(C[ok[d[ok].argmin()], 0])] = norm_call(r.call)
         else:
             dropped += 1
     return out, dropped
@@ -56,7 +61,7 @@ def load_calls(b, subj, cand):
             return {}, (f"{subj}: old-format calls IGNORED - candidates were re-detected after "
                         f"they were made, so cand_ids may point to different lesions")
         valid = set(cand.cand_id.astype(int))
-        return {int(c): v for c, v in zip(calls.cand_id, calls.call) if int(c) in valid}, ""
+        return {int(c): norm_call(v) for c, v in zip(calls.cand_id, calls.call) if int(c) in valid}, ""
     return m, (f"{subj}: {dropped} earlier call(s) match no current candidate (detector re-run) "
                f"- dropped" if dropped else "")
 
@@ -72,12 +77,12 @@ def save_calls(b, subj, cand, calls):
 # mark_css.py already understand, so old single letters (C V N H U) keep their meaning.
 LABELS = {
     "C":   ("cSS", "cSS"),
-    "V":   ("vein_unspecified", "Vein"),
-    "VS":  ("vein_surface", "Vein"),            # cortical vein running ALONG the pial surface (hard negative)
-    "VC":  ("vein_sulcal", "Vein"),             # vein in the middle of the sulcal CSF
-    "VT":  ("vein_transcortical", "Vein"),      # medullary / transcortical, perpendicular to the cortex
-    "VX":  ("vein_sinus_adjacent", "Vein"),     # vein joining / next to a dural sinus
-    "TV":  ("thrombosed_vein", "Vein"),
+    "V":   ("vein_unspecified", "Vessel"),
+    "VS":  ("vein_surface", "Vessel"),            # cortical vein running ALONG the pial surface (hard negative)
+    "VC":  ("vein_sulcal", "Vessel"),             # vein in the middle of the sulcal CSF
+    "VT":  ("vein_transcortical", "Vessel"),      # medullary / transcortical, perpendicular to the cortex
+    "VX":  ("vein_sinus_adjacent", "Vessel"),     # vein joining / next to a dural sinus
+    "TV":  ("thrombosed_vein", "Vessel"),
     "A":   ("artifact_airbone", "Artifact"),    # skull base / orbitofrontal / temporal pole susceptibility
     "AM":  ("artifact_motion", "Artifact"),     # motion, ghosting, Gibbs, registration
     "N":   ("normal_other", "Normal"),
@@ -92,8 +97,8 @@ LABELS = {
     "U":   ("uncertain", "Unsure"),
 }
 LABEL_HELP = [("C", "cortical superficial siderosis"),
-              ("V / VS / VC / VT / VX", "vein: any / along surface / mid-sulcus / transcortical / at sinus"),
-              ("TV", "thrombosed vein"),
+              ("V / VS / VC / VT / VX", "vessel: any / along surface / mid-sulcus / transcortical / at sinus"),
+              ("TV", "thrombosed vessel"),
               ("A / AM", "artifact: air-bone susceptibility / motion, ghosting"),
               ("N / NI", "normal or other / normal iron-rich cortex"),
               ("MB / CA", "microbleed / calcification"),

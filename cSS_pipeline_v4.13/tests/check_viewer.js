@@ -37,5 +37,17 @@ const {chromium} = require('playwright');
   if (!/^PH3_cand\d\d_x\d{3}_y\d{3}_z\d{3}_axial\.png$/.test(nm)) await fail('snapshot name ' + nm);
   if (errs.length) await fail('page errors: ' + errs.join(' | '));
   console.log('viewer: zoom stays fit, layouts 1/2/4, mirror round-trip, panel hide/pin, snapshot name ' + nm);
+  // v5.9: 3-D shape card visible by default, draws a non-blank canvas, key 3 hides / shows it, the choice is remembered
+  await ev(() => document.activeElement.blur());
+  if (await ev(() => getComputedStyle($('#s3body')).display) === 'none') await fail('3-D card must be visible by default');
+  let nz = 0; for (let i = 0; i < 40 && !nz; i++) { await pg.waitForTimeout(500); nz = await ev(() => { const c = $('#s3cv'), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let k = 3; k < d.length; k += 4) if (d[k] > 0) n++; return n; }); }
+  if (!nz) await fail('3-D canvas stays empty');
+  const r0 = await ev(() => s3.ry); const cb = await pg.locator('#s3cv').boundingBox(); await pg.mouse.move(cb.x + 60, cb.y + 60); await pg.mouse.down(); await pg.mouse.move(cb.x + 120, cb.y + 60, {steps: 4}); await pg.mouse.up();
+  if (await ev(() => s3.ry) === r0) await fail('dragging the 3-D canvas must rotate it');
+  await pg.keyboard.press('3'); await pg.waitForTimeout(300);
+  if (await ev(() => getComputedStyle($('#s3body')).display) !== 'none' || await ev(() => localStorage.getItem('css_s3')) !== 'false') await fail('key 3 must hide the 3-D card and remember it');
+  await pg.keyboard.press('3'); await pg.waitForTimeout(300);
+  if (await ev(() => getComputedStyle($('#s3body')).display) === 'none') await fail('key 3 must show the 3-D card again');
+  console.log('3-D card: visible by default, drawn, rotates, hide / show with key 3');
   console.log('RESULT viewer OK'); await b.close();
 })();

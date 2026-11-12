@@ -11,7 +11,7 @@ def run(args):
     return r.stdout
 before = {f: hashlib.md5(open(f, "rb").read()).hexdigest() for f in glob.glob(f"{B}/review/PH3_*") + glob.glob(f"{B}/work/PH3_*") + glob.glob(f"{B}/data/PH3_*") if os.path.isfile(f)}
 cand = pd.read_csv(f"{B}/review/PH3_candidates.csv"); x = cand[["cand_id", "vox_i", "vox_j", "vox_k", "volume_mm3"]].copy()
-x["call"] = (["cSS", "cSS", "Vein", "Artifact", "Normal", "Normal", "Vein"] * 8)[:len(x)]; x["comment"] = ""; cf = f"{B}/review/PH3_calls_CpT.csv"; x.to_csv(cf, index=False)
+x["call"] = (["cSS", "cSS", "Vessel", "Artifact", "Normal", "Normal", "Vessel"] * 8)[:len(x)]; x["comment"] = ""; cf = f"{B}/review/PH3_calls_CpT.csv"; x.to_csv(cf, index=False)
 adj = f"{B}/review/adjudication.csv"; had_adj = os.path.exists(adj)
 if not had_adj: pd.DataFrame([dict(study_id="PH3", fate="shown", obj_id=2, call="not cSS", note="t")]).to_csv(adj, index=False)   # exercises the A_fate / A_id adjudication path
 try:

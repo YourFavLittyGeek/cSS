@@ -46,8 +46,8 @@ truth = nib.load(f"{T}/work/PH3_truth.nii.gz").get_fdata().astype(int)
 
 # ---- 1. switch off = unchanged list, new columns appended last
 off, off_lab, _, _, _ = detect("PH3", False)
-new = ["midline_frac", "mask_edge_mm", "skull_frac", "v53_active", "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac", "dual_contact_frac", "soft_gate_fail", "axis_angle_deg", "sheet3d_med", "sheet3d_overlap", "piece_sheet", "ext_piece_max_mm", "zone2_frac", "sylvian_frac"]
-if list(off.columns[-19:]) != new: fail(f"new columns must be appended last, got {list(off.columns[-19:])}")
+new = ["midline_frac", "mask_edge_mm", "skull_frac", "v53_active", "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac", "dual_contact_frac", "soft_gate_fail", "axis_angle_deg", "sheet3d_med", "sheet3d_overlap", "piece_sheet", "ext_piece_max_mm", "zone2_frac", "sylvian_frac", "struct_s1_mm", "struct_s2_mm", "struct_s3_mm", "struct_thick_mm", "struct_cls", "struct_cont", "struct_ctx_frac", "struct_surf_cos", "struct_verdict"]
+if list(off.columns[-28:]) != new: fail(f"new columns must be appended last, got {list(off.columns[-28:])}")
 if off.sheet3d_med.notna().any() or off.sheet3d_overlap.notna().any(): fail("the 3-D sheet columns must stay empty when CSS_3D_SEEDS is not set")
 if not off.axis_angle_deg.dropna().between(0, 90).all() or not off.axis_angle_deg.notna().all(): fail("axis_angle_deg (always recorded) must be 0-90 degrees")
 if off.soft_gate_fail.fillna("").ne("").any(): fail("soft_gate_fail must be empty when CSS_SOFT_GATES is not set")
@@ -170,6 +170,18 @@ _tb = [k for k in np.unique(truth[truth > 0]) if ((truth == k) & (_zbl > 0)).any
 if set(_tb) - set(_tz): fail(f"CSS_ZONE2 lost true lesions {sorted(set(_tb) - set(_tz))}")
 if not (_z1.sylvian_frac < 0.2).all(): fail("E27 must exclude every shown object at or above its threshold")
 print(f"v5.8 zone2: true lesions shown {len(_tb)} -> {len(_tz)} with CSS_ZONE2=1; candidates {len(_zb)} -> {len(_z1)}")
+
+# ---- 1d4. v5.9 3-D structure: columns always recorded; CSS_STRUCT=1 (E28 ball, E29 tube, opt-in) can only remove objects, never a true lesion on the phantom
+run([f"{S}/detect_css.py", "PH3"], CSS_V53="1", CSS_STRUCT="1")
+_s1 = pd.read_csv(f"{T}/review/PH3_candidates.csv"); _sl = np.asanyarray(nib.load(f"{T}/review/PH3_candidates.nii.gz").dataobj).astype(int)
+_ts = [k for k in np.unique(truth[truth > 0]) if ((truth == k) & (_sl > 0)).any()]
+run([f"{S}/detect_css.py", "PH3"], CSS_V53="1")
+_sb = pd.read_csv(f"{T}/review/PH3_candidates.csv"); _sbl = np.asanyarray(nib.load(f"{T}/review/PH3_candidates.nii.gz").dataobj).astype(int)
+_tb2 = [k for k in np.unique(truth[truth > 0]) if ((truth == k) & (_sbl > 0)).any()]
+if not set(_sb.struct_cls.dropna()) <= {"BALL", "TUBE", "RIBBON", "OTHER", "UNRESOLVED"} or _sb.struct_verdict.isna().any(): fail("struct columns must be filled with valid classes and a verdict")
+if set(_tb2) - set(_ts): fail(f"CSS_STRUCT lost true lesions {sorted(set(_tb2) - set(_ts))}")
+if len(_s1) > len(_sb): fail("CSS_STRUCT may only remove objects")
+print(f"v5.9 struct: classes {_sb.struct_cls.value_counts().to_dict()}; CSS_STRUCT=1 keeps {len(_ts)} of {len(_tb2)} true lesions, shown {len(_sb)} -> {len(_s1)}")
 
 # ---- 1e. audit branch: CSS_3D_SEEDS=1 (opt-in, RECORDED ONLY): 3-D plate-ness seeds -> work/ID_gen_3d.nii.gz, ID_3d_only.csv, manifest overlap statistics;
 #      every column of the candidate list except the two sheet3d columns is identical to the run without the switch

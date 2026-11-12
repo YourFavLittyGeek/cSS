@@ -11,15 +11,15 @@ usage: review_css.py SUBJECT [--top N] [--redo] [--by-tier | --by-priority | --b
   the score is reported with that caveat (v3 silently scored them as "not cSS").
 
 Keys (or click the buttons):
-  y = cSS (agree)      v = vein      o = normal cortex      a = artifact
+  y = cSS (agree)      v = vessel      o = normal cortex      a = artifact
   i = near ICH         u = unsure    b = back one            [ / ] = move slice down/up
   q = finish and score
 Decisions are saved after every key press, so you can quit and resume later.
 Left column: whole slice (top) and an 8 mm minIP slab of the zoom window (bottom) computed from the
-SWI itself - veins become continuous branching tubes there, cSS stays a band along the cortex.
+SWI itself - vessels become continuous branching tubes there, cSS stays a band along the cortex.
 (Do not feed the scanner minIP series into the pipeline; this panel is only for reading.)
 Right column (only with run_css.sh --phase): filtered SWI phase - calcium has the opposite sign to
-veins and blood products (AJNR 2016 mimic list).
+vessels and blood products (AJNR 2016 mimic list).
 Title: the v4 definition features - on-surface distance, plate/tube shape, tram-track, vein tree,
 nearby ICH, FLAIR - as a reading aid; the call is always yours.
 At the end, accepted candidates are scored automatically (score_css.py)."""
@@ -77,13 +77,13 @@ if not redo:
     # re-run of the detector can no longer attach an old call to a different lesion
     calls, warn = load_calls(base, subj, df)
     if warn: print("WARNING:", warn)
-KEYS = {"y": "cSS", "v": "Vein", "o": "Normal", "a": "Artifact", "i": "Near ICH", "u": "Unsure"}
-COL = {"cSS": "#2e7d32", "Vein": "#1565c0", "Normal": "#6d6d6d", "Artifact": "#ef6c00",
+KEYS = {"y": "cSS", "v": "Vessel", "o": "Normal", "a": "Artifact", "i": "Near ICH", "u": "Unsure"}
+COL = {"cSS": "#2e7d32", "Vessel": "#1565c0", "Normal": "#6d6d6d", "Artifact": "#ef6c00",
        "Near ICH": "#8e24aa", "Unsure": "#c9a400"}
 HW = int(round(30 / vox[0]))          # 60 mm zoom window
 # optional SWI phase (run_css.sh --phase): high-pass filtered phase separates paramagnetic blood
-# products (same sign as veins) from diamagnetic CALCIUM (opposite sign) - an AJNR 2016 cSS mimic.
-# Sign conventions differ by vendor (Vaccarino et al. 2025), so compare with a vein on the same image.
+# products (same sign as vessels) from diamagnetic CALCIUM (opposite sign) - an AJNR 2016 cSS mimic.
+# Sign conventions differ by vendor (Vaccarino et al. 2025), so compare with a vessel on the same image.
 PH = None
 _php = f"{base}/data/{subj}_phase.nii.gz"
 if os.path.exists(_php) and os.path.getmtime(_php) < os.path.getmtime(f"{base}/data/{subj}_swi.nii"):
@@ -122,7 +122,7 @@ class Reviewer:
         self.ov = self.fig.add_subplot(gs[0, 0]); self.mip = self.fig.add_subplot(gs[1, 0])
         self.ax = [[self.fig.add_subplot(gs[r, c + 1]) for c in range(3)] for r in range(2)]
         self.btns = []
-        labels = [("cSS (y)", "y"), ("Vein (v)", "v"), ("Normal (o)", "o"), ("Artifact (a)", "a"),
+        labels = [("cSS (y)", "y"), ("Vessel (v)", "v"), ("Normal (o)", "o"), ("Artifact (a)", "a"),
                   ("Near ICH (i)", "i"), ("Unsure (u)", "u"), ("◀ Back (b)", "b"),
                   ("Slice ↓ [", "["), ("Slice ↑ ]", "]"), ("Finish (q)", "q")]
         w = 0.094
@@ -157,7 +157,7 @@ class Reviewer:
         self.mip.clear(); self.mip.imshow(slab.T, cmap="gray", origin="lower", vmin=lo, vmax=hi)
         if m[i0:i1, j0:j1, k0:k1].any():
             self.mip.contour(m[i0:i1, j0:j1, k0:k1].any(axis=2).T.astype(float), levels=[0.5], colors="red", linewidths=0.8)
-        self.mip.set_title(f"minIP {int(round((k1 - k0) * vox[2]))} mm slab (veins = tubes)", fontsize=9); self.mip.axis("off")
+        self.mip.set_title(f"minIP {int(round((k1 - k0) * vox[2]))} mm slab (vessels = tubes)", fontsize=9); self.mip.axis("off")
         # zoomed: top row raw, bottom row with outline; slices kc-1, kc, kc+1
         for c, k in enumerate((kc - 1, kc, kc + 1)):
             for row in (0, 1):
@@ -177,10 +177,10 @@ class Reviewer:
                 if row == 1 and m[i0:i1, j0:j1, kc].any():
                     a.contour(m[i0:i1, j0:j1, kc].T.astype(float), levels=[0.5], colors="red", linewidths=1.2)
                 a.set_xticks([]); a.set_yticks([])
-            self.ph[0].set_title("filtered PHASE (centre slice)\ncalcium = opposite sign to veins", fontsize=9)
+            self.ph[0].set_title("filtered PHASE (centre slice)\ncalcium = opposite sign to vessels", fontsize=9)
         flags = [n for n, f in (("artifact zone", "artifact_zone"), ("midline", "midline_zone"), ("vein-like", "vein_like"),
                                 ("INFRATENTORIAL", "infratentorial"), ("FLAIR-bright CSF: acute cSAH?", "flair_bright"),
-                                ("FLAIR-bright cortex: cortical vein thrombosis?", "flair_ctx_bright"),
+                                ("FLAIR-bright cortex: cortical vessel thrombosis?", "flair_ctx_bright"),
                                 ("microbleed-like: small, >=half in parenchyma", "cmb_like")) if flag(r.get(f, 0))]
         if flag(r.get("near_ich_suggest", 0)):
             flags.append(f"ICH {num(r.get('ich_dist_mm')):.0f} mm away - press i if contiguous")
@@ -188,7 +188,7 @@ class Reviewer:
         if "pial_dist_mm" in r:
             shape = "plate" if num(r.tube_ratio) < 0.4 else ("tube" if num(r.tube_ratio) > 0.5 else "mixed")
             tram = num(r.tram_frac)
-            ev = (f"   |   evidence: cSS {num(r.css_evidence):.2f}  vein {num(r.vein_evidence):.2f}"
+            ev = (f"   |   evidence: cSS {num(r.css_evidence):.2f}  vessel {num(r.vein_evidence):.2f}"
                   if "css_evidence" in r else "")
             feat = (f"\npial {num(r.pial_dist_mm):+.1f} mm   shape {shape} ({num(r.tube_ratio):.2f})   "
                     f"follows surface {num(r.surface_alignment):.2f}   "
@@ -221,7 +221,7 @@ class Reviewer:
 R = Reviewer()
 if os.environ.get("CSS_REVIEW_TEST"):
     R.fig.savefig(f"{base}/review/{subj}_review_preview.png", dpi=80)
-    for n, c in enumerate(ids): calls[c] = ["cSS", "Vein", "Near ICH", "Normal"][n % 4]
+    for n, c in enumerate(ids): calls[c] = ["cSS", "Vessel", "Near ICH", "Normal"][n % 4]
     R.save()
 else:
     plt.show()

@@ -26,15 +26,9 @@ if not a or a[0].startswith("-"): sys.exit(__doc__)
 ids = [s for s in a[0].split(",") if s]
 reads = (a[a.index("--reads") + 1] if "--reads" in a else "Redo_v53,Blind_v57").split(",")
 CAP = float(a[a.index("--cap") + 1]) if "--cap" in a else 20.0
-BALL_MM, TUBE_R, RIB_R, MIN_VOX_S3 = 9.0, 2.5, 2.0, 1.5
 
 
-def classify(s1, s2, s3, vmax):
-    if s3 < MIN_VOX_S3 * vmax: return "UNRESOLVED"
-    if s1 <= BALL_MM and s1 / s3 <= 3.0: return "BALL"
-    if s1 / s2 >= TUBE_R and s2 / s3 <= 2.0: return "TUBE"
-    if s2 / s3 >= RIB_R and s1 >= BALL_MM: return "RIBBON"
-    return "OTHER"
+classify = cs.classify3d
 
 
 rows = []

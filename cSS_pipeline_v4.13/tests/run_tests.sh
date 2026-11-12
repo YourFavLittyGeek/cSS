@@ -207,6 +207,8 @@ python $ROOT/tests/check_shape.py | tee $T/shape.log | grep -v "^RESULT"
 grep -q "RESULT shape OK" $T/shape.log || { echo "FAIL: shape measures"; exit 1; }
 python $ROOT/tests/check_shape_probe.py | tee $T/shapeprobe.log | grep -v "^RESULT"
 grep -q "RESULT shape_probe OK" $T/shapeprobe.log || { echo "FAIL: shape_probe checks"; exit 1; }
+python $ROOT/tests/check_vessel_rename.py | tee $T/vessel.log | grep -v "^RESULT"
+grep -q "RESULT vessel_rename OK" $T/vessel.log || { echo "FAIL: vessel rename"; exit 1; }
 python $ROOT/tests/check_struct_probe.py | tee $T/structprobe.log | grep -v "^RESULT"
 grep -q "RESULT struct_probe OK" $T/structprobe.log || { echo "FAIL: struct_probe checks"; exit 1; }
 echo "== audit branch: 3-D plate-ness filter (sheet at 0 / 45 / 90 deg, tube, blob) and the 2-D axial orientation dependence"

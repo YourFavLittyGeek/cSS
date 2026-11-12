@@ -46,7 +46,7 @@ rows = [
  ("1. Prepare the scan", "Need the SWI series (processed SWI or magnitude - NOT the minIP and NOT the phase map), plus the 3-D T1 and FLAIR if available (see PIPELINE.md). DICOM: convert with dcm2niix (see Commands). Use a code like P006 - never a name or MRN."),
  ("2. Run the pipeline", "Terminal:  run_css.sh P006 /path/to/swi.nii --t1 /path/to/t1.nii --flair /path/to/flair.nii [--recon]   (anatomy, detects, ranks candidates, opens freeview)."),
  ("3. Export candidates", "Terminal:  python ~/css_project/scripts/export_review.py P006 40 | pbcopy   then paste into 'Candidate Review' at column A of the next empty row."),
- ("4. Review in freeview", "Jump to each candidate (vox_i vox_j vox_k). In 'Candidate Review' choose a Reader call: cSS / Vein / Artifact / Near ICH / Unsure. Use 'Near ICH' for siderosis connected to a lobar haemorrhage - it is reported but NOT scored (standard convention). IDs build automatically."),
+ ("4. Review in freeview", "Jump to each candidate (vox_i vox_j vox_k). In 'Candidate Review' choose a Reader call: cSS / Vessel / Artifact / Near ICH / Unsure. Use 'Near ICH' for siderosis connected to a lobar haemorrhage - it is reported but NOT scored (standard convention). IDs build automatically."),
  ("5. Score", "Copy the command from 'Case Log' column V into Terminal. Type the printed score (0-4) and foci into Case Log columns I and J. Mark column W if the scan shows a lobar ICH."),
  ("6. Compare to the expert", "Enter the expert reference in Case Log columns G (cSS present 1/0) and H (multifocality 0-4). 'Validation' updates automatically."),
  ("COLOUR LEGEND", None),
@@ -84,7 +84,7 @@ cr = wb.create_sheet("Candidate Review")
 CR0, CR1 = 7, 2006
 crh = ["Subject ID","cand_id","hemi","region","label","volume_mm3","n_slices","elongation",
        "surface_contact","darkness_z","artifact_zone","midline_zone","score","vox_i","vox_j","vox_k",
-       "Reader call (cSS / Vein / Artifact / Near ICH / Unsure)","Accept (1/0)","Accepted IDs so far","Near-ICH IDs so far","Notes"]
+       "Reader call (cSS / Vessel / Artifact / Near ICH / Unsure)","Accept (1/0)","Accepted IDs so far","Near-ICH IDs so far","Notes"]
 cr["A1"] = "Candidate Review"; cr["A1"].font = f_title
 cr["A2"] = "Paste the export (columns A-P) from export_review.py. Then pick a Reader call in column Q for each candidate you looked at. Keep each subject's rows together."
 cr["A2"].font = f_note
@@ -106,7 +106,7 @@ for c, v in enumerate(ex, 1):
     if v is not None: cr.cell(row=6, column=c, value=v)
 for c in range(1, 22):
     cr.cell(row=6, column=c).fill = fill_ex
-dv = DataValidation(type="list", formula1='"cSS,Vein,Artifact,Near ICH,Unsure"', allow_blank=True)
+dv = DataValidation(type="list", formula1='"cSS,Vessel,Artifact,Near ICH,Unsure"', allow_blank=True)
 cr.add_data_validation(dv); dv.add(f"Q6:Q{CR1}")
 cr.freeze_panes = "E6"
 
@@ -301,7 +301,7 @@ prm = [
  ("Segmentation", "SynthSeg-robust 2.0 (--parc)", "Contrast-agnostic cortex/CSF labels directly on SWI; no T1 needed.", "Run on P005; labels followed the cortical ribbon."),
  ("Coverage mask", "SWI > 0", "SynthSeg imagines anatomy outside the slab; labels are removed where SWI has no signal.", "Removed ~67,000 voxels (2.3%) on P005."),
  ("Edge rim excluded", "3 mm (3D, mm units)", "Skull-stripped edge looks like a dark ridge; 2D rim was too thin.", "P005: 3 mm gave 8/8 synthetic lesions, worst rank #15; 2 mm gave 7/8, worst rank #28."),
- ("Ridge filter percentile", "85", "Ridge strength scales with contrast; 95th percentile was set by veins and rejected cSS-like bands.", "At 95: 1/8 lesions; at 85: 8/8 lesions with ~73% of voxels intact."),
+ ("Ridge filter percentile", "85", "Ridge strength scales with contrast; 95th percentile was set by vessels and rejected cSS-like bands.", "At 95: 1/8 lesions; at 85: 8/8 lesions with ~73% of voxels intact."),
  ("Darkness cutoff (z)", "-2.5", "Robust z vs cortex median/MAD. -2.0 is an optional high-sensitivity mode.", "Synthetic (P005, 3 layouts x 3 depths): -2.5 found 22/24 strong, 20/24 medium, 11/24 faint; -2.0 found 23/24, 20/24, 15/24 but ranks reached #85-86 and clean-scan candidates rose 83 -> 106."),
  ("Min size / slices / elongation", "10 mm3 / 2 slices / 2.5", "Removes single-slice specks and round blobs (microbleeds).", "Cut raw candidate list from 351 to ~100 on P005."),
  ("Midline handling", "Split by hemisphere; <5 mm from midline = half score", "Interhemispheric fissure merged lesions across hemispheres and topped the list.", "Fixed hemisphere assignment (left 5 / right 3 on synthetic test); synthetic medial lesion fell to rank #38, other 7 in top 11."),
@@ -311,7 +311,7 @@ prm = [
  ("Scoring rule (per hemisphere)", "0 none; 1 = one cluster of <=3 foci; 2 = >1 cluster or >3 foci. Total 0-4", "Approximates the published multifocality rule using physical distance because SWI-only segmentation gives gyri, not sulci.", "Verified on synthetic lesions: 4/4 disseminated."),
  ("Focal / disseminated", "focal <=3 foci; disseminated >3", "Conventional categories.", "Definition used in the literature."),
  ("Near-ICH siderosis", "Excluded from the 0-4 score; count and volume reported", "cSS potentially connected to a lobar ICH is not included in multifocality ratings.", "Convention as applied by van Harten et al. 2023 (NeuroImage: Clinical 38:103447)."),
- ("Vein penalty (v3)", "cortex_frac < 0.35 -> 0.6x score", "Veins lie mid-sulcus; cSS lines the cortex.", "Phantom test only (cSS 0.92 vs veins 0.35). Validate on real cases."),
+ ("Vessel penalty (v3)", "cortex_frac < 0.35 -> 0.6x score", "Vessels lie mid-sulcus; cSS lines the cortex.", "Phantom test only (cSS 0.92 vs vessels 0.35). Validate on real cases."),
  ("Surface depth profile (v3)", "surface_gradient recorded, not used for ranking", "cSS iron is densest in the outermost cortex (MGH histology).", "Phantom only; partly built into the synthetic test, so real cases decide."),
 ]
 for i, row in enumerate(prm, 4):
@@ -331,7 +331,7 @@ if TEST:
         cl.cell(row=r, column=9, value=i_); cl.cell(row=r, column=10, value=j)
         if q: cl.cell(row=r, column=17, value=q)
         cl.cell(row=r, column=18, value=5 + k)
-    cand = [("T01",1,"cSS"),("T01",2,"Vein"),("T01",3,"cSS"),("T02",1,"Vein"),("T02",4,"cSS"),("T02",5,"cSS"),("T03",1,"Artifact")]
+    cand = [("T01",1,"cSS"),("T01",2,"Vessel"),("T01",3,"cSS"),("T02",1,"Vessel"),("T02",4,"cSS"),("T02",5,"cSS"),("T03",1,"Artifact")]
     for k, (a, cid, call) in enumerate(cand):
         r = CR0 + k
         cr.cell(row=r, column=1, value=a); cr.cell(row=r, column=2, value=cid); cr.cell(row=r, column=17, value=call)

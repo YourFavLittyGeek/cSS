@@ -26,7 +26,7 @@ if "error" not in post("/api/call", dict(study="PH3", reviewer="", cand_id=1, ca
 post("/api/reviewer", dict(name="Reader A"))
 ids = [c["id"] for c in m["cands"]]
 post("/api/call", dict(study="PH3", reviewer="Reader A", cand_id=ids[0], call="cSS", meter=0.8))
-post("/api/call", dict(study="PH3", reviewer="Reader A", cand_id=ids[1], call="Vein"))
+post("/api/call", dict(study="PH3", reviewer="Reader A", cand_id=ids[1], call="Vessel"))
 post("/api/call", dict(study="PH3", reviewer="Reader A", cand_id=ids[1], call="", action="clear"))
 post("/api/call", dict(study="PH3", reviewer="Reader A", cand_id=ids[2], comment="check, \"quoted\""))
 if "error" not in post("/api/call", dict(study="PH3", reviewer="Reader A", cand_id=ids[0], call="Banana")): fail("unknown call accepted")
@@ -50,7 +50,7 @@ if rs.get("multifocality_0_4") is None or rs.get("category") not in ("absent", "
 if ai.get("multifocality_0_4") is None or not os.path.exists(f"{B}/review/PH3_score_ai.json"): fail(f"AI score: {ai}")
 if json.load(open(f"{B}/review/PH3_score.json"))["multifocality_0_4"] != rs["multifocality_0_4"]: fail("the AI scoring must not overwrite the reader's score file")
 if os.path.exists(f"{B}/review/PH3_final_Reader_A.json"): fail("no final record before the final save")
-post("/api/call", dict(study="PH3", reviewer="Reader A", cand_id=ids[1], call="Vein", action="revote"))
+post("/api/call", dict(study="PH3", reviewer="Reader A", cand_id=ids[1], call="Vessel", action="revote"))
 g = post("/api/finish", dict(study="PH3", reviewer="Reader A", final=True, n_differ=1, meter_visible=1, comparison_shown=True))
 if g.get("error") or not os.path.exists(f"{B}/review/PH3_final_Reader_A.json"): fail(f"final save failed: {g.get('error')}")
 fin = json.load(open(f"{B}/review/PH3_final_Reader_A.json"))
@@ -92,7 +92,7 @@ if nx_ and au:
     aid = au[0]["id"]
     if aid < 10000 or any(c_["id"] == aid for c_ in get("/api/meta?study=PH3&reviewer=Reader%20C")["cands"]): fail("audit objects must appear only in a validation read")
     post("/api/call", dict(study="PH3", reviewer="Reader C", cand_id=aid, call="cSS", mode="validation"))
-    post("/api/call", dict(study="PH3", reviewer="Reader C", cand_id=ids[0], call="Vein", mode="validation"))
+    post("/api/call", dict(study="PH3", reviewer="Reader C", cand_id=ids[0], call="Vessel", mode="validation"))
     af = pd.read_csv(f"{B}/review/PH3_excluded_audit_Reader_C.csv")
     if list(af.excl_id) != [aid - 10000] or af.call[0] != "cSS" or not str(af.rule[0]): fail(f"audit file: {af}")
     gc = post("/api/finish", dict(study="PH3", reviewer="Reader C", final=True, read_mode="validation"))

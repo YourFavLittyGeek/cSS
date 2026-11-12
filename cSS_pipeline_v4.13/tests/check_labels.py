@@ -32,7 +32,7 @@ out = run(f"{S}/expert_import.py", "PH3", "expertB", "--letters", " ".join(ans))
 print("   " + out.strip().replace("\n", "\n   "))
 e = pd.read_csv(f"{B}/review/PH3_expert_expertB.csv")
 if list(e.columns[:6]) != ["cand_id", "call", "vox_i", "vox_j", "vox_k", "volume_mm3"]: fail("review expert file columns")
-if not set(e.call) <= {"cSS", "Vein", "Normal"} or not {"cSS"} <= set(e.call): fail(f"coarse calls {set(e.call)}")
+if not set(e.call) <= {"cSS", "Vessel", "Normal"} or not {"cSS"} <= set(e.call): fail(f"coarse calls {set(e.call)}")
 L = pd.read_csv(f"{B}/labels/candidate_labels.csv"); Lb = L[L.reader_id == "expertB"]
 if (Lb.list == "excluded").sum() != nx: fail("excluded objects missing from the label table")
 if Lb.defaulted.sum() != 1 or Lb[Lb.sheet_no == left_out].label.iloc[0] != "normal_other": fail("default N")

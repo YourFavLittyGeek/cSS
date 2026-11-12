@@ -73,6 +73,7 @@ from skimage.measure import regionprops
 from skimage.morphology import skeletonize
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from css_common import match_calls, base as _base, load_lut, fresh, sha256, update_manifest, environment_record, skeleton_length, radius_profile
+import css_shape
 import css_qc, css_vessel, mimic_rules, css_pieces, css_features, css_tiers, css_sheet3d
 
 subj   = sys.argv[1]
@@ -147,6 +148,12 @@ SEEDS3D = os.environ.get("CSS_3D_SEEDS", "") == "1"
 ZONE2 = os.environ.get("CSS_ZONE2", "") == "1"
 ZONE2_R_MM, ZONE2_FRAC = 4.0, float(os.environ.get("CSS_ZONE2_FRAC", "0"))   # v5.8.1: E26 OFF (M02-M11: lost M04 #28 at 0.42, gained <= 1 non-cSS)
 SYLV_MM, SYLV_FRAC = 3.0, float(os.environ.get("CSS_SYLV_FRAC", "0.2"))   # v5.8.4: was 0.4. cSS max 0.09 on M02-M11 (ST / ML protected: 0.00); 6 more shown non-cSS
+# v5.9 3-D structure (css_shape.struct_measures): the whole dark structure of every object is measured (ball / tube / ribbon, cortex share, runs along the surface or
+# leaves it, continues beyond the object). Columns struct_* are ALWAYS recorded. E28 excludes only with CSS_STRUCT=1 (opt-in, default OFF; thresholds provisional until
+# struct_probe.py has fitted them on M02-M11 against protected cSS): a compact BALL with at most STRUCT_BALL_CTX of it in cortex, or a TUBE that continues
+# STRUCT_TUBE_CONT times beyond the object and leaves the surface (|cos| >= STRUCT_TUBE_COS).
+STRUCT = os.environ.get("CSS_STRUCT", "") == "1"
+STRUCT_BALL_CTX, STRUCT_TUBE_CONT, STRUCT_TUBE_COS = float(os.environ.get("CSS_STRUCT_BALL_CTX", "0.3")), float(os.environ.get("CSS_STRUCT_TUBE_CONT", "3.0")), float(os.environ.get("CSS_STRUCT_TUBE_COS", "0.5"))
 E22_PIECES = V53 and os.environ.get("CSS_E22_PIECES", "1") != "0"   # v5.7-E-fix3: ON with CSS_V53=1 (acceptance 56/56 incl. M11 #12); CSS_E22_PIECES=0 = merged-object E22 as in fix2
 SHEET3D_SIGMAS_MM = (0.6, 1.2, 1.8)
 V53_OUT_MM = 1.0                 # E17: voxels further than this outside the labelled pial boundary count as "outside"
@@ -624,6 +631,14 @@ def plane_feats(mm_, pad_):
     w_, v_ = np.linalg.eigh(np.cov(Q.T)); ext = np.ptp(Q @ v_, axis=0)
     return dict(plane_dist_mm=round(float(np.median(np.abs((P - PL_C) @ PL_N))), 1), cos_plane=round(float(abs(v_[:, 0] @ PL_N)), 2),
                 ext_major_mm=round(float(ext[2]), 1))
+DARKG = zone & (z < GROW_Z); CTXB = (seg >= 1000) & (seg < 3000)
+def struct_feats(mm_, pad_):
+    """v5.9: 3-D form of the whole dark structure -> struct_* columns (css_shape.struct_measures)"""
+    sm = css_shape.struct_measures(DARKG[pad_], mm_, CTXB[pad_], pial_sd[pad_], vox, 20.0)
+    return dict(struct_s1_mm=sm["s1"], struct_s2_mm=sm["s2"], struct_s3_mm=sm["s3"], struct_thick_mm=sm["thick"], struct_cls=sm["cls"], struct_cont=sm["cont"],
+                struct_ctx_frac=sm["ctx"], struct_surf_cos=sm["cos"], struct_verdict=sm["verdict"])
+
+
 def piece_sheet_feats(mm_, pad_):
     """E22 judged per first-pass piece: -> piece_sheet (1 if any piece of the object meets all three E22 conditions), ext_piece_max_mm (longest piece)"""
     if PL_N is None: return dict(piece_sheet=0, ext_piece_max_mm=np.nan)
@@ -921,7 +936,7 @@ for p in regionprops(lab, spacing=vox):
                mask_edge_mm=round(float(np.median(dist_mm[pad][mm])), 1),
                skull_frac=round(float(SKULL[pad][mm].mean()), 2), v53_active=int(V53), _band=bool(BAND[pad][mm].any()),
                vent_frac=round(float((d_vent[pad][mm] <= E16_MM).mean()), 2),
-               out_frac=round(float((pial_sd[pad][mm] > V53_OUT_MM).mean()), 2), **plane_feats(mm, pad), **piece_sheet_feats(mm, pad),
+               out_frac=round(float((pial_sd[pad][mm] > V53_OUT_MM).mean()), 2), **plane_feats(mm, pad), **piece_sheet_feats(mm, pad), **struct_feats(mm, pad),
                skullbase_frac=round(float(np.isin(NEAR_CX[pad][mm], E24_LABELS).mean()), 2),
                dual_contact_frac=round(float(DUALC[pad][mm].mean()), 2), zone2_frac=round(float(RIBSUL[pad][mm].mean()), 2), sylvian_frac=round(float(SYLV[pad][mm].mean()), 2), axis_angle_deg=axis_angle(mm, pad),
                sheet3d_med=round(float(np.median(S3[pad][mm])), 4) if S3 is not None else np.nan,
@@ -1029,7 +1044,8 @@ V50_COLS = ["mimic_score", "mimic_class", "mimic_reason", "phase_z", "mb_cluster
             "review_priority_rank", "review_priority", "review_priority_reason",                # v5.1.3 (css_tiers.py)
             "midline_frac", "mask_edge_mm", "skull_frac", "v53_active",                         # v5.3, appended
             "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac", "dual_contact_frac",               # v5.3.1 / v5.3.2 / v5.3.4 / v5.7, appended
-            "soft_gate_fail", "axis_angle_deg", "sheet3d_med", "sheet3d_overlap", "piece_sheet", "ext_piece_max_mm", "zone2_frac", "sylvian_frac"]                                                                    # v5.7 audit branch: "" or the generation gate the object failed (CSS_SOFT_GATES=1)
+            "soft_gate_fail", "axis_angle_deg", "sheet3d_med", "sheet3d_overlap", "piece_sheet", "ext_piece_max_mm", "zone2_frac", "sylvian_frac",
+            "struct_s1_mm", "struct_s2_mm", "struct_s3_mm", "struct_thick_mm", "struct_cls", "struct_cont", "struct_ctx_frac", "struct_surf_cos", "struct_verdict"]                                                                    # v5.7 audit branch: "" or the generation gate the object failed (CSS_SOFT_GATES=1)
 cols = cols + V50_COLS
 
 # ---- 11. exclusions (v4.8) - each with an explicit, definition-based reason
@@ -1054,7 +1070,7 @@ RULE_CONF = {"E1": "high" if T1_ANAT else "medium", "E2": "medium", "E3": "mediu
              "E5": "medium", "E6": "medium", "E7": "medium", "E8": "low", "E9": "medium",
              "E10": "low", "E11": "low",                       # v5.0 mimic rules: no real-data support yet
              "E12": "low", "E13": "low", "E14": "low", "E15": "low", "E16": "low", "E17": "low",
-             "E18": "low", "E19": "low", "E20": "low", "E21": "low", "E22": "low", "E24": "low", "E25": "low", "E26": "low", "E27": "low"}   # v5.3: chosen on M02-M11, not validated
+             "E18": "low", "E19": "low", "E20": "low", "E21": "low", "E22": "low", "E24": "low", "E25": "low", "E26": "low", "E27": "low", "E28": "low", "E29": "low"}   # v5.3: chosen on M02-M11, not validated
 def exclusion(r):
     """-> (rule_version, reason); ("", "") = kept. v5.1.1 CSS_MIXED_REVIEW=1: a mixed merged object (pieces disagree)
     is not removed whole by a vein rule (E5 / E6 / E7); it is shown with mixed_object_review = 1"""
@@ -1093,6 +1109,10 @@ def exclusion_v4(r):
             return "E26@v5.8", f"outside cortex and sulci: only {100 * r['zone2_frac']:.0f} % in cortex or sulcal CSF (convexity CSF / dura / skull / fissure)"
         if ZONE2 and r["sylvian_frac"] >= SYLV_FRAC:
             return "E27@v5.8", f"Sylvian fissure: {100 * r['sylvian_frac']:.0f} % between insula and operculum (middle cerebral artery branches / Sylvian veins)"
+        if STRUCT and r["struct_cls"] == "BALL" and np.isfinite(r["struct_ctx_frac"]) and r["struct_ctx_frac"] <= STRUCT_BALL_CTX:
+            return "E28@v5.9", f"compact 3-D ball ({r['struct_s1_mm']:.0f} mm) outside the cortex: microbleed / bubble-like"
+        if STRUCT and r["struct_cls"] == "TUBE" and r["struct_cont"] >= STRUCT_TUBE_CONT and np.isfinite(r["struct_surf_cos"]) and r["struct_surf_cos"] >= STRUCT_TUBE_COS:
+            return "E29@v5.9", f"round 3-D tube that runs on {r['struct_cont']:.1f}x beyond the object and leaves the surface: vessel"
         if r["dual_contact_frac"] >= E25_FRAC:
             return "E25@v5.7", (f"interhemispheric fissure: left and right cortex both within {E25_REACH_MM:g} mm of {100 * r['dual_contact_frac']:.0f} % "
                                 f"of the object (between the hemispheres: falx / sinus / fissure vessels)")
@@ -1269,14 +1289,14 @@ if len(df):
                        "vox_i", "vox_j", "vox_k"]].to_string(index=False))
 FROZEN_NAMES = ["MIN_MM3", "MIN_SLICES", "MIN_ELONG", "MIN_EXTENT_MM", "MERGE_GAP_MM", "MERGE_MAX_MM", "V53_GAP_MM", "V53_MAX_MM", "V53_OUT_MM",
                 "E12_MM3", "E13_FRAC_V533", "E14_EDGE_MM", "E15_SKULL", "E16_FRAC", "E16_MM", "E17_FRAC", "E17_CTX", "E18_EDGE", "E19_DARK", "E19_SKULL",
-                "E20_VOL", "E21_CTX", "E22_PLANE_MM", "E22_COS", "E22_EXT_MM", "E24_FRAC", "E24_LABELS", "E25_FRAC", "E25_REACH_MM", "ZONE2_R_MM", "ZONE2_FRAC", "SYLV_MM", "SYLV_FRAC", "Z_LOW", "R_PCT_LOW"]
+                "E20_VOL", "E21_CTX", "E22_PLANE_MM", "E22_COS", "E22_EXT_MM", "E24_FRAC", "E24_LABELS", "E25_FRAC", "E25_REACH_MM", "ZONE2_R_MM", "ZONE2_FRAC", "SYLV_MM", "SYLV_FRAC", "STRUCT_BALL_CTX", "STRUCT_TUBE_CONT", "STRUCT_TUBE_COS", "Z_LOW", "R_PCT_LOW"]
 def frozen_rules():
     """thresholds in force for this run (the rule set is frozen pending held-out validation) -> manifest"""
     return {n: (list(globals()[n]) if isinstance(globals().get(n), (list, tuple)) else globals().get(n)) for n in FROZEN_NAMES if n in globals()}
 def active_switches():
     """every experimental environment switch read by the detector, as set for this run"""
     return {k: os.environ.get(k, "") for k in ("CSS_V53", "CSS_USE_MIMIC", "CSS_MIXED_REVIEW", "CSS_QC_STRICT", "CSS_KEEP_ALL", "CSS_SATO_LEGACY",
-                                              "CSS_RANK", "CSS_ALLOW_ORIENT", "CSS_SURFACE_ZONE", "CSS_SOFT_GATES", "CSS_3D_SEEDS", "CSS_E22_PIECES", "CSS_ZONE2", "CSS_ZONE2_FRAC", "CSS_SYLV_FRAC")}
+                                              "CSS_RANK", "CSS_ALLOW_ORIENT", "CSS_SURFACE_ZONE", "CSS_SOFT_GATES", "CSS_3D_SEEDS", "CSS_E22_PIECES", "CSS_ZONE2", "CSS_ZONE2_FRAC", "CSS_SYLV_FRAC", "CSS_STRUCT")}
 # v4.17 provenance: inputs (sha256), parameters, versions -> review/ID_manifest.json
 _inputs = {k: p_ for k, p_ in (("swi", f"{base}/data/{subj}_swi.nii"), ("labels", f"{base}/work/{subj}_seg_swispace.nii.gz"),
                                ("t1_labels", _t1p), ("destrieux", f"{base}/work/{subj}_a2009s_swispace.nii.gz"),

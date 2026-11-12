@@ -3,7 +3,7 @@ import os, sys, subprocess, hashlib, glob, pandas as pd
 HERE = os.path.dirname(os.path.abspath(__file__)); S = os.path.join(HERE, "..", "scripts"); B = os.environ["CSS_BASE"]
 def fail(m): print("FAIL:", m); sys.exit(1)
 c = pd.read_csv(f"{B}/review/PH3_candidates.csv"); x = c[["cand_id", "vox_i", "vox_j", "vox_k", "volume_mm3"]].copy(); made = []
-for name, calls in (("SpA", ["cSS", "cSS", "Vein", "Artifact", "Normal", "Normal", "Vein"]), ("SpB", ["cSS", "Microbleed", "Vein", "Artifact", "Normal", "cSS", "Vein"])):
+for name, calls in (("SpA", ["cSS", "cSS", "Vessel", "Artifact", "Normal", "Normal", "Vessel"]), ("SpB", ["cSS", "Microbleed", "Vessel", "Artifact", "Normal", "cSS", "Vessel"])):
     x["call"] = calls[:len(x)]; x["comment"] = ""; p = f"{B}/review/PH3_calls_{name}.csv"; x.to_csv(p, index=False); made.append(p)
 adj = f"{B}/review/adjudication.csv"; had = os.path.exists(adj)
 if not had: pd.DataFrame([dict(study_id="PH3", fate="shown", obj_id=6, call="not cSS", note="t")]).to_csv(adj, index=False); made.append(adj)

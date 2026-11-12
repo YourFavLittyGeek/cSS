@@ -122,7 +122,7 @@ if __name__ == "__main__":
     with open(os.path.join(root, "README.txt"), "w") as f:
         f.write(f"Candidate export {stamp}. Patients: {', '.join(ids)}. Study codes only; no names, MRNs or DICOM headers.\n"
                 "summary.csv: one row per candidate. pipeline_tier / pipeline_reason = the detector's own tier;\n"
-                "reader_call = the reader's decision (cSS, Vein, Normal, Artifact, Near ICH, Unsure); accepted_cSS = 1 if cSS.\n"
+                "reader_call = the reader's decision (cSS, Vessel, Normal, Artifact, Near ICH, Unsure); accepted_cSS = 1 if cSS.\n"
                 "ID/overview.png: whole head, brain-mask edge, all candidates and excluded objects.\n"
                 "ID/cand_NN/candidate.png: close-up of one candidate in three planes.\n"
                 + ("excluded.csv / ID/excl_NN: objects removed by an exclusion rule (no reader call).\n" if a.excluded else "")

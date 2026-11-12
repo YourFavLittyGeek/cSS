@@ -19,7 +19,7 @@ def run(*a):
     return r.stdout
 run(f"{HERE}/phantom_v4.py", "PH3", "1"); run(f"{S}/align_seg.py", "PH3")
 shutil.copy(f"{T}/work/PH3_seg_swispace.nii.gz", f"{T}/work/PH3_t1seg_swispace.nii.gz")
-run(f"{S}/detect_css.py", "PH3"); run(f"{S}/review_css.py", "PH3", "--redo")          # test mode: calls cycle cSS / Vein / Near ICH / Normal
+run(f"{S}/detect_css.py", "PH3"); run(f"{S}/review_css.py", "PH3", "--redo")          # test mode: calls cycle cSS / Vessel / Near ICH / Normal
 json.dump(dict(names=["Tester"], last="Tester"), open(f"{T}/review/reviewers.json", "w"))
 n0 = len(pd.read_csv(f"{T}/review/PH3_candidates.csv"))
 import hashlib
@@ -42,7 +42,7 @@ kept["call"] = ["cSS"] * len(kept)
 by_new = kept.groupby("new_id").cand_id.apply(list)
 conflict_nid = next((int(n) for n, ids in by_new.items() if len(ids) > 1), None)
 if conflict_nid is not None:
-    ids = by_new[conflict_nid]; kept.loc[kept.cand_id == ids[0], "call"] = "Vein"
+    ids = by_new[conflict_nid]; kept.loc[kept.cand_id == ids[0], "call"] = "Vessel"
 kept_all = fate.copy(); kept_all.loc[kept.index, "call"] = kept.call; kept_all.to_csv(f"{T}/review/changes/PH3_old_candidates_fate.csv", index=False)
 open(f"{T}/pre.txt", "w").write("x")
 out = run(f"{S}/inherit_calls.py", "PH3", "--reviewer", "Tester"); print("  " + out.strip().splitlines()[1])

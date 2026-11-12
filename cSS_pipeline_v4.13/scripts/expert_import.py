@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Import an expert's answers from the blinded sheet (expert_sheet.py) as REFERENCE calls.
-usage: expert_import.py SUBJECT READER --css 3,17,40 [--vein 1,2] [--ich 9] [--unsure 5]
+usage: expert_import.py SUBJECT READER --css 3,17,40 [--vessel 1,2] [--ich 9] [--unsure 5]
        expert_import.py SUBJECT READER --letters "1V 2VS:4 3C 4N 5U ..."   (codes from the grid)
        options: --session N (default 1; a later blinded re-read of the same sheet = 2, ...)  --score
                 --require-confidence (v5.1.1): refuse answers given without :1-:5 (defaulted N excepted)
 Codes (css_common.LABELS): C, V / VS / VC / VT / VX, TV, A / AM, N / NI, MB, CA, SAH, LN, HI, IS, H, U,
 optionally followed by :1-:5 confidence. Sheet numbers not listed are recorded as N (defaulted=1).
 Writes
-  review/ID_expert_READER.csv   candidates: cand_id, call (coarse: cSS / Vein / Normal / Artifact /
+  review/ID_expert_READER.csv   candidates: cand_id, call (coarse: cSS / Vessel / Normal / Artifact /
                                 Near ICH / Unsure), fingerprint, then label, confidence, defaulted (v4.15)
   labels/candidate_labels.csv   long table, one row per study x reader x session x object, INCLUDING
                                 excluded objects when the sheet mixed them in (expert_sheet --include-excluded)
@@ -23,7 +23,7 @@ base = _base()
 key = pd.read_csv(f"{base}/review/{subj}_expert_key.csv")
 if "list" not in key.columns:                     # key written before v4.15: candidates only
     key["list"], key["obj_id"] = "candidate", key["cand_id"]
-arg = lambda f: sys.argv[sys.argv.index(f) + 1] if f in sys.argv else ""
+arg = lambda f: sys.argv[sys.argv.index(f) + 1] if f in sys.argv else (sys.argv[sys.argv.index("--vein") + 1] if f == "--vessel" and "--vein" in sys.argv else "")   # --vein is kept as an alias of --vessel
 nums = lambda s: [int(x) for x in re.split(r"[,\s]+", s.strip()) if x]
 session = int(arg("--session") or 1)
 ans = {n: ("N", None, 1) for n in key.sheet_no}  # sheet_no -> (code, confidence, defaulted)
@@ -34,7 +34,7 @@ if arg("--letters"):
         except ValueError as e:
             sys.exit(str(e))
         ans[n] = (code, conf, 0)
-for flag, code in (("--css", "C"), ("--vein", "V"), ("--ich", "H"), ("--unsure", "U")):
+for flag, code in (("--css", "C"), ("--vessel", "V"), ("--ich", "H"), ("--unsure", "U")):
     for n in nums(arg(flag)): ans[n] = (code, None, 0)
 bad = [n for n in ans if n not in set(key.sheet_no)]
 _noconf = sorted(n for n, (c, cf, d) in ans.items() if not d and cf is None)

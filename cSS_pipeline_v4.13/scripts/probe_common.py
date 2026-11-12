@@ -10,7 +10,7 @@ apply_adjudication(df, B) -> df with the final decisions of review/adjudication.
 """
 import os, re
 import numpy as np, pandas as pd, nibabel as nib
-from css_common import match_calls
+from css_common import match_calls, norm_call
 
 slug = lambda s: re.sub(r"[^A-Za-z0-9]+", "_", s.strip()).strip("_") or "reviewer"
 
@@ -57,7 +57,7 @@ def object_calls(B, sid, fate, L, reads, cand=None):
             f = f"{B}/review/{sid}_excluded_audit_{slug(rd)}.csv"
             if os.path.exists(f):
                 for _, r in pd.read_csv(f).iterrows():
-                    if isinstance(r.call, str) and r.call: out.setdefault(int(r.excl_id), []).append(f"{rd}:{r.call}")
+                    if isinstance(r.call, str) and r.call: out.setdefault(int(r.excl_id), []).append(f"{rd}:{norm_call(r.call)}")
     for k, v in old_calls_onto(B, sid, L).items(): out.setdefault(k, []).extend(v)
     return out
 

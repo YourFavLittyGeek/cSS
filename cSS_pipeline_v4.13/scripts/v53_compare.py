@@ -104,7 +104,7 @@ if len(ex):
     out.append(""); out.append("Excluded by rule (rows) and reader call (columns):")
     out.append(pd.crosstab(ex.excluded_reason.str.split(":").str[0].str.strip(), ex.reader_call.replace("", "(not read)")).to_string())
 out.append("")
-for call in ("Artifact", "Normal", "Vein"):
+for call in ("Artifact", "Normal", "Vessel"):
     a = d[d.reader_call == call]
     if len(a): out.append(f"{call} still shown: {(a.fate == 'shown').sum()} / {len(a)}")
 out.append(""); out.append("Patient scores are not recomputed here: read the v5.3 candidates before any score is compared.")

@@ -12,7 +12,7 @@ c = pd.DataFrame(dict(cand_id=np.arange(1, n + 1), hemi="L", region="ctx-lh-x", 
 c.to_csv(f"{T}/review/PX_candidates.csv", index=False)
 pd.DataFrame(dict(list="candidate", obj_id=np.arange(1, n + 1), vox_i=c.vox_i, vox_j=20, vox_k=30, volume_mm3=c.volume_mm3, surf_valid=1,
                   surf_normal_dist_mm=mesh, surf_sulc=np.r_[np.ones(20), -np.ones(20)])).to_csv(f"{T}/review/PX_surface_features.csv", index=False)
-calls = c[["cand_id", "vox_i", "vox_j", "vox_k", "volume_mm3"]].copy(); calls["call"] = ["cSS"] * 20 + ["Vein"] * 20; calls["comment"] = ""
+calls = c[["cand_id", "vox_i", "vox_j", "vox_k", "volume_mm3"]].copy(); calls["call"] = ["cSS"] * 20 + ["Vessel"] * 20; calls["comment"] = ""
 calls.to_csv(f"{T}/review/PX_calls_Tst.csv", index=False)
 r = subprocess.run([sys.executable, f"{S}/pial_compare.py", "PX", "--reads", "Tst"], capture_output=True, text=True, env=dict(os.environ, CSS_BASE=T))
 if r.returncode: fail(r.stderr[-500:] + r.stdout[-300:])

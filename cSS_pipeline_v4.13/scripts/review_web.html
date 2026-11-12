@@ -116,6 +116,10 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
     <div id="aibody"><svg id="gauge" viewBox="0 0 220 122"></svg>
     <div class="band"><span style="color:#d64545">not cSS</span><span style="color:#c99a1c">uncertain</span><span style="color:#3aa655">cSS likely</span></div>
     <div class="say" id="aisay"></div><div class="mut sm" id="aisrc"></div></div></div>
+   <div class="card" id="s3card"><div class="h"><span>3-D shape of the dark structure</span><span class="mut sm"><a href="#" id="s3hide" style="color:inherit">hide <kbd>3</kbd></a></span></div>
+    <div id="s3body"><canvas id="s3cv" width="300" height="200" style="width:100%;border-radius:8px;background:#0e1116;cursor:grab;touch-action:none"></canvas>
+    <div class="mut sm">drag = rotate · wheel = zoom · double-click = reset · <span style="color:#e04b4b">red</span> structure, <span style="color:#ffd25a">yellow</span> detector object, <span style="color:#7d8590">grey</span> cortex</div>
+    <div class="say" id="s3say"></div><div class="mut sm" id="s3meas"></div></div></div>
    <div class="card" id="deccard"><div class="h"><span>Your decision</span><span class="mut sm" id="curcall"></span></div>
     <div class="dec" id="dec"></div>
     <input type="text" id="comment" placeholder="Add a comment…  (C)" maxlength="500" autocomplete="off">
@@ -151,15 +155,15 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
  <h2>How to use the reviewer</h2>
  <p><b>The reading.</b> Each candidate is a dark structure the detector found near the cortex. It is outlined in red on the whole slice and an arrow shows where it is (nothing is zoomed in for you: zoom and pan as you like). Compare with the other planes and sequences, then give one decision. The decision is saved at once; the next unread candidate opens (Auto-next, <kbd>G</kbd>). When all are read, press <kbd>Q</kbd> for the summary and the 0&ndash;4 score. Everything is also in the menu bar and in the right-click menu on the image.</p>
  <table><tr><td><kbd>Y</kbd> cSS</td><td>curvilinear dark lining of the cortical surface / sulcus</td></tr>
- <tr><td><kbd>V</kbd> Vein</td><td>tube that continues beyond the candidate, branches, or runs into the white matter or a sinus</td></tr>
+ <tr><td><kbd>V</kbd> Vessel</td><td>tube that continues beyond the candidate, branches, or runs into the white matter or a sinus</td></tr>
  <tr><td><kbd>N</kbd> Normal cortex</td><td>naturally dark cortex or sulcus, nothing abnormal</td></tr>
  <tr><td><kbd>A</kbd> Artifact</td><td>skull, air&ndash;bone interface, motion, mask edge</td></tr>
  <tr><td><kbd>B</kbd> Microbleed</td><td>round / oval dark blob, not a line along the cortex; not cSS (counted separately)</td></tr>
  <tr><td><kbd>U</kbd> Unsure</td><td>cannot decide; counted as <i>not</i> cSS in the score and listed for re-reading</td></tr>
  <tr><td><kbd>H</kbd> Near ICH</td><td>siderosis connected to a lobar haemorrhage; reported but not scored</td></tr></table>
  <h3>The AI meter</h3>
- <p>The needle shows a number from 0 to 1: <span style="color:#d64545"><b>red</b> below 0.33</span> (the detector suspects a vein, artifact or normal cortex), <span style="color:#c99a1c"><b>yellow</b> 0.33&ndash;0.66</span> (uncertain), <span style="color:#3aa655"><b>green</b> 0.66 and above</span> (suspects cSS). The line under it says what it suspects and why.<br>
- <b>It is not a probability and has not been validated.</b> It is the detector's rule-based evidence (shape, position on the cortex, both banks, vessel continuation), lowered when its vein / artifact rules fire. Use it as a second opinion only: the decision is yours. Seeing it before you decide can bias you &mdash; hide it with <kbd>K</kbd> for any reading that is used to test the detector. The <b>Calls summary</b> tab (<kbd>F3</kbd>) lists the meter next to your calls: "agree" = you called cSS and it is green, or you called something else and it is red; yellow counts as neither.</p>
+ <p>The needle shows a number from 0 to 1: <span style="color:#d64545"><b>red</b> below 0.33</span> (the detector suspects a vessel, artifact or normal cortex), <span style="color:#c99a1c"><b>yellow</b> 0.33&ndash;0.66</span> (uncertain), <span style="color:#3aa655"><b>green</b> 0.66 and above</span> (suspects cSS). The line under it says what it suspects and why.<br>
+ <b>It is not a probability and has not been validated.</b> It is the detector's rule-based evidence (shape, position on the cortex, both banks, vessel continuation), lowered when its vessel / artifact rules fire. Use it as a second opinion only: the decision is yours. Seeing it before you decide can bias you &mdash; hide it with <kbd>K</kbd> for any reading that is used to test the detector. The <b>Calls summary</b> tab (<kbd>F3</kbd>) lists the meter next to your calls: "agree" = you called cSS and it is green, or you called something else and it is red; yellow counts as neither.</p>
  <h3>Viewing</h3>
  <table>
  <tr><td><kbd>wheel</kbd> or <kbd>&uarr;</kbd> <kbd>&darr;</kbd></td><td>scroll slices in the view under the mouse (<kbd>PgUp</kbd> <kbd>PgDn</kbd> = 5 slices); the slice bar at the right edge can be dragged</td></tr>
@@ -174,7 +178,7 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
  <tr><td><kbd>R</kbd> &nbsp; <kbd>F</kbd></td><td>reset zoom and window &nbsp; go to the candidate (centres and zooms in on it)</td></tr>
  <tr><td><kbd>M</kbd> &nbsp; <kbd>O</kbd></td><td>show / hide this candidate's marking &nbsp; the other candidates' markings</td></tr>
  <tr><td><kbd>P</kbd></td><td>corner text and scale bar on / off</td></tr>
- <tr><td><kbd>W</kbd> &nbsp; <kbd>I</kbd></td><td>magnifier lens (2.5&times;) &nbsp; minIP slab (about 8 mm), axial view: veins become continuous tubes</td></tr>
+ <tr><td><kbd>W</kbd> &nbsp; <kbd>I</kbd></td><td>magnifier lens (2.5&times;) &nbsp; minIP slab (about 8 mm), axial view: vessels become continuous tubes</td></tr>
  <tr><td><kbd>S</kbd>, <kbd>1</kbd>&ndash;<kbd>5</kbd></td><td>next sequence / choose a sequence for the active image</td></tr>
  <tr><td><kbd>D</kbd> &nbsp; <kbd>L</kbd> &nbsp; <kbd>X</kbd></td><td>darkness probe (click) &nbsp; ruler (drag, mm) &nbsp; mark a missed cSS</td></tr>
  </table>
@@ -236,9 +240,9 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const MAC=/Mac|iPhone|iPad/.test(navigator.platform||navigator.userAgent), MOD=MAC?"⌘":"Ctrl";
 $$(".modk").forEach(e=>e.textContent=MOD);
-const CALLKEYS={y:"cSS",v:"Vein",n:"Normal",a:"Artifact",b:"Microbleed",u:"Unsure",h:"Near ICH"};
-const CALLLBL={cSS:"cSS",Vein:"Vein",Normal:"Normal cortex",Artifact:"Artifact",Microbleed:"Microbleed",Unsure:"Unsure","Near ICH":"Near ICH"};
-const CALLCOL={cSS:"#2e9d4a",Vein:"#3b82e0",Normal:"#8a8f98",Artifact:"#e07a1f",Microbleed:"#b0306a",Unsure:"#c9a400","Near ICH":"#9b4fc0"};
+const CALLKEYS={y:"cSS",v:"Vessel",n:"Normal",a:"Artifact",b:"Microbleed",u:"Unsure",h:"Near ICH"};
+const CALLLBL={cSS:"cSS",Vessel:"Vessel",Normal:"Normal cortex",Artifact:"Artifact",Microbleed:"Microbleed",Unsure:"Unsure","Near ICH":"Near ICH"};
+const CALLCOL={cSS:"#2e9d4a",Vessel:"#3b82e0",Normal:"#8a8f98",Artifact:"#e07a1f",Microbleed:"#b0306a",Unsure:"#c9a400","Near ICH":"#9b4fc0"};
 const did=c=>c.disp||c.id;      // number shown to the reader (shuffled 1..N in a validation read)
 let vmode=false;
 const BANDCOL={green:"#3aa655",yellow:"#c99a1c",red:"#d64545"};
@@ -453,11 +457,43 @@ function gauge(a){const P=t=>[110-90*Math.cos(Math.PI*t),105-90*Math.sin(Math.PI
   $("#gauge").innerHTML=arc(0,.33,"#d64545")+arc(.335,.66,"#e0b030")+arc(.665,1,"#3aa655")+`<line x1="110" y1="105" x2="${nxp}" y2="${nyp}" stroke="var(--text)" stroke-width="4" stroke-linecap="round"/><circle cx="110" cy="105" r="7" fill="var(--text)"/>
    <text x="14" y="120" font-size="10" fill="var(--mut)">0</text><text x="194" y="120" font-size="10" fill="var(--mut)">1.0</text><text x="110" y="78" text-anchor="middle" font-size="26" font-weight="700" fill="var(--text)">${a.score.toFixed(2)}</text>`;
   const s=$("#aisay");s.style.borderLeftColor=BANDCOL[a.band];s.innerHTML=`<b>${esc(a.suspect)}</b>`+(a.reason?`: ${esc(a.reason)}.`:".");$("#aisrc").textContent=a.source+" · not validated"}
+// ---------- v5.9 3-D view of the dark structure (canvas, no libraries) ----------
+let showS3=LS("s3",true), s3={d:null,rx:-1.0,ry:0.6,z:1,key:""};
+const S3CLS={BALL:"ball",TUBE:"tube",RIBBON:"ribbon",OTHER:"no clear form",UNRESOLVED:"too thin to resolve"};
+function s3Proj(p,cx,cy,sc){const[x,y,z]=p,cY=Math.cos(s3.ry),sY=Math.sin(s3.ry),cX=Math.cos(s3.rx),sX=Math.sin(s3.rx);
+  const x1=x*cY+y*sY,y1=-x*sY+y*cY,z1=z;const y2=y1*cX-z1*sX,z2=y1*sX+z1*cX;return[cx+x1*sc,cy-z2*sc,y2]}
+function s3Draw(){const cv=$("#s3cv");if(!cv)return;const g=cv.getContext("2d"),W=cv.width,H=cv.height;g.clearRect(0,0,W,H);const d=s3.d;
+  if(!d||d.error){g.fillStyle="#8a8f98";g.font="12px sans-serif";g.fillText(d&&d.error?d.error.slice(0,48):"loading…",10,24);return}
+  let r=8;for(const set of [d.struct,d.core,d.cortex])for(const p of set)r=Math.max(r,Math.hypot(p[0],p[1],p[2]));
+  const sc=Math.min(W,H)/2/Math.min(r,26)*0.92*s3.z,cx=W/2,cy=H/2;
+  const lay=[[d.cortex,"rgba(125,133,144,.35)",1.4],[d.others,"rgba(70,160,255,.5)",1.8],[d.struct,"rgba(224,75,75,.85)",2.4],[d.core,"rgba(255,210,90,.95)",2.6]];
+  const all=[];for(const[set,col,sz]of lay)for(const p of set){const q=s3Proj(p,cx,cy,sc);all.push([q[2],q[0],q[1],col,sz])}
+  all.sort((a,b)=>a[0]-b[0]);for(const[,x,y,col,sz]of all){g.fillStyle=col;g.fillRect(x-sz/2,y-sz/2,sz,sz)}
+  // orientation triad: canonical axes x = patient right, y = anterior, z = superior
+  const ax=[[[1,0,0],"R"],[[0,1,0],"A"],[[0,0,1],"S"]];g.font="bold 11px sans-serif";for(const[v,l]of ax){const q=s3Proj([v[0]*9,v[1]*9,v[2]*9],34,H-30,3.2),o=s3Proj([0,0,0],34,H-30,3.2);
+    g.strokeStyle="#c9d1d9";g.beginPath();g.moveTo(o[0],o[1]);g.lineTo(q[0],q[1]);g.stroke();g.fillStyle="#c9d1d9";g.fillText(l,q[0]+3,q[1]+3)}}
+async function s3Load(){const body=$("#s3body"),card=$("#s3card");if(!card)return;body.style.display=showS3?"":"none";$("#s3hide").innerHTML=showS3?'hide <kbd>3</kbd>':'show <kbd>3</kbd>';
+  const c=M.cands[ci];if(!showS3||!c||c.audit){return}const key=M.study+"|"+c.id;if(s3.key===key)return;s3.key=key;s3.d=null;s3Draw();
+  try{const d=await api(`/api/struct3d?study=${M.study}&cand=${c.id}`);if(s3.key!==key)return;s3.d=d}catch(e){s3.d={error:String(e.message||e)}}
+  s3Draw();const m=s3.d&&s3.d.measures;
+  if(!m){$("#s3say").textContent="";$("#s3meas").textContent="";return}
+  if(vmode){$("#s3say").innerHTML="<span class='mut'>shape reading hidden in a validation read 🔒</span>";$("#s3meas").textContent="";return}
+  $("#s3say").style.borderLeftColor=m.cls==="RIBBON"?"#3aa655":(m.cls==="BALL"||m.cls==="TUBE")?"#d64545":"#8a8f98";
+  $("#s3say").innerHTML=`<b>${esc(S3CLS[m.cls]||m.cls)}</b>: ${esc(m.verdict)}`;
+  $("#s3meas").textContent=`length ${m.s1} mm · width ${m.s2} mm · thickness ${m.s3} mm · in cortex ${m.ctx===null?"?":Math.round(m.ctx*100)+" %"} · runs on ${m.cont}× beyond the object`+(m.cos===null?"":(m.cos<=.5?" · along the surface":" · leaves the surface"))+" · AI shape reading, not validated"}
+function s3Bind(){const cv=$("#s3cv");if(!cv||cv._b)return;cv._b=1;let dr=null;
+  cv.addEventListener("pointerdown",e=>{dr=[e.clientX,e.clientY];cv.setPointerCapture(e.pointerId);cv.style.cursor="grabbing"});
+  cv.addEventListener("pointerup",()=>{dr=null;cv.style.cursor="grab"});
+  cv.addEventListener("pointermove",e=>{if(!dr)return;s3.ry+=(e.clientX-dr[0])*0.012;s3.rx=Math.max(-3.1,Math.min(0.1,s3.rx+(e.clientY-dr[1])*0.012));dr=[e.clientX,e.clientY];s3Draw()});
+  cv.addEventListener("wheel",e=>{e.preventDefault();s3.z=Math.max(.4,Math.min(4,s3.z*(e.deltaY<0?1.12:.89)));s3Draw()},{passive:false});
+  cv.addEventListener("dblclick",()=>{s3.rx=-1.0;s3.ry=0.6;s3.z=1;s3Draw()});
+  $("#s3hide").addEventListener("click",e=>{e.preventDefault();s3Toggle()})}
+function s3Toggle(){showS3=!showS3;try{localStorage.setItem("css_s3",JSON.stringify(showS3))}catch(e){}s3.key="";s3Load()}
 function go(i,keepView){if(!M.cands.length){paintLists();draw();return}ci=Math.max(0,Math.min(M.cands.length-1,i));const c=M.cands[ci];cur=c.centre.slice();
   if(!keepView&&zoom>1.001){ctr=cur.slice()}            // nothing is zoomed for you: an existing zoom is only re-centred on the candidate
   ruler=null;probe=null;if(tool!=="miss")$("#readout").textContent="";
   $("#candinfo").textContent=(c.audit&&c.rule?`EXCLUDED OBJECT (rule: ${c.rule}) · `:"")+`Candidate ${ci+1} of ${M.cands.length} · #${did(c)} · ${c.hemi==="L"?"left":"right"} ${c.region} · ${Math.round(c.volume)} mm³`;
-  gauge(c.ai);paintDecision();paintLists();draw()}
+  gauge(c.ai);paintDecision();paintLists();draw();s3Bind();s3Load()}
 function paintDecision(){const c=cand();if(!c)return;const st=calls[c.id]||{};$$("#dec .b").forEach(b=>{const on=b.dataset.call===st.call;b.classList.toggle("on",on);b.style.borderColor=on?CALLCOL[st.call]:"";b.style.background=on?CALLCOL[st.call]+"33":""});
   $("#curcall").textContent=st.call?("saved: "+CALLLBL[st.call]):"not read yet";if(document.activeElement!==$("#comment"))$("#comment").value=st.comment||""}
 const firstUnread=from=>{const n=M.cands.findIndex((x,j)=>j>from&&!isDone(x));return n<0?M.cands.findIndex(x=>!isDone(x)):n};
@@ -751,7 +787,7 @@ window.addEventListener("keydown",e=>{const tag=(e.target.tagName||"").toLowerCa
   else if(k==="["){const w=getWL(panes[act].seq);setWLp(panes[act].seq,w[0],w[1]-2)}else if(k==="]"){const w=getWL(panes[act].seq);setWLp(panes[act].seq,w[0],w[1]+2)}
   else if(k===";"){const w=getWL(panes[act].seq);setWLp(panes[act].seq,w[0]*1.1,w[1])}else if(k==="'"){const w=getWL(panes[act].seq);setWLp(panes[act].seq,w[0]/1.1,w[1])}
   else if(k==="r")resetView();else if(k==="f")gotoCandidate();
-  else if(k==="m")A.mark.f();else if(k==="o")A.other.f();else if(k==="i")A.mip.f();else if(k==="g")A.auto.f();else if(k==="k")A.ai.f();else if(k==="w")A.mag.f();else if(k==="p")A.text.f();
+  else if(k==="m")A.mark.f();else if(k==="o")A.other.f();else if(k==="i")A.mip.f();else if(k==="g")A.auto.f();else if(k==="k")A.ai.f();else if(k==="3")s3Toggle();else if(k==="w")A.mag.f();else if(k==="p")A.text.f();
   else if(k==="s")nextSeq();else if(/^[1-5]$/.test(k)){const s=M.seqs[+k-1];if(s)setSeq(s.key)}
   else if(k==="t"){theme(THEMES[(THEMES.indexOf(document.documentElement.dataset.theme)+1)%3])}
   else if(k==="d")A.dark.f();else if(k==="l")A.ruler.f();else if(k==="x")A.miss.f();

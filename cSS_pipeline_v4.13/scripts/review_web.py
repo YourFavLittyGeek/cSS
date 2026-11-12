@@ -7,7 +7,7 @@ Only the detector's SHOWN candidates are listed: objects the exclusion rules rem
   --audit   validation-read audit: mix a 20 % sample of the EXCLUDED objects into the list (shuffled numbering) to check the rules
 Starts a server on this computer only (127.0.0.1) and opens the page: a scrollable three-plane viewer (wheel =
 slices, Ctrl+wheel or = / - = zoom, right-drag = window / level), the detector's outlines, an evidence meter, the
-decision keys (Y cSS, V vein, N normal cortex, A artifact, U unsure, H near ICH), comments, missed-cSS marks, a
+decision keys (Y cSS, V vessel, N normal cortex, A artifact, U unsure, H near ICH), comments, missed-cSS marks, a
 ruler, a magnifier and a darkness probe; menu bar and right-click menu. Press ? in the page for all keys. Stop the server with Ctrl+C in the Terminal.
 
 Every decision is saved the moment it is made:
@@ -30,10 +30,10 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 from scipy import ndimage as ndi
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
-from css_common import base as _base, save_calls, FP
+from css_common import base as _base, save_calls, FP, norm_call
 
 B = _base()
-CALLS = ["cSS", "Vein", "Normal", "Artifact", "Unsure", "Near ICH", "Microbleed"]   # v5.7: Microbleed (fine code MB) = not cSS
+CALLS = ["cSS", "Vessel", "Normal", "Artifact", "Unsure", "Near ICH", "Microbleed"]   # v5.7: Microbleed (fine code MB) = not cSS
 SEQ_NAMES = {"swi": "SWI", "flair": "FLAIR", "t1": "T1", "t2": "T2", "phase": "Phase (filtered)"}
 LOCK = threading.Lock()
 slug = lambda s: re.sub(r"[^A-Za-z0-9]+", "_", s.strip()).strip("_") or "reviewer"
@@ -88,7 +88,7 @@ def ai_opinion(r):
     if f("skull_frac", 0) >= 0.5: mimic = "artifact (dark skull band)"; s *= 0.4
     elif f("midline_frac", 0) >= 0.5 and f("pial_dist_mm", -1) > 0: mimic = "a midline structure (falx / sinus)"; s *= 0.4
     elif tier == 4: mimic = "a microbleed" if "microbleed" in treason else "artifact (air-bone zone)"; s *= 0.5
-    elif tier == 3: mimic = "a vein"; s *= 0.6
+    elif tier == 3: mimic = "a vessel"; s *= 0.6
     elif tier == 2: mimic = "a mimic (" + treason.split(";")[0] + ")"; s *= 0.8
     elif tier == 5: mimic = "nothing reliable (case quality insufficient)"; s *= 0.3
     mid = ""                       # v5.6.3 hint only (not an exclusion): a thin sheet close to the mid-sagittal plane
@@ -115,8 +115,8 @@ def ai_opinion(r):
     if mid: why.append(mid)
     if cap and band != "red": why.append(f"meter capped below green: {cap}")
     if band == "green": suspect = "I suspect cSS"
-    elif band == "yellow": suspect = "Uncertain: could be cSS" + (f" or {mimic}" if mimic else " or normal dark cortex / a vein")
-    else: suspect = f"I suspect {mimic}" if mimic else "Probably not cSS (weak evidence: vein or normal cortex more likely)"
+    elif band == "yellow": suspect = "Uncertain: could be cSS" + (f" or {mimic}" if mimic else " or normal dark cortex / a vessel")
+    else: suspect = f"I suspect {mimic}" if mimic else "Probably not cSS (weak evidence: vessel or normal cortex more likely)"
     return dict(score=round(s, 2), band=band, suspect=suspect, reason=", ".join(why), source=src, tier=tier)
 
 
@@ -184,6 +184,39 @@ class Study:
         n = max(1, int(round(AUDIT_FRAC * len(ids))))
         return sorted(int(i) for i in rng.choice(ids, size=min(n, len(ids)), replace=False))
 
+    def struct3d(self, cid):
+        """v5.9 3-D view data: the whole dark structure of candidate (or excluded object 10000+id) as points in mm around its centre, the cortex surface nearby,
+        the object's own core, and the shape measures + plain-language verdict (css_shape.struct_measures). Canonical (RAS+) axes: x right, y anterior, z superior."""
+        import css_shape
+        if not hasattr(self, "_s3"):
+            dp = f"{B}/work/{self.sid}_dark.nii.gz"; sp = f"{B}/work/{self.sid}_seg_swispace.nii.gz"; pp = f"{B}/work/{self.sid}_pial_sd.nii.gz"
+            dark = self._grid(dp, order=0) > 0 if os.path.exists(dp) else None
+            seg = self._grid(sp, order=0) if os.path.exists(sp) else None
+            self._s3 = dict(dark=dark, ctx=((seg >= 1000) & (seg < 3000)) if seg is not None else None, psd=self._grid(pp, order=1) if os.path.exists(pp) else None)
+        S = self._s3
+        if S["dark"] is None or S["ctx"] is None: return dict(error="the 3-D view needs work/ID_dark.nii.gz and the T1 labels (work/ID_seg_swispace.nii.gz)")
+        if cid >= AUDIT_OFFSET:
+            xd, xl = self._excluded(); obj_full = self._xl_can == (cid - AUDIT_OFFSET) if hasattr(self, "_xl_can") else None
+            return dict(error="3-D view is available for the shown candidates")
+        obj_full = self.lab == cid
+        if not obj_full.any(): return dict(error="object not found")
+        vox = np.array(self.vox); pts = np.argwhere(obj_full); lo = np.maximum(pts.min(0) - np.ceil(22 / vox).astype(int), 0); hi = np.minimum(pts.max(0) + np.ceil(22 / vox).astype(int) + 1, self.shape)
+        sl = tuple(slice(a, b) for a, b in zip(lo, hi)); obj = obj_full[sl]
+        sm = css_shape.struct_measures(S["dark"][sl], obj, S["ctx"][sl], S["psd"][sl] if S["psd"] is not None else None, vox, 20.0)
+        st = css_shape.dark_support(S["dark"][sl], obj, vox, cap_mm=20.0, grow=1)
+        cen = (np.argwhere(st).mean(0) if st.any() else np.argwhere(obj).mean(0))
+        def pts_mm(m, cap, seed):
+            p = np.argwhere(m); 
+            if len(p) > cap: p = p[np.random.default_rng(seed).choice(len(p), cap, replace=False)]
+            return np.round((p - cen) * vox, 1).tolist()
+        ctx = S["ctx"][sl]; edge = ctx & ~ndi.binary_erosion(ctx, iterations=1)
+        dd = ndi.distance_transform_edt(~(st | obj), sampling=vox) if (st | obj).any() else None
+        near = edge & (dd <= 14) if dd is not None else edge
+        others = ((self.lab[sl] > 0) & (self.lab[sl] != cid))
+        sm = {k: (None if (isinstance(v, float) and not np.isfinite(v)) else v) for k, v in sm.items()}
+        return dict(id=cid, measures=sm, struct=pts_mm(st & ~obj, 1800, 1), core=pts_mm(obj, 900, 2), cortex=pts_mm(near, 2200, 3), others=pts_mm(others, 500, 4),
+                    n_struct=int(st.sum()), vox=[float(v) for v in vox])
+
     def audit_cands(self, reviewer):
         xd, xl = self._excluded(); out = []; revealed = SHOW_EXCL or load_final(self.sid, reviewer) is not None
         for e in self.audit_ids(reviewer):
@@ -209,7 +242,7 @@ class Study:
         if not os.path.exists(p): return {}
         a = pd.read_csv(p); out = {}
         for _, r in a.iterrows():
-            out[AUDIT_OFFSET + int(r.excl_id)] = dict(call=r.call if isinstance(r.call, str) else "", comment=r.comment if isinstance(r.get("comment"), str) else "",
+            out[AUDIT_OFFSET + int(r.excl_id)] = dict(call=norm_call(r.call) if isinstance(r.call, str) else "", comment=r.comment if isinstance(r.get("comment"), str) else "",
                                                      time=r.get("time", "") if isinstance(r.get("time"), str) else "")
         return out
 
@@ -309,7 +342,7 @@ class Study:
             ok = np.where((d <= 2.0) & (dv <= 0.15))[0]
             if not len(ok): lost += 1; continue
             cm = r.get("comment", ""); call = r.get("call", "")
-            out[int(C[ok[d[ok].argmin()], 0])] = dict(call=call if isinstance(call, str) else "",
+            out[int(C[ok[d[ok].argmin()], 0])] = dict(call=norm_call(call) if isinstance(call, str) else "",
                                                      comment=cm if isinstance(cm, str) else "",
                                                      time=r.get("time") if isinstance(r.get("time"), str) else "")
         if lost: note += f" {lost} earlier call(s) match no current candidate (detector re-run) and were left out."
@@ -503,6 +536,7 @@ class H(BaseHTTPRequestHandler):
                 s = study(q["study"]); return self._send(s.volume(q.get("seq", "swi")).tobytes(order="F"), "application/octet-stream")
             if u.path == "/api/seqmeta":
                 s = study(q["study"]); s.volume(q["seq"]); return self._send(s.meta_seq[q["seq"]])
+            if u.path == "/api/struct3d": return self._send(study(q["study"]).struct3d(int(q["cand"])))
             if u.path == "/api/labels":
                 L = study(q["study"]).labels(q.get("reviewer", ""), q.get("mode") == "validation" or SHOW_EXCL)
                 return self._send(L.astype("<u2").tobytes(order="F"), "application/octet-stream")
