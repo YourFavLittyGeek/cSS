@@ -115,7 +115,7 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
    <div class="card" id="aicard"><div class="h"><span>AI evidence for cSS</span><span class="mut sm">hide <kbd>K</kbd></span></div>
     <div id="aibody"><svg id="gauge" viewBox="0 0 220 122"></svg>
     <div class="band"><span style="color:#d64545">not cSS</span><span style="color:#c99a1c">uncertain</span><span style="color:#3aa655">cSS likely</span></div>
-    <div class="say" id="aisay"></div><div class="mut sm" id="aisrc"></div></div></div>
+    <div class="say" id="aisay"></div><div class="mut sm" id="aisrc"></div><div class="mut sm" id="aiconf" style="margin-top:4px"></div></div></div>
    <div class="card" id="s3card"><div class="h"><span>3-D shape of the dark structure</span><span class="mut sm"><a href="#" id="s3hide" style="color:inherit">hide <kbd>3</kbd></a></span></div>
     <div id="s3body"><canvas id="s3cv" width="300" height="200" style="width:100%;border-radius:8px;background:#0e1116;cursor:grab;touch-action:none"></canvas>
     <div class="mut sm">drag = rotate · wheel = zoom · double-click = reset · <span style="color:#e04b4b">red</span> structure, <span style="color:#ffd25a">yellow</span> detector object, <span style="color:#7d8590">grey</span> cortex</div>
@@ -493,7 +493,8 @@ function go(i,keepView){if(!M.cands.length){paintLists();draw();return}ci=Math.m
   if(!keepView&&zoom>1.001){ctr=cur.slice()}            // nothing is zoomed for you: an existing zoom is only re-centred on the candidate
   ruler=null;probe=null;if(tool!=="miss")$("#readout").textContent="";
   $("#candinfo").textContent=(c.audit&&c.rule?`EXCLUDED OBJECT (rule: ${c.rule}) · `:"")+`Candidate ${ci+1} of ${M.cands.length} · #${did(c)} · ${c.hemi==="L"?"left":"right"} ${c.region} · ${Math.round(c.volume)} mm³`;
-  gauge(c.ai);paintDecision();paintLists();draw();s3Bind();s3Load()}
+  gauge(c.ai);$("#aiconf").innerHTML=(c.conf===null||c.conf===undefined)?"":`<b>Confidence model: ${Math.round(c.conf)} %</b>${c.conf_why?" · "+esc(c.conf_why):""} · fitted on 10 patients, not a validated probability`;
+  paintDecision();paintLists();draw();s3Bind();s3Load()}
 function paintDecision(){const c=cand();if(!c)return;const st=calls[c.id]||{};$$("#dec .b").forEach(b=>{const on=b.dataset.call===st.call;b.classList.toggle("on",on);b.style.borderColor=on?CALLCOL[st.call]:"";b.style.background=on?CALLCOL[st.call]+"33":""});
   $("#curcall").textContent=st.call?("saved: "+CALLLBL[st.call]):"not read yet";if(document.activeElement!==$("#comment"))$("#comment").value=st.comment||""}
 const firstUnread=from=>{const n=M.cands.findIndex((x,j)=>j>from&&!isDone(x));return n<0?M.cands.findIndex(x=>!isDone(x)):n};

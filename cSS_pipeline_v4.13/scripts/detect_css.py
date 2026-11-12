@@ -73,7 +73,7 @@ from skimage.measure import regionprops
 from skimage.morphology import skeletonize
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from css_common import match_calls, base as _base, load_lut, fresh, sha256, update_manifest, environment_record, skeleton_length, radius_profile
-import css_shape
+import css_shape, css_confidence
 import css_qc, css_vessel, mimic_rules, css_pieces, css_features, css_tiers, css_sheet3d
 
 subj   = sys.argv[1]
@@ -154,6 +154,10 @@ SYLV_MM, SYLV_FRAC = 3.0, float(os.environ.get("CSS_SYLV_FRAC", "0.2"))   # v5.8
 # STRUCT_TUBE_CONT times beyond the object and leaves the surface (|cos| >= STRUCT_TUBE_COS).
 STRUCT = os.environ.get("CSS_STRUCT", "") == "1"
 STRUCT_BALL_CTX, STRUCT_TUBE_CONT, STRUCT_TUBE_COS = float(os.environ.get("CSS_STRUCT_BALL_CTX", "0.3")), float(os.environ.get("CSS_STRUCT_TUBE_CONT", "3.0")), float(os.environ.get("CSS_STRUCT_TUBE_COS", "0.5"))
+# v5.10 confidence model (css_confidence.py; fitted by fit_confidence.py -> review/confidence_model.json). When the file exists every object gets confidence_pct
+# (0-100, NOT a validated probability) and confidence_why. CSS_CONF=1 (opt-in): an object the other rules keep is excluded as E30 when its confidence is below
+# the model's own cut (set by the fit below the lowest protected cSS, with a margin). No model file -> columns empty, nothing excluded.
+CONF = os.environ.get("CSS_CONF", "") == "1"
 E22_PIECES = V53 and os.environ.get("CSS_E22_PIECES", "1") != "0"   # v5.7-E-fix3: ON with CSS_V53=1 (acceptance 56/56 incl. M11 #12); CSS_E22_PIECES=0 = merged-object E22 as in fix2
 SHEET3D_SIGMAS_MM = (0.6, 1.2, 1.8)
 V53_OUT_MM = 1.0                 # E17: voxels further than this outside the labelled pial boundary count as "outside"
@@ -281,10 +285,18 @@ def local_ref(ref):
     w = ndi.gaussian_filter(ref.astype(np.float32), _sig)
     m = ndi.gaussian_filter((Ic * ref).astype(np.float32), _sig)
     return np.where(w > 0.05, m / np.maximum(w, 1e-6), mu)
-z = (Ic - local_ref(cortex)) / sd
+# v5.10 cSS next to a lobar ICH: a READER-DRAWN haemorrhage (work/ID_ich.nii.gz) and a 4 mm rim around it are left out of the local cortex reference, so the
+# haemorrhage no longer drags the reference down and makes neighbouring cSS look less dark. Without a drawn mask nothing changes.
+_ichp = f"{base}/work/{subj}_ich.nii.gz"; ICH_REF = None
+if os.path.exists(_ichp):
+    _im = np.asanyarray(nib.load(_ichp).dataobj) > 0
+    if _im.shape == I.shape and _im.any(): ICH_REF = ndi.distance_transform_edt(~_im, sampling=vox) <= 4.0
+    del _im
+_cref = cortex if ICH_REF is None else (cortex & ~ICH_REF)
+z = (Ic - local_ref(_cref)) / sd
 # pass 2: locally dark cortex (lesion candidates) no longer pulls its own reference down;
 # regionally dark NORMAL cortex (iron-rich motor cortex) is not locally dark, so it stays in
-_ref2 = cortex & (z > Z_LOW)
+_ref2 = _cref & (z > Z_LOW)
 z = (Ic - local_ref(_ref2)) / sd
 # v5.1.1: where the pass-2 cortex reference had enough valid voxels (else the global cortex median was used)
 REF_OK = ndi.gaussian_filter(_ref2.astype(np.float32), _sig) > 0.05; del _ref2
@@ -632,8 +644,37 @@ def plane_feats(mm_, pad_):
     return dict(plane_dist_mm=round(float(np.median(np.abs((P - PL_C) @ PL_N))), 1), cos_plane=round(float(abs(v_[:, 0] @ PL_N)), 2),
                 ext_major_mm=round(float(ext[2]), 1))
 DARKG = zone & (z < GROW_Z); CTXB = (seg >= 1000) & (seg < 3000)
+def _wide(mm_, pad_, mm_reach=22.0):
+    """the object mask on a window `mm_reach` mm larger than its padded box (the padded box is only 3 voxels wide: too small to regrow a structure)"""
+    ex = [int(np.ceil(mm_reach / v)) for v in vox]
+    w = tuple(slice(max(s.start - e, 0), min(s.stop + e, n)) for s, e, n in zip(pad_, ex, I.shape))
+    m = np.zeros(tuple(s.stop - s.start for s in w), bool)
+    m[tuple(slice(p.start - s.start, p.stop - s.start) for p, s in zip(pad_, w))] = mm_
+    return m, w
+def cont_feats(mm_, pad_):
+    """v5.10 continuity measures (recorded): darkness along the object and the minIP view.
+    dark_cv / dark_gap_frac: the object's voxels are binned every 1.5 mm along its long axis; cv = SD / |mean| of the bin medians of the darkness z,
+        gap = share of bins that are not dark (z > Z_LOW). An even, unbroken dark line -> both low.
+    minip_len_mm / minip_cont: axial minimum-intensity slab of +-4 mm around the object; the dark (z < z_thr) 2-D component under the object's footprint;
+        its longest extent and that extent / the object's own in-plane extent. A vessel becomes a long continuous tube on the minIP (cont >> 1)."""
+    out = dict(dark_cv=np.nan, dark_gap_frac=np.nan, minip_len_mm=np.nan, minip_cont=np.nan)
+    c = np.argwhere(mm_)
+    if len(c) < 5: return out
+    P = c * vox; Q = P - P.mean(0); w_, v_ = np.linalg.eigh(np.cov(Q.T)); t_ = Q @ v_[:, -1]; zz = z[pad_][mm_]
+    b = np.floor((t_ - t_.min()) / 1.5).astype(int); med = np.array([np.median(zz[b == k]) for k in np.unique(b)])
+    if len(med) >= 2: out["dark_cv"] = round(float(med.std() / max(abs(med.mean()), 1e-6)), 2); out["dark_gap_frac"] = round(float((med > Z_LOW).mean()), 2)
+    m, w = _wide(mm_, pad_, 25.0); k = np.nonzero(m.any((0, 1)))[0]; h = int(np.ceil(4.0 / vox[2]))
+    k0, k1 = max(k.min() - h, 0), min(k.max() + h + 1, m.shape[2])
+    zs = np.where(brain[w][:, :, k0:k1], z[w][:, :, k0:k1], 0).min(2); foot = m.any(2)
+    lab2, _n = ndi.label(zs < z_thr, structure=np.ones((3, 3)))
+    ids = np.unique(lab2[foot]); ids = ids[ids > 0]
+    if len(ids):
+        comp = np.isin(lab2, ids); ext = lambda msk: float(np.sqrt(sum((np.ptp(a) * v_ + v_) ** 2 for a, v_ in zip(np.nonzero(msk), vox[:2]))))
+        le = ext(comp); out["minip_len_mm"] = round(le, 1); out["minip_cont"] = round(le / max(ext(foot), 1e-6), 2)
+    return out
 def struct_feats(mm_, pad_):
-    """v5.9: 3-D form of the whole dark structure -> struct_* columns (css_shape.struct_measures)"""
+    """v5.9: 3-D form of the whole dark structure -> struct_* columns (css_shape.struct_measures); v5.10: measured on a 22 mm wider window"""
+    mm_, pad_ = _wide(mm_, pad_)
     sm = css_shape.struct_measures(DARKG[pad_], mm_, CTXB[pad_], pial_sd[pad_], vox, 20.0)
     return dict(struct_s1_mm=sm["s1"], struct_s2_mm=sm["s2"], struct_s3_mm=sm["s3"], struct_thick_mm=sm["thick"], struct_cls=sm["cls"], struct_cont=sm["cont"],
                 struct_ctx_frac=sm["ctx"], struct_surf_cos=sm["cos"], struct_verdict=sm["verdict"])
@@ -936,7 +977,7 @@ for p in regionprops(lab, spacing=vox):
                mask_edge_mm=round(float(np.median(dist_mm[pad][mm])), 1),
                skull_frac=round(float(SKULL[pad][mm].mean()), 2), v53_active=int(V53), _band=bool(BAND[pad][mm].any()),
                vent_frac=round(float((d_vent[pad][mm] <= E16_MM).mean()), 2),
-               out_frac=round(float((pial_sd[pad][mm] > V53_OUT_MM).mean()), 2), **plane_feats(mm, pad), **piece_sheet_feats(mm, pad), **struct_feats(mm, pad),
+               out_frac=round(float((pial_sd[pad][mm] > V53_OUT_MM).mean()), 2), **plane_feats(mm, pad), **piece_sheet_feats(mm, pad), **struct_feats(mm, pad), **cont_feats(mm, pad), ich_contact_frac=round(float((ich_dist[pad][mm] <= 2.0).mean()), 2),
                skullbase_frac=round(float(np.isin(NEAR_CX[pad][mm], E24_LABELS).mean()), 2),
                dual_contact_frac=round(float(DUALC[pad][mm].mean()), 2), zone2_frac=round(float(RIBSUL[pad][mm].mean()), 2), sylvian_frac=round(float(SYLV[pad][mm].mean()), 2), axis_angle_deg=axis_angle(mm, pad),
                sheet3d_med=round(float(np.median(S3[pad][mm])), 4) if S3 is not None else np.nan,
@@ -1045,7 +1086,8 @@ V50_COLS = ["mimic_score", "mimic_class", "mimic_reason", "phase_z", "mb_cluster
             "midline_frac", "mask_edge_mm", "skull_frac", "v53_active",                         # v5.3, appended
             "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac", "dual_contact_frac",               # v5.3.1 / v5.3.2 / v5.3.4 / v5.7, appended
             "soft_gate_fail", "axis_angle_deg", "sheet3d_med", "sheet3d_overlap", "piece_sheet", "ext_piece_max_mm", "zone2_frac", "sylvian_frac",
-            "struct_s1_mm", "struct_s2_mm", "struct_s3_mm", "struct_thick_mm", "struct_cls", "struct_cont", "struct_ctx_frac", "struct_surf_cos", "struct_verdict"]                                                                    # v5.7 audit branch: "" or the generation gate the object failed (CSS_SOFT_GATES=1)
+            "struct_s1_mm", "struct_s2_mm", "struct_s3_mm", "struct_thick_mm", "struct_cls", "struct_cont", "struct_ctx_frac", "struct_surf_cos", "struct_verdict",
+            "dark_cv", "dark_gap_frac", "minip_len_mm", "minip_cont", "ich_contact_frac", "confidence_pct", "confidence_why"]                                                                    # v5.7 audit branch: "" or the generation gate the object failed (CSS_SOFT_GATES=1)
 cols = cols + V50_COLS
 
 # ---- 11. exclusions (v4.8) - each with an explicit, definition-based reason
@@ -1070,11 +1112,13 @@ RULE_CONF = {"E1": "high" if T1_ANAT else "medium", "E2": "medium", "E3": "mediu
              "E5": "medium", "E6": "medium", "E7": "medium", "E8": "low", "E9": "medium",
              "E10": "low", "E11": "low",                       # v5.0 mimic rules: no real-data support yet
              "E12": "low", "E13": "low", "E14": "low", "E15": "low", "E16": "low", "E17": "low",
-             "E18": "low", "E19": "low", "E20": "low", "E21": "low", "E22": "low", "E24": "low", "E25": "low", "E26": "low", "E27": "low", "E28": "low", "E29": "low"}   # v5.3: chosen on M02-M11, not validated
+             "E18": "low", "E19": "low", "E20": "low", "E21": "low", "E22": "low", "E24": "low", "E25": "low", "E26": "low", "E27": "low", "E28": "low", "E29": "low", "E30": "low"}   # v5.3: chosen on M02-M11, not validated
 def exclusion(r):
     """-> (rule_version, reason); ("", "") = kept. v5.1.1 CSS_MIXED_REVIEW=1: a mixed merged object (pieces disagree)
     is not removed whole by a vein rule (E5 / E6 / E7); it is shown with mixed_object_review = 1"""
     rv, why = exclusion_v4(r)
+    if not rv and CONF and CONF_MODEL is not None and not KEEP_ALL and np.isfinite(r["confidence_pct"]) and r["confidence_pct"] < float(CONF_MODEL.get("cut_pct", 0)):
+        rv, why = "E30@v5.10", f"low confidence ({r['confidence_pct']:.0f} % < {float(CONF_MODEL['cut_pct']):.0f} %): {r['confidence_why']}"
     if css_pieces.rescue_mixed(rv, r.get("mixed_object"), MIXED_REVIEW):
         r["mixed_object_review"] = 1
         return "", ""
@@ -1167,6 +1211,14 @@ if QC_STRICT and QC["status"] == "insufficient_quality":
     print(f"{subj}: QC insufficient_quality ({'; '.join(QC['reasons'])}) - CSS_QC_STRICT=1: case cannot be scored, "
           f"no candidates written [review/{subj}_qc.json]")
     sys.exit(3)
+_cmp = f"{base}/review/confidence_model.json"; CONF_MODEL = None
+if os.path.exists(_cmp):
+    try: CONF_MODEL = css_confidence.load(_cmp)
+    except Exception as e: print(f"{subj}: confidence model ignored ({e})")
+for r in rows:
+    r["confidence_pct"] = np.nan; r["confidence_why"] = ""
+    if CONF_MODEL is not None:
+        r["confidence_pct"] = float(css_confidence.confidence(CONF_MODEL, pd.DataFrame([r]))[0]); r["confidence_why"] = css_confidence.explain(CONF_MODEL, r)
 for r in rows:
     rv, r["_excl"] = exclusion(r)
     r["qc_status"] = QC["status"]
@@ -1296,7 +1348,7 @@ def frozen_rules():
 def active_switches():
     """every experimental environment switch read by the detector, as set for this run"""
     return {k: os.environ.get(k, "") for k in ("CSS_V53", "CSS_USE_MIMIC", "CSS_MIXED_REVIEW", "CSS_QC_STRICT", "CSS_KEEP_ALL", "CSS_SATO_LEGACY",
-                                              "CSS_RANK", "CSS_ALLOW_ORIENT", "CSS_SURFACE_ZONE", "CSS_SOFT_GATES", "CSS_3D_SEEDS", "CSS_E22_PIECES", "CSS_ZONE2", "CSS_ZONE2_FRAC", "CSS_SYLV_FRAC", "CSS_STRUCT")}
+                                              "CSS_RANK", "CSS_ALLOW_ORIENT", "CSS_SURFACE_ZONE", "CSS_SOFT_GATES", "CSS_3D_SEEDS", "CSS_E22_PIECES", "CSS_ZONE2", "CSS_ZONE2_FRAC", "CSS_SYLV_FRAC", "CSS_STRUCT", "CSS_CONF")}
 # v4.17 provenance: inputs (sha256), parameters, versions -> review/ID_manifest.json
 _inputs = {k: p_ for k, p_ in (("swi", f"{base}/data/{subj}_swi.nii"), ("labels", f"{base}/work/{subj}_seg_swispace.nii.gz"),
                                ("t1_labels", _t1p), ("destrieux", f"{base}/work/{subj}_a2009s_swispace.nii.gz"),
