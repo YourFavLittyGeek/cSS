@@ -46,8 +46,8 @@ truth = nib.load(f"{T}/work/PH3_truth.nii.gz").get_fdata().astype(int)
 
 # ---- 1. switch off = unchanged list, new columns appended last
 off, off_lab, _, _, _ = detect("PH3", False)
-new = ["midline_frac", "mask_edge_mm", "skull_frac", "v53_active", "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac", "dual_contact_frac", "soft_gate_fail", "axis_angle_deg", "sheet3d_med", "sheet3d_overlap", "piece_sheet", "ext_piece_max_mm", "zone2_frac", "sylvian_frac", "struct_s1_mm", "struct_s2_mm", "struct_s3_mm", "struct_thick_mm", "struct_cls", "struct_cont", "struct_ctx_frac", "struct_surf_cos", "struct_verdict", "dark_cv", "dark_gap_frac", "minip_len_mm", "minip_cont", "ich_contact_frac", "confidence_pct", "confidence_why"]
-if list(off.columns[-35:]) != new: fail(f"new columns must be appended last, got {list(off.columns[-35:])}")
+new = ["midline_frac", "mask_edge_mm", "skull_frac", "v53_active", "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac", "dual_contact_frac", "soft_gate_fail", "axis_angle_deg", "sheet3d_med", "sheet3d_overlap", "piece_sheet", "ext_piece_max_mm", "zone2_frac", "sylvian_frac", "struct_s1_mm", "struct_s2_mm", "struct_s3_mm", "struct_thick_mm", "struct_cls", "struct_cont", "struct_ctx_frac", "struct_surf_cos", "struct_verdict", "dark_cv", "dark_gap_frac", "minip_len_mm", "minip_cont", "ich_contact_frac", "confidence_pct", "confidence_why", "conf_guard"]
+if list(off.columns[-36:]) != new: fail(f"new columns must be appended last, got {list(off.columns[-36:])}")
 if off.sheet3d_med.notna().any() or off.sheet3d_overlap.notna().any(): fail("the 3-D sheet columns must stay empty when CSS_3D_SEEDS is not set")
 if not off.axis_angle_deg.dropna().between(0, 90).all() or not off.axis_angle_deg.notna().all(): fail("axis_angle_deg (always recorded) must be 0-90 degrees")
 if off.soft_gate_fail.fillna("").ne("").any(): fail("soft_gate_fail must be empty when CSS_SOFT_GATES is not set")

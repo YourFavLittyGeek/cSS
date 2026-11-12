@@ -158,6 +158,9 @@ STRUCT_BALL_CTX, STRUCT_TUBE_CONT, STRUCT_TUBE_COS = float(os.environ.get("CSS_S
 # (0-100, NOT a validated probability) and confidence_why. CSS_CONF=1 (opt-in): an object the other rules keep is excluded as E30 when its confidence is below
 # the model's own cut (set by the fit below the lowest protected cSS, with a margin). No model file -> columns empty, nothing excluded.
 CONF = os.environ.get("CSS_CONF", "") == "1"
+# v5.10.5 side guard: the confidence rule alone may never empty a hemisphere. When every object it removes on one side was the last shown object there, the
+# highest-confidence one of them is kept (conf_guard = 1). Only E30 is undone; objects other rules exclude are never brought back. CSS_CONF_GUARD=0 turns it off.
+CONF_GUARD = os.environ.get("CSS_CONF_GUARD", "1") != "0"
 E22_PIECES = V53 and os.environ.get("CSS_E22_PIECES", "1") != "0"   # v5.7-E-fix3: ON with CSS_V53=1 (acceptance 56/56 incl. M11 #12); CSS_E22_PIECES=0 = merged-object E22 as in fix2
 SHEET3D_SIGMAS_MM = (0.6, 1.2, 1.8)
 V53_OUT_MM = 1.0                 # E17: voxels further than this outside the labelled pial boundary count as "outside"
@@ -1087,7 +1090,7 @@ V50_COLS = ["mimic_score", "mimic_class", "mimic_reason", "phase_z", "mb_cluster
             "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac", "dual_contact_frac",               # v5.3.1 / v5.3.2 / v5.3.4 / v5.7, appended
             "soft_gate_fail", "axis_angle_deg", "sheet3d_med", "sheet3d_overlap", "piece_sheet", "ext_piece_max_mm", "zone2_frac", "sylvian_frac",
             "struct_s1_mm", "struct_s2_mm", "struct_s3_mm", "struct_thick_mm", "struct_cls", "struct_cont", "struct_ctx_frac", "struct_surf_cos", "struct_verdict",
-            "dark_cv", "dark_gap_frac", "minip_len_mm", "minip_cont", "ich_contact_frac", "confidence_pct", "confidence_why"]                                                                    # v5.7 audit branch: "" or the generation gate the object failed (CSS_SOFT_GATES=1)
+            "dark_cv", "dark_gap_frac", "minip_len_mm", "minip_cont", "ich_contact_frac", "confidence_pct", "confidence_why", "conf_guard"]                                                                    # v5.7 audit branch: "" or the generation gate the object failed (CSS_SOFT_GATES=1)
 cols = cols + V50_COLS
 
 # ---- 11. exclusions (v4.8) - each with an explicit, definition-based reason
@@ -1216,7 +1219,7 @@ if os.path.exists(_cmp):
     try: CONF_MODEL = css_confidence.load(_cmp)
     except Exception as e: print(f"{subj}: confidence model ignored ({e})")
 for r in rows:
-    r["confidence_pct"] = np.nan; r["confidence_why"] = ""
+    r["confidence_pct"] = np.nan; r["confidence_why"] = ""; r["conf_guard"] = 0
     if CONF_MODEL is not None:
         r["confidence_pct"] = float(css_confidence.confidence(CONF_MODEL, pd.DataFrame([r]))[0]); r["confidence_why"] = css_confidence.explain(CONF_MODEL, r)
 for r in rows:
@@ -1233,6 +1236,15 @@ for r in rows:
     r["review_tier"] = 2 if why else 1; r["tier_reason"] = "; ".join(why)
     # v5.1.3 review-priority tier (css_tiers.py): reading order only, nothing hidden or excluded by it
     r["review_priority_rank"], r["review_priority"], r["review_priority_reason"] = css_tiers.review_priority(r, QC["status"])
+if CONF and CONF_GUARD:
+    for _h in ("L", "R"):
+        _side = [r for r in rows if r.get("hemi") == _h]
+        if _side and not any(r["rule_version"] == RULESET for r in _side):
+            _e30 = [r for r in _side if str(r["rule_version"]).startswith("E30")]
+            if _e30:
+                _k = max(_e30, key=lambda r: r["confidence_pct"])
+                _k["_excl"] = ""; _k["rule_version"] = RULESET; _k["exclusion_confidence"] = ""; _k["conf_guard"] = 1
+                print(f"{subj}: side guard - {_h} hemisphere would have no candidate left after the confidence rule; kept its highest-confidence object ({_k['confidence_pct']:.0f} %)")
     if r.get("soft_gate_fail"):          # soft mode: read last, labelled
         r["review_priority_rank"] = max(int(r["review_priority_rank"]), 4)
         r["review_priority_reason"] = f"below a generation gate ({r['soft_gate_fail']}); " + str(r["review_priority_reason"] or "")
@@ -1348,7 +1360,7 @@ def frozen_rules():
 def active_switches():
     """every experimental environment switch read by the detector, as set for this run"""
     return {k: os.environ.get(k, "") for k in ("CSS_V53", "CSS_USE_MIMIC", "CSS_MIXED_REVIEW", "CSS_QC_STRICT", "CSS_KEEP_ALL", "CSS_SATO_LEGACY",
-                                              "CSS_RANK", "CSS_ALLOW_ORIENT", "CSS_SURFACE_ZONE", "CSS_SOFT_GATES", "CSS_3D_SEEDS", "CSS_E22_PIECES", "CSS_ZONE2", "CSS_ZONE2_FRAC", "CSS_SYLV_FRAC", "CSS_STRUCT", "CSS_CONF")}
+                                              "CSS_RANK", "CSS_ALLOW_ORIENT", "CSS_SURFACE_ZONE", "CSS_SOFT_GATES", "CSS_3D_SEEDS", "CSS_E22_PIECES", "CSS_ZONE2", "CSS_ZONE2_FRAC", "CSS_SYLV_FRAC", "CSS_STRUCT", "CSS_CONF", "CSS_CONF_GUARD")}
 # v4.17 provenance: inputs (sha256), parameters, versions -> review/ID_manifest.json
 _inputs = {k: p_ for k, p_ in (("swi", f"{base}/data/{subj}_swi.nii"), ("labels", f"{base}/work/{subj}_seg_swispace.nii.gz"),
                                ("t1_labels", _t1p), ("destrieux", f"{base}/work/{subj}_a2009s_swispace.nii.gz"),

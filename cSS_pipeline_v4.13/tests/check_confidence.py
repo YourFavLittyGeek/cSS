@@ -50,6 +50,16 @@ try:
     L1 = np.asanyarray(nib.load(f"{B}/review/PH3_candidates.nii.gz").dataobj).astype(int)
     lost = [k for k in np.unique(truth[truth > 0]) if ((truth == k) & (L > 0)).any() and not ((truth == k) & (L1 > 0)).any()]
     if lost: fail(f"CSS_CONF=1 lost true lesions {lost}")
+    # side guard: a cut above every object would empty both hemispheres -> each side keeps exactly its highest-confidence object; CSS_CONF_GUARD=0 -> none
+    json.dump(dict(mj, cut_pct=101.0), open(f"{B}/review/confidence_model.json", "w"))
+    run([f"{S}/detect_css.py", "PH3"], CSS_CONF="1"); g1 = pd.read_csv(f"{B}/review/PH3_candidates.csv")
+    sides = set(a0.hemi)
+    if set(g1.hemi) != sides or len(g1) != len(sides) or not (g1.conf_guard == 1).all(): fail(f"side guard: {g1[['cand_id', 'hemi', 'confidence_pct', 'conf_guard']]}")
+    for h in sides:
+        if float(g1[g1.hemi == h].confidence_pct.iloc[0]) != float(a0[a0.hemi == h].confidence_pct.max()): fail(f"side guard must keep the highest-confidence object of side {h}")
+    run([f"{S}/detect_css.py", "PH3"], CSS_CONF="1", CSS_CONF_GUARD="0"); g0 = pd.read_csv(f"{B}/review/PH3_candidates.csv")
+    if len(g0): fail("with CSS_CONF_GUARD=0 the cut above every object must remove them all")
+    print(f"side guard: cut above everything keeps 1 object per side ({sorted(sides)}), off -> 0")
     print(f"confidence: unit AUC 1.00; fit on 5 phantom patients, cut {mj['cut_pct']} %, LOPO AUC {mj['lopo_auc']}; detect: {len(a0)} shown -> {len(a1)} with CSS_CONF=1 ({len(e30)} low confidence), no true lesion lost")
 finally:
     for f in made:
