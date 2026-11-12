@@ -36,7 +36,9 @@ def run(args, **kw):
     if r.returncode: fail(f"{' '.join(args[-2:])} exit {r.returncode}\n{r.stdout[-800:]}\n{r.stderr[-800:]}")
     return r.stdout
 def detect(name, v53):
-    out = run([f"{S}/detect_css.py", name], CSS_V53="1" if v53 else "0")
+    # Phase 1: the skull phantom PHS has a dark line 0.6-2 mm outside the cortex; css_qc's edge fit reads that as a 2.3 mm label shift although the labels are
+    # exact, so the registration gate would stop it. This test is about the skull RULES, so the gate is overridden for PHS only (and asserted further down).
+    out = run([f"{S}/detect_css.py", name], CSS_V53="1" if v53 else "0", **({"CSS_ALLOW_BAD_REG": "1"} if name == "PHS" else {}))
     lab = nib.load(f"{T}/review/{name}_candidates.nii.gz").get_fdata().astype(int)
     allobj = (lab > 0) | (nib.load(f"{T}/review/{name}_excluded.nii.gz").get_fdata() > 0)      # shown + excluded objects
     return pd.read_csv(f"{T}/review/{name}_candidates.csv"), lab, pd.read_csv(f"{T}/review/{name}_excluded.csv"), out, allobj
@@ -46,8 +48,8 @@ truth = nib.load(f"{T}/work/PH3_truth.nii.gz").get_fdata().astype(int)
 
 # ---- 1. switch off = unchanged list, new columns appended last
 off, off_lab, _, _, _ = detect("PH3", False)
-new = ["midline_frac", "mask_edge_mm", "skull_frac", "v53_active", "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac", "dual_contact_frac", "soft_gate_fail", "axis_angle_deg", "sheet3d_med", "sheet3d_overlap", "piece_sheet", "ext_piece_max_mm", "zone2_frac", "sylvian_frac", "struct_s1_mm", "struct_s2_mm", "struct_s3_mm", "struct_thick_mm", "struct_cls", "struct_cont", "struct_ctx_frac", "struct_surf_cos", "struct_verdict", "dark_cv", "dark_gap_frac", "minip_len_mm", "minip_cont", "ich_contact_frac", "confidence_pct", "confidence_why", "conf_guard"]
-if list(off.columns[-36:]) != new: fail(f"new columns must be appended last, got {list(off.columns[-36:])}")
+new = ["midline_frac", "mask_edge_mm", "skull_frac", "v53_active", "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac", "dual_contact_frac", "soft_gate_fail", "axis_angle_deg", "sheet3d_med", "sheet3d_overlap", "piece_sheet", "ext_piece_max_mm", "zone2_frac", "sylvian_frac", "struct_s1_mm", "struct_s2_mm", "struct_s3_mm", "struct_thick_mm", "struct_cls", "struct_cont", "struct_ctx_frac", "struct_surf_cos", "struct_verdict", "dark_cv", "dark_gap_frac", "minip_len_mm", "minip_cont", "ich_contact_frac", "confidence_pct", "confidence_why", "conf_guard", "single_slice"]
+if list(off.columns[-37:]) != new: fail(f"new columns must be appended last, got {list(off.columns[-37:])}")
 if off.sheet3d_med.notna().any() or off.sheet3d_overlap.notna().any(): fail("the 3-D sheet columns must stay empty when CSS_3D_SEEDS is not set")
 if not off.axis_angle_deg.dropna().between(0, 90).all() or not off.axis_angle_deg.notna().all(): fail("axis_angle_deg (always recorded) must be 0-90 degrees")
 if off.soft_gate_fail.fillna("").ne("").any(): fail("soft_gate_fail must be empty when CSS_SOFT_GATES is not set")
@@ -218,6 +220,9 @@ for a, b in (("work/PH3_seg_swispace.nii.gz", "work/PHS_seg_swispace.nii.gz"), (
 for f in os.listdir(f"{T}/work"):
     if f.startswith("PH3_") and "a2009s" in f: shutil.copy(f"{T}/work/{f}", f"{T}/work/{f.replace('PH3_', 'PHS_')}")
 os.utime(f"{T}/work/PHS_t1seg_swispace.nii.gz")
+_rg = subprocess.run([py, f"{S}/detect_css.py", "PHS"], env=env, capture_output=True, text=True)
+if _rg.returncode != 5 or os.path.exists(f"{T}/review/PHS_candidates.csv"): fail(f"skull phantom without the override: the registration gate must stop it (known false alarm of the edge fit), exit {_rg.returncode}")
+print("registration gate on the skull phantom: stops (the edge fit reads the dark skull line as a label shift - a known false alarm; documented)")
 s_off, l_off, x_off, _, a_off = detect("PHS", False)
 s_on, l_on, x_on, log, a_on = detect("PHS", True)
 far = lambda m: int((m & (out_mm > 1.0 + max(vox))).sum())      # object voxels beyond the cortex outline + 1 mm

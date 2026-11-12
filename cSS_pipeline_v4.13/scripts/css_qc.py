@@ -207,6 +207,14 @@ def case_qc(base, subj, swi, I, If, seg, brain, tissue, cortex, pial_sd, normal,
         why_low.append(f"oblique slices ({qc['obliquity_deg']} deg from axial)")
     if max(vox) > THICK_SLICE_MM:
         why_low.append(f"thick slices ({max(vox):.1f} mm)")
+    # Phase 1 (safety): explicit registration verdict for T1 anatomy. False = measured and beyond the limit (detect_css.py stops, score_css.py refuses);
+    # None = could not be measured (not verified); True = measured and within the limit. SWI-only anatomy has no T1 registration: None.
+    qc["registration_ok"] = None; qc["registration_note"] = "not measured"
+    if qc["anatomy"] != "SWI-only" and qc["edge_agreement_mm"] is not None and qc["label_shift_mm"] is not None:
+        _bad = [m for m, v in (("label shift", qc["label_shift_mm"]), ("edge bias", abs(qc["edge_bias_mm"]) if qc["edge_bias_mm"] is not None else 0.0)) if v > EDGE_LOW_CONF_MM]
+        qc["registration_ok"] = not _bad
+        qc["registration_note"] = (f"{' and '.join(_bad)} above {EDGE_LOW_CONF_MM} mm (label shift {qc['label_shift_mm']} mm, edge bias {qc['edge_bias_mm']} mm)" if _bad
+                                   else f"label shift {qc['label_shift_mm']} mm, edge bias {qc['edge_bias_mm']} mm (limit {EDGE_LOW_CONF_MM} mm)")
     qc["status"] = "insufficient_quality" if why_bad else ("low_confidence_review" if why_low else "ok")
     qc["reasons"] = why_bad + why_low
     qc["thresholds"] = dict(oblique_low_conf_deg=OBLIQUE_LOW_CONF_DEG, edge_low_conf_mm=EDGE_LOW_CONF_MM, reg_cost_low_conf=REG_COST_LOW_CONF,

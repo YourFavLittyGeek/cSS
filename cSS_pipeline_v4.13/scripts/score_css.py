@@ -35,6 +35,16 @@ MERGE_MM, ADJ_MM, GROW_MM = 3.0, 10.0, 5.0
 SULC_MM = 4.0                     # a focus lines a sulcus if within 4 mm of that sulcus' cortex
 use_truth = "--truth" in sys.argv
 base = os.environ.get("CSS_BASE", os.path.expanduser("~/css_project"))
+# Phase 1 (safety): no anatomical score from a registration that was measured and found unacceptable (review/ID_qc.json: registration_ok false, written by
+# detect_css.py / css_qc.py). Exit code 5, nothing written. CSS_ALLOW_BAD_REG=1 proceeds knowingly (the same switch as the detector's).
+_qcp = f"{base}/review/{subj}_qc.json"
+if os.path.exists(_qcp) and os.environ.get("CSS_ALLOW_BAD_REG", "") != "1":
+    try: _qc = json.load(open(_qcp))
+    except Exception: _qc = {}
+    if _qc.get("registration_ok") is False:
+        print(f"{subj}: NOT SCORED - registration not acceptable: {_qc.get('registration_note')}. Re-register (prep_anat.sh) and re-run the detection, "
+              f"or CSS_ALLOW_BAD_REG=1 to score knowingly.")
+        sys.exit(5)
 csv = f"{base}/review/{subj}_candidates.csv"
 df  = pd.read_csv(csv)
 img = nib.load(f"{base}/review/{subj}_candidates.nii.gz")

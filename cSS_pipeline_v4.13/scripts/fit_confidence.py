@@ -11,6 +11,10 @@ Reports: leave-one-PATIENT-out AUC of the model against the detector's score_v4 
   cut = (1 - margin) x the lowest confidence of a protected cSS, taking the LOWER of the final model and the leave-one-patient-out prediction (each patient
   scored by a model that never saw that patient). v5.10.2: this is the default because the final-model cut alone lost 6 of 54 cSS in the leave-one-patient-out
   check on M02-M11. --cut-insample restores the old, optimistic cut; --cut X sets it by hand (percent). Objects below the cut are excluded (E30, CSS_CONF=1).
+Development vs evaluation (Phase 1): studies listed in review/evaluation_studies.txt (one study id per line, optional ",note") are EVALUATION studies. They may
+never be fitted on: the script stops if any of them is given. The model file records the fit studies, the cut and how the cut was set (cut_method: lopo_min /
+insample_min / manual); detect_css.py applies the exclusion only for lopo_min unless CSS_CONF_ALLOW_OPTIMISTIC=1. eval_confidence.py reports a frozen model on
+evaluation studies without changing anything.
 Writes review/confidence_model.json (unless --dry-run), review/confidence_fit.csv and confidence_fit_summary.txt. The project's lists and calls are not changed."""
 import sys, os, json, numpy as np, pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -23,6 +27,9 @@ ids = [s for s in a[0].split(",") if s]
 reads = (a[a.index("--reads") + 1] if "--reads" in a else "ST,ML,Redo_v53,Blind_v57").split(",")
 gp = a[a.index("--grades") + 1] if "--grades" in a else f"{B}/review/radiologist_grades.csv"
 margin = float(a[a.index("--margin") + 1]) if "--margin" in a else 0.10
+_evp = f"{B}/review/evaluation_studies.txt"
+EVAL = {l.split(",")[0].strip() for l in open(_evp) if l.strip() and not l.startswith("#")} if os.path.exists(_evp) else set()
+if EVAL & set(ids): sys.exit(f"STOP: {sorted(EVAL & set(ids))} are evaluation studies ({_evp}) and may not be used to fit or calibrate the model.")
 neg_h = set()
 if os.path.exists(gp):
     g = pd.read_csv(gp)
@@ -70,9 +77,13 @@ out += ["", f"lowest protected cSS confidence: final model {lo_in:.1f} %, leave-
         "", "cut table (final model / leave-one-patient-out):"]
 for c_ in sorted({cut, 5.0, 10.0, 15.0, 20.0, 30.0, 40.0, 50.0}):
     out.append(f"   < {c_:5.1f} %   cSS lost {int((prot.confidence_pct < c_).sum()):2d} / {int((prot.confidence_lopo_pct < c_).sum()):2d}    not-cSS removed {int((neg.confidence_pct < c_).sum()):3d} / {int((neg.confidence_lopo_pct < c_).sum()):3d}")
-model.update(cut_pct=cut, margin=margin, studies=ids, reads=reads, n_css=int((y == 1).sum()), n_not=int((y == 0).sum()), lopo_auc=round(float(cm.auc(y[ok], oof[ok])), 3),
+model.update(cut_method="manual" if "--cut" in a else ("insample_min" if "--cut-insample" in a else "lopo_min"), evaluation_studies_excluded=sorted(EVAL),
+             cut_pct=cut, margin=margin, studies=ids, reads=reads, n_css=int((y == 1).sum()), n_not=int((y == 0).sum()), lopo_auc=round(float(cm.auc(y[ok], oof[ok])), 3),
              note="fitted on the listed studies; NOT a validated probability; exclusion E30 only with CSS_CONF=1")
 t[["study_id", "obj_id", "hemi", "region", "volume_mm3", "calls", "gold_neg", "y", "confidence_pct", "confidence_lopo_pct"] + [f for f in ("struct_cls", "struct_cont", "minip_cont", "dark_cv") if f in t.columns]].to_csv(f"{B}/review/confidence_fit.csv", index=False)
+if model["cut_method"] != "lopo_min":
+    out.append(f"\nWARNING: cut_method = {model['cut_method']}: this cut was not set from leave-one-patient-out predictions. detect_css.py will NOT apply the exclusion "
+               f"with this model unless CSS_CONF_ALLOW_OPTIMISTIC=1.")
 if "--dry-run" not in a:
     json.dump(model, open(f"{B}/review/confidence_model.json", "w"), indent=1); out.append(f"\nwrote {B}/review/confidence_model.json (cut {cut:.1f} %). Next: acceptance test with CSS_CONF=1, then redetect.")
 else: out.append("\n--dry-run: no model file written.")

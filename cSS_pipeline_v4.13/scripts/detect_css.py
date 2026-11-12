@@ -157,6 +157,24 @@ STRUCT_BALL_CTX, STRUCT_TUBE_CONT, STRUCT_TUBE_COS = float(os.environ.get("CSS_S
 # v5.10 confidence model (css_confidence.py; fitted by fit_confidence.py -> review/confidence_model.json). When the file exists every object gets confidence_pct
 # (0-100, NOT a validated probability) and confidence_why. CSS_CONF=1 (opt-in): an object the other rules keep is excluded as E30 when its confidence is below
 # the model's own cut (set by the fit below the lowest protected cSS, with a margin). No model file -> columns empty, nothing excluded.
+# Phase 1 (safety) G2 slice gate in millimetres. The gate was "at least MIN_SLICES (2) slices", set on 1.2 mm slices = 2.4 mm of through-plane extent. On
+# 3 mm slices that silently became "at least 6 mm", so a focus visible on ONE 3 mm slice was dropped whatever its in-plane length. Now an object passes G2 when
+# it spans >= MIN_SLICES slices OR its through-plane extent (slices x slice thickness) is >= MIN_SI_MM. Scans with slices < 2.4 mm behave exactly as before.
+# Objects that pass only through the mm criterion are marked single_slice = 1 (recorded). CSS_SLICE_GATE=legacy restores the slice-count gate.
+MIN_SI_MM = 2.4
+SLICE_GATE_LEGACY = os.environ.get("CSS_SLICE_GATE", "") == "legacy"
+def passes_slice_gate(n_sl, vz):
+    return n_sl >= MIN_SLICES or (not SLICE_GATE_LEGACY and n_sl >= 1 and n_sl * float(vz) >= MIN_SI_MM)
+# Phase 1 (safety) registration gate. With T1 anatomy every anatomical rule and the sulcal score rest on the T1 labels lying on the SWI. css_qc measures the
+# label shift against the SWI cortex edge; when it exceeds css_qc.EDGE_LOW_CONF_MM (1.5 mm, the existing limit) the registration is NOT acceptable: the
+# detector stops with exit code 5 BEFORE writing any list (existing lists, calls and fates stay untouched) and review/ID_qc.json says registration_ok = false.
+# CSS_ALLOW_BAD_REG=1 lets it continue (lists are then written with qc_status low_confidence_review, as before this change).
+ALLOW_BAD_REG = os.environ.get("CSS_ALLOW_BAD_REG", "") == "1"
+# Phase 1 (safety) confidence exclusion. E30 is applied only when the model's cut was set from leave-one-patient-out predictions (cut_method "lopo_min"), i.e.
+# from patients the model had not seen. A cut taken from the model's own training patients ("insample_min"), a hand-set cut ("manual") or a model file without
+# cut_method is NOT applied unless CSS_CONF_ALLOW_OPTIMISTIC=1; confidence_pct is still recorded. The role of the study for the model (development = one of
+# the fit studies, evaluation = any other) is written to the manifest.
+CONF_ALLOW_OPTIMISTIC = os.environ.get("CSS_CONF_ALLOW_OPTIMISTIC", "") == "1"
 CONF = os.environ.get("CSS_CONF", "") == "1"
 # v5.10.5 side guard: the confidence rule alone may never empty a hemisphere. When every object it removes on one side was the last shown object there, the
 # highest-confidence one of them is kept (conf_guard = 1). Only E30 is undone; objects other rules exclude are never brought back. CSS_CONF_GUARD=0 turns it off.
@@ -808,7 +826,7 @@ if SEEDS3D:
     for _i in _only:
         if _cnt3[_i] * _vv < MIN_MM3: continue
         _c3 = np.argwhere(LAB3 == _i)
-        if len(np.unique(_c3[:, 2])) < MIN_SLICES: continue
+        if not passes_slice_gate(len(np.unique(_c3[:, 2])), vox[2]): continue
         _cm = np.round(_c3.mean(0)).astype(int)
         _rows3.append(dict(obj3d=int(_i), vox_i=int(_cm[0]), vox_j=int(_cm[1]), vox_k=int(_cm[2]), volume_mm3=round(float(_cnt3[_i] * _vv), 1),
                            hemi="L" if hemiL[tuple(_cm)] else "R", nearest_cortex_label=int(NEAR_CX[tuple(_cm)]),
@@ -845,7 +863,7 @@ for p in regionprops(lab, spacing=vox):
     pad = tuple(slice(max(s.start - 3, 0), s.stop + 3) for s in sl)
     mm = lab[pad] == p.label
     n_sl = int(mm.any(axis=(0, 1)).sum())
-    if n_sl < MIN_SLICES:
+    if not passes_slice_gate(n_sl, vox[2]):
         if SOFT_GATES:
             soft = soft or "G2_slices"; soft_log.append(dict(lab=p.label, gate_id="G2_slices", measured=n_sl, threshold=MIN_SLICES))
         else: drop(p, f"<{MIN_SLICES} slices", vol, n_sl, gate="G2_slices", measured=n_sl, thr=MIN_SLICES); continue
@@ -1032,7 +1050,7 @@ for p in regionprops(lab, spacing=vox):
     vein_ev = float(np.mean([v for v in ve if v is not None]))
     c0 = pts.mean(0)
     rows.append(dict(soft_gate_fail=soft, hemi="L" if is_left else "R", region=region, label=code,
-                     volume_mm3=round(vol, 1), n_slices=n_sl, elongation=round(elong, 1),
+                     volume_mm3=round(vol, 1), n_slices=n_sl, single_slice=int(n_sl < MIN_SLICES), elongation=round(elong, 1),
                      surface_contact=round(contact, 2), darkness_z=round(depth, 1),
                      artifact_zone=int(artz), midline_zone=int(midz),
                      score=round(s4 if RANK == "v4" else s3_, 2),
@@ -1090,7 +1108,7 @@ V50_COLS = ["mimic_score", "mimic_class", "mimic_reason", "phase_z", "mb_cluster
             "vent_frac", "out_frac", "plane_dist_mm", "cos_plane", "ext_major_mm", "skullbase_frac", "dual_contact_frac",               # v5.3.1 / v5.3.2 / v5.3.4 / v5.7, appended
             "soft_gate_fail", "axis_angle_deg", "sheet3d_med", "sheet3d_overlap", "piece_sheet", "ext_piece_max_mm", "zone2_frac", "sylvian_frac",
             "struct_s1_mm", "struct_s2_mm", "struct_s3_mm", "struct_thick_mm", "struct_cls", "struct_cont", "struct_ctx_frac", "struct_surf_cos", "struct_verdict",
-            "dark_cv", "dark_gap_frac", "minip_len_mm", "minip_cont", "ich_contact_frac", "confidence_pct", "confidence_why", "conf_guard"]                                                                    # v5.7 audit branch: "" or the generation gate the object failed (CSS_SOFT_GATES=1)
+            "dark_cv", "dark_gap_frac", "minip_len_mm", "minip_cont", "ich_contact_frac", "confidence_pct", "confidence_why", "conf_guard", "single_slice"]                                                                    # v5.7 audit branch: "" or the generation gate the object failed (CSS_SOFT_GATES=1)
 cols = cols + V50_COLS
 
 # ---- 11. exclusions (v4.8) - each with an explicit, definition-based reason
@@ -1120,7 +1138,7 @@ def exclusion(r):
     """-> (rule_version, reason); ("", "") = kept. v5.1.1 CSS_MIXED_REVIEW=1: a mixed merged object (pieces disagree)
     is not removed whole by a vein rule (E5 / E6 / E7); it is shown with mixed_object_review = 1"""
     rv, why = exclusion_v4(r)
-    if not rv and CONF and CONF_MODEL is not None and not KEEP_ALL and np.isfinite(r["confidence_pct"]) and r["confidence_pct"] < float(CONF_MODEL.get("cut_pct", 0)):
+    if not rv and CONF and CONF_CUT_OK and not KEEP_ALL and np.isfinite(r["confidence_pct"]) and r["confidence_pct"] < float(CONF_MODEL.get("cut_pct", 0)):
         rv, why = "E30@v5.10", f"low confidence ({r['confidence_pct']:.0f} % < {float(CONF_MODEL['cut_pct']):.0f} %): {r['confidence_why']}"
     if css_pieces.rescue_mixed(rv, r.get("mixed_object"), MIXED_REVIEW):
         r["mixed_object_review"] = 1
@@ -1199,6 +1217,13 @@ def exclusion_v4(r):
 # ---- 11b. case QC (v4.14, reported only - changes no candidate)
 QC = css_qc.case_qc(base, subj, swi, I, If, seg, brain, tissue, cortex, pial_sd, normal, rim, hemiL, vox,
                     T1_ANAT, FULL_BOTTOM)
+if T1_ANAT and QC.get("registration_ok") is False and not ALLOW_BAD_REG:
+    update_manifest(base, subj, "detect_refused", dict(pipeline_version=RULESET, run_at=pd.Timestamp.now().isoformat(timespec="seconds"), reason="registration_failed",
+                    label_shift_mm=QC.get("label_shift_mm"), edge_bias_mm=QC.get("edge_bias_mm"), limit_mm=css_qc.EDGE_LOW_CONF_MM,
+                    note="no list was written; existing lists, calls and fates are unchanged"))
+    print(f"{subj}: STOPPED - registration not acceptable: {QC.get('registration_note')}. No candidate list was written and nothing existing was changed "
+          f"[review/{subj}_qc.json]. Re-register (prep_anat.sh) or, to proceed knowingly, CSS_ALLOW_BAD_REG=1.")
+    sys.exit(5)
 if QC_STRICT and QC["status"] == "insufficient_quality":
     # v5.0 CSS_QC_STRICT=1: the detector's assumptions do not hold -> no candidates are offered for this case
     os.makedirs(f"{base}/review", exist_ok=True)
@@ -1218,6 +1243,11 @@ _cmp = f"{base}/review/confidence_model.json"; CONF_MODEL = None
 if os.path.exists(_cmp):
     try: CONF_MODEL = css_confidence.load(_cmp)
     except Exception as e: print(f"{subj}: confidence model ignored ({e})")
+CONF_ROLE = "" if CONF_MODEL is None else ("development" if subj in [str(s) for s in CONF_MODEL.get("studies", [])] else "evaluation")
+CONF_CUT_OK = CONF_MODEL is not None and (CONF_MODEL.get("cut_method") == "lopo_min" or CONF_ALLOW_OPTIMISTIC)
+if CONF and CONF_MODEL is not None and not CONF_CUT_OK:
+    print(f"{subj}: low-confidence exclusion NOT applied - the model's cut ({CONF_MODEL.get('cut_pct')} %, method {CONF_MODEL.get('cut_method', 'not recorded')}) was not set "
+          f"from leave-one-patient-out predictions. Refit with fit_confidence.py (default cut) or set CSS_CONF_ALLOW_OPTIMISTIC=1 to apply it knowingly.")
 for r in rows:
     r["confidence_pct"] = np.nan; r["confidence_why"] = ""; r["conf_guard"] = 0
     if CONF_MODEL is not None:
@@ -1353,14 +1383,14 @@ if len(df):
                        "vox_i", "vox_j", "vox_k"]].to_string(index=False))
 FROZEN_NAMES = ["MIN_MM3", "MIN_SLICES", "MIN_ELONG", "MIN_EXTENT_MM", "MERGE_GAP_MM", "MERGE_MAX_MM", "V53_GAP_MM", "V53_MAX_MM", "V53_OUT_MM",
                 "E12_MM3", "E13_FRAC_V533", "E14_EDGE_MM", "E15_SKULL", "E16_FRAC", "E16_MM", "E17_FRAC", "E17_CTX", "E18_EDGE", "E19_DARK", "E19_SKULL",
-                "E20_VOL", "E21_CTX", "E22_PLANE_MM", "E22_COS", "E22_EXT_MM", "E24_FRAC", "E24_LABELS", "E25_FRAC", "E25_REACH_MM", "ZONE2_R_MM", "ZONE2_FRAC", "SYLV_MM", "SYLV_FRAC", "STRUCT_BALL_CTX", "STRUCT_TUBE_CONT", "STRUCT_TUBE_COS", "Z_LOW", "R_PCT_LOW"]
+                "E20_VOL", "E21_CTX", "E22_PLANE_MM", "E22_COS", "E22_EXT_MM", "E24_FRAC", "E24_LABELS", "E25_FRAC", "E25_REACH_MM", "ZONE2_R_MM", "ZONE2_FRAC", "SYLV_MM", "SYLV_FRAC", "STRUCT_BALL_CTX", "STRUCT_TUBE_CONT", "STRUCT_TUBE_COS", "MIN_SI_MM", "Z_LOW", "R_PCT_LOW"]
 def frozen_rules():
     """thresholds in force for this run (the rule set is frozen pending held-out validation) -> manifest"""
     return {n: (list(globals()[n]) if isinstance(globals().get(n), (list, tuple)) else globals().get(n)) for n in FROZEN_NAMES if n in globals()}
 def active_switches():
     """every experimental environment switch read by the detector, as set for this run"""
     return {k: os.environ.get(k, "") for k in ("CSS_V53", "CSS_USE_MIMIC", "CSS_MIXED_REVIEW", "CSS_QC_STRICT", "CSS_KEEP_ALL", "CSS_SATO_LEGACY",
-                                              "CSS_RANK", "CSS_ALLOW_ORIENT", "CSS_SURFACE_ZONE", "CSS_SOFT_GATES", "CSS_3D_SEEDS", "CSS_E22_PIECES", "CSS_ZONE2", "CSS_ZONE2_FRAC", "CSS_SYLV_FRAC", "CSS_STRUCT", "CSS_CONF", "CSS_CONF_GUARD")}
+                                              "CSS_RANK", "CSS_ALLOW_ORIENT", "CSS_SURFACE_ZONE", "CSS_SOFT_GATES", "CSS_3D_SEEDS", "CSS_E22_PIECES", "CSS_ZONE2", "CSS_ZONE2_FRAC", "CSS_SYLV_FRAC", "CSS_STRUCT", "CSS_CONF", "CSS_CONF_GUARD", "CSS_SLICE_GATE", "CSS_ALLOW_BAD_REG", "CSS_CONF_ALLOW_OPTIMISTIC")}
 # v4.17 provenance: inputs (sha256), parameters, versions -> review/ID_manifest.json
 _inputs = {k: p_ for k, p_ in (("swi", f"{base}/data/{subj}_swi.nii"), ("labels", f"{base}/work/{subj}_seg_swispace.nii.gz"),
                                ("t1_labels", _t1p), ("destrieux", f"{base}/work/{subj}_a2009s_swispace.nii.gz"),
@@ -1370,6 +1400,9 @@ _inputs = {k: p_ for k, p_ in (("swi", f"{base}/data/{subj}_swi.nii"), ("labels"
 update_manifest(base, subj, "detect", dict(
     pipeline_version=RULESET, run_at=pd.Timestamp.now().isoformat(timespec="seconds"), args=sys.argv[1:],
     parameters=dict(z_thr=z_thr, ridge_pct=r_pct, rim_mm=RIM_MM, rank=RANK, keep_all=KEEP_ALL,
+                    slice_gate="legacy" if SLICE_GATE_LEGACY else f"mm (>= {MIN_SLICES} slices or >= {MIN_SI_MM} mm)", allow_bad_reg=ALLOW_BAD_REG,
+                    confidence=dict(model=CONF_MODEL is not None, role=CONF_ROLE, cut_pct=None if CONF_MODEL is None else CONF_MODEL.get("cut_pct"),
+                                    cut_method=None if CONF_MODEL is None else CONF_MODEL.get("cut_method", "not recorded"), exclusion_applied=bool(CONF and CONF_CUT_OK)),
                     use_mimic=USE_MIMIC, qc_strict=QC_STRICT, mixed_review=MIXED_REVIEW, phase=MIM.phase_note,
                     sato_sigmas_mm=list(SATO_SIGMAS_MM), sato_sigmas_px=[round(v, 2) for v in SATO_PX],
                     v53=V53, v53_out_mm=V53_OUT_MM, v53_gap_mm=V53_GAP_MM, v53_max_mm=V53_MAX_MM, v53_same_region_merge=True,

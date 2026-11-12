@@ -25,8 +25,11 @@ def make_case(name, I, seg, aff, t1=True):
     p = f"{B}/work/{name}_t1seg_swispace.nii.gz"
     if t1: nib.save(nib.Nifti1Image(seg.astype(np.int32), aff), p)
     elif os.path.exists(p): os.remove(p)
-    run(f"{S}/align_seg.py", name); run(f"{S}/detect_css.py", name)
-    return json.load(open(f"{B}/review/{name}_qc.json"))
+    run(f"{S}/align_seg.py", name)
+    r = subprocess.run([py, f"{S}/detect_css.py", name], capture_output=True, text=True)      # Phase 1: exit 5 = registration gate (QC file is still written)
+    if r.returncode not in (0, 5): print(r.stdout[-800:], r.stderr[-1500:]); fail(f"detect_css.py {name} exit {r.returncode}")
+    q = json.load(open(f"{B}/review/{name}_qc.json")); q["_rc"] = r.returncode
+    return q
 
 img = nib.load(f"{B}/data/PH3_swi.nii"); I0 = img.get_fdata().astype(np.float32); aff = img.affine
 seg0 = nib.load(f"{B}/synthseg/PH3_seg.nii.gz").get_fdata().astype(np.int32)
@@ -88,6 +91,13 @@ for n in (0, 1, 2, 4):
 print("label shift true -> estimated mm (bias), status: " +
       ", ".join(f"{t:.2f} -> {e} ({b}) {s}" for n, t, e, b, s in vals))
 if vals[0][4] != "ok": fail("unshifted T1-labelled phantom should be QC ok")
+# Phase 1 registration gate: a measured label shift above the limit stops the detector (exit 5) and writes no list; within the limit it runs
+for n in (0, 1, 2, 4):
+    q = json.load(open(f"{B}/review/PHS{n}_qc.json")); big = q["label_shift_mm"] is not None and q["label_shift_mm"] > 1.5
+    r = subprocess.run([py, f"{S}/detect_css.py", f"PHS{n}"], capture_output=True, text=True)
+    if (r.returncode == 5) != big or (q["registration_ok"] is False) != big: fail(f"registration gate PHS{n}: shift {q['label_shift_mm']} mm, exit {r.returncode}, registration_ok {q['registration_ok']}")
+    if big and os.path.exists(f"{B}/review/PHS{n}_candidates.csv"): fail(f"PHS{n}: a list was written although the registration gate stopped the detector")
+print("registration gate: shift <= 1.5 mm runs (registration_ok true), larger shift stops with exit 5 and writes no list")
 for n, t, e, b, s in vals[:3]:
     if abs(e - t) > 0.6: fail(f"shift {t:.2f} mm estimated as {e} mm")
 if vals[2][4] == "ok" or vals[3][4] == "ok": fail("a >= 2.5 mm label shift is still QC ok")

@@ -207,6 +207,9 @@ python $ROOT/tests/check_shape.py | tee $T/shape.log | grep -v "^RESULT"
 grep -q "RESULT shape OK" $T/shape.log || { echo "FAIL: shape measures"; exit 1; }
 python $ROOT/tests/check_shape_probe.py | tee $T/shapeprobe.log | grep -v "^RESULT"
 grep -q "RESULT shape_probe OK" $T/shapeprobe.log || { echo "FAIL: shape_probe checks"; exit 1; }
+echo "== Phase 1 safety fixes: slice gate in mm, registration gate, confidence cut method / development vs evaluation"
+python $ROOT/tests/check_phase1.py 2>/dev/null | tee $T/phase1.log | grep -v "^RESULT"
+grep -q "RESULT phase1 OK" $T/phase1.log || { echo "FAIL: phase 1 safety checks"; exit 1; }
 python $ROOT/tests/check_confidence.py 2>/dev/null | tee $T/conf.log | grep -v "^RESULT"
 grep -q "RESULT confidence OK" $T/conf.log || { echo "FAIL: confidence model"; exit 1; }
 python $ROOT/tests/check_vessel_rename.py | tee $T/vessel.log | grep -v "^RESULT"
