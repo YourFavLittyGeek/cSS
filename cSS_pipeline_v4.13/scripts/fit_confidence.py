@@ -8,8 +8,9 @@ Labels of the SHOWN objects:
                     overrules a reader's cSS call there
   unread objects elsewhere are left out.
 Reports: leave-one-PATIENT-out AUC of the model against the detector's score_v4 on the same objects, the weight of each evidence domain, and the cut:
-  cut = (1 - margin) x the lowest confidence of a protected cSS under the final model. Objects below it would be excluded (E30, CSS_CONF=1).
-  The honest estimate of what the cut costs on NEW patients = protected cSS whose LEAVE-ONE-PATIENT-OUT confidence falls below it (printed).
+  cut = (1 - margin) x the lowest confidence of a protected cSS, taking the LOWER of the final model and the leave-one-patient-out prediction (each patient
+  scored by a model that never saw that patient). v5.10.2: this is the default because the final-model cut alone lost 6 of 54 cSS in the leave-one-patient-out
+  check on M02-M11. --cut-insample restores the old, optimistic cut; --cut X sets it by hand (percent). Objects below the cut are excluded (E30, CSS_CONF=1).
 Writes review/confidence_model.json (unless --dry-run), review/confidence_fit.csv and confidence_fit_summary.txt. The project's lists and calls are not changed."""
 import sys, os, json, numpy as np, pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -57,9 +58,10 @@ w = np.array(model["w"]); out.append("evidence domains (sum of |weight| of their
 for dom, fs in cc.DOMAINS.items():
     ws = sorted(((f, w[cc.FEATURES.index(f)]) for f in fs), key=lambda kv: -abs(kv[1]))
     out.append(f"   {dom:<9} {sum(abs(v) for _, v in ws):5.2f}   [" + ", ".join(f"{f} {v:+.2f}" for f, v in ws[:3]) + "]")
-prot = t[t.y == 1]; lo = float(prot.confidence_pct.min()); cut = round((1 - margin) * lo, 1)
+prot = t[t.y == 1]; lo_in = float(prot.confidence_pct.min()); lo_oof = float(np.nanmin(prot.confidence_lopo_pct)); lo = lo_in if "--cut-insample" in a else min(lo_in, lo_oof)
+cut = float(a[a.index("--cut") + 1]) if "--cut" in a else round((1 - margin) * lo, 1)
 neg = t[t.y == 0]; unread = d[d.y < 0].copy(); unread["confidence_pct"] = cc.confidence(model, unread) if len(unread) else []
-out += ["", f"lowest protected cSS confidence {lo:.1f} %  ->  cut {cut:.1f} %  (margin {100 * margin:.0f} %)",
+out += ["", f"lowest protected cSS confidence: final model {lo_in:.1f} %, leave-one-patient-out {lo_oof:.1f} %  ->  cut {cut:.1f} %  (margin {100 * margin:.0f} % below the {'final-model' if '--cut-insample' in a else 'lower'} value{'; set by hand' if '--cut' in a else ''})",
         f"at this cut: protected cSS excluded 0 of {len(prot)};  not-cSS excluded {int((neg.confidence_pct < cut).sum())} of {len(neg)};  unread objects excluded {int((unread.confidence_pct < cut).sum()) if len(unread) else 0} of {len(unread)}",
         f"HONEST CHECK (each patient scored by a model that never saw that patient): protected cSS below the cut {int((prot.confidence_lopo_pct < cut).sum())} of {len(prot)};  not-cSS below the cut {int((neg.confidence_lopo_pct < cut).sum())} of {len(neg)}",
         "", "not-cSS excluded at the cut, by study:  " + str(neg[neg.confidence_pct < cut].study_id.value_counts().sort_index().to_dict()),

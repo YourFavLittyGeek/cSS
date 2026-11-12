@@ -38,6 +38,7 @@ try:
     out = run([f"{S}/fit_confidence.py", ",".join(ids), "--reads", "CfT", "--grades", gf]); made += [f"{B}/review/confidence_fit.csv", f"{B}/review/confidence_fit_summary.txt", f"{B}/review/confidence_model.json"]
     mj = json.load(open(f"{B}/review/confidence_model.json")); fit = pd.read_csv(f"{B}/review/confidence_fit.csv")
     if not (fit[fit.y == 1].confidence_pct >= mj["cut_pct"]).all(): fail("the cut must lie below every protected cSS")
+    if not (fit[fit.y == 1].confidence_lopo_pct >= mj["cut_pct"]).all(): fail("the cut must also lie below every leave-one-patient-out confidence of a protected cSS")
     if not (fit[(fit.study_id == "Q1") & (fit.hemi == "R")].y == 0).all(): fail("objects in a radiologist-negative hemisphere must be negatives")
     if "leave-one-patient-out AUC" not in out or "HONEST CHECK" not in out: fail("summary text")
     run([f"{S}/detect_css.py", "PH3"]); a0 = pd.read_csv(f"{B}/review/PH3_candidates.csv")

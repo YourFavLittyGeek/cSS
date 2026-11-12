@@ -74,7 +74,16 @@ for sid in ids:
         for sub in ("data", "work"):
             for f in glob.glob(f"{E}/{sub}/{sid}_*"): os.remove(f)
 if not rows: sys.exit("\n".join(notes) + "\nnothing to compare")
-d = pd.DataFrame(rows); d.to_csv(f"{B}/review/v53_compare.csv", index=False)
+d = pd.DataFrame(rows)
+# v5.10.2: the radiologist is the reference. A reader's cSS call in a hemisphere the radiologist graded 0 (review/radiologist_grades.csv: study_id,R,L; $CSS_GRADES
+# = another file, "none" = off) is not a protected cSS call: it is relabelled and reported on its own line, as fit_confidence.py treats it.
+_gp = os.environ.get("CSS_GRADES", f"{B}/review/radiologist_grades.csv"); n_over = 0
+if _gp != "none" and os.path.exists(_gp):
+    _g = pd.read_csv(_gp); _neg = {(str(r.study_id), h) for _, r in _g.iterrows() for h in ("R", "L") if h in _g.columns and pd.notna(r[h]) and float(r[h]) == 0}
+    _m = (d.reader_call == "cSS") & pd.Series([(s, h) in _neg for s, h in zip(d.study_id, d.hemi)], index=d.index)
+    n_over = int(_m.sum()); d.loc[_m, "reader_call"] = "cSS (radiologist: none)"
+    notes.append(f"radiologist grades: {n_over} reader cSS call(s) lie in a hemisphere graded 0 and are not counted as protected cSS ({os.path.basename(_gp)})")
+d.to_csv(f"{B}/review/v53_compare.csv", index=False)
 if allobj:                                   # all v5.3 objects (shown + excluded) with the reader calls mapped onto them
     A = pd.concat(allobj, ignore_index=True, sort=False)
     sh = d[d.fate == "shown"].groupby(["study_id", "new_cand_id"]).reader_call.agg(lambda s: "+".join(sorted(set(x for x in s if x))))
