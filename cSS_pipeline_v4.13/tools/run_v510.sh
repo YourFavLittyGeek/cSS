@@ -16,7 +16,7 @@ python -c "import sys; sys.path.insert(0, '$S'); import css_shape, css_confidenc
 [ -n "$SKIP1" ] || { python "$S/redetect.py" "$FIT" --v53 > "$R/v510_redetect1.log" 2>&1; grep -E "done:|NOT done" "$R/v510_redetect1.log"; }
 F1=${FIT%%,*}; head -1 "$R/${F1}_candidates.csv" | grep -q "minip_cont" || { echo "STOP: the redetect did not write the new measures. Last lines of the log:"; tail -25 "$R/v510_redetect1.log"; cd "$R" && zip -q results_v510.zip v510_redetect1.log; echo "Send $R/results_v510.zip"; exit 1; }
 echo "=== 2/5 fit the confidence model  $(date '+%H:%M')"
-python "$S/fit_confidence.py" "$FIT" --reads "$READS" --grades "$G" > "$R/v510_fit.log" 2>&1 || { tail -5 "$R/v510_fit.log"; echo "STOP: the fit failed. Send $R/v510_fit.log"; exit 1; }
+python "$S/fit_confidence.py" "$FIT" --reads "$READS" --grades "$G" $CUT_ARGS > "$R/v510_fit.log" 2>&1 || { tail -5 "$R/v510_fit.log"; echo "STOP: the fit failed. Send $R/v510_fit.log"; exit 1; }
 grep -E "objects:|leave-one-patient-out AUC|lowest protected|at this cut|HONEST CHECK" "$R/v510_fit.log"
 cp "$G" "$BASE/v53_eval/review/" 2>/dev/null
 echo "=== 3/5 acceptance test on copies with the low-confidence exclusion  $(date '+%H:%M')"
