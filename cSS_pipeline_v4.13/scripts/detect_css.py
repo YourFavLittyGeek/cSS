@@ -1236,6 +1236,9 @@ for r in rows:
     r["review_tier"] = 2 if why else 1; r["tier_reason"] = "; ".join(why)
     # v5.1.3 review-priority tier (css_tiers.py): reading order only, nothing hidden or excluded by it
     r["review_priority_rank"], r["review_priority"], r["review_priority_reason"] = css_tiers.review_priority(r, QC["status"])
+    if r.get("soft_gate_fail"):          # soft mode: read last, labelled
+        r["review_priority_rank"] = max(int(r["review_priority_rank"]), 4)
+        r["review_priority_reason"] = f"below a generation gate ({r['soft_gate_fail']}); " + str(r["review_priority_reason"] or "")
 if CONF and CONF_GUARD:
     for _h in ("L", "R"):
         _side = [r for r in rows if r.get("hemi") == _h]
@@ -1245,9 +1248,6 @@ if CONF and CONF_GUARD:
                 _k = max(_e30, key=lambda r: r["confidence_pct"])
                 _k["_excl"] = ""; _k["rule_version"] = RULESET; _k["exclusion_confidence"] = ""; _k["conf_guard"] = 1
                 print(f"{subj}: side guard - {_h} hemisphere would have no candidate left after the confidence rule; kept its highest-confidence object ({_k['confidence_pct']:.0f} %)")
-    if r.get("soft_gate_fail"):          # soft mode: read last, labelled
-        r["review_priority_rank"] = max(int(r["review_priority_rank"]), 4)
-        r["review_priority_reason"] = f"below a generation gate ({r['soft_gate_fail']}); " + str(r["review_priority_reason"] or "")
 excluded = [r for r in rows if r["_excl"]]
 rows = [r for r in rows if not r["_excl"]]
 os.makedirs(f"{base}/review", exist_ok=True)
