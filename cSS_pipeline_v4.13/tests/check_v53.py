@@ -87,9 +87,9 @@ for f in os.listdir(f"{T}/work"):
 b_on, b_lab, b_x, b_log, _ = detect("PHB", True)
 if len(b_on) and (b_on.hemi == "L").any(): fail(f"E24: left objects still shown: {b_on[b_on.hemi == 'L'].cand_id.tolist()}")
 e24 = b_x[b_x.reason.astype(str).str.startswith("skull-base cortex zone")] if len(b_x) else b_x
-if not len(e24) or not (e24.skullbase_frac >= 0.5).all(): fail(f"E24 must exclude the left objects: {b_x.reason.tolist() if len(b_x) else 'none'}")
+if not len(e24) or not (e24.skullbase_frac >= 0.2).all(): fail(f"E24 must exclude the left objects: {b_x.reason.tolist() if len(b_x) else 'none'}")
 if len(b_on) != int((_on.hemi == "R").sum()): fail(f"E24: right objects must be unchanged ({len(b_on)} vs {int((_on.hemi == 'R').sum())})")
-print(f"E24 skull-base zone: {len(e24)} left objects excluded, {len(b_on)} right objects unchanged, skullbase_frac >= 0.5")
+print(f"E24 skull-base zone: {len(e24)} left objects excluded, {len(b_on)} right objects unchanged, skullbase_frac >= 0.2")
 
 # ---- 1c. v5.7 E25 interhemispheric fissure: PHD = PH3 with the cortex around ONE true lesion relabelled half left / half right (x parity),
 #      so that left AND right cortex both lie within 3 mm of it: that object must be excluded by E25, the other true lesions kept
@@ -168,7 +168,7 @@ run([f"{S}/detect_css.py", "PH3"], CSS_V53="1")
 _zb = pd.read_csv(f"{T}/review/PH3_candidates.csv"); _zbl = np.asanyarray(nib.load(f"{T}/review/PH3_candidates.nii.gz").dataobj).astype(int)
 _tb = [k for k in np.unique(truth[truth > 0]) if ((truth == k) & (_zbl > 0)).any()]
 if set(_tb) - set(_tz): fail(f"CSS_ZONE2 lost true lesions {sorted(set(_tb) - set(_tz))}")
-if not (_z1.sylvian_frac < 0.4).all(): fail("E27 must exclude every shown object at or above its threshold")
+if not (_z1.sylvian_frac < 0.2).all(): fail("E27 must exclude every shown object at or above its threshold")
 print(f"v5.8 zone2: true lesions shown {len(_tb)} -> {len(_tz)} with CSS_ZONE2=1; candidates {len(_zb)} -> {len(_z1)}")
 
 # ---- 1e. audit branch: CSS_3D_SEEDS=1 (opt-in, RECORDED ONLY): 3-D plate-ness seeds -> work/ID_gen_3d.nii.gz, ID_3d_only.csv, manifest overlap statistics;

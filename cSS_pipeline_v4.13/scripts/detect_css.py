@@ -146,7 +146,7 @@ SEEDS3D = os.environ.get("CSS_3D_SEEDS", "") == "1"
 #   sylvian_frac share within 3 mm of insula AND of opercular cortex (frontal / parietal operculum, superior temporal) -> Sylvian vessels; E27: >= SYLV_FRAC
 ZONE2 = os.environ.get("CSS_ZONE2", "") == "1"
 ZONE2_R_MM, ZONE2_FRAC = 4.0, float(os.environ.get("CSS_ZONE2_FRAC", "0"))   # v5.8.1: E26 OFF (M02-M11: lost M04 #28 at 0.42, gained <= 1 non-cSS)
-SYLV_MM, SYLV_FRAC = 3.0, float(os.environ.get("CSS_SYLV_FRAC", "0.4"))   # v5.8.1: cSS max 0.09 on M02-M11, 7 non-cSS >= 0.4
+SYLV_MM, SYLV_FRAC = 3.0, float(os.environ.get("CSS_SYLV_FRAC", "0.2"))   # v5.8.4: was 0.4. cSS max 0.09 on M02-M11 (ST / ML protected: 0.00); 6 more shown non-cSS
 E22_PIECES = V53 and os.environ.get("CSS_E22_PIECES", "1") != "0"   # v5.7-E-fix3: ON with CSS_V53=1 (acceptance 56/56 incl. M11 #12); CSS_E22_PIECES=0 = merged-object E22 as in fix2
 SHEET3D_SIGMAS_MM = (0.6, 1.2, 1.8)
 V53_OUT_MM = 1.0                 # E17: voxels further than this outside the labelled pial boundary count as "outside"
@@ -172,7 +172,7 @@ E13_FRAC_V533 = 0.5                  # midline, any depth (cSS max 0.36)
 # within E25_REACH_MM of at least E25_FRAC of its voxels (falx, sagittal sinus, pericallosal / fissure vessels; a sulcal cSS has one hemisphere
 # on both banks). Objects hugging ONE medial surface are not flagged.
 E25_FRAC, E25_REACH_MM = 0.3, 3.0
-E24_FRAC = 0.5
+E24_FRAC = 0.2                       # v5.8.4: was 0.5. M02-M11: no cSS call (52 primary, ST, ML) has ANY skull-base share (max 0.00); 5 more shown non-cSS at >= 0.2
 E24_LABELS = [1012, 1014, 1032, 1033, 1006, 1019]       # lateral / medial orbitofrontal, frontal pole, temporal pole, entorhinal, pars orbitalis (+2000 = right)
 E24_LABELS = E24_LABELS + [x + 1000 for x in E24_LABELS]
 E22_PLANE_MM, E22_COS, E22_EXT_MM = 8.0, 0.9, 25.0   # within 8 mm of the mid-sagittal plane, thin axis aligned with it, >= 25 mm long
