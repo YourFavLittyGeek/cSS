@@ -1,6 +1,7 @@
 # PROJECT_HANDOFF.md — cSS detection and grading pipeline
 
-Handoff for a new Claude Code session. Written 2026-11-12 from the repository itself plus this session's history.
+Handoff for a new Claude Code session. Written 2026-11-12, **updated 2026-11-16 for v5.11.0-phase1** (section 4b and every "UPDATE" note), from the
+repository itself plus this session's history.
 Statements are marked with where they come from: **[repo]** = verified against the files in this repository, **[test]** = verified by a test
 run in this sandbox, **[Mac]** = reported from the user's own runs on real patient data (cannot be re-checked here, there is no patient data
 in this sandbox).
@@ -11,11 +12,15 @@ Read `CLAUDE.md` (same folder) as well: it holds the long version history v3 to 
 
 ## 0. Exact first actions for the new session
 
-1. **Do not change any rule or threshold yet.** Before anything else, ask the user for the output of the v5.10.6 redetect
-   (side guard) and for their look at the four M15 cSS objects the confidence cut removed (section 7, item P0-1).
-2. Run the fast test suite once to confirm the environment: `cd cSS_pipeline_v4.13 && bash tests/run_tests.sh` (about 25 min in this
-   sandbox; no FreeSurfer or patient data needed). Expected last line: `ALL TESTS PASSED`.
-3. Remember: **push to GitHub is blocked** (403, GitHub account disconnected). The user receives code as zip files; see section 9.
+State at handoff: branch `phase1/safety-fixes`, version `v5.11.0-phase1`, tag `baseline-v5.10.6` = the state before Phase 1.
+The user approved a **three-phase, stop-after-each-phase process** (section 7a). Phase 1 is built and reported; **the user has not yet approved Phase 2.**
+
+1. **Do not start Phase 2 or change any rule.** Ask the user for `review/results_phase1.zip` (output of `tools/phase1_measure.sh`, measurement on copies) and
+   for their three Phase 1 decisions (section 7a).
+2. Confirm the environment: `cd cSS_pipeline_v4.13 && bash tests/run_tests.sh` (about 25-30 min; no FreeSurfer or patient data). Expected last line:
+   `ALL TESTS PASSED`. Then `bash tests/test_shell.sh` -> `SHELL TESTS PASSED`.
+3. Remotes: the original GitHub remote (`Selim-tarek/My-Claude-`) rejects pushes with 403. A second repository, **`YourFavLittyGeek/cSS`**, was attached on
+   2026-11-16 and is the remote to push to (section 9).
 
 ---
 
@@ -196,6 +201,30 @@ Version tags are in `scripts/VERSION` and commit subjects. "Tested" = automated 
 - `snapshot_from_backup.py`, `inherit_calls.py` delivered (inherit_calls existed since v5.5.2 but had never reached the user's install).
 - `pial_compare.py` / `probe_common.py` crash fixes (real label volumes, non-3-D guard), `compare_pipelines.py` adjudication columns.
 
+### 4b. Phase 1 safety fixes (v5.11.0-phase1, commit e4a59f3, 2026-11-12)  [repo; full report: docs/PHASE1_SAFETY_REPORT.md]
+Requested by the user after the audit (audit report: delivered as a file, not in the repository; its findings are summarised in section 7). Scope was limited
+to the four items below; no other threshold, rule or scoring logic was touched.
+
+| Item | File / function | Before | Now | Tested |
+|---|---|---|---|---|
+| G2 slice gate | `detect_css.py` `passes_slice_gate`, `MIN_SI_MM = 2.4` | object needed >= 2 slices (so >= 6 mm on 3 mm slices) | passes with >= 2 slices OR slices x thickness >= 2.4 mm; such objects get `single_slice = 1` (appended column); `CSS_SLICE_GATE=legacy` restores | [test] check_phase1 part 1: 1.2 mm phantom identical; 3.6 mm phantom objects 10 -> 29 before rules, shown 9 -> 10, lesions 6/6 both ways |
+| Registration gate | `css_qc.py` (`registration_ok`, `registration_note`), `detect_css.py` (exit 5 before any list is written, manifest `detect_refused`), `score_css.py` (exit 5) | label shift > 1.5 mm only gave `low_confidence_review` | measured shift or edge bias > `EDGE_LOW_CONF_MM` (1.5 mm, existing limit) stops detection and scoring; `CSS_ALLOW_BAD_REG=1` overrides; existing lists untouched | [test] check_qc, check_phase1 part 2 |
+| Confidence exclusion E30 | `detect_css.py` (`CONF_CUT_OK`, `CONF_ROLE`), `fit_confidence.py` (`cut_method`, evaluation refusal) | any cut in the model file was applied | applied only if `cut_method == "lopo_min"`; other cuts need `CSS_CONF_ALLOW_OPTIMISTIC=1`; manifest records role (development / evaluation), cut, method, applied | [test] check_phase1 part 3, check_confidence |
+| Development vs evaluation | `fit_confidence.py`, new `eval_confidence.py`, `review/evaluation_studies.txt` | not enforced | fit refuses listed evaluation studies; `eval_confidence.py` is read-only, refuses fit studies, prints the "already examined" note | [test] check_phase1 part 3 |
+
+Findings of Phase 1 that the next session must know:
+- **No size guard was added** to E30 although the audit proposed one: on the development data it does not help (all 6 leave-one-patient-out cSS losses are
+  < 100 mm3); the only support is one 223 mm3 object in M15 (evaluation patient) - using it would be tuning on evaluation data.
+- **The user's current model file (cut 24.2 %) has no `cut_method`, so E30 is NOT applied on the next redetect** unless the model is refitted (default cut,
+  about 8 % on the earlier fit) or `CSS_CONF_ALLOW_OPTIMISTIC=1` is set. The user's lists on the Mac still carry the 24.2 % exclusion from before.
+- **Registration gate false alarm** [test]: a dark band just outside the cortex fools the edge fit - the skull phantom of check_v53 (labels exactly aligned)
+  reads a 2.33 mm shift and is stopped. Safe direction, but may hold back good scans. `check_v53.py` overrides the gate for that phantom and asserts the stop.
+- An unmeasurable registration (`registration_ok` null) is NOT stopped (still `low_confidence_review`).
+- `tools/phase1_measure.sh` (measurement on copies; creates `review/evaluation_studies.txt` naming M12-M15 as examined) has **not been run by the user yet**.
+- Phase 1 files: new `scripts/eval_confidence.py`, `tests/check_phase1.py`, `tools/phase1_measure.sh`, `docs/PHASE1_SAFETY_REPORT.md`; modified
+  `scripts/detect_css.py`, `css_qc.py`, `score_css.py`, `fit_confidence.py`, `run_experiment.py`, `tests/check_qc.py`, `check_v53.py`, `run_tests.sh`,
+  `CLAUDE.md`, `scripts/VERSION`.
+
 ### Files created in this session  [repo: git diff --name-status 1f5146b HEAD]
 scripts: VERSION, compare_pipelines.py, compare_reads.py, css_confidence.py, css_shape.py, css_sheet3d.py, fit_confidence.py,
 midline_probe.py, pial_compare.py, probe_common.py, run_experiment.py, shape_probe.py, snapshot_from_backup.py, struct_probe.py, zone_probe.py.
@@ -219,8 +248,11 @@ tests/check_inherit.py, check_labels.py, check_review_web.py, check_v53.py, run_
 ### Automated (this sandbox, synthetic phantoms only, no FreeSurfer)  [test]
 - `bash tests/run_tests.sh` — **ALL TESTS PASSED, exit 0**, run on the v5.10.6 code (log in the session scratchpad; last stage is
   check_inherit). Earlier full runs also passed at v5.9.1 and v5.10.0.
+- **UPDATE v5.11.0-phase1:** every stage passes, but NOT in one uninterrupted run: run 1 stopped at check_v53 (skull phantom hit the new registration gate ->
+  test updated); run 2 passed everything up to check_phase1, which had a bug in the test itself (hashed a directory); after the fix the remaining stages were run
+  in the same temp folder and ended `ALL TESTS PASSED`. `tests/test_shell.sh` -> `SHELL TESTS PASSED`. A single clean full run is step 2 of section 0.
 - Individually re-run after the last edits: `check_v53.py` OK, `check_confidence.py` OK, `check_review_web.py` OK, `check_viewer.py` OK.
-- Not run in this session: `tests/test_shell.sh` (stubbed FreeSurfer shell flow).
+- `tests/test_shell.sh` (stubbed FreeSurfer shell flow): run at v5.11.0-phase1, passed.
 - What the tests prove: mechanics (rules fire on constructed cases, switches off = unchanged, no phantom lesion lost, read-only probes do
   not touch the project). They say **nothing about performance on patients**.
 
@@ -245,7 +277,7 @@ tests/check_inherit.py, check_labels.py, check_review_web.py, check_v53.py, run_
 `ID_candidates.csv/.nii.gz`, `ID_excluded.csv/.nii.gz`, `ID_rule_audit.csv`, `ID_manifest.json`, `ID_qc.json`, `ID_calls*.csv`,
 `ID_score*.json`, `ID_final_<name>.json`, `ID_review_log.csv`, `ID_missed.csv`, `ID_surface_features.csv`; work/: `ID_dropped.csv`,
 `ID_dark.nii.gz`, `ID_pial_sd.nii.gz`, `ID_gen.nii.gz`, `ID_seg_swispace.nii.gz`. Column contract: new columns are **appended only**
-(check_v53 asserts the last 36 column names).
+(check_v53 asserts the last 37 column names; the last one is `single_slice`).
 
 ### Regression risks
 - Any change of the search zone or object shape (not just exclusion) changes seeds and objects: v5.3.0 and v5.3.1 each lost 3 cSS this way.
@@ -266,6 +298,31 @@ tests/check_inherit.py, check_labels.py, check_review_web.py, check_v53.py, run_
 
 ---
 
+## 7a. The approved development process (user instruction, 2026-11-12)
+
+Priority order stated by the user: **scientific validity first, computational efficiency second, architectural sophistication third.**
+After each phase: report and WAIT for approval. Dedicated branch per phase, baseline preserved, never overwrite existing results, experimental outputs
+separate from production, every change tested, every modified file documented, no claim of clinical accuracy without expert-annotated reference data.
+
+- **Phase 1 - safety fixes: DONE, awaiting the user's review** (section 4b). Open decisions put to the user:
+  1. slice gate: keep the mm gate as default or return to legacy until M05 / M11 are measured (recommendation: wait for the measurement);
+  2. confidence exclusion: refit with the leave-one-patient-out cut (recommended), keep 24.2 % with the explicit override, or switch it off;
+  3. should an unmeasurable registration also stop the detector.
+- **Phase 2 - fast anatomical route: NOT STARTED, not yet approved.** Compare the recon-all workflow with SynthSeg and FastSurfer on the existing 14 patients:
+  segmentation quality, cortical region localisation, sulcal identification and counting, T1-SWI registration accuracy, agreement of the final 0-4 score,
+  time and memory. Do not assume equivalence of sulcal scoring; recon-all stays the reference until equivalence is shown. Known facts: `run_css.sh` without
+  `--recon` already runs SynthSeg `--parc --robust` + `mri_coreg`; without Destrieux labels `score_css.py` falls back to a Euclidean rule (wrong on P006);
+  `mri_coreg` slipped 3.9 mm on P011; FastSurfer is not installed on the user's Mac.
+- **Phase 3 - detector experiments: NOT STARTED.** Separate experiments: absolute vs scan-relative thresholds; 2-D vs 2.5-D vs 3-D ridge detection;
+  multiscale filtering; orientation-independent curvilinear detection; false-positive discrimination against cortical veins. Phantoms + existing cases;
+  the production detector is not replaced until an experiment shows a meaningful improvement.
+
+Audit findings behind these phases (verified in code / by test): seed thresholds are percentiles of each scan's own ridge response (`detect_css.py`
+`r_hi = np.percentile(R[shell], r_pct)`); the per-slice 2-D Sato filter gives 0.000 response to a sheet in the slice plane (`tests/check_sheet3d.py`:
+0.000 / 0.35 / 0.27 at 0 / 45 / 90 deg vs 0.27 / 0.32 / 0.27 for the 3-D filter); E3 excludes by position; the AI score over-calls; detection time is
+dominated by whole-volume distance transforms (phantom profile: 13.1 s, EDT 43 %, Gaussian 19 %, Sato 10 %). Literature search found **no validated
+automatic cSS detector and no public cSS dataset**; van Harten 2023 (semi-automatic) is the only quantitative method.
+
 ## 7. Known issues and outstanding work (prioritised)
 
 ### P0 — affects reliability of current results
@@ -274,10 +331,11 @@ tests/check_inherit.py, check_labels.py, check_review_web.py, check_v53.py, run_
    --show-excluded`). If real: add a **size guard** (never E30 above a volume, e.g. 150 mm³) in `exclusion()` in `scripts/detect_css.py`,
    test in `tests/check_confidence.py`, re-run `run_v510.sh`. Do not lower the cut silently; the user decides.
 2. **v5.10.6 side-guard redetect not confirmed on the Mac.** Ask for the output (`grep "side guard"` lines).
+   UPDATE: superseded in practice by Phase 1 - with v5.11.0-phase1 installed the 24.2 % model is no longer applied (section 4b).
 3. **Patient scores after all list changes were never recomputed against the radiologist** for M02–M15 together. The reads were made on
    older lists. Next: `compare_grades.py` / `css_report.py` once the reads are current.
-4. **GitHub push blocked (403).** The user must reconnect GitHub (claude.ai → Settings → Connectors). Until then the user's Mac is the only
-   other copy; local commits exist only in this sandbox.
+4. **GitHub push to the original remote blocked (403).** UPDATE 2026-11-16: the user attached `YourFavLittyGeek/cSS`; the full history is pushed there
+   (section 9).
 
 ### P1 — scientific validity
 1. **Reading accuracy is the main error** on held-out cases (M13 read 0 vs 4; sides wrong in M12/M14). ML's blind read of M12–M15 is still
@@ -338,16 +396,18 @@ tests/check_inherit.py, check_labels.py, check_review_web.py, check_v53.py, run_
 
 ## 9. Git, delivery and environment
 
-- **Branch in use:** `fix/audit-v5.7-priority1` (created at the user's request), HEAD `4b4059d` "v5.10.6: side guard moved after the per-object
-  loop". The designated push branch is `claude/css-detection-audit-2esnbb` (local copy is old, at `7936c16`). Push command used:
-  `git push -u origin fix/audit-v5.7-priority1:claude/css-detection-audit-2esnbb` — fails with **403** (GitHub authentication required).
-  No remote-tracking branch exists. Nothing has reached GitHub from this session.
-- Working tree at handoff: clean except this new file `PROJECT_HANDOFF.md` (untracked, not committed per the user's instruction).
+- **Branches (local):** `phase1/safety-fixes` (current; HEAD = this handoff update on top of `e4a59f3` v5.11.0-phase1), `fix/audit-v5.7-priority1`
+  (v5.10.6, `4b4059d`), `claude/css-detection-audit-2esnbb` (old, `7936c16`). **Tag `baseline-v5.10.6`** = state before Phase 1.
+- **Remotes:** `origin` = `Selim-tarek/My-Claude-` - every push failed with 403 (GitHub authentication); nothing from this session is there.
+  `css` = `https://github.com/YourFavLittyGeek/css` (attached 2026-11-16, was empty) - all branches and the tag are pushed there; see the last lines of the
+  final chat message of the session for the push result. A shallow, empty clone of it also sits at `/home/user/css` in the sandbox.
+- New work for Phase 2 / 3: create `phase2/...`, `phase3/...` branches from `phase1/safety-fixes` once the user approves.
+- Working tree at handoff: clean (this file is tracked since `e4a59f3`).
 - **Delivery to the user:** zip of changed files (`zip -q <scratchpad>/cSS_vX_update.zip scripts/... tests/... tools/...` from
   `cSS_pipeline_v4.13/`), sent with SendUserFile; user installs with
   `cd ~/css_project && unzip -o ~/Downloads/<zip> -d ~/css_project && conda activate css && cat scripts/VERSION`.
-  Lesson learned: ship **cumulative** zips (a missing intermediate zip broke v5.10.0 on the Mac). Last zip sent: `cSS_v5.10.6_update.zip`
-  (detect_css.py, VERSION, check_confidence.py, check_v53.py, run_v510.sh).
+  Lesson learned: ship **cumulative** zips (a missing intermediate zip broke v5.10.0 on the Mac). Last zip sent: `cSS_v5.11.0-phase1_update.zip`
+  (all 15 files changed since v5.10.6). The user's Mac was last confirmed at v5.10.4-v5.10.6; whether the phase-1 zip is installed is unknown.
 - Commit messages end with the attribution lines given by the system reminder; never put model names in code or docs.
 - Sandbox: python 3.13 with the packages of environment.yml; Playwright + Chromium preinstalled for check_viewer; no FreeSurfer.
 
@@ -355,8 +415,12 @@ tests/check_inherit.py, check_labels.py, check_review_web.py, check_v53.py, run_
 
 ## 10. Exact next recommended action
 
-Ask the user for (a) the output of the v5.10.6 redetect command (`side guard` lines and `done:` line) and (b) their verdict on the four
-M15 cSS objects excluded at 24.2 % (especially the 223 mm³ rostral middle frontal one). Then:
-- if any of them is real cSS → implement the size guard for E30 (P0-1), test (`tests/check_confidence.py`, full suite), deliver a cumulative
-  zip, and re-run `tools/run_v510.sh` with `CUT_ARGS="--cut-insample"`;
-- otherwise → move to P1-1 (ML's blind read of M12–M15) and P2-1 (fast-route comparison script on three patients).
+1. Ask the user whether `cSS_v5.11.0-phase1_update.zip` is installed (`cat ~/css_project/scripts/VERSION` must print `v5.11.0-phase1`) and for
+   `~/css_project/review/results_phase1.zip` from `caffeinate -i bash tools/phase1_measure.sh` (about 25 min, changes nothing in the project).
+2. From that result report: studies the registration gate would stop; effect of the mm slice gate on M05 / M11 (objects added, any reader-called cSS
+   among them); the leave-one-patient-out confidence cut if the fit could run.
+3. Get the user's three Phase 1 decisions (section 7a), apply them, and only after explicit approval start **Phase 2** on a new branch
+   `phase2/fast-anatomy`: first deliverable is a read-only comparison script (fast route in a separate project folder vs the existing recon-all results)
+   on 3 development patients, then all 14.
+4. Still open from before the phases: the user's look at the four M15 cSS objects removed by the 24.2 % cut, ML's blind read of M12-M15, and the
+   struct_probe results - none of them blocks Phase 2.
