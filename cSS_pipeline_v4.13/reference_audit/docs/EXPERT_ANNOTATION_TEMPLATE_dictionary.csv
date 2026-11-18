@@ -1,0 +1,31 @@
+field,allowed_values
+reader_id,free text / number
+read_session,free text / number
+patient_id,free text / number
+lesion_id,free text / number
+hemisphere,L;R;midline
+lobe,free text / number
+cortical_region,free text / number
+sulcal_location,free text / number
+x_mm,free text / number
+y_mm,free text / number
+z_mm,free text / number
+vox_i,free text / number
+vox_j,free text / number
+vox_k,free text / number
+mask_file,free text / number
+length_mm,free text / number
+thickness_mm,free text / number
+n_slices,free text / number
+morphology,;linear_band;curvilinear_gyriform;tram_track;patchy;dot_like;tubular;other
+continuity,;continuous;discontinuous;single_focus
+swi_appearance,;hypointense_band;hypointense_dot;blooming;not_visible;not_available;other
+gre_appearance,;hypointense_band;hypointense_dot;blooming;not_visible;not_available;other
+flair_appearance,;normal;sulcal_hyperintensity;cortical_hyperintensity;not_visible;not_available
+associated_vascular_structure,;none_seen;adjacent_vessel;continuous_with_vessel;uncertain
+confidence_1to5,1;2;3;4;5
+final_category,definite_cSS;probable_cSS;non_cSS;indeterminate
+noncss_type,;cortical_vein;pial_vessel;sulcal_vessel;dural_structure;skull_base_artifact;other_susceptibility_artifact;microbleed;calcification;normal_dark_cortex;cSAH_acute;ICH_related;other
+uncertainty_reason,free text / number
+comment,free text / number
+read_minutes,free text / number

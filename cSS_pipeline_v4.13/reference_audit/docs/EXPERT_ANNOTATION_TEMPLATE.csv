@@ -1,0 +1,1 @@
+reader_id,read_session,patient_id,lesion_id,hemisphere,lobe,cortical_region,sulcal_location,x_mm,y_mm,z_mm,vox_i,vox_j,vox_k,mask_file,length_mm,thickness_mm,n_slices,morphology,continuity,swi_appearance,gre_appearance,flair_appearance,associated_vascular_structure,confidence_1to5,final_category,noncss_type,uncertainty_reason,comment,read_minutes

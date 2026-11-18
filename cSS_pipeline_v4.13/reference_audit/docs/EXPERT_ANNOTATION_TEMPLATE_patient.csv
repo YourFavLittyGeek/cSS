@@ -1,0 +1,1 @@
+reader_id,read_session,patient_id,image_quality_1to3,sequences_available,css_present_L,css_present_R,multifocality_L_0to2,multifocality_R_0to2,n_definite,n_probable,n_indeterminate,read_minutes,comment
