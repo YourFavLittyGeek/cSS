@@ -8,7 +8,7 @@ from scipy import ndimage as ndi
 from . import flags as FL, hessian_fingerprint as A, candidate_decomposition as F, surface_coordinates as B
 from . import vessel_graph as C, multiview_seeding as D, sulcus_reference as E, fusion as FU, __version__
 
-MARGIN_MM = 8.0
+MARGIN_MM = 15.0   # >= 4 x largest sigma (2.4 mm), >= reference radius (10 mm), = vessel ROI: same crop for every configuration
 
 def sha(p):
     h = hashlib.sha256()
@@ -30,7 +30,8 @@ def crop(sl_obj, shape, vox, margin_mm):
 def analyse(sid, base, fl, out=None, include_excluded=False):
     if not FL.any_on(fl):
         print(f"{sid}: all experimental flags off - nothing computed, nothing written"); return None
-    if fl["CSS_CANDIDATE_SPLITTING"] or fl["CSS_EXPERIMENTAL_FUSION"]: fl = dict(fl, CSS_HESSIAN_FINGERPRINT=True)
+    # modules that need module A's voxel classes switch it on (C: tube class for the vessel map; F: plate/tube split)
+    if fl["CSS_CANDIDATE_SPLITTING"] or fl["CSS_EXPERIMENTAL_FUSION"] or fl["CSS_VESSEL_GRAPH"]: fl = dict(fl, CSS_HESSIAN_FINGERPRINT=True)
     p = dict(swi=f"{base}/data/{sid}_swi.nii", psd=f"{base}/work/{sid}_pial_sd.nii.gz", seg=f"{base}/work/{sid}_seg_swispace.nii.gz",
              cand=f"{base}/review/{sid}_candidates.nii.gz", candcsv=f"{base}/review/{sid}_candidates.csv",
              excl=f"{base}/review/{sid}_excluded.nii.gz", drop=f"{base}/work/{sid}_dropped.nii.gz")
@@ -53,7 +54,7 @@ def analyse(sid, base, fl, out=None, include_excluded=False):
     from .common import objects
     for src, L_ in sources:
       for cid, sl_o, _ in objects(L_):
-          sl = crop(sl_o, cand.shape, vox, MARGIN_MM if not fl["CSS_VESSEL_GRAPH"] else C.ROI_MM)
+          sl = crop(sl_o, cand.shape, vox, MARGIN_MM)
           obj = L_[sl] == cid; Jc = J[sl]; r = dict(study_id=sid, source=src, obj_id=cid, vol_mm3=round(float(obj.sum() * np.prod(vox)), 1))
           cls_full = np.full(obj.shape, -1, np.int8)
           if fl["CSS_HESSIAN_FINGERPRINT"]:
