@@ -30,3 +30,7 @@ changes detector thresholds or rules. Names (optional) only in $CSS_BASE/private
   docx / pdf (codes only, Desktop); Review opens the window at the click (pop-up fix) with every finished patient, the
   reviewer has Cohort + Patient drop-downs and ◂ ▸ (review_web.py --groups FILE --start ID); live run log in the Log
   window; "no progress for N min" after 20 min without a log line.
+- app13 (reviewer): after the final save a small card (bottom right) shows your score and the AI score with a green / grey
+  "next patient automatically" switch and a countdown to the next patient of the cohort (Stay / Next / details).
+  Settings menu: "Go to the next patient automatically" (default on) and "Close the summary after" Immediately (no summary) /
+  3 / 5 / 10 (default) / 20 / 30 s. The last patient of a cohort keeps the full summary ("Cohort finished").

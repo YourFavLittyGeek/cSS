@@ -87,7 +87,8 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
 .sc{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:8px 0}.sc .card{background:var(--bg)}.sc .big{font-size:30px;font-weight:800;line-height:1.1}
 .banner{background:#7a5b00;color:#fff;padding:5px 14px;font-size:13px;display:none}
 .toast{position:fixed;left:24px;bottom:66px;background:#1f6b36;color:#fff;border-radius:10px;padding:9px 14px;font-size:13px;z-index:60;box-shadow:0 6px 20px rgba(0,0,0,.5);display:none;user-select:text}
-.hide{display:none!important}#prevStudy,#nextStudy{padding:3px 9px;color:var(--ink)}
+.hide{display:none!important}#nextcard{position:fixed;right:18px;bottom:18px;width:360px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;z-index:70;display:none;box-shadow:0 10px 30px rgba(0,0,0,.5);font-size:13px}#nextcard.show{display:block}
+.nsw{display:inline-flex;align-items:center;width:34px;height:19px;border-radius:999px;padding:2px;background:#5a626e;cursor:pointer;flex:none}.nsw i{width:15px;height:15px;border-radius:50%;background:#fff;display:block}.nsw.on{background:#3aa655;justify-content:flex-end}#nextcard .pri{background:var(--acc);border-color:var(--acc);color:#fff}#prevStudy,#nextStudy{padding:3px 9px;color:var(--text)}
 .toast.err{background:#8a2b2b}.toast u{cursor:pointer;margin-left:8px}
 </style></head><body>
 <div class="top"><b>cSS Reviewer</b>
@@ -216,7 +217,7 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
  <div class="r"><b></b><label class="mut sm"><input type="radio" name="imov" checked> only candidates I have not called</label><label class="mut sm"><input type="radio" name="imov" id="imAll"> replace my calls too</label></div>
  <div class="mut sm">Switched off during a validation read (importing would unblind you).</div>
  <div class="r" style="justify-content:flex-end;margin-top:10px"><button class="btn" id="imCancel">Cancel</button><button class="btn on" id="imGo">Import</button></div></div></div>
-<div class="modal" id="summary"><div class="dlg" style="min-width:560px"><h2>Summary</h2><div id="sumbody"></div><p class="mut">Close with <kbd>Esc</kbd>.</p></div></div>
+<div id="nextcard"></div><div class="modal" id="summary"><div class="dlg" style="min-width:560px"><h2>Summary</h2><div id="sumbody"></div><p class="mut">Close with <kbd>Esc</kbd>.</p></div></div>
 <div class="modal" id="saveas"><div class="dlg" style="min-width:600px"><h2>Save snapshot as</h2>
  <div class="r"><b>Folder</b><input type="text" id="saFolder" autocomplete="off"><button class="btn" id="saChoose" style="display:none">Choose&hellip;</button></div>
  <div class="r"><b>File name</b><input type="text" id="saName" autocomplete="off"></div>
@@ -261,6 +262,7 @@ let M=null, LAB=null, vols={}, seqmeta={}, WLs={}, luts={};
 let nx,ny,nz,vox, cur=[0,0,0], ctr=[0,0,0], zoom=1;
 let layout=LS("layout","1"), panes=[], act=0;
 let ci=0, calls={}, undo=[], tool=LS("tool","pan"), ruler=null, probe=null, missed=[], draft=null, shape="rect", onlyDiffer=false;
+let autoPt=LS("autopt",true),autoSec=LS("autosec",10),nxTimer=null;   // after the final save: next patient of the cohort
 let compareOn=LS("compare",true), revoteMode=false, readerScore=null, finalRec=null;
 let showMark=LS("mark",true), showOther=LS("other",true), autoNext=LS("auto",true), showAI=LS("ai",true), showText=LS("text",true), showCross=LS("cross2",false), mag=false, mouse=null;
 let mir=false, showRL=LS("rl",true), ltah=LS("ltah",false), ltopen=false, sideChk=null;
@@ -539,8 +541,23 @@ async function summary(){if(!reviewer()){status("Enter your name first.",true);r
 async function finalSave(shown){$("#compare").classList.remove("show");$("#sumbody").innerHTML="<p>Saving the final review ...</p>";$("#summary").classList.add("show");
   try{const r=await api("/api/finish",{study:M.study,reviewer:reviewer(),final:true,n_inherited_unconfirmed:M.cands.filter(isInh).length,n_differ:differIdx().length,meter_visible:showAI&&!vmode?1:0,comparison_shown:!!shown,read_mode:vmode?"validation":"second look"});
     readerScore=r.reader_score;finalRec=r.final;revoteMode=false;paintScores();
-    $("#sumbody").innerHTML=`<p><b>${esc(M.study)}</b> · reviewer <b>${esc(reviewer())}</b> · <span class="ok">final saved ${esc(r.final.saved)}</span></p>`+summaryHtml(r)+`<p class="mut sm">Cohort report: ${esc(r.report||"")}</p>`}
+    const L=cohortList(),i=L.indexOf(M.study),nxt=i>=0&&i<L.length-1?L[i+1]:"";
+    $("#sumbody").innerHTML=`<p><b>${esc(M.study)}</b> · reviewer <b>${esc(reviewer())}</b> · <span class="ok">final saved ${esc(r.final.saved)}</span>${i>=0&&!nxt?` · <b class="ok">Cohort finished - ${L.length} / ${L.length} read</b>`:""}</p>`+summaryHtml(r)+`<p class="mut sm">Cohort report: ${esc(r.report||"")}</p>`;
+    if(nxt)nextCard(r,nxt,i,L.length)}
   catch(e){$("#sumbody").innerHTML=`<p class="err">${esc(e.message)}</p>`}}
+function cohortList(){const G=M.groups||{},g=Object.keys(G).find(k=>G[k].includes(M.study));return g?G[g].filter(s=>M.studies.includes(s)):M.studies}
+function nextCard(r,nxt,i,n){clearInterval(nxTimer);const go2=()=>{clearInterval(nxTimer);$("#nextcard").classList.remove("show");$("#summary").classList.remove("show");loadStudy(nxt)};
+  if(autoPt&&autoSec===0){go2();return}
+  $("#summary").classList.remove("show");const sc=(x)=>x?`<b style="font-size:19px">${x.multifocality_0_4??"–"}</b> <span class="mut">L${x.L_score??"–"} R${x.R_score??"–"}</span>`:"–";
+  const paint=(left)=>{$("#nextcard").innerHTML=`<div style="display:flex;gap:8px;align-items:center"><b>${esc(M.study)} done</b><span class="mut">${i+1} / ${n}</span><span style="flex:1"></span><span class="mut sm" style="cursor:pointer" id="ncFull" title="Open the full summary">details</span></div>
+    <div style="display:flex;gap:6px;align-items:center;margin:6px 0"><span class="mut">You</span>${sc(r.reader_score)}<span style="flex:1"></span><span class="mut" title="AI only, not validated">${vmode?"":"AI*"}</span>${vmode?"":sc(r.ai_score)}</div>
+    <div style="display:flex;gap:8px;align-items:center;border-top:1px solid var(--line);padding-top:7px"><span class="nsw ${autoPt?"on":""}" id="ncSw" title="Next patient automatically (Settings: default and seconds)"><i></i></span>
+    ${autoPt?`<span>Next: ${esc(nxt)} in <b>${left} s</b></span>`:'<span class="mut">Auto next off</span>'}<span style="flex:1"></span>
+    <button class="btn" id="ncStay">${autoPt?"Stay":"Close"}</button><button class="btn pri" id="ncNext">Next ▸</button></div>`;
+    $("#ncSw").onclick=()=>{autoPt=!autoPt;LSS("autopt",autoPt);start()};$("#ncNext").onclick=go2;
+    $("#ncStay").onclick=()=>{clearInterval(nxTimer);$("#nextcard").classList.remove("show")};$("#ncFull").onclick=()=>{clearInterval(nxTimer);$("#nextcard").classList.remove("show");$("#summary").classList.add("show")}};
+  const start=()=>{clearInterval(nxTimer);let left=autoSec||10;paint(left);if(!autoPt)return;nxTimer=setInterval(()=>{left--;if(left<=0)go2();else paint(left)},1000)};
+  $("#nextcard").classList.add("show");start()}
 function reReview(){$("#compare").classList.remove("show");const dx=differIdx();if(!dx.length){status("No disagreements to re-review.");return}onlyDiffer=true;setTab("calls");go(dx[0]);status("Re-reviewing "+dx.length+" disagreement(s). Press Q when done.")}
 function setCompare(v){compareOn=v;LSS("compare",v);$("#cNo").checked=!v}
 function exportCsv(){if(vmode){status("Export is switched off during a validation read.",true);return}const q=s=>'"'+String(s==null?"":s).replace(/"/g,'""')+'"';
@@ -713,6 +730,7 @@ const A={
  vmode:{l:"Validation read (meter hidden, excluded audit)",ic:"eye",f:()=>setVmode(!vmode),on:()=>vmode},
  primary:{l:"Primary reviewer…",ic:"flag",f:showPrimary},import:{l:"Import earlier calls…",ic:"undo",f:openImport,dis:()=>vmode},
  audit:{l:"Excluded audit objects",ic:"layers",f:nextAudit,dis:()=>!(M&&M.cands.some(c=>c.audit))},
+ autopt:{l:"Go to the next patient automatically after the final save",ic:"next",f:()=>{autoPt=!autoPt;LSS("autopt",autoPt)},on:()=>autoPt},
  compare:{l:"Show the AI comparison before the final save",ic:"cmp",f:()=>setCompare(!compareOn),on:()=>compareOn},
  help:{l:"Keys and reading rules",k:"?",ic:"help",f:()=>$("#help").classList.toggle("show")}};
 Object.entries(CALLKEYS).forEach(([k,c])=>A["call_"+k]={l:"Decide: "+CALLLBL[c],k:k.toUpperCase(),ic:"cmp",f:()=>decide(c),on:()=>M&&cand()&&callOf(cand())===c});
@@ -724,7 +742,7 @@ const MENUS={file:()=>[{sub:"Open study",ic:"folder",items:studyItems},"import",
  view:()=>[{sub:"Layout",ic:"l4",k:"\\",items:()=>["lay1","lay2","lay4"]},{sub:"Plane",ic:"cube",k:"Tab",items:planeItems},{sub:"Sequence",ic:"seq",items:seqItems},"-","mark","other","mag","mip","text","cross","ai","-","mirror","rl","side","-","zin","zout","fit","actual","reset","centre","-","tviewer","tcands","tcalls","hidepanel","autohide","-",{sub:"Theme",ic:"moon",items:themeItems}],
  cand:()=>["prev","next","unread","audit","-","call_y","call_v","call_n","call_a","call_u","call_h","-","auto"],
  tools:()=>["pan","zoomtool","wl","scroll","-","mag","dark","ruler","miss","-","snap","snapas","snapfolder"],
- settings:()=>["vmode","primary","-","autohide","text","rl","mirror","compare","ai","auto","-",{sub:"Theme",ic:"moon",items:themeItems},"-","snapset"],help:()=>["help"]};
+ settings:()=>["vmode","primary","-","autohide","text","rl","mirror","compare","ai","auto","-","autopt",{sub:"Close the summary after",ic:"next",items:()=>[[0,"Immediately (no summary)"],[3,"3 s"],[5,"5 s"],[10,"10 s (default)"],[20,"20 s"],[30,"30 s"]].map(([v,l])=>({l,ic:"next",f:()=>{autoSec=v;LSS("autosec",v)},on:()=>autoSec===v}))},"-",{sub:"Theme",ic:"moon",items:themeItems},"-","snapset"],help:()=>["help"]};
 function closeMenus(){$$(".menu").forEach(m=>m.remove());$$("#mbar span").forEach(s=>s.classList.remove("on"));drawLens()}
 function openMenu(items,x,y,level){$$(".menu").forEach(m=>{if(+m.dataset.level>=level)m.remove()});
   const m=document.createElement("div");m.className="menu";m.dataset.level=level;
