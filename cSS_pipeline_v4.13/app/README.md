@@ -16,3 +16,9 @@ changes detector thresholds or rules. Names (optional) only in $CSS_BASE/private
   -> Fast re-registration -> SynthMorph -> then the user decides. A notice lists every change; choosing a non-recommended
   pathway asks for confirmation.
 - Icon follows the theme (icon_dark.png / icon_light.png); the Mac app uses AppIcon.icns (dark).
+- app10: Settings "When a retry is needed" (retry automatically / let me choose); every failed registration is recorded and the
+  recommendation moves on (Fast re-registration -> SynthMorph -> recon-all -> SWI-only); expected time beside each option,
+  recommended in green; old "processing failed" rows re-read from the run log at start; QC opens in its own window (arrows step
+  through patients); recommended number of patients at once recalculated from the pathways in the queue (memory per pathway:
+  SynthSeg / masked 12 GB, recon-all 5 GB, SynthMorph / SWI-only alone); optional pywebview window with a Dock icon that
+  follows the Mac appearance (Home > Setup check > Install).

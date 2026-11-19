@@ -26,7 +26,7 @@ def jload(name, default):
     except Exception: return default
 def jsave(name, obj):
     p = f"{AD}/{name}"; json.dump(obj, open(p + ".tmp", "w"), indent=1, default=str); os.replace(p + ".tmp", p)
-SET = dict(dict(awake=True, theme="dark", backup_dir="", freesurfer_home=os.environ.get("FREESURFER_HOME", ""), threads=4, parallel=1, auto_path=True,
+SET = dict(dict(awake=True, theme="dark", backup_dir="", freesurfer_home=os.environ.get("FREESURFER_HOME", ""), threads=4, parallel=1, auto_path=True, auto_retry=True,
                 features=dict(duplicate_check=True, preflight=True, qc_snapshot=True, notify=True, version_stamp=True, share=True, backup=True,
                               name_warning=False)), **jload("settings.json", {}))
 PAT = jload("patients.json", [])
@@ -34,6 +34,18 @@ for p in PAT:                                            # resume after a restar
     if p.get("status") in ("running", "paused"): p.update(status="waiting", step="", note="restarted after the app was closed")
     p.setdefault("pathway", "recon" if p.get("anatomy") == "recon" else (p.get("reg_method") or "synthseg"))
 def save_pat(): jsave("patients.json", PAT)
+def reread_failures():
+    """failures written by an older app version ('processing failed') are explained again from the run log"""
+    for p in PAT:
+        if p.get("status") == "failed" and "processing failed" in p.get("error", ""):
+            try:
+                e = explain(p["code"], "failed")
+                if e != p["error"]:
+                    p["error"] = e
+                    if "do not line up" in e and not p.get("tried"):
+                        m = re.search(r"shift ([\d.?]+) mm", e); p["tried"] = [dict(pathway=p.get("pathway", "synthseg"), shift=m.group(1) if m else "?")]
+            except Exception: pass
+    save_pat()
 def names():
     import csv
     p = f"{PRIV}/names.csv"
@@ -107,10 +119,26 @@ def sysinfo():
     cores = os.cpu_count() or 1; disk = shutil.disk_usage(B).free / 1e9
     try: load = os.getloadavg()[0] / cores * 100
     except Exception: load = 0
-    rec = max(1, min(4, cores // 4, int((total - 6) // 12) if total else 1))
+    rec = max(1, min(4, cores // 4, int((total - 6) // 12) if total else 1))      # base: SynthSeg patients only
     return dict(chip=chip, cores=cores, mem_total=round(total, 1), mem_used=round(used, 1), mem_pct=round(100 * used / total) if total else 0,
                 cpu_pct=round(min(load, 100)), disk_free=round(disk), recommended=rec, per_patient_gb=12)
 MEM_YELLOW, MEM_RED = 70, 85        # % of memory: yellow = no new patient starts; red = warning + "Stop newest patient"
+
+def recommend(si):
+    """recommended patients at the same time for the pathways actually waiting / running (memory budget = total - 6 GB)"""
+    q = [p for p in PAT if p["status"] in ("waiting", "running", "paused", "starting") and p.get("pathway") not in SOLO]
+    if not q or not si["mem_total"]: return si["recommended"], "", {}
+    q.sort(key=lambda p: (p["status"] == "waiting", p.get("added", 0)))
+    budget, cores, n = si["mem_total"] - 6, si["cores"], 0
+    for p in q:
+        m, c = PW_MEM.get(p.get("pathway"), 12), PW_CORES.get(p.get("pathway"), 4)
+        if m > budget or (n and c > cores): break
+        budget -= m; cores -= c; n += 1
+    n = max(1, min(4, n))
+    mix = {}
+    for p in q: mix[PATHWAYS.get(p.get("pathway"), "SynthSeg")] = mix.get(PATHWAYS.get(p.get("pathway"), "SynthSeg"), 0) + 1
+    why = ", ".join(f"{v} {k}" for k, v in mix.items())
+    return n, why, mix
 
 def preflight():
     env = fs_env(); out = []
@@ -133,6 +161,12 @@ def preflight():
         import numpy, scipy, nibabel, pandas, skimage  # noqa
         out.append(dict(item="Python packages", ok=True, detail=f"python {platform.python_version()}"))
     except ImportError as e: out.append(dict(item="Python packages", ok=False, detail=str(e)))
+    try:
+        import webview  # noqa
+        out.append(dict(item="Own app window (Dock icon)", ok=True, detail="pywebview installed - the app opens in its own window with the cSS icon"))
+    except ImportError:
+        out.append(dict(item="Own app window (Dock icon)", ok=False, fix="pywebview",
+                        detail="optional - without it the app opens in Chrome and the Dock shows Chrome. Install, then quit and reopen the app"))
     if mac():
         r = subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True)
         gb = int(r.stdout.strip() or 0) / 1e9; out.append(dict(item="Memory", ok=gb >= 16, detail=f"{gb:.0f} GB"))
@@ -174,6 +208,14 @@ def scan_patient(folder, folder_is, rule):
     return r
 PATHWAYS = {"synthseg": "SynthSeg", "coreg_masked": "Fast re-registration", "synthmorph": "SynthMorph", "recon": "recon-all", "swi_only": "SWI-only"}
 SOLO = ("swi_only", "synthmorph")       # high / unknown memory: always run alone
+PW_TIME = {"synthseg": "~4 min", "coreg_masked": "~4 min", "synthmorph": "~5 min", "recon": "~2-3 h", "swi_only": "~30 min"}
+PW_MEM = {"synthseg": 12, "coreg_masked": 12, "recon": 5}          # GB per patient (estimates; SOLO pathways run alone)
+PW_CORES = {"synthseg": 4, "coreg_masked": 4, "recon": 2}
+RETRY_ORDER = ["coreg_masked", "synthmorph", "recon", "swi_only"]
+def next_rec(p):
+    """recommended next pathway after a failed registration: first in RETRY_ORDER not tried yet"""
+    tried = {t["pathway"] for t in p.get("tried", [])} | {p.get("pathway")}
+    return next((x for x in RETRY_ORDER if x not in tried), "recon")
 def check_pathway(r, ser):
     """recommended pathway + check result for one scanned patient (header only, nothing is converted)"""
     pk = r["chosen"]; sw = next((x for x in ser if x["path"] == pk.get("SWI")), {}); t1 = next((x for x in ser if x["path"] == pk.get("T1")), {})
@@ -443,11 +485,16 @@ NEXT_REG = {None: "coreg_masked", "": "coreg_masked", "coreg_masked": "synthmorp
 SETUP_ERR = ("licence", "FreeSurfer", "disk is full", "dcm2niix")
 def fail(p, msg):
     with LOCK:
-        if "do not line up" in msg and SET.get("auto_path", True) and p.get("pathway") in ("synthseg", "coreg_masked") and p["series"].get("T1"):
-            nxt = NEXT_REG[p.get("reg_method")]; move_bad_registration(p); apply_pathway(p, nxt)
-            p.update(status="waiting", error="", steps_done={}, path_ack=False,
-                     path_note=f"{msg.split(' - ')[0]} -> retrying automatically with {PATHWAYS[nxt]}")
-            save_pat(); notify("cSS Pipeline", f"{p['code']}: registration retried with {PATHWAYS[nxt]}"); return
+        if "do not line up" in msg:
+            m = re.search(r"shift ([\d.?]+) mm", msg)
+            p.setdefault("tried", []).append(dict(pathway=p.get("pathway", "synthseg"), shift=m.group(1) if m else "?"))
+            move_bad_registration(p)
+            nxt = next_rec(p)
+            if SET.get("auto_retry", True) and nxt in ("coreg_masked", "synthmorph") and p["series"].get("T1"):
+                apply_pathway(p, nxt)
+                p.update(status="waiting", error="", steps_done={}, path_ack=False,
+                         path_note=f"{msg.split(' - ')[0]} -> retrying automatically with {PATHWAYS[nxt]} ({PW_TIME[nxt]})")
+                save_pat(); notify("cSS Pipeline", f"{p['code']}: registration retried with {PATHWAYS[nxt]}"); return
         p.update(status="failed", error=msg, finished=time.time()); save_pat()
         if any(k in msg for k in SETUP_ERR): CUR["hold"] = msg
     notify("cSS Pipeline", f"{p['code']} failed: {msg[:60]}")
@@ -597,6 +644,7 @@ def rollback():
 
 # ------------------------------------------------------------------ child apps (reviewer / blind viewer)
 CHILD = {}
+WIN = dict(webview=False, port=8800)
 def free_port(start):
     for p in range(start, start + 50):
         with socket.socket() as s:
@@ -624,14 +672,16 @@ def state():
         out.append(dict(code=p["code"], name=nm.get(p["code"], ""), cohort=p.get("cohort", ""), mode=p.get("mode"), anatomy=p.get("anatomy"),
                         status=p["status"], step=p.get("step", ""), steps_done=list(p.get("steps_done", {}).keys()), error=p.get("error", ""),
                         elapsed=el, remaining=rem, reg_method=p.get("reg_method", ""), pathway=p.get("pathway", "synthseg"),
-                        path_note=p.get("path_note", ""), path_ack=p.get("path_ack", True), solo=solo(p), started=p.get("started", 0), has_qc=os.path.exists(f"{AD}/qc/{p['code']}.png"), version=p.get("version", ""),
+                        path_note=p.get("path_note", ""), path_ack=p.get("path_ack", True), solo=solo(p), started=p.get("started", 0),
+                        tried=p.get("tried", []), next_rec=next_rec(p) if p["status"] == "failed" else "", has_qc=os.path.exists(f"{AD}/qc/{p['code']}.png"), version=p.get("version", ""),
                         radiologist=p.get("radiologist", ""), grade_R=p.get("grade_R", ""), grade_L=p.get("grade_L", ""),
                         step_times={k: round(v) for k, v in p.get("steps_done", {}).items()}))
     q = [x for x in out if x["status"] in ("waiting", "running", "paused", "starting")]
+    si = sysinfo(); rec, rec_why, _ = recommend(si)
     par = max(1, int(SET.get("parallel", 1)))
     rem = sum(x["remaining"] for x in q) / min(par, max(1, len([x for x in q if not x["solo"]]) or 1))
     return dict(patients=out, queue=dict(n=len(q), remaining=rem, running=",".join(RUNNING), hold=CUR["hold"], mem_wait=CUR["mem_wait"]),
-                sys=sysinfo(), pathways=PATHWAYS, mem_zones=[MEM_YELLOW, MEM_RED],
+                sys=si, rec=rec, rec_why=rec_why, pw_time=PW_TIME, pw_mem=PW_MEM, pathways=PATHWAYS, mem_zones=[MEM_YELLOW, MEM_RED],
                 settings=SET, version=version(), cohorts=sorted(set(jload("cohorts.json", [])) | {p.get("cohort", "") for p in PAT} - {""}), steps=STEPS)
 
 class H(BaseHTTPRequestHandler):
@@ -650,6 +700,25 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/preflight": return self.send(preflight())
             if u.path == "/api/log":
                 f = f"{AD}/logs/{q['code']}.log"; return self.send(dict(text=open(f).read()[-30000:] if os.path.exists(f) else "(no log yet)"))
+            if u.path == "/qc":
+                done = [p["code"] for p in PAT if os.path.exists(f"{AD}/qc/{p['code']}.png")]; c = q.get("code", done[0] if done else "")
+                i = done.index(c) if c in done else 0; th = SET.get("theme", "dark")
+                info = ""
+                try:
+                    j = json.load(open(f"{B}/review/{c}_qc.json")); sh = j.get("label_shift_mm")
+                    if sh is not None: info = f"label shift {float(sh):.2f} mm " + ("✓" if float(sh) <= 1.5 else "✗ above 1.5 mm")
+                except Exception: pass
+                nav = lambda k, t: f'<a href="/qc?code={done[k]}">{t}</a>' if 0 <= k < len(done) else f'<span style="opacity:.3">{t}</span>'
+                bg, fg = ("#111418", "#e6e8eb") if th != "light" else ("#f4f5f7", "#16181b")
+                html = (f'<!doctype html><html><head><meta charset="utf-8"><title>QC - {c}</title><link rel="icon" href="/icon_{"light" if th == "light" else "dark"}.png">'
+                        f'<style>body{{margin:0;background:{bg};color:{fg};font:14px -apple-system,sans-serif;padding:14px}}a{{color:#3987e5;text-decoration:none;font-size:15px}}'
+                        f'img{{max-width:100%;border-radius:8px;margin-top:10px}}.r{{display:flex;gap:16px;align-items:center}}.m{{opacity:.7;font-size:13px}}</style></head><body>'
+                        f'<div class="r"><b style="font-size:17px">QC - {c}</b><span class="m">{info}</span><span style="flex:1"></span>{nav(i - 1, "◂ previous")} {i + 1} / {len(done)} {nav(i + 1, "next ▸")}</div>'
+                        f'<img src="/api/qc?code={c}&t={time.time():.0f}"><p class="m">Cyan = cortex labels, yellow = brain mask. They should follow the anatomy on every panel; '
+                        f'a shift or a cut-off part of the brain means the registration or the mask is wrong.</p>'
+                        f'<script>document.onkeydown=e=>{{const a=[...document.querySelectorAll("a")];if(e.key=="ArrowLeft"&&a[0]&&a[0].textContent.includes("prev"))a[0].click();'
+                        f'if(e.key=="ArrowRight")a.find(x=>x.textContent.includes("next"))?.click()}}</script></body></html>')
+                return self.send(html.encode(), ctype="text/html; charset=utf-8")
             if u.path == "/api/qc":
                 f = f"{AD}/qc/{q['code']}.png"; return self.send(open(f, "rb").read(), ctype="image/png")
             if u.path == "/api/results": return self.send(results())
@@ -716,6 +785,9 @@ class H(BaseHTTPRequestHandler):
                     if k in d: p[k] = d[k]
                 save_pat(); write_grades_file(); return self.send(dict(ok=True))
             if u.path == "/api/fix":
+                if d.get("what") == "pywebview":
+                    r = subprocess.run([sys.executable, "-m", "pip", "install", "pywebview"], capture_output=True, text=True)
+                    return self.send(dict(ok=r.returncode == 0, error="" if r.returncode == 0 else (r.stderr or r.stdout)[-500:]))
                 if d.get("what") == "dcm2niix":
                     r = subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "dcm2niix"], capture_output=True, text=True)
                     ok = r.returncode == 0 and bool(which("dcm2niix", fs_env()))
@@ -751,6 +823,11 @@ class H(BaseHTTPRequestHandler):
                                        capture_output=True, text=True, env=fs_env())
                     if r.returncode: return self.send(dict(ok=False, error=(r.stderr or r.stdout)[-400:]))
                 return self.send(launch_child("blind", d, 8790))
+            if u.path == "/api/window":                 # QC etc.: own window (pywebview) or the browser opens one
+                if WIN["webview"]:
+                    import webview; webview.create_window(d.get("title", "cSS"), f"http://127.0.0.1:{WIN['port']}{d['url']}", width=1150, height=560)
+                    return self.send(dict(open=False))
+                return self.send(dict(open=True))
             if u.path == "/api/share": return self.send(dict(ok=True, path=share_package(d["codes"])))
             if u.path == "/api/quit":
                 if RUNNING and not d.get("force"): return self.send(dict(ok=False, error="a patient is processing - stop it first, or quit anyway (it restarts from the beginning next time)"))
@@ -760,6 +837,24 @@ class H(BaseHTTPRequestHandler):
                 return self.send(dict(ok=True))
             return self.send(dict(error="not found"), 404)
         except Exception as e: return self.send(dict(error=f"{type(e).__name__}: {e}"), 500)
+
+def mac_dark():
+    r = subprocess.run(["defaults", "read", "-g", "AppleInterfaceStyle"], capture_output=True, text=True)
+    return "dark" in r.stdout.lower()
+def dock_icon_follow_theme():
+    """own window only: Dock icon = dark or white brain icon following the Mac appearance (checked every 5 s)"""
+    if not mac(): return
+    try:
+        from AppKit import NSApplication, NSImage
+        from PyObjCTools import AppHelper
+    except ImportError: return
+    last = None
+    while True:
+        cur = "dark" if mac_dark() else "light"
+        if cur != last:
+            img = NSImage.alloc().initWithContentsOfFile_(f"{HERE}/icon_{cur}.png")
+            AppHelper.callAfter(lambda i=img: NSApplication.sharedApplication().setApplicationIconImage_(i)); last = cur
+        time.sleep(5)
 
 def open_window(url):
     """own window if pywebview is installed; else Chrome / Edge in app mode; else the default browser"""
@@ -779,6 +874,7 @@ if __name__ == "__main__":
         if s.connect_ex(("127.0.0.1", port)) == 0:             # already running: just show it
             if "--no-window" not in a: open_window(f"http://127.0.0.1:{port}/")
             sys.exit(0)
+    reread_failures()
     threading.Thread(target=worker, daemon=True).start()
     def _caff_watch():
         while True: caffeinate(bool(RUNNING)); time.sleep(5)
@@ -786,10 +882,11 @@ if __name__ == "__main__":
     srv = ThreadingHTTPServer(("127.0.0.1", port), H); url = f"http://127.0.0.1:{port}/"
     print(f"cSS Pipeline app: {url}  (CSS_BASE={B})", flush=True)
     how = None if "--no-window" in a else open_window(url)
+    WIN["port"] = port
     if how == "webview":
-        import webview
+        import webview; WIN["webview"] = True
         threading.Thread(target=srv.serve_forever, daemon=True).start()
-        webview.create_window("cSS Pipeline", url, width=1400, height=900); webview.start()
+        webview.create_window("cSS Pipeline", url, width=1400, height=900); webview.start(dock_icon_follow_theme)
     else:
         try: srv.serve_forever()
         except KeyboardInterrupt: pass
