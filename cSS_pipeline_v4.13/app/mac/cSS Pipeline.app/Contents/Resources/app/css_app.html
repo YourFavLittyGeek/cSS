@@ -255,6 +255,14 @@ function ptsView(v){const q=S.queue,sy=S.sys,z=S.mem_zones,coh=["all"].concat(S.
     if(a==="retry"){const sel=v.querySelector(`[data-retry="${b.dataset.code}"]`);if(sel){const recp=sel.dataset.rec,r=await confirmPath(b.dataset.code,sel.value,recp,"after a failed registration");
       if(r===false)return;a=r==="rec"?recp:sel.value;if(a==="recon"&&!confirm("recon-all takes about 2-3 hours for this patient. Continue?"))return}}
     if(a==="stop"&&!confirm("Stop this patient?"))return;
+    if(a==="rerun"){const p=S.patients.find(x=>x.code===b.dataset.code);if(S.settings.rerun_mode==="auto"){const r=await api("/api/control",{code:p.code,action:"rerun"});
+        toast(r.error?esc(r.error):`${esc(p.code)}: re-run with ${esc(PW()[p.pathway])} (same as last run)`,!!r.error);return render()}
+      $("#dlg").innerHTML=`<h2>Re-run ${esc(p.code)}</h2><p class="note">Last run: ${esc(PW()[p.pathway]||p.pathway)}${p.qc?` · QC ${esc(p.qc)}`:""}. The earlier results stay until the new run finishes.</p>
+       <div class="row">Pathway ${pwSel(p.pathway,p.pathway,'id="rrsel" style="flex:1"',p.tried)}</div><div class="note">✓ recommended = same as last run · Settings › Re-run can make this automatic.</div>
+       <div class="acts" style="margin-top:10px"><button class="b" data-v="x">Cancel</button><button class="b pri" data-v="ok">Re-run</button></div>`;
+      $("#shade").style.display="flex";$("#dlg").querySelectorAll("button").forEach(x=>x.onclick=async()=>{const val=$("#rrsel").value;$("#shade").style.display="none";if(x.dataset.v!=="ok")return;
+        if(val==="recon"&&!confirm("recon-all takes about 2-3 hours for this patient. Continue?"))return;
+        const r=await api("/api/control",{code:p.code,action:"rerun",pathway:val});if(r.error)toast(esc(r.error),1);render()});return}
     const r=await api("/api/control",{code:b.dataset.code,action:a});if(r.error)toast(esc(r.error),1);render()});
   v.querySelectorAll("input[data-code]").forEach(el=>el.onchange=async()=>{const r=await api("/api/edit",{code:el.dataset.code,[el.dataset.f]:el.value.trim()});if(r.error)toast(esc(r.error),1);render()});
   v.querySelectorAll("[data-lg]").forEach(b=>b.onclick=()=>{$("#logcode").value=b.dataset.lg;$("#log").style.display="block";loadLog()});
@@ -299,15 +307,32 @@ function agreement(R){let n=0,a=0;R.forEach(r=>{if(r.score_total==null||r.rad_R=
 async function readView(v){const pk=await api("/api/packets"),done=S.patients.filter(p=>p.status==="done");
   v.innerHTML=`<div class="card"><h2>Review (AI support visible)</h2><div class="row"><span class="lab">Reviewer name</span><input id="rvn" value="${esc(localStorage.getItem("cssapp_reviewer")||"")}" placeholder="e.g. Selim_v1"></div>
    <div class="row" style="flex-wrap:wrap">${done.map(p=>`<label style="margin-right:10px"><input type="checkbox" class="rc" value="${esc(p.code)}"> ${esc(p.code)}</label>`).join("")||'<span class="mut">no processed patients yet</span>'}</div>
-   <div class="row"><button class="b pri" id="rv">Open the reviewer ▸</button><span class="note">opens the usual reviewer with the AI meter, AI score and 3-D view visible</span></div></div>
+   <div class="row"><button class="b pri" id="rv">Open the reviewer ▸</button><button class="b" id="vsetb2">⚙ Reviewer settings…</button><span class="note">opens the usual reviewer with the AI meter, AI score and 3-D view visible</span></div></div>
   <div class="card"><h2>Blind read (no detector output)</h2><div class="row"><span class="lab">Reader code</span><input id="brd" value="${esc(localStorage.getItem("cssapp_reader")||"READER1")}"></div>
    <div class="row"><span class="lab">Existing packet</span><select id="pk">${pk.map(x=>`<option>${esc(x)}</option>`).join("")}</select><button class="b pri" id="bopen">Open blind read ▸</button></div>
    <div class="row"><span class="lab">or new packet from</span><span class="note">the patients ticked above</span><input id="npk" placeholder="packet name, e.g. W2"><button class="b" id="bnew">Create and open ▸</button></div></div>`;
   const sel=()=>[...document.querySelectorAll(".rc:checked")].map(x=>x.value);
+  $("#vsetb2").onclick=vsetDlg;
   $("#rv").onclick=()=>{const c=sel();if(!c.length)return toast("tick at least one patient",1);localStorage.setItem("cssapp_reviewer",$("#rvn").value.trim());review(c)};
   const blind=async(body)=>{localStorage.setItem("cssapp_reader",$("#brd").value.trim());toast("starting the blind viewer…");const r=await api("/api/blind",Object.assign({reader:$("#brd").value.trim()},body));if(!r.ok)return toast(esc(r.error),1);window.open(r.url,"_blank")};
   $("#bopen").onclick=()=>{if(!$("#pk").value)return toast("no packet yet",1);blind({packet:$("#pk").value})};
   $("#bnew").onclick=()=>{const c=sel(),n=$("#npk").value.trim();if(!c.length||!n)return toast("tick patients and name the packet",1);blind({packet:n,codes:c,new_packet:true})}}
+// ---------------- reviewer settings (review/viewer_settings.json, read by every reviewer window at start)
+async function vsetDlg(){const V=await api("/api/vset"),g=(k,d)=>V[k]===undefined?d:V[k];
+  const sw=(k,d,l)=>`<div class="row" style="margin:5px 0"><label><input type="checkbox" data-vk="${k}" ${g(k,d)?"checked":""}> ${l}</label></div>`;
+  const sel=(k,d,opts,l)=>`<div class="row" style="margin:5px 0"><span style="width:200px">${l}</span><select data-vs="${k}">${opts.map(([v,t])=>`<option value="${v}" ${String(g(k,d))===String(v)?"selected":""}>${t}</option>`).join("")}</select></div>`;
+  $("#dlg").innerHTML=`<h2>Reviewer settings</h2><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 24px">
+   <div><b class="note">READING</b>${sw("auto",true,"Auto-next candidate after a decision")}${sw("blind",false,"Blind read (no AI meter / score, audit objects)")}${sw("compare",true,"AI comparison before the final save")}</div>
+   <div><b class="note">AFTER THE FINAL SAVE</b>${sw("autopt",true,"Next patient automatically")}${sel("autosec",10,[[0,"Immediately"],[3,"3 s"],[5,"5 s"],[10,"10 s"],[20,"20 s"],[30,"30 s"]],"Close the summary after")}</div>
+   <div><b class="note">AI SUPPORT</b>${sw("ai",true,"AI meter")}${sw("s3",true,"3-D shape card")}</div>
+   <div><b class="note">IMAGE</b>${sw("text",true,"Corner text and scale bar")}${sw("rl",true,"R badge")}${sw("cross2",false,"Crosshair")}${sw("other",true,"Other candidates' markings")}${sel("layout","1",[["1","1 × 1"],["2","1 × 2"],["4","2 × 2"]],"Layout")}</div>
+   <div><b class="note">PANEL</b>${sw("ah",false,"Auto-hide right panel")}${sw("ltah",false,"Fold the left tool strip")}</div>
+   <div><b class="note">SCREENSHOTS</b>${sel("scap","window",[["window","Whole reviewer window"],["area","Choose an area with the mouse"]],"Screenshot button")}</div></div>
+   <p class="note">Applies to reviewer windows opened from now on (an open reviewer: reload it). Primary reviewer and snapshot naming are set in the reviewer.</p>
+   <div class="acts"><button class="b" data-v="x">Cancel</button><button class="b pri" data-v="ok">Save</button></div>`;
+  $("#shade").style.display="flex";$("#dlg").querySelectorAll("button[data-v]").forEach(x=>x.onclick=async()=>{$("#shade").style.display="none";if(x.dataset.v!=="ok")return;const o={};
+    $("#dlg").querySelectorAll("[data-vk]").forEach(e=>o[e.dataset.vk]=e.checked);$("#dlg").querySelectorAll("[data-vs]").forEach(e=>o[e.dataset.vs]=e.dataset.vs==="autosec"?+e.value:e.value);
+    await api("/api/vset",o);toast("reviewer settings saved")})}
 // ---------------- settings
 function setView(v){const s=S.settings,F=s.features;const L={duplicate_check:"Duplicate-scan check",preflight:"Pre-flight check before processing",qc_snapshot:"QC snapshot per patient",notify:"Notification when a patient finishes / fails",
    version_stamp:"Version stamp on every result",share:"Share package (codes only)",backup:"Automatic daily backup (calls, grades, results - no images)",name_warning:"Warn when a folder name looks like a person's name"};
@@ -316,11 +341,14 @@ function setView(v){const s=S.settings,F=s.features;const L={duplicate_check:"Du
    <div class="row"><span class="lab">Threads</span><input id="thr" type="number" min="1" max="12" value="${s.threads||4}" style="width:80px"><span class="note">CPU threads for SynthSeg / recon-all (4 is safe on a 36 GB Mac); shared between patients running at the same time</span></div></div>
   <div class="card"><h2>When SynthSeg cannot run for a patient</h2><div class="row">${seg("ap",[["1","Switch automatically + tell me"],["0","Ask me first"]],s.auto_path===false?"0":"1")}</div>
    <div class="note">No T1 → SWI-only (runs alone, last) · T1 does not cover the brain and another T1 exists → the other T1 · no usable T1 → SWI-only · T1 / SWI misaligned → Fast re-registration → SynthMorph → then you decide (recon-all 2-3 h) · no SWI → not queued.</div></div>
+  <div class="card"><h2>Re-run of a finished patient</h2><div class="row">${seg("rr",[["choose","Let me choose the pathway"],["auto","Automatic - same pathway as last run"]],s.rerun_mode==="auto"?"auto":"choose")}</div></div>
+  <div class="card"><h2>Reviewer</h2><div class="row"><button class="b" id="vsetb">⚙ Reviewer settings…</button><span class="note">the same settings window as in the reviewer (shared by every reviewer window)</span></div></div>
   <div class="card"><h2>When a retry is needed (T1 / SWI misaligned)</h2><div class="row">${seg("ar",[["1","Retry automatically (next pathway)"],["0","Let me choose (recommended marked)"]],s.auto_retry===false?"0":"1")}</div>
    <div class="note">Order: Fast re-registration (~4 min) → SynthMorph (~5 min, alone) → recon-all (~2-3 h, always asks) → SWI-only. In both modes a failed retry moves the recommendation to the next pathway; the failed attempt's files are kept, renamed.</div></div>
   <div class="card"><h2>Backup</h2><div class="row"><span class="lab">Backup folder</span><input class="wide" id="bk" value="${esc(s.backup_dir||"")}" placeholder="e.g. an external drive"><button class="b" id="bkc">Choose…</button></div></div>
   <div class="card"><h2>Features</h2>${Object.keys(L).map(k=>`<div class="row"><label><input type="checkbox" data-ft="${k}" ${F[k]?"checked":""}> ${L[k]}</label></div>`).join("")}</div>
   <div class="row"><button class="b" id="quit">Quit the app</button><span class="note">closing the window does not stop processing; Quit does</span><span class="sp"></span><button class="b pri" id="save">Save settings</button></div>`;
+  bindSeg("rr",async x=>{await api("/api/settings",{rerun_mode:x});render()});$("#vsetb").onclick=vsetDlg;
   bindSeg("ar",async x=>{await api("/api/settings",{auto_retry:x==="1"});render()});
   bindSeg("ap",async x=>{await api("/api/settings",{auto_path:x==="1"});render()});
   $("#quit").onclick=async()=>{if(!confirm("Quit cSS Pipeline?"))return;let r=await api("/api/quit",{});if(!r.ok&&confirm(r.error+"\n\nQuit anyway?"))r=await api("/api/quit",{force:true});if(r.ok)document.body.innerHTML='<p style="padding:40px">cSS Pipeline has stopped. Open it again from Applications.</p>'};

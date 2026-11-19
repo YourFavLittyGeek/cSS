@@ -534,6 +534,9 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path); q = {k: v[0] for k, v in parse_qs(u.query).items()}
         try:
             if u.path == "/": return self._send(open(os.path.join(HERE, "review_web.html"), "rb").read(), "text/html; charset=utf-8")
+            if u.path == "/api/vset":                  # reviewer settings shared by every reviewer window and the app
+                f = f"{B}/review/viewer_settings.json"
+                return self._send(json.load(open(f)) if os.path.exists(f) else {})
             if u.path == "/api/meta": return self._send(meta(q.get("study") or START[0], q.get("reviewer", ""), q.get("mode", "")))
             if u.path == "/api/vol":
                 s = study(q["study"]); return self._send(s.volume(q.get("seq", "swi")).tobytes(order="F"), "application/octet-stream")
@@ -552,8 +555,24 @@ class H(BaseHTTPRequestHandler):
         try:
             d = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
             if u.path == "/api/reviewer": return self._send(reviewers(d.get("name", "")))
+            if u.path == "/api/vset":
+                f = f"{B}/review/viewer_settings.json"; os.makedirs(os.path.dirname(f), exist_ok=True)
+                cur = json.load(open(f)) if os.path.exists(f) else {}
+                cur.update({k: v for k, v in d.items() if isinstance(k, str) and len(k) < 40 and not k.startswith("vmode_")})
+                json.dump(cur, open(f + ".tmp", "w"), indent=1); os.replace(f + ".tmp", f); return self._send(dict(ok=True))
             s = study(d["study"]); rev = (d.get("reviewer") or "").strip()
             if not rev: return self._send(dict(error="Enter the reviewer name first (upper right)."), code=400)
+            if u.path == "/api/screencap":            # macOS screencapture: the reviewer window (-R) or an area chosen with the mouse (-i)
+                if sys.platform != "darwin": return self._send(dict(error="screen capture needs macOS - use Snapshot (image only)"), code=400)
+                folder = os.path.abspath(os.path.expanduser(str(d.get("folder") or f"{B}/review/snapshots/{s.sid}").replace("{study}", s.sid))); os.makedirs(folder, exist_ok=True)
+                path = os.path.join(folder, safe_name(d.get("name", "") or f"{s.sid}_screen.png"))
+                b0, e0 = os.path.splitext(path); k = 2
+                while os.path.exists(path): path = f"{b0}_{k}{e0}"; k += 1
+                if d.get("mode") == "area": cmd = ["screencapture", "-i", "-x", path]
+                else: cmd = ["screencapture", "-x", "-R", ",".join(str(int(float(d.get(k, 0)))) for k in ("x", "y", "w", "h")), path]
+                subprocess.run(cmd, timeout=120)
+                if not os.path.exists(path): return self._send(dict(error="cancelled"))
+                return self._send(dict(ok=True, path=path))
             if u.path == "/api/snapshot":
                 name = safe_name(d.get("name", ""))
                 folder = os.path.abspath(os.path.expanduser(str(d.get("folder") or f"{B}/review/snapshots/{s.sid}").replace("{study}", s.sid)))

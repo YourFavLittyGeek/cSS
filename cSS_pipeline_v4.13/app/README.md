@@ -34,3 +34,9 @@ changes detector thresholds or rules. Names (optional) only in $CSS_BASE/private
   "next patient automatically" switch and a countdown to the next patient of the cohort (Stay / Next / details).
   Settings menu: "Go to the next patient automatically" (default on) and "Close the summary after" Immediately (no summary) /
   3 / 5 / 10 (default) / 20 / 30 s. The last patient of a cohort keeps the full summary ("Cohort finished").
+- app14: reviewer menu bar File / Candidate / View / Tools / Help + 💾 Save final (⌘↩; shows unread count) + ⚙ Settings (one grouped
+  window: reading incl. blind read, after the final save, AI support, image, panel, screenshots); settings are stored in
+  review/viewer_settings.json and shared by every reviewer window and the app (Settings / Review screen: "Reviewer settings…").
+  Blind read also in File. Screenshot (File, Tools, camera in the left tool strip): macOS screencapture of the reviewer window,
+  or an area chosen with the mouse (Settings). Theme stays in the top bar. App: Re-run asks for the pathway (default; Settings:
+  automatic = same pathway as last run).
