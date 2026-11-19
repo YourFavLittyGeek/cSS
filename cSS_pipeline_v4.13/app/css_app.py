@@ -65,10 +65,28 @@ def fs_env():
     e = dict(os.environ); fh = SET.get("freesurfer_home") or e.get("FREESURFER_HOME", "")
     if fh:
         e["FREESURFER_HOME"] = fh; e["PATH"] = f"{fh}/bin:{fh}/python/bin:" + e.get("PATH", "")
-        e.setdefault("FS_LICENSE", f"{fh}/license.txt"); e.setdefault("SUBJECTS_DIR", f"{B}/subjects")
+        e.setdefault("SUBJECTS_DIR", f"{B}/subjects")
+    lic = find_license(fh, e)
+    if lic: e["FS_LICENSE"] = lic
+    extra = [os.path.join(sys.prefix, "bin"), "/opt/homebrew/bin", "/usr/local/bin", os.path.expanduser("~/bin"),
+             os.path.expanduser("~/.local/bin"), "/Applications/MRIcroGL.app/Contents/Resources", "/Applications/MRIcroGL.app/Contents/MacOS"]
+    have = e.get("PATH", "").split(":")
+    e["PATH"] = ":".join([p for p in extra if os.path.isdir(p) and p not in have] + have)
     e["CSS_BASE"] = B; e["CSS_THREADS"] = str(SET.get("threads", 4)); e.update(PIPE_ENV)
     return e
 def which(x, env): return shutil.which(x, path=env.get("PATH"))
+def license_candidates(fh, e=None):
+    e = e or os.environ; h = os.path.expanduser("~")
+    c = [SET.get("fs_license", ""), e.get("FS_LICENSE", ""), f"{h}/license.txt", f"{h}/.license", f"{h}/freesurfer_license.txt", f"{h}/freesurfer/license.txt",
+         f"{h}/css_project/license.txt", f"{h}/Documents/license.txt", f"{h}/Downloads/license.txt", f"{fh}/license.txt" if fh else "", f"{fh}/.license" if fh else ""]
+    if os.path.exists(f"{h}/.zshrc"):
+        import re as _re
+        for m in _re.finditer(r"FS_LICENSE=[\"']?([^\"'\s]+)", open(f"{h}/.zshrc", errors="ignore").read()): c.insert(2, os.path.expandvars(os.path.expanduser(m.group(1))))
+    return [x for x in dict.fromkeys(c) if x]
+def find_license(fh, e=None):
+    for x in license_candidates(fh, e):
+        if os.path.isfile(x) and os.access(x, os.R_OK): return x
+    return ""
 
 def preflight():
     env = fs_env(); out = []
@@ -78,9 +96,15 @@ def preflight():
     fh = env.get("FREESURFER_HOME", "")
     out.append(dict(item="FreeSurfer", ok=bool(fh) and os.path.isdir(fh), detail=fh or "not found - choose its folder in Setup"))
     lic = env.get("FS_LICENSE", "")
-    out.append(dict(item="FreeSurfer licence", ok=bool(lic) and os.path.exists(lic), detail=lic or "license.txt not found"))
+    if lic: out.append(dict(item="FreeSurfer licence", ok=True, detail=f"{lic} (readable)"))
+    else:
+        unreadable = [x for x in license_candidates(fh, env) if os.path.isfile(x)]
+        out.append(dict(item="FreeSurfer licence", ok=False, fix="licence", fix_path=unreadable[0] if unreadable else "",
+                        detail=(f"{unreadable[0]} exists but this user cannot read it" if unreadable else "license.txt not found")))
     for tool in ("mri_synthseg", "mri_convert", "dcm2niix"):
-        w = which(tool, env); out.append(dict(item=tool, ok=bool(w), detail=w or "not on the FreeSurfer path"))
+        w = which(tool, env)
+        out.append(dict(item=tool, ok=bool(w), detail=w or ("not found - press Install" if tool == "dcm2niix" else "not on the FreeSurfer path"),
+                        fix="dcm2niix" if tool == "dcm2niix" and not w else ""))
     try:
         import numpy, scipy, nibabel, pandas, skimage  # noqa
         out.append(dict(item="Python packages", ok=True, detail=f"python {platform.python_version()}"))
@@ -104,7 +128,7 @@ def scan_patient(folder, folder_is, rule):
     elif folder_is == "name": r["code"] = ""; r["name"] = base.replace("_", " ")
     else: r["code"] = ""; r["name"] = ""
     if "SWI" not in pick_: r["warnings"].append("no SWI found - choose one")
-    if "T1" not in pick_: r["warnings"].append("no T1 - SWI-only route (less accurate)")
+    if "T1" not in pick_: r["warnings"].append("no T1 - SWI-only route: less accurate, and SynthStrip on the SWI can need 30-64 GB of memory - run it alone")
     t1 = next((x for x in ser if x["path"] == pick_.get("T1")), None)
     if t1 and max([v for v in (t1.get("voxel") or []) if v] or [0]) > 1.5:
         r["warnings"].append(f"T1 is 2-D ({max(v for v in t1['voxel'] if v):g} mm slices) - anatomy will be less accurate than with a 3-D T1")
@@ -119,8 +143,22 @@ def scan_patient(folder, folder_is, rule):
     if SET["features"].get("name_warning") and folder_is == "code" and looks_like_name(base):
         r["warnings"].append("the folder name looks like a person's name - it will be used as the study code")
     return r
+def patient_like_subfolders(path):
+    """sub-folders that each hold their own MRI series - a sign the chosen folder is a COHORT, not one patient"""
+    subs = [os.path.join(path, d) for d in sorted(os.listdir(path)) if os.path.isdir(os.path.join(path, d)) and not d.startswith(".")]
+    hits = []
+    for d in subs[:60]:
+        ser = SD.scan(d, max_depth=3)
+        if any(x.get("type") == "SWI" for x in ser) or len(ser) >= 3: hits.append(os.path.basename(d))
+    return hits
 def scan(path, mode, folder_is, rule):
-    if mode == "single": return [scan_patient(path, folder_is, rule)]
+    if mode == "single":
+        many = patient_like_subfolders(path)
+        r = scan_patient(path, folder_is, rule)
+        if len(many) >= 2:
+            r["multi_patient"] = many
+            r["warnings"].insert(0, f"this folder holds {len(many)} patient folders - use Batch")
+        return [r]
     subs = sorted(d for d in os.listdir(path) if os.path.isdir(os.path.join(path, d)) and not d.startswith("."))
     return [scan_patient(os.path.join(path, d), folder_is, rule) for d in subs]
 
@@ -211,7 +249,7 @@ def stage(p):
                     if not os.path.exists(dst): os.symlink(f, dst)
     return d
 
-CUR = dict(proc=None, code=None, caff=None)
+CUR = dict(proc=None, code=None, caff=None, hold="")      # hold: queue paused because of a setup problem (licence, FreeSurfer, disk)
 def caffeinate(on):
     if not mac(): return
     if on and SET.get("awake") and CUR["caff"] is None:
@@ -253,7 +291,13 @@ def process(p):
     step_begin(p, "import")
     st = stage(p); tab = f"{B}/review/cohort_import.csv"; bak = None
     if os.path.exists(tab): bak = open(tab).read()
-    rc = run_logged([sys.executable, f"{SC}/cohort.py", "import", os.path.dirname(st), "--ids", code], logf, env)
+    d2n = which("dcm2niix", env)
+    if not d2n and any(os.path.isdir(v) for v in p["series"].values()):
+        return fail(p, "dcm2niix (the DICOM converter) is not installed - Home -> Setup check -> Install dcm2niix, then Retry")
+    cmd = [sys.executable, f"{SC}/cohort.py", "import", os.path.dirname(st), "--ids", code] + (["--dcm2niix", d2n] if d2n else [])
+    dj = which("dcmdjpeg", env)
+    if dj: cmd += ["--dcmdjpeg", dj]
+    rc = run_logged(cmd, logf, env)
     if bak is not None and os.path.exists(tab):
         import pandas as pd
         new = pd.read_csv(tab, dtype=str); old = pd.read_csv(io.StringIO(bak), dtype=str)
@@ -294,19 +338,29 @@ def _cohort_status(code):
     return t.status.iloc[-1] if len(t) else "unknown"
 def explain(code, status):
     log = open(f"{B}/logs/{code}_run.log").read()[-6000:] if os.path.exists(f"{B}/logs/{code}_run.log") else ""
-    for pat, msg in ((r"exit 5|registration", "the T1 and SWI do not line up (registration check failed) - check the T1 / SWI pair"),
-                     (r"insufficient_quality|exit 3", "image quality too low for scoring (QC: insufficient quality)"),
-                     (r"mri_convert could not read", "the SWI file could not be read"), (r"no SWI chosen", "no SWI series was chosen"),
-                     (r"license|licence", "FreeSurfer licence not found - choose it in Setup"), (r"No space left", "the disk is full"),
+    for pat, msg in ((r"license file .* do not have read permission|licen[cs]e.*permission", "FreeSurfer cannot read its licence file - Home -> Setup check -> fix the licence, then Retry all failed"),
+                     (r"licen[cs]e file .*(not found|does not exist)|FS_LICENSE", "FreeSurfer licence not found - Home -> Setup check -> Choose licence file"),
+                     (r"No space left", "the disk is full"),
+                     (r"registration check|registration_ok|label shift .* > |exit 5\b", "the T1 and SWI do not line up (registration check failed) - check the T1 / SWI pair"),
+                     (r"insufficient_quality|exit 3\b", "image quality too low for scoring (QC: insufficient quality)"),
+                     (r"mri_convert could not read", "the SWI file could not be read by FreeSurfer (see the lines just above it in the log)"), (r"no SWI chosen", "no SWI series was chosen"),
                      (r"command not found|not found: mri_", "FreeSurfer tools not found - choose the FreeSurfer folder in Setup")):
-        if re.search(pat, log, re.I): return msg
+        if re.search(pat, log, re.I):
+            if msg == "REGISTRATION":
+                m = re.search(r"label shift ([\d.]+) mm", log)
+                return (f"the T1 labels do not line up with the SWI (shift {m.group(1) if m else '?'} mm, limit 1.5 mm) - nothing was written. "
+                        "Retry with recon-all (recommended, better registration, ~2-3 h)")
+            return msg
     app = open(f"{AD}/logs/{code}.log").read()[-4000:] if os.path.exists(f"{AD}/logs/{code}.log") else ""
     if "Traceback" in app:
         last = [l for l in app.strip().splitlines() if l.strip()][-1][:200]
         return f"the pipeline stopped with an error: {last} - open the log for details"
     return f"processing failed ({status}) - open the log for details"
+SETUP_ERR = ("licence", "FreeSurfer", "disk is full", "dcm2niix")
 def fail(p, msg):
-    with LOCK: p.update(status="failed", error=msg, finished=time.time()); save_pat()
+    with LOCK:
+        p.update(status="failed", error=msg, finished=time.time()); save_pat()
+        if any(k in msg for k in SETUP_ERR): CUR["hold"] = msg
     notify("cSS Pipeline", f"{p['code']} failed: {msg[:60]}")
 def copy_results(p):
     """codes-only copy of the patient's result files into the chosen results folder"""
@@ -335,7 +389,7 @@ def qc_snapshot(code):
 def worker():
     last_backup = ""
     while True:
-        with LOCK: nxt = next((p for p in PAT if p["status"] == "waiting"), None)
+        with LOCK: nxt = None if CUR["hold"] else next((p for p in PAT if p["status"] == "waiting"), None)
         if nxt is None:
             caffeinate(False)
             day = datetime.date.today().isoformat()
@@ -462,7 +516,7 @@ def state():
                         radiologist=p.get("radiologist", ""), grade_R=p.get("grade_R", ""), grade_L=p.get("grade_L", ""),
                         step_times={k: round(v) for k, v in p.get("steps_done", {}).items()}))
     q = [x for x in out if x["status"] in ("waiting", "running", "paused")]
-    return dict(patients=out, queue=dict(n=len(q), remaining=sum(x["remaining"] for x in q), running=CUR["code"]),
+    return dict(patients=out, queue=dict(n=len(q), remaining=sum(x["remaining"] for x in q), running=CUR["code"], hold=CUR["hold"]),
                 settings=SET, version=version(), cohorts=sorted(set(jload("cohorts.json", [])) | {p.get("cohort", "") for p in PAT} - {""}), steps=STEPS)
 
 class H(BaseHTTPRequestHandler):
@@ -519,7 +573,17 @@ class H(BaseHTTPRequestHandler):
                 elif a == "stop" and p["status"] in ("running", "paused"):
                     p.update(status="stopped", error="stopped by you")
                     if pr: os.killpg(pr.pid, signal.SIGCONT); os.killpg(pr.pid, signal.SIGTERM)
-                elif a in ("retry", "rerun") and p["status"] in ("failed", "stopped", "done"): p.update(status="waiting", error="", steps_done={})
+                elif a in ("retry", "rerun") and p["status"] in ("failed", "stopped", "done"): p.update(status="waiting", error="", steps_done={}); CUR["hold"] = ""
+                elif a in ("swi_only", "recon") and p["status"] in ("failed", "stopped", "done"):
+                    # a misregistered T1 must not be reused: its labels are moved aside (kept, renamed), never deleted
+                    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    for f in (f"{B}/work/{p['code']}_t1seg_swispace.nii.gz", f"{B}/work/{p['code']}_swi2t1.lta", f"{B}/work/{p['code']}_brainmask.nii.gz"):
+                        if os.path.exists(f): os.replace(f, f"{f}.bad_registration_{stamp}")
+                    if a == "swi_only":
+                        p["series"] = {k: v for k, v in p["series"].items() if k not in ("T1", "FLAIR")}; p["note"] = "retried SWI-only after a failed registration"
+                    else:
+                        p["anatomy"] = "recon"; p["note"] = "retried with recon-all + bbregister after a failed registration"
+                    p.update(status="waiting", error="", steps_done={}); CUR["hold"] = ""
                 elif a == "remove" and p["status"] in ("waiting", "failed", "stopped"): PAT.remove(p)
                 else: return self.send(dict(error=f"cannot {a} while {p['status']}"))
                 save_pat(); return self.send(dict(ok=True))
@@ -535,6 +599,33 @@ class H(BaseHTTPRequestHandler):
                 for k in ("radiologist", "grade_R", "grade_L"):
                     if k in d: p[k] = d[k]
                 save_pat(); write_grades_file(); return self.send(dict(ok=True))
+            if u.path == "/api/fix":
+                if d.get("what") == "dcm2niix":
+                    r = subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "dcm2niix"], capture_output=True, text=True)
+                    ok = r.returncode == 0 and bool(which("dcm2niix", fs_env()))
+                    return self.send(dict(ok=ok, error="" if ok else (r.stderr or r.stdout)[-500:]))
+                if d.get("what") == "licence_choose":
+                    path, err = pick("file", "Choose your FreeSurfer license.txt")
+                    if not path: return self.send(dict(ok=False, error=err or "cancelled"))
+                    if not os.access(path, os.R_OK): return self.send(dict(ok=False, error="that file cannot be read either"))
+                    with LOCK: SET["fs_license"] = path; jsave("settings.json", SET)
+                    return self.send(dict(ok=True))
+                if d.get("what") == "licence_permission" and mac():
+                    p = d.get("path", "")
+                    if not p or not os.path.isfile(p): return self.send(dict(ok=False, error="no licence file to fix"))
+                    r = subprocess.run(["osascript", "-e", f'do shell script "chmod a+r " & quoted form of "{p}" with administrator privileges'], capture_output=True, text=True)
+                    ok = r.returncode == 0 and os.access(p, os.R_OK)
+                    if ok:
+                        with LOCK: SET["fs_license"] = p; jsave("settings.json", SET)
+                    return self.send(dict(ok=ok, error="" if ok else (r.stderr or "not changed")[-300:]))
+                return self.send(dict(ok=False, error="unknown fix"))
+            if u.path == "/api/retry_failed":
+                n = 0
+                with LOCK:
+                    for p in PAT:
+                        if p["status"] in ("failed", "stopped"): p.update(status="waiting", error="", steps_done={}); n += 1
+                    save_pat(); CUR["hold"] = ""
+                return self.send(dict(ok=True, n=n))
             if u.path == "/api/install": return self.send(install_zip(d["path"]))
             if u.path == "/api/rollback": return self.send(rollback())
             if u.path == "/api/review": return self.send(launch_child("review", d, 8765))

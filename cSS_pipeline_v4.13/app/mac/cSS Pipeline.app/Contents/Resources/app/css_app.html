@@ -52,12 +52,16 @@ async function loadLog(){const c=$("#logcode").value;if(!c){$("#logtext").textCo
 async function render(){await refresh();const v=$("#view");
   if(V==="home")return homeView(v);if(V==="add")return addView(v);if(V==="pts")return ptsView(v);if(V==="res")return resView(v);if(V==="read")return readView(v);if(V==="set")return setView(v)}
 async function homeView(v){const pf=await api("/api/preflight");const q=S.queue;
-  v.innerHTML=`<div class="card"><h2>Setup check</h2><table>${pf.map(x=>`<tr><td style="width:30px" class="${x.ok?"ok":"bad"}">${x.ok?"✓":"✗"}</td><td style="width:220px">${esc(x.item)}</td><td class="mut">${esc(x.detail)}</td></tr>`).join("")}</table>
+  v.innerHTML=`<div class="card"><h2>Setup check</h2><table>${pf.map(x=>`<tr><td style="width:30px" class="${x.ok?"ok":"bad"}">${x.ok?"✓":"✗"}</td><td style="width:220px">${esc(x.item)}</td><td class="mut">${esc(x.detail)} ${x.fix==="dcm2niix"?`<button class="b pri" data-fix="dcm2niix">Install dcm2niix</button>`:""}${x.fix==="licence"?`${x.fix_path?`<button class="b pri" data-lic="perm" data-p="${esc(x.fix_path)}">Make it readable (asks for your Mac password)</button> `:""}<button class="b" data-lic="choose">Choose licence file…</button>`:""}</td></tr>`).join("")}</table>
    ${pf.some(x=>!x.ok)?'<p class="note">Fix ✗ items in <b>Settings</b> (FreeSurfer folder, licence) before processing.</p>':""}</div>
   <div class="card"><h2>Pipeline version</h2><div class="row"><span>Installed: <b>${esc(S.version)}</b></span><button class="b" id="inst">Install / update from zip…</button><button class="b" id="rb">Roll back to the previous version</button></div>
    <div class="note">Installing keeps a backup of the current code; your patients, calls and results are never touched.</div></div>
   <div class="card"><h2>Queue</h2><div class="row">${q.n?`${q.n} patient(s) waiting or running · remaining ≈ ${hms(q.remaining)} · finish ≈ ${new Date(Date.now()+q.remaining*1000).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}`:"empty"}</div>
    <div class="row"><button class="b pri" onclick="go('add')">+ Add patients</button><button class="b" onclick="go('pts')">Patients (${S.patients.length})</button><button class="b" onclick="go('res')">Results</button><button class="b" onclick="go('read')">Review / Blind read</button></div></div>`;
+  v.querySelectorAll("[data-fix]").forEach(b=>b.onclick=async()=>{b.disabled=true;b.textContent="installing…";const r=await api("/api/fix",{what:b.dataset.fix});
+    toast(r.ok?`${esc(b.dataset.fix)} installed - go to Patients and press "Retry all failed"`:`install failed: ${esc(r.error)}`,!r.ok);render()});
+  v.querySelectorAll("[data-lic]").forEach(b=>b.onclick=async()=>{const r=await api("/api/fix",b.dataset.lic==="perm"?{what:"licence_permission",path:b.dataset.p}:{what:"licence_choose"});
+    toast(r.ok?'licence OK - go to Patients and press "Retry all failed"':`not fixed: ${esc(r.error)}`,!r.ok);render()});
   $("#inst").onclick=async()=>{const p=await pick("file","Choose the cSS pipeline zip");if(!p)return;const r=await api("/api/install",{path:p});toast(r.ok?`installed ${esc(r.version)} (${r.files} files; backup kept)`:esc(r.error),!r.ok);render()};
   $("#rb").onclick=async()=>{if(!confirm("Restore the previous pipeline version?"))return;const r=await api("/api/rollback",{});toast(r.ok?`restored ${esc(r.version)}`:esc(r.error),!r.ok);render()}}
 window.go=x=>document.querySelector(`nav button[data-v="${x}"]`).click();
@@ -72,6 +76,8 @@ function addView(v){if(ADD.summary)return summaryView(v);const A=ADD,coh=S.cohor
     <span class="note">Code → folder name is the code · Name → folder name is the name, a code is assigned · Neither → type both</span></div>
    <div class="row"><span class="lab">Patient names</span><label><input type="checkbox" id="store" ${A.store?"checked":""}> Store names</label><span class="note">🔒 kept only on this Mac (private/names.csv), never in results · unticked = codes only</span></div>
    <div class="row"><span class="lab">Grades (optional)</span><input class="wide" id="gfile" value="${esc(A.gfile||"")}" placeholder="grades.xlsx or .csv"><button class="b" id="gimp">Import from Excel…</button><a class="b" href="/api/grades_template.xlsx" style="text-decoration:none">Download template (.xlsx)</a><span class="note" id="gmsg">${A.gmsg||""}</span></div></div>
+  ${A.mode==="single"&&A.pts[0]&&A.pts[0].multi_patient?`<div class="card" style="border-color:var(--warn)"><b class="warn">⚠ This folder holds ${A.pts[0].multi_patient.length} patients</b> (${A.pts[0].multi_patient.slice(0,8).map(esc).join(", ")}${A.pts[0].multi_patient.length>8?" …":""}). Single-patient mode would mix their scans into one row.
+   <button class="b pri" id="tobatch" style="margin-left:10px">Switch to Batch with this folder ▸</button></div>`:""}
   <div class="card" id="tbl">${A.pts.length?tableHTML():'<div class="mut">Choose a folder to start.</div>'}</div>
   <div class="card"><div class="row"><span class="lab">Cohort</span><select id="coh">${coh.map(c=>`<option ${c===A.cohort?"selected":""}>${esc(c)}</option>`).join("")}<option value="__new" ${!coh.includes(A.cohort)&&A.cohort?"selected":""}>+ New cohort…</option></select>
     <input id="newcoh" placeholder="new cohort name" value="${!coh.includes(A.cohort)?esc(A.cohort):""}" class="${!coh.includes(A.cohort)||!coh.length?"":"hide"}">
@@ -80,7 +86,8 @@ function addView(v){if(ADD.summary)return summaryView(v);const A=ADD,coh=S.cohor
    <div class="note">${A.rmode==="semi"?"Semi-automatic: a radiologist reviews the AI candidates; the score is the reader's.":"Automatic: the AI result is scored with no review - labelled \"AI only, not validated\" everywhere."}</div>
    <div class="row"><span class="lab">Save results in</span><input class="wide" id="resdir" value="${esc(A.results||"")}" placeholder="~/css_project/results/COHORT"><button class="b" id="rchoose">Choose folder…</button></div></div>
   <div class="row"><span class="sp"></span><span class="err" id="adderr"></span><button class="b" id="cancel">Cancel</button><button class="b pri" id="tosum">Review summary ▸</button></div>`;
-  bindSeg("mode",x=>{A.mode=x;A.pts=[];addView(v)});bindSeg("fis",x=>{A.folder_is=x;rescan()});bindSeg("anat",x=>{A.anatomy=x;addView(v)});bindSeg("rm",x=>{A.rmode=x;addView(v)});
+  bindSeg("mode",x=>{A.mode=x;A.pts=[];addView(v)});
+  $("#tobatch")&&($("#tobatch").onclick=()=>{A.mode="batch";rescan()});bindSeg("fis",x=>{A.folder_is=x;rescan()});bindSeg("anat",x=>{A.anatomy=x;addView(v)});bindSeg("rm",x=>{A.rmode=x;addView(v)});
   $("#rule")&&($("#rule").onchange=e=>{A.rule=e.target.value;rescan()});$("#store").onchange=e=>{A.store=e.target.checked;addView(v)};
   $("#choose").onclick=async()=>{const p=await pick("folder",A.mode==="single"?"Choose the patient folder":"Choose the folder with patients");if(p){A.folder=p;rescan()}};
   $("#rescan").onclick=()=>{A.folder=$("#fold").value.trim();rescan()};
@@ -91,11 +98,11 @@ function addView(v){if(ADD.summary)return summaryView(v);const A=ADD,coh=S.cohor
   $("#cancel").onclick=()=>{ADD.pts=[];go("home")};$("#tosum").onclick=()=>{const e=validate();$("#adderr").textContent=e[0]||"";if(!e.length){A.summary=true;addView(v)}};bindTable()}
 async function rescan(){const A=ADD;if(!A.folder)return;$("#tbl").innerHTML='<span class="mut">scanning…</span>';
   try{const r=await api("/api/scan",{path:A.folder,mode:A.mode,folder_is:A.folder_is,rule:A.rule});if(r.error)throw new Error(r.error);
-    A.pts=r.patients.map(p=>Object.assign(p,{include:!!p.chosen.SWI,radiologist:"",grade_R:"",grade_L:"",src:{code:p.code?"from folder":"",name:p.name?"from folder":""}}));applyGrades()}catch(e){toast(esc(e.message),1)}addView($("#view"))}
+    A.pts=r.patients.map(p=>Object.assign(p,{include:!!p.chosen.SWI&&!p.multi_patient,radiologist:"",grade_R:"",grade_L:"",src:{code:p.code?"from folder":"",name:p.name?"from folder":""}}));applyGrades()}catch(e){toast(esc(e.message),1)}addView($("#view"))}
 function applyGrades(){const A=ADD;if(!A.grades)return;let m=0;
   A.pts.forEach(p=>{const g=A.grades.find(g=>(g.code&&p.code&&g.code.toLowerCase()===p.code.toLowerCase())||(g.name&&p.name&&g.name.toLowerCase()===p.name.toLowerCase()));
     if(g){m++;p.radiologist=g.radiologist||p.radiologist;p.grade_R=g.R??"";p.grade_L=g.L??"";p.gsrc="excel"}});A.gmsg=`✓ ${m} of ${A.pts.length} matched`}
-function tableHTML(){const A=ADD;const opt=(p,t)=>{const s=p.series.filter(x=>x.ok);return `<select data-t="${t}"><option value="">—</option>${s.map(x=>`<option value="${esc(x.path)}" title="${esc(x.relpath||x.name)}" ${p.chosen[t]===x.path?"selected":""}>${esc(x.name)}${x.voxel&&x.voxel.filter(Boolean).length?` · ${x.voxel.filter(Boolean).map(v=>(+v).toFixed(1)).join("×")} mm`:""}${x.description&&x.description!==x.name?` · ${esc(x.description)}`:""}</option>`).join("")}</select>`};
+function tableHTML(){const A=ADD;const opt=(p,t)=>{const s=p.series.filter(x=>x.ok);return `<select data-t="${t}"><option value="">—</option>${s.map(x=>`<option value="${esc(x.path)}" title="${esc(x.relpath||x.name)}" ${p.chosen[t]===x.path?"selected":""}>${esc(x.name)}${x.voxel&&x.voxel.filter(Boolean).length?` · ${x.voxel.filter(Boolean).map(v=>(+v).toFixed(1)).join("×")} mm`:""}${x.description&&x.description!==x.name?` · ${esc(x.description)}`:""}${/mip|mnip|min.?ip/i.test(x.name+" "+(x.description||""))?" · minIP - do not use":""}</option>`).join("")}</select>`};
   return `<table><tr><th>Folder</th><th>Study code ✎</th>${A.store?"<th>Patient name ✎</th>":""}${TYPES.map(t=>`<th>${t==="PHASE"?"Phase":t}</th>`).join("")}<th>Radiologist ✎</th><th>R</th><th>L</th><th>Notes</th><th>Include</th></tr>
    ${A.pts.map((p,i)=>{const id=p.code||p.name,bad=!id;return `<tr data-i="${i}"><td>${esc(p.folder_name)}</td>
     <td><input data-f="code" value="${esc(p.code)}" placeholder="${p.name?"auto":"type code…"}" style="${bad?"border-color:var(--bad)":""}"> <span class="note">${esc(p.src.code||"")}</span></td>
@@ -135,18 +142,23 @@ function ptsView(v){const q=S.queue,coh=["all"].concat(S.cohorts);v._f=v._f||"al
      <div class="steps">${S.steps.map(s=>p.steps_done.includes(s)?`<span class="ok">✓ ${s} ${hms(p.step_times[s])}</span>`:s===p.step?`<span>● ${s}…</span>`:`<span class="mut">○ ${s}</span>`).join("")}</div>`}
     if(p.status==="waiting")return `waiting · est. ${hms(p.remaining)}`;if(p.status==="done")return `<span class="ok">✓ done in ${hms(p.elapsed)}</span>`;
     return `<span class="${p.status==="failed"?"bad":"warn"}">✗ ${esc(p.status)}${p.error?": "+esc(p.error):""}</span>`};
-  const acts=p=>({running:["Pause","Stop"],paused:["Resume","Stop"],waiting:["Remove"],failed:["Retry","Remove"],stopped:["Retry","Remove"],done:["Re-run"]}[p.status]||[]);
+  const acts=p=>{const a=({running:["Pause","Stop"],paused:["Resume","Stop"],waiting:["Remove"],failed:["Retry","Remove"],stopped:["Retry","Remove"],done:["Re-run"]}[p.status]||[]);
+    return p.status==="failed"&&/do not line up/.test(p.error)?["Retry with recon-all","Retry SWI-only","Remove"]:a};
   v.innerHTML=`<div class="card"><div class="row"><b>Queue</b><span class="mut">${q.n?`${q.n} waiting or running · remaining ≈ ${hms(q.remaining)} · finish ≈ ${new Date(Date.now()+q.remaining*1000).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}`:"nothing waiting"}</span><span class="sp"></span>
-   <select id="cf">${coh.map(c=>`<option ${c===v._f?"selected":""}>${esc(c)}</option>`).join("")}</select><label><input type="checkbox" id="hn" ${hide?"checked":""}> Hide names</label><button class="b pri" onclick="go('add')">+ Add patients</button></div>
+   <select id="cf">${coh.map(c=>`<option ${c===v._f?"selected":""}>${esc(c)}</option>`).join("")}</select><label><input type="checkbox" id="hn" ${hide?"checked":""}> Hide names</label>${S.patients.some(p=>p.status==="failed"||p.status==="stopped")?'<button class="b" id="rall">Retry all failed</button>':""}<button class="b pri" onclick="go('add')">+ Add patients</button></div>
    ${q.n?`<div class="bar"><i style="width:${Math.round(100*S.patients.filter(p=>p.status==="done").length/Math.max(1,S.patients.length))}%"></i></div>`:""}</div>
+  ${q.hold?`<div class="card" style="border-color:var(--bad)"><b class="bad">⏸ Queue paused - setup problem:</b> ${esc(q.hold)}<br><span class="note">Fix it on the Home screen (Setup check), then press "Retry all failed". Waiting patients were not touched.</span></div>`:""}
   <div class="card"><table><tr><th>Study code ✎</th><th>Patient name ✎</th><th>Cohort</th><th>Mode</th><th>Status</th><th>Actions</th></tr>
    ${P.map(p=>`<tr><td><input data-code="${esc(p.code)}" data-f="new_code" value="${esc(p.code)}" ${p.status!=="waiting"?"disabled title='locked once processing has started'":""}></td>
     <td>${hide?"•••":`<input data-code="${esc(p.code)}" data-f="name" value="${esc(p.name)}" placeholder="—">`}</td><td>${esc(p.cohort)}</td>
     <td>${p.mode==="auto"?'<span class="tag ai">Auto · AI only, not validated</span>':"Semi"} · ${p.anatomy==="recon"?"recon-all":"SynthSeg"}</td><td style="min-width:420px">${st(p)}</td>
     <td>${acts(p).map(a=>`<button class="b" data-act="${a}" data-code="${esc(p.code)}">${a}</button>`).join(" ")} <button class="b" data-lg="${esc(p.code)}">Log</button>${p.has_qc?` <button class="b" data-qc="${esc(p.code)}">QC</button>`:""}${p.status==="done"?` <button class="b pri" data-rv="${esc(p.code)}">Review</button>`:""}</td></tr>`).join("")||'<tr><td colspan="6" class="mut">No patients yet.</td></tr>'}</table>
    <div class="note" style="margin-top:6px">One patient runs at a time. You can close this window; processing continues and resumes after a restart. A code can be changed until processing starts; names any time.</div></div><div id="qcimg"></div>`;
-  $("#cf").onchange=e=>{v._f=e.target.value;ptsView(v)};$("#hn").onchange=e=>{v._hide=e.target.checked;ptsView(v)};
-  v.querySelectorAll("[data-act]").forEach(b=>b.onclick=async()=>{const a=b.dataset.act.toLowerCase().replace("re-run","rerun");if(a==="stop"&&!confirm("Stop this patient?"))return;
+  $("#cf").onchange=e=>{v._f=e.target.value;ptsView(v)};
+  $("#rall")&&($("#rall").onclick=async()=>{const r=await api("/api/retry_failed",{});toast(`${r.n} patient(s) back in the queue`);render()});$("#hn").onchange=e=>{v._hide=e.target.checked;ptsView(v)};
+  v.querySelectorAll("[data-act]").forEach(b=>b.onclick=async()=>{const a={"retry swi-only":"swi_only","retry with recon-all":"recon"}[b.dataset.act.toLowerCase()]||b.dataset.act.toLowerCase().replace("re-run","rerun");
+    if(a==="recon"&&!confirm("Recommended. recon-all + bbregister gives a more accurate T1-SWI registration; it takes about 2-3 hours for this patient. Continue?"))return;
+    if(a==="swi_only"&&!confirm("SWI-only skull-strips the SWI with SynthStrip, which needed 30-64 GB of memory on this Mac before and froze it. Only continue if nothing else is running. Continue?"))return;if(a==="stop"&&!confirm("Stop this patient?"))return;
     const r=await api("/api/control",{code:b.dataset.code,action:a});if(r.error)toast(esc(r.error),1);render()});
   v.querySelectorAll("input[data-code]").forEach(el=>el.onchange=async()=>{const r=await api("/api/edit",{code:el.dataset.code,[el.dataset.f]:el.value.trim()});if(r.error)toast(esc(r.error),1);render()});
   v.querySelectorAll("[data-lg]").forEach(b=>b.onclick=()=>{$("#logcode").value=b.dataset.lg;$("#log").style.display="block";loadLog()});
@@ -181,13 +193,15 @@ async function readView(v){const pk=await api("/api/packets"),done=S.patients.fi
 function setView(v){const s=S.settings,F=s.features;const L={duplicate_check:"Duplicate-scan check",preflight:"Pre-flight check before processing",qc_snapshot:"QC snapshot per patient",notify:"Notification when a patient finishes / fails",
    version_stamp:"Version stamp on every result",share:"Share package (codes only)",backup:"Automatic daily backup (calls, grades, results - no images)",name_warning:"Warn when a folder name looks like a person's name"};
   v.innerHTML=`<div class="card"><h2>FreeSurfer</h2><div class="row"><span class="lab">FreeSurfer folder</span><input class="wide" id="fs" value="${esc(s.freesurfer_home||"")}" placeholder="/Applications/freesurfer/8.2.0"><button class="b" id="fsc">Choose…</button></div>
+   <div class="row"><span class="lab">Licence file</span><input class="wide" id="lic" value="${esc(s.fs_license||"")}" placeholder="found automatically if readable"><button class="b" id="licc">Choose…</button></div>
    <div class="row"><span class="lab">Threads</span><input id="thr" type="number" min="1" max="12" value="${s.threads||4}" style="width:80px"><span class="note">CPU threads for SynthSeg / recon-all (4 is safe on a 36 GB Mac)</span></div></div>
   <div class="card"><h2>Backup</h2><div class="row"><span class="lab">Backup folder</span><input class="wide" id="bk" value="${esc(s.backup_dir||"")}" placeholder="e.g. an external drive"><button class="b" id="bkc">Choose…</button></div></div>
   <div class="card"><h2>Features</h2>${Object.keys(L).map(k=>`<div class="row"><label><input type="checkbox" data-ft="${k}" ${F[k]?"checked":""}> ${L[k]}</label></div>`).join("")}</div>
   <div class="row"><button class="b" id="quit">Quit the app</button><span class="note">closing the window does not stop processing; Quit does</span><span class="sp"></span><button class="b pri" id="save">Save settings</button></div>`;
   $("#quit").onclick=async()=>{if(!confirm("Quit cSS Pipeline?"))return;let r=await api("/api/quit",{});if(!r.ok&&confirm(r.error+"\n\nQuit anyway?"))r=await api("/api/quit",{force:true});if(r.ok)document.body.innerHTML='<p style="padding:40px">cSS Pipeline has stopped. Open it again from Applications.</p>'};
+  $("#licc").onclick=async()=>{const p=await pick("file","Choose your FreeSurfer license.txt");if(p)$("#lic").value=p};
   $("#fsc").onclick=async()=>{const p=await pick("folder","Choose the FreeSurfer folder");if(p)$("#fs").value=p.replace(/\/$/,"")};$("#bkc").onclick=async()=>{const p=await pick("folder","Choose the backup folder");if(p)$("#bk").value=p};
   $("#save").onclick=async()=>{const f={};document.querySelectorAll("[data-ft]").forEach(x=>f[x.dataset.ft]=x.checked);
-    await api("/api/settings",{freesurfer_home:$("#fs").value.trim(),threads:+$("#thr").value,backup_dir:$("#bk").value.trim(),features:f});toast("settings saved");render()}}
+    await api("/api/settings",{fs_license:$("#lic").value.trim(),freesurfer_home:$("#fs").value.trim(),threads:+$("#thr").value,backup_dir:$("#bk").value.trim(),features:f});toast("settings saved");render()}}
 render();setInterval(async()=>{if(V==="pts"&&!document.activeElement.matches("input,select"))await render();else if(V==="home")await refresh();if($("#log").style.display==="block")loadLog()},3000);
 </script></body></html>

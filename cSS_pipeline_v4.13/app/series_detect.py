@@ -65,8 +65,8 @@ def scan(folder, max_depth=4):
             if os.path.exists(js):
                 try: j = json.load(open(js)); desc = j.get("SeriesDescription", "") + " " + "\\".join(j.get("ImageType", []))
                 except Exception: pass
-            typ, why = classify(f"{f} {desc}", desc)
-            out.append(dict(path=p, format="NIfTI", ok=True, name=f, relpath=os.path.relpath(p, folder), files=1, description=desc.strip(), type=typ, reason=why,
+            typ, why = classify(f"{os.path.basename(root) if root != folder else ''} {f} {desc}", desc)
+            out.append(dict(path=p, format="NIfTI", ok=True, name=(os.path.basename(root) + "/" + f) if root != folder else f, relpath=os.path.relpath(p, folder), files=1, description=desc.strip(), type=typ, reason=why,
                             voxel=vox, shape=shape, fingerprint=hashlib.sha1(open(p, "rb").read(1 << 16)).hexdigest()[:16]))
         dcm = [os.path.join(root, f) for f in files if f.lower().endswith(".dcm") or (not os.path.splitext(f)[1] and is_dicom(os.path.join(root, f)))]
         if dcm:
