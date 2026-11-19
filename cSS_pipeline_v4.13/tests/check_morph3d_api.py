@@ -1,0 +1,21 @@
+"""check_morph3d_api.py - the reviewer's /api/morph3d on the PH6 phantom ($CSS_BASE with PH6 detected): known cSS candidates are
+sheet-like, the known tubular vein is tube-like, the candidate label image and the work/review files are not modified.
+usage: python tests/check_morph3d_api.py"""
+import sys, os, glob, hashlib
+HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.join(os.path.dirname(HERE), "scripts")); sys.argv = sys.argv[:1]
+import numpy as np, review_web as rw
+B = rw.B
+if not os.path.exists(f"{B}/review/PH6_candidates.csv"): print("SKIP morph3d api (PH6 not detected)"); print("RESULT morph3d_api OK"); sys.exit(0)
+h = lambda: {f: hashlib.md5(open(f, "rb").read()).hexdigest() for f in glob.glob(f"{B}/review/PH6_*") + glob.glob(f"{B}/work/PH6_*")}
+before = h(); rw.IDS[:] = ["PH6"]; s = rw.study("PH6"); lab0 = s.lab.copy()
+tr = s._grid(f"{B}/work/PH6_truth.nii.gz", 0); ve = s._grid(f"{B}/work/PH6_veins.nii.gz", 0); fails = []
+for c in range(1, len(s.df) + 1):
+    o = s.morph3d(c); m = o["measures"]; obj = s.lab == c; t, v = (tr[obj] > 0).mean(), (ve[obj] > 0).mean()
+    sh = m["local_share"]; kind = "cSS" if t >= 0.3 else ("vein" if v >= 0.3 else "other")
+    ok = (kind != "cSS" or sh["sheet"] >= 0.8) and (kind != "vein" or c != 6 or sh["tube"] >= 0.6)
+    print(("ok    " if ok else "FAIL  ") + f"PH6 #{c} ({kind}): tube {sh['tube']} sheet {sh['sheet']} blob {sh['blob']} | {m['summary'][:70]}")
+    if not ok: fails.append(c)
+    assert len(o["voxels"]["p"]) == int(obj.sum()), "every candidate voxel is sent (no subsampling)"
+check = np.array_equal(lab0, s.lab) and before == h()
+print(("ok    " if check else "FAIL  ") + "candidate labels and every PH6 review / work file unchanged")
+print(f"RESULT morph3d_api {'OK' if not fails and check else 'FAILED'}"); sys.exit(0 if not fails and check else 1)

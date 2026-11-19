@@ -219,6 +219,77 @@ class Study:
         return dict(id=cid, measures=sm, struct=pts_mm(st & ~obj, 1800, 1), core=pts_mm(obj, 900, 2), cortex=pts_mm(near, 2200, 3), others=pts_mm(others, 500, 4),
                     n_struct=int(st.sum()), vox=[float(v) for v in vox])
 
+    def morph3d(self, cid, margin_mm=8.0):
+        """3-D morphology analysis of ONE candidate (css_morph3d) on a candidate-local crop of the canonical grid.
+        Read-only: the candidate mask, the SWI and every detector file are only read; results are cached per candidate."""
+        import css_morph3d as cm, base64 as b64
+        key = (cid, round(float(margin_mm), 1))
+        if not hasattr(self, "_m3"): self._m3 = {}
+        if key in self._m3: return self._m3[key]
+        if cid >= AUDIT_OFFSET: return dict(error="3-D analysis is available for the shown candidates")
+        full = self.lab == cid
+        if not full.any(): return dict(error="object not found")
+        vox = np.array(self.vox, float); P0 = np.argwhere(full); mg = np.ceil(margin_mm / vox).astype(int)
+        lo = np.maximum(P0.min(0) - mg, 0); hi = np.minimum(P0.max(0) + mg + 1, self.shape); sl = tuple(slice(a, b) for a, b in zip(lo, hi))
+        mask = full[sl].copy()
+        if not hasattr(self, "_Ican"): self._Ican = self.can.get_fdata(dtype=np.float32)
+        img = self._Ican[sl].copy()
+        if not hasattr(self, "_m3maps"):
+            g = lambda p, o: self._grid(p, order=o) if os.path.exists(p) else None
+            seg = g(f"{B}/work/{self.sid}_seg_swispace.nii.gz", 0)
+            self._m3maps = dict(psd=g(f"{B}/work/{self.sid}_pial_sd.nii.gz", 1), ves=g(f"{B}/work/{self.sid}_vessels.nii.gz", 0),
+                                dark=g(f"{B}/work/{self.sid}_dark.nii.gz", 0), ctx=((seg >= 1000) & (seg < 3000)) if seg is not None else None)
+        Mp = self._m3maps
+        crop = lambda a, t=None: (a[sl] > 0.5 if t == "b" else a[sl]).copy() if a is not None else None
+        psd, ctx, ves, dark = crop(Mp["psd"]), crop(Mp["ctx"], "b"), crop(Mp["ves"], "b"), crop(Mp["dark"], "b")
+        res, arr = cm.analyse(mask, vox, img=img, psd=psd, cortex=ctx, vessel=(ves & ~mask) if ves is not None else None)
+        if "error" in res: return res
+        cen = arr["P_idx"].mean(0)                                      # crop voxel index of the centroid
+        rel = lambda idx: np.round((np.asarray(idx, float) - cen) * vox, 2).tolist()
+        from scipy.spatial import cKDTree
+        tree = cKDTree(arr["P_idx"] * vox); lab_c, _ = ndi.label(mask, cm.S26); comp = lab_c[tuple(arr["P_idx"].T)]
+        def mesh_out(v, f):
+            if not len(f): return dict(v=[], f=[], vi=[])
+            _, nn = tree.query(v); return dict(v=np.round(v - cen * vox, 2).ravel().tolist(), f=f.ravel().tolist(), vi=nn.tolist())
+        def other_mesh(m, step=1):
+            if m is None or not m.any(): return None
+            from skimage.measure import marching_cubes
+            try: v, f, _, _ = marching_cubes(np.pad(m.astype(np.float32), 1), 0.5, spacing=tuple(vox), step_size=step)
+            except Exception: return None
+            v = v - vox; return dict(v=np.round(v - cen * vox, 2).ravel().tolist(), f=f.ravel().tolist())
+        out = dict(id=cid, measures=res, vox=vox.tolist(), origin=lo.tolist(), centroid_vox=np.round(lo + cen, 2).tolist(),
+                   voxels=dict(p=rel(arr["P_idx"]), idx=(arr["P_idx"] + lo).tolist(), comp=comp.tolist(), gcls=arr["gcls"].tolist(),
+                               thick=np.round(arr["thick"], 2).tolist(), spread=np.round(arr["desc"], 2).tolist(),
+                               slab=np.clip(((((arr["P_idx"] * vox) - (arr["P_idx"] * vox).mean(0)) @ np.array(res["pca_axes"]).T[:, 0]
+                                            - min(c["pos_mm"] for c in res["xsections"])) / max(1e-6, (max(c["pos_mm"] for c in res["xsections"]) - min(c["pos_mm"] for c in res["xsections"])) / max(1, len(res["xsections"]) - 1)) + 0.5).astype(int), 0, len(res["xsections"]) - 1).tolist() if res["xsections"] else []),
+                   mesh=mesh_out(*arr["mesh"]), skeleton=rel(arr["sk"]), branch=rel(arr["sk_branch"]))
+        if "hess" in arr:
+            h = arr["hess"]; out["voxels"].update(hcls=h["cls"].tolist(), htube=np.round(h["tube"], 2).tolist(), hsheet=np.round(h["sheet"], 2).tolist(),
+                                                  heig=np.round(h["eig"], 3).tolist(), haxis=np.round(h["axis"], 2).tolist())
+        if "footprint" in arr: out["footprint"] = rel(arr["footprint"])
+        if "contact" in arr: out["contact"] = rel(arr["contact"])
+        if ves is not None and "vessel_conn" in arr:
+            out["vessel_mesh"] = other_mesh(ves & ~mask); out["vessel_conn_mesh"] = other_mesh(arr["vessel_conn"])
+        if dark is not None:
+            near = dark & ~mask & (ndi.distance_transform_edt(~mask, sampling=vox) <= margin_mm)
+            if ves is not None: near &= ~ves
+            out["dark_mesh"] = other_mesh(near)
+        if ctx is not None: out["cortex_mesh"] = other_mesh(ctx, step=2)
+        # MRI context: three orthogonal planes through the centroid (window p1-p99 of the crop)
+        lo_w, hi_w = np.percentile(img[img > 0], [1, 99]) if (img > 0).any() else (0, 1)
+        q = lambda a: np.clip((a - lo_w) / max(hi_w - lo_w, 1e-6) * 255, 0, 255).astype(np.uint8)
+        ci = np.round(cen).astype(int); planes = []
+        for ax_, nm in ((2, "axial"), (1, "coronal"), (0, "sagittal")):
+            sl2 = [slice(None)] * 3; sl2[ax_] = int(ci[ax_]); a2 = q(img[tuple(sl2)])           # 2-D array over the two other axes (u, v)
+            uv = [k for k in range(3) if k != ax_]
+            planes.append(dict(name=nm, axis=ax_, at_mm=round(float((ci[ax_] - cen[ax_]) * vox[ax_]), 2), uv=uv, nu=int(a2.shape[0]), nv=int(a2.shape[1]),
+                               u0=round(float((0 - cen[uv[0]]) * vox[uv[0]] - vox[uv[0]] / 2), 2), u1=round(float((a2.shape[0] - 1 - cen[uv[0]]) * vox[uv[0]] + vox[uv[0]] / 2), 2),
+                               v0=round(float((0 - cen[uv[1]]) * vox[uv[1]] - vox[uv[1]] / 2), 2), v1=round(float((a2.shape[1] - 1 - cen[uv[1]]) * vox[uv[1]] + vox[uv[1]] / 2), 2),
+                               data=b64.b64encode(np.ascontiguousarray(a2.T).tobytes()).decode()))
+        out["planes"] = planes
+        out["margin_mm"] = margin_mm
+        self._m3[key] = out; return out
+
     def audit_cands(self, reviewer):
         xd, xl = self._excluded(); out = []; revealed = SHOW_EXCL or load_final(self.sid, reviewer) is not None
         for e in self.audit_ids(reviewer):
@@ -543,6 +614,8 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/seqmeta":
                 s = study(q["study"]); s.volume(q["seq"]); return self._send(s.meta_seq[q["seq"]])
             if u.path == "/api/struct3d": return self._send(study(q["study"]).struct3d(int(q["cand"])))
+            if u.path == "/api/morph3d": return self._send(study(q["study"]).morph3d(int(q["cand"]), float(q.get("margin", 8))))
+            if u.path == "/morph3d.js": return self._send(open(os.path.join(HERE, "morph3d_view.js"), "rb").read(), "text/javascript; charset=utf-8")
             if u.path == "/api/labels":
                 L = study(q["study"]).labels(q.get("reviewer", ""), q.get("mode") == "validation" or SHOW_EXCL)
                 return self._send(L.astype("<u2").tobytes(order="F"), "application/octet-stream")

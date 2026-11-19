@@ -45,3 +45,10 @@ Not found to be causes: wrong spacing, wrong orientation, wrong mask file, inter
 ## Consequence for the redesign
 
 The new viewer must measure **the candidate itself**: its components; local thickness from a distance transform; cross-sections along a skeleton or principal path; and local Hessian sheet- or tube-likeness computed on the candidate's bounding box. The regrown structure becomes an optional context layer. A surface (marching cubes on a display copy) replaces the point cloud. Next step: technical design and interface mockup, for approval before code.
+
+## Resolution (v5.12)
+
+The redesign keeps the old card unchanged as a quick thumbnail and adds a separate analysis window ("Open 3-D analysis ▸").
+The window measures the candidate itself (`scripts/css_morph3d.py`), sends every voxel, draws a marching-cubes surface and
+the exact voxels, and keeps context (vessel map, dark structures, cortex, MRI planes) in separate, optional layers. See
+`3D_VIEWER_TECHNICAL_DESIGN.md`, `3D_MORPHOLOGY_FEATURES.md` and `3D_VIEWER_VALIDATION_REPORT.md`.

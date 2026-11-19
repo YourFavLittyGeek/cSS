@@ -551,3 +551,10 @@ Reviewer viewer rebuilt (docs/CHANGELOG_v5.6.md): single un-zoomed image, layout
 - app9 (app/README.md): parallel patients (SET parallel, recommended from sysinfo), memory zones 70/85 %, IMPORT_LOCK around
   cohort.py import + run start, pathway check at scan (series_detect.choose_t1), automatic pathway fallback (auto_path),
   theme icon + AppIcon.icns. Detector / prep_anat defaults unchanged. Tested in CSS_APP_FAKE_RUN mode only.
+- v5.12 (branch experimental/3d-morphology-viewer; reports/3D_VIEWER_*.md): css_morph3d.py = read-only morphology of ONE
+  candidate on a local crop (components, coordinate PCA, mesh area / sphericity, EDT local thickness, Lee skeleton only for
+  curve-like objects, PC1 cross-sections, per-voxel local shape tube / sheet / blob / uncertain from neighbourhood spreads
+  within 3x local thickness (same piece), image Hessian separate (detect_css convention), pial relation, vessel-map contact).
+  review_web /api/morph3d + morph3d_view.js (WebGL, no libs): isolated / context, surface / voxels, layers, cross-section strip,
+  click -> MRI slices, cursor -> 3-D. tests/morph_phantoms.py + check_morph3d.py (11 shapes) + check_morph3d_api.py (PH6):
+  cSS #1-5 sheet, vein #6 tube, flat CSF vein #9 = ribbon (separated only by position). Detector untouched; phantoms only.

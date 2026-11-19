@@ -87,7 +87,17 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
 .sc{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:8px 0}.sc .card{background:var(--bg)}.sc .big{font-size:30px;font-weight:800;line-height:1.1}
 .banner{background:#7a5b00;color:#fff;padding:5px 14px;font-size:13px;display:none}
 .toast{position:fixed;left:24px;bottom:66px;background:#1f6b36;color:#fff;border-radius:10px;padding:9px 14px;font-size:13px;z-index:60;box-shadow:0 6px 20px rgba(0,0,0,.5);display:none;user-select:text}
-.hide{display:none!important}.sgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.sbox{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.hide{display:none!important}
+#m3d .m3w{position:fixed;inset:18px;background:var(--panel);border:1px solid var(--line);border-radius:12px;display:grid;grid-template-columns:230px 1fr 360px;overflow:hidden;z-index:80}
+.m3l,.m3r{overflow:auto;padding:10px 12px;font-size:12.5px}.m3l{border-right:1px solid var(--line)}.m3r{border-left:1px solid var(--line)}
+.m3c{display:flex;flex-direction:column;min-width:0}.m3head{display:flex;gap:10px;align-items:center;padding:8px 10px;border-bottom:1px solid var(--line)}
+#m3cv{flex:1;width:100%;min-height:200px;cursor:grab;touch-action:none}.m3prof{height:128px;border-top:1px solid var(--line);display:flex;gap:8px;padding:6px 10px}#m3pf{flex:1;height:110px;cursor:pointer}#m3slab{width:230px}
+.m3l h5,.m3r h5{margin:10px 0 4px;font-size:10.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em}.m3l h5:first-child,.m3r h5:first-child{margin-top:0}
+.m3seg{display:flex;flex-wrap:wrap;gap:4px}.m3seg button{font-size:12px;padding:3px 8px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--text);cursor:pointer}.m3seg button.on{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 25%,transparent)}
+.m3l label{display:flex;gap:6px;align-items:center;padding:2px 0;cursor:pointer}.m3sw{width:10px;height:10px;border-radius:3px;display:inline-block}
+.m3r table{width:100%;border-collapse:collapse}.m3r td{padding:3px 4px;border-bottom:1px solid var(--line);font-size:12px}.m3r td:last-child{text-align:right;white-space:nowrap}
+.m3bar{display:flex;align-items:center;gap:6px;font-size:12px;margin:2px 0}.m3bar div{flex:1;height:8px;border-radius:4px;background:var(--line);overflow:hidden}.m3bar i{display:block;height:100%}
+.m3sum{border-left:3px solid var(--acc);padding:6px 8px;background:var(--bg);border-radius:4px;margin-top:6px;font-size:12.5px}.sgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.sbox{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
 .sbox h4{margin:0 0 6px;font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em}.sbox .it{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--line);font-size:13px}.sbox .it:last-child{border:0}
 #setdlg .pri,#bSaveFinal{font-weight:600}#setdlg .pri{background:var(--acc);border-color:var(--acc);color:#fff}#nextcard{position:fixed;right:18px;bottom:18px;width:360px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;z-index:70;display:none;box-shadow:0 10px 30px rgba(0,0,0,.5);font-size:13px}#nextcard.show{display:block}
 .nsw{display:inline-flex;align-items:center;width:34px;height:19px;border-radius:999px;padding:2px;background:#5a626e;cursor:pointer;flex:none}.nsw i{width:15px;height:15px;border-radius:50%;background:#fff;display:block}.nsw.on{background:#3aa655;justify-content:flex-end}#nextcard .pri{background:var(--acc);border-color:var(--acc);color:#fff}#prevStudy,#nextStudy{padding:3px 9px;color:var(--text)}
@@ -122,7 +132,7 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
     <div class="band"><span style="color:#d64545">not cSS</span><span style="color:#c99a1c">uncertain</span><span style="color:#3aa655">cSS likely</span></div>
     <div class="say" id="aisay"></div><div class="mut sm" id="aisrc"></div><div class="mut sm" id="aiconf" style="margin-top:4px"></div></div></div>
    <div class="card" id="s3card"><div class="h"><span>3-D shape of the dark structure</span><span class="mut sm"><a href="#" id="s3hide" style="color:inherit">hide <kbd>3</kbd></a></span></div>
-    <div id="s3body"><canvas id="s3cv" width="300" height="200" style="width:100%;border-radius:8px;background:#0e1116;cursor:grab;touch-action:none"></canvas>
+    <div id="s3body"><button class="btn" id="bM3" style="width:100%;margin-bottom:6px" title="Isolated 3-D analysis of this candidate: surface, voxels, local tube / sheet / blob, thickness, cross-sections, Hessian, vessels, pial surface">Open 3-D analysis ▸</button><canvas id="s3cv" width="300" height="200" style="width:100%;border-radius:8px;background:#0e1116;cursor:grab;touch-action:none"></canvas>
     <div class="mut sm">drag = rotate · wheel = zoom · double-click = reset · <span style="color:#e04b4b">red</span> structure, <span style="color:#ffd25a">yellow</span> detector object, <span style="color:#7d8590">grey</span> cortex</div>
     <div class="say" id="s3say"></div><div class="mut sm" id="s3meas"></div></div></div>
    <div class="card" id="deccard"><div class="h"><span>Your decision</span><span class="mut sm" id="curcall"></span></div>
@@ -220,7 +230,12 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
  <div class="r"><b></b><label class="mut sm"><input type="radio" name="imov" checked> only candidates I have not called</label><label class="mut sm"><input type="radio" name="imov" id="imAll"> replace my calls too</label></div>
  <div class="mut sm">Switched off during a validation read (importing would unblind you).</div>
  <div class="r" style="justify-content:flex-end;margin-top:10px"><button class="btn" id="imCancel">Cancel</button><button class="btn on" id="imGo">Import</button></div></div></div>
-<div id="nextcard"></div><div class="modal" id="setdlg"><div class="dlg" style="min-width:880px;max-width:96vw"><h2>Settings</h2><div id="setbody"></div>
+<div id="nextcard"></div>
+<div class="modal" id="m3d"><div class="m3w">
+ <div class="m3l" id="m3left"></div>
+ <div class="m3c"><div class="m3head"><b id="m3title">3-D analysis</b><span class="mut sm" id="m3hint">drag rotate · wheel zoom · right-drag pan · click = MRI slices jump there · double-click = best view</span><span style="flex:1"></span><button class="btn" id="m3close">Close <kbd>Esc</kbd></button></div>
+  <canvas id="m3cv"></canvas><div class="m3prof"><canvas id="m3pf"></canvas><div id="m3slab" class="mut sm"></div></div></div>
+ <div class="m3r" id="m3right"></div></div></div><div class="modal" id="setdlg"><div class="dlg" style="min-width:880px;max-width:96vw"><h2>Settings</h2><div id="setbody"></div>
  <div style="display:flex;gap:8px;align-items:center;margin-top:10px"><span class="mut sm">Changes apply at once and are kept in the project folder (shared by every reviewer window and the app). Theme: top bar.</span><span style="flex:1"></span><button class="btn" id="setReset">Reset to defaults</button><button class="btn pri" id="setDone">Done</button></div></div></div><div class="modal" id="summary"><div class="dlg" style="min-width:560px"><h2>Summary</h2><div id="sumbody"></div><p class="mut">Close with <kbd>Esc</kbd>.</p></div></div>
 <div class="modal" id="saveas"><div class="dlg" style="min-width:600px"><h2>Save snapshot as</h2>
  <div class="r"><b>Folder</b><input type="text" id="saFolder" autocomplete="off"><button class="btn" id="saChoose" style="display:none">Choose&hellip;</button></div>
@@ -241,6 +256,7 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
  <div class="mut sm">Names use the study code only, never a patient name. x y z = voxel position of the lesion centre in the SWI.</div>
  <div class="r" style="justify-content:flex-end;margin-top:10px"><button class="btn" id="sCancel">Cancel</button><button class="btn on" id="sOk">Save settings</button></div></div></div>
 
+<script src="/morph3d.js"></script>
 <script>
 "use strict";
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
@@ -712,7 +728,7 @@ function openSnapFolder(){const f=snap.folder||(M&&M.snapdir)||"";api("/api/open
 
 // ---------- actions, menu bar, right-click menu ----------
 function tog(){$("#aibody").style.display=showAI&&!vmode?"":"none";LSS("mark",showMark);LSS("other",showOther);LSS("auto",autoNext);LSS("ai",showAI);LSS("text",showText);LSS("cross2",showCross);draw()}
-const A={savefinal:{l:"Save final",k:MOD+(MAC?"":"+")+"↩",ic:"disk",f:()=>saveFinal()},
+const A={m3d:{l:"3-D analysis of the candidate…",ic:"cube",f:()=>m3Open()},savefinal:{l:"Save final",k:MOD+(MAC?"":"+")+"↩",ic:"disk",f:()=>saveFinal()},
  blind:{l:"Blind read (no AI, audit objects)",ic:"eye",f:()=>{const v=!LS("blind",false);LSS("blind",v);setVmode(v)},on:()=>vmode},
  openset:{l:"Settings…",ic:"gear",f:()=>openSet()},s3:{l:"3-D shape card",k:"3",ic:"cube",f:()=>s3Toggle(),on:()=>showS3},
  screencap:{l:"Screenshot",ic:"cam",f:()=>screenCap()},
@@ -749,7 +765,7 @@ const studyItems=()=>M.studies.map(s=>({l:s,ic:"folder",f:()=>loadStudy(s),on:()
 const planeItems=()=>PLN.map((n,i)=>({l:n,ic:"cube",f:()=>setPlane(i),on:()=>panes[act]&&panes[act].plane===i}));
 const MENUS={file:()=>[{sub:"Open patient",ic:"folder",items:studyItems},"savefinal","summary","blind","-","import","exportcsv","-","screencap","snap","snapfolder"],
  cand:()=>["prev","next","unread","-","call_y","call_v","call_n","call_a","call_u","call_h","-","undo","clear","comment","miss","audit"],
- view:()=>[{sub:"Plane",ic:"cube",k:"Tab",items:planeItems},{sub:"Sequence",ic:"seq",items:seqItems},{sub:"Layout",ic:"l4",k:"\\",items:()=>["lay1","lay2","lay4"]},"-","zin","zout","fit","actual","reset","centre","-","mark","mip","mag","s3","hidepanel"],
+ view:()=>[{sub:"Plane",ic:"cube",k:"Tab",items:planeItems},{sub:"Sequence",ic:"seq",items:seqItems},{sub:"Layout",ic:"l4",k:"\\",items:()=>["lay1","lay2","lay4"]},"-","zin","zout","fit","actual","reset","centre","-","mark","mip","mag","s3","m3d","hidepanel"],
  tools:()=>["pan","zoomtool","wl","scroll","-","ruler","dark","side","-","screencap","snap","snapas","-","help"],
  settings:()=>["openset"],help:()=>["help"]};
 const MENUS_OLD={file:()=>[],edit:()=>["undo","clear","comment"],
@@ -785,6 +801,77 @@ function openSet(){closeMenus();const sw=(id,on,lab,dis)=>`<div class="it"><span
   $("#setdlg").classList.add("show")}
 function resetSet(){if(!confirm("Reset every reviewer setting to its default?"))return;for(const k of Object.keys(localStorage))if(k.startsWith("css_")&&!k.startsWith("css_vmode_"))localStorage.removeItem(k);
   fetch("/api/vset",{method:"POST",headers:{"Content-Type":"application/json","X-CSS":"1"},body:JSON.stringify({auto:true,ai:true,compare:true,autopt:true,autosec:10,text:true,rl:true,cross2:false,other:true,mark:true,ah:false,ltah:false,layout:"1",s3:true,blind:false,scap:"window"})}).then(()=>location.reload())}
+// ---------- v5.12 3-D morphology analysis (css_morph3d.py; read-only, never changes the candidate or the score) ----------
+let m3open=false,m3o=null,m3init=false;
+const M3DEF={volume:"voxel count x voxel volume (mm3)",surface:"area of the marching-cubes surface of the exact mask (staircase included, so slightly high)",
+ length:"extent along the first principal axis (voxel centres + one voxel)",thick:"local thickness: 2 x distance to the nearest outside voxel minus one voxel, read at the medial ridge",
+ pca:"square roots of the eigenvalues of the coordinate covariance (spread of the voxels, NOT the image Hessian); describes the overall distribution, not the local cross-section",
+ sph:"pi^(1/3) (6V)^(2/3) / A: 1 for a ball, small for sheets and thin tubes",xs:"coefficient of variation of the cross-section diameter along the first principal axis (small = stable radius)",
+ skel:"curve skeleton (Lee thinning); shown only for curve-like objects - the medial set of a sheet is a surface",local:"per voxel, spread of the mask within 3x its local thickness: tube = thin and round across and elongated; sheet = thin in one direction; blob = solid in all three",
+ hess:"image intensity Hessian at 0.8 / 1.6 mm (detect_css.py convention: |l1|<=|l2|<=|l3|, dark structure -> l3 > 0): curvature of the SWI signal, independent of the mask",
+ surf:"share of candidate voxels within 1 mm of the pial surface (signed distance of the T1 labels); footprint = cortex-surface voxels within 1.5 mm",
+ ves:"the detector's vessel map (work/ID_vessels): a connection is evidence of vascular anatomy, not proof that the candidate is a vein"};
+function m3Defaults(){return {mode:"isolated",rep:"surface",color:"geometry",layers:{vessel:false,dark:false,cortex:false,skeleton:false,pca:false,footprint:false,contact:true,mri:{axial:false,coronal:false,sagittal:false}},comp:null,slab:-1,margin:8,light:document.documentElement.dataset.theme==="light"}}
+async function m3Open(){const c=M&&M.cands[ci];if(!c||c.audit){status("3-D analysis: choose a shown candidate",true);return}
+  $("#m3d").classList.add("show");m3open=true;if(!m3o)m3o=m3Defaults();m3o.light=document.documentElement.dataset.theme==="light";
+  if(!m3init){try{M3.init($("#m3cv"),m3o);m3init=true}catch(e){$("#m3left").innerHTML=`<p class="err">${esc(e.message)}</p>`;return}}
+  $("#m3title").textContent=`3-D analysis · ${M.study} · candidate ${did(c)}`;$("#m3right").innerHTML='<p class="mut">computing …</p>';
+  try{const d=await api(`/api/morph3d?study=${M.study}&cand=${c.id}&margin=${m3o.margin}`);M3.load(d,m3Pick);m3Panels();m3Prof();M3.setMarker(cur)}
+  catch(e){$("#m3right").innerHTML=`<p class="err">${esc(e.message)}</p>`}}
+function m3Close(){$("#m3d").classList.remove("show");m3open=false}
+function m3Pick(idx,k){cur=idx.slice();ctr=cur.slice();draw();M3.setMarker(cur);const V=M3.data().voxels,cl=["tube-like","sheet-like","blob-like","uncertain"];
+  $("#m3slab").innerHTML=`<b>voxel ${idx.join(", ")}</b><br>local geometry: ${vmode?"🔒":cl[V.gcls[k]]}<br>thickness ${V.thick[k]} mm<br>spread ${V.spread[k].join(" / ")} mm`+(V.heig?`<br>Hessian l1,l2,l3 ${V.heig[k].join(", ")}<br>image: ${vmode?"🔒":cl[V.hcls[k]]}`:"")+`<br><span class="mut">MRI slices moved here</span>`}
+function m3Panels(){const d=M3.data(),m=d.measures,o=m3o,sel=(g,cur,opts)=>`<div class="m3seg" data-g="${g}">${opts.map(([v,l,t])=>`<button data-v="${v}" class="${String(cur)===String(v)?"on":""}" title="${t||""}">${l}</button>`).join("")}</div>`;
+  const ck=(k,l,col,on)=>`<label><input type="checkbox" data-l="${k}" ${on?"checked":""}><span class="m3sw" style="background:${col}"></span>${l}</label>`,L=o.layers,lock=vmode;
+  if(lock&&["geometry","hessian"].includes(o.color))o.color="plain";
+  $("#m3left").innerHTML=`<h5>View</h5>${sel("mode",o.mode,[["isolated","Isolated"],["context","Anatomical context"]])}
+   <h5>Representation</h5>${sel("rep",o.rep,[["surface","Surface","marching cubes + Taubin smoothing of a display copy"],["voxels","Voxels","the exact original mask, one box per voxel"],["both","Both"]])}
+   <h5>Colour by</h5>${sel("color",o.color,[["geometry","Local shape",lock?"hidden in a validation read":""],["hessian","Image Hessian"],["thickness","Thickness"],["component","Piece"],["plain","Plain"]].filter(x=>!lock||!["geometry","hessian"].includes(x[0])))}
+   <div class="mut sm" style="margin-top:4px">${o.color==="geometry"||o.color==="hessian"?'<span style="color:#4aa3ff">■</span> tube <span style="color:#f0a040">■</span> sheet <span style="color:#c77dff">■</span> blob <span style="color:#8a8f98">■</span> uncertain':o.color==="thickness"?"blue thin → red thick (p10–p90)":""}</div>
+   <h5>Layers</h5>${ck("vessel","Vessel map nearby","#4aa3ff",L.vessel)}${ck("dark","Other dark structures","#6b6b73",L.dark)}${ck("cortex","Cortical surface","#9ea3ad",L.cortex)}
+   ${ck("mri.axial","MRI axial plane","#ddd",L.mri.axial)}${ck("mri.coronal","MRI coronal plane","#ddd",L.mri.coronal)}${ck("mri.sagittal","MRI sagittal plane","#ddd",L.mri.sagittal)}
+   ${ck("contact","Contact with vessels","#ff3399",L.contact)}${ck("footprint","Cortical footprint","#5cd980",L.footprint)}${ck("skeleton","Skeleton"+(m.skeleton.ok?"":" (n/a)"),"#fff",L.skeleton)}${ck("pca","Principal axes","#ff5050",L.pca)}
+   <h5>Pieces (${m.components.length})</h5>${m.components.map(c=>`<label><input type="checkbox" data-c="${c.id}" ${!o.comp||o.comp.has(c.id)?"checked":""}>piece ${c.id} · ${c.volume_mm3} mm³</label>`).join("")}
+   <h5>Camera</h5><div class="m3seg">${["R","L","A","P","S","I"].map(k=>`<button data-cam="${k}">${k}</button>`).join("")}<button data-cam="best" title="look along the thinnest axis">Best</button><button data-cam="fit">Fit</button></div>
+   <h5>Context margin</h5>${sel("margin",o.margin,[[5,"5 mm"],[8,"8 mm"],[12,"12 mm"],[16,"16 mm"]])}
+   <p class="mut sm" style="margin-top:10px">Read-only view: the candidate, its score and the detector output are never changed. Measurements are descriptive, not a diagnosis.</p>`;
+  const tr=(k,l,v)=>`<tr title="${esc(M3DEF[k]||"")}"><td>${l}</td><td>${v}</td></tr>`,t=m.thickness_mm,bar=(l,v,c)=>`<div class="m3bar"><span style="width:70px">${l}</span><div><i style="width:${Math.round(v*100)}%;background:${c}"></i></div><span style="width:38px;text-align:right">${Math.round(v*100)} %</span></div>`;
+  const h=m.hessian,sf=m.surface||{},vs=m.vessel||{};
+  $("#m3right").innerHTML=`<h5>Candidate morphology</h5><table>
+   ${tr("volume","Volume",m.volume_mm3+" mm³")}${tr("surface","Surface area",m.surface_mm2+" mm²")}${tr("length","Length (1st axis)",m.extent_mm[0]+" mm")}${tr("length","Width / depth (2nd / 3rd)",m.extent_mm[1]+" / "+m.extent_mm[2]+" mm")}
+   ${tr("thick","Thickness median (min–max)",`${t.median} mm (${t.min}–${t.max})`)}${tr("thick","Thickness mean",t.mean+" mm")}${tr("pca","Principal spread ratio",m.pca_ratio.join(" : "))}
+   ${tr("sph","Sphericity",m.sphericity)}${tr("sph","Surface / volume",m.sa_to_vol+" /mm")}${tr("xs","Cross-section variability (CV)",m.xsection_cv??"–")}
+   ${tr("skel","Skeleton length",m.skeleton.ok?m.skeleton.length_mm+" mm":"n/a")}${tr("skel","Branch points",m.skeleton.ok?m.skeleton.n_branch:"n/a")}
+   ${tr("surf","On the pial surface (≤1 mm)",sf.within_1mm!=null?Math.round(sf.within_1mm*100)+" %":"–")}${tr("surf","Median pial distance",sf.median_pial_mm!=null?sf.median_pial_mm+" mm":"–")}${tr("surf","Cortical footprint",sf.footprint_mm2!=null?sf.footprint_mm2+" mm²":"–")}
+   ${tr("ves","Vessel map",vs.present?(vs.connected?`connected (${vs.n_connected_segments} segment${vs.n_connected_segments>1?"s":""})`:"near, not connected"):"no vessel map")}
+   ${tr("volume","Voxel size",m.vox.join(" × ")+" mm")}${tr("volume","Pieces",m.components.length)}</table>
+   ${lock?'<p class="mut" style="margin-top:8px">🔒 Shape interpretation is hidden during a validation read (measurements stay visible).</p>':`
+   <h5 title="${esc(M3DEF.local)}">Local shape of the mask (share of voxels)</h5>${bar("Tube-like",m.local_share.tube,"#4aa3ff")}${bar("Sheet-like",m.local_share.sheet,"#f0a040")}${bar("Blob-like",m.local_share.blob,"#c77dff")}${bar("Uncertain",m.local_share.uncertain,"#8a8f98")}
+   ${h?`<h5 title="${esc(M3DEF.hess)}">Image Hessian (separate source)</h5>${bar("Tube-like",h.share.tube,"#4aa3ff")}${bar("Sheet-like",h.share.sheet,"#f0a040")}${bar("Blob-like",h.share.blob,"#c77dff")}
+     <div class="mut sm">agrees with the mask geometry on ${h.agree_with_geometry!=null?Math.round(h.agree_with_geometry*100)+" %":"–"} of voxels</div>`:""}
+   <div class="m3sum">${esc(m.summary)}</div>`}
+   <h5>Measurement reliability: ${esc(m.reliability)}</h5><div class="mut sm">${m.reliability_notes.map(esc).join("<br>")||"no limitation found"}</div>
+   <details style="margin-top:8px"><summary class="mut sm">Definitions</summary><div class="mut sm">${Object.entries(M3DEF).map(([k,v])=>`<p><b>${k}</b>: ${esc(v)}</p>`).join("")}</div></details>`;
+  $$("#m3left [data-g]").forEach(g=>g.querySelectorAll("button").forEach(b=>b.onclick=()=>{const k=g.dataset.g,v=b.dataset.v;
+    if(k==="margin"){o.margin=+v;m3Open();return}o[k]=v;
+    if(k==="mode"){Object.assign(o.layers,v==="context"?{vessel:true,cortex:true,dark:false,mri:{axial:true,coronal:false,sagittal:false}}:{vessel:false,cortex:false,dark:false,mri:{axial:false,coronal:false,sagittal:false}});M3.fit()}
+    m3Panels();M3.rebuild()}));
+  $$("#m3left [data-l]").forEach(e=>e.onchange=()=>{const k=e.dataset.l;if(k.startsWith("mri."))o.layers.mri[k.slice(4)]=e.checked;else o.layers[k]=e.checked;M3.draw()});
+  $$("#m3left [data-c]").forEach(e=>e.onchange=()=>{const on=new Set($$("#m3left [data-c]").filter(x=>x.checked).map(x=>+x.dataset.c));o.comp=on.size===m.components.length?null:on;M3.rebuild()});
+  $$("#m3left [data-cam]").forEach(b=>b.onclick=()=>b.dataset.cam==="fit"?M3.fit():M3.view(b.dataset.cam))}
+function m3Prof(){const d=M3.data(),xs=d.measures.xsections.filter(c=>c.area_mm2!=null),cv=$("#m3pf"),g=cv.getContext("2d"),W=cv.width=cv.clientWidth*devicePixelRatio,H=cv.height=cv.clientHeight*devicePixelRatio,pr=devicePixelRatio;
+  g.clearRect(0,0,W,H);g.font=`${11*pr}px sans-serif`;g.fillStyle="#9aa1ab";g.fillText("cross-sections along the 1st principal axis: equivalent diameter (bars) · thickness along the skeleton (line) · click a bar",6*pr,12*pr);
+  if(!xs.length)return;const mx=Math.max(...xs.map(c=>Math.max(c.eq_diam_mm,c.major_mm)),...(d.measures.skeleton.radius_profile||[]).map(r=>2*r[1]),1),n=d.measures.xsections.length,bw=(W-12*pr)/n;
+  d.measures.xsections.forEach((c,i)=>{if(c.area_mm2==null)return;const h=(c.eq_diam_mm/mx)*(H-34*pr),x=6*pr+i*bw;g.fillStyle=i===m3o.slab?"#ffffff":"#f0a040";g.fillRect(x+2*pr,H-14*pr-h,bw-4*pr,h);
+    g.fillStyle="#9aa1ab";g.fillText(String(i+1),x+bw/2-3*pr,H-2*pr)});
+  const rp=d.measures.skeleton.radius_profile;if(rp&&rp.length>1){const p0=Math.min(...d.measures.xsections.map(c=>c.pos_mm)),p1=Math.max(...d.measures.xsections.map(c=>c.pos_mm)),sx=p=>6*pr+((p-p0)/Math.max(p1-p0,1e-6)*(n-1)+0.5)*bw;
+    g.strokeStyle="#4aa3ff";g.lineWidth=2*pr;g.beginPath();rp.forEach((r,i)=>{const x=sx(r[0]),y=H-14*pr-(2*r[1]/mx)*(H-34*pr);i?g.lineTo(x,y):g.moveTo(x,y)});g.stroke()}
+  g.fillStyle="#9aa1ab";g.fillText(`${mx.toFixed(1)} mm`,W-48*pr,24*pr)}
+$("#m3pf").addEventListener("click",e=>{const d=M3.data();if(!d)return;const n=d.measures.xsections.length,r=e.target.getBoundingClientRect(),i=Math.floor((e.clientX-r.left-6)/((r.width-12)/n));
+  if(i<0||i>=n)return;m3o.slab=m3o.slab===i?-1:i;const c=d.measures.xsections[i];
+  $("#m3slab").innerHTML=c.area_mm2!=null&&m3o.slab>=0?`<b>cross-section ${i+1} / ${n}</b> at ${c.pos_mm} mm<br>area ${c.area_mm2} mm² · eq. diameter ${c.eq_diam_mm} mm<br>major ${c.major_mm} · minor ${c.minor_mm} mm<br>eccentricity ${c.ecc}<br><span class="mut">highlighted white in 3-D</span>`:"";M3.rebuild();m3Prof()});
+$("#m3close").onclick=m3Close;
+{const _d=draw;draw=function(){_d();if(m3open&&$("#m3d").classList.contains("show"))M3.setMarker(cur)}}
 function closeMenus(){$$(".menu").forEach(m=>m.remove());$$("#mbar span").forEach(s=>s.classList.remove("on"));drawLens()}
 function openMenu(items,x,y,level){$$(".menu").forEach(m=>{if(+m.dataset.level>=level)m.remove()});
   const m=document.createElement("div");m.className="menu";m.dataset.level=level;
@@ -817,7 +904,7 @@ $("#lt").addEventListener("mouseenter",()=>{if(ltah){ltopen=true;applyPalette()}
 $("#lt").addEventListener("click",e=>{if(e.target.closest(".ahb"))return;const d=e.target.closest("div");if(!d)return;if(d.dataset.tool==="shot")screenCap();else if(d.dataset.tool)setTool(d.dataset.tool);else if(d.dataset.a==="lens"){mag=!mag;tog()}});
 $("#pt").addEventListener("click",e=>{const s=e.target.closest("span");if(!s)return;if(s.dataset.pl!==undefined)setPlane(+s.dataset.pl);else if(s.dataset.lay)setLayout(s.dataset.lay);else if(s.dataset.a==="fit")fitView();else if(s.dataset.a==="actual")actualSize();else if(s.dataset.a==="cand")gotoCandidate()});
 $("#seq").onchange=e=>{setSeq(e.target.value);e.target.blur()};
-$("#bSaveFinal").onclick=saveFinal;$("#bGear").onclick=openSet;$("#setDone").onclick=()=>$("#setdlg").classList.remove("show");$("#setReset").onclick=resetSet;
+$("#bSaveFinal").onclick=saveFinal;$("#bM3").onclick=m3Open;$("#bGear").onclick=openSet;$("#setDone").onclick=()=>$("#setdlg").classList.remove("show");$("#setReset").onclick=resetSet;
 $("#study").onchange=e=>{loadStudy(e.target.value);e.target.blur()};
 $("#cohort").onchange=e=>{const l=((M.groups||{})[e.target.value]||[]).filter(s=>M.studies.includes(s));if(l.length)loadStudy(l[0]);e.target.blur()};
 $("#zoom").oninput=e=>{const p=panes[act];zoomFrom(p,p.cv.clientWidth/2,p.cv.clientHeight/2,zoom,ctr.slice(),0.25*Math.pow(96,e.target.value/100))};

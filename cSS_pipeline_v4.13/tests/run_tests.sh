@@ -198,6 +198,8 @@ python $ROOT/tests/check_review_web.py | tee $T/rweb.log | grep -v "^RESULT"
 grep -q "RESULT review_web OK" $T/rweb.log || { echo "FAIL: review_web checks"; exit 1; }
 echo "== v5.7 reviewer in a browser (skipped without node + Playwright)"
 python $ROOT/tests/check_viewer.py | tee $T/viewer.log | grep -v "^RESULT"
+echo "== v5.12 3-D morphology (synthetic shapes + PH6 api)"
+python $ROOT/tests/check_morph3d.py | grep -v "^ok" ; python $ROOT/tests/check_morph3d_api.py | grep -v "^ok"
 grep -q "RESULT viewer OK" $T/viewer.log || { echo "FAIL: viewer checks"; exit 1; }
 echo "== v5.7 zone probe (read-only anatomical zones vs calls)"
 python $ROOT/tests/check_zone_probe.py | tee $T/zone.log | grep -v "^RESULT"
