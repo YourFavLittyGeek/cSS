@@ -40,7 +40,9 @@ def _dicom_info(files):
                         image_type="\\".join(map(str, getattr(d, "ImageType", []) or [])),
                         series_uid=str(getattr(d, "SeriesInstanceUID", "")), voxel=[float(ps[0]) if ps[0] else None, float(ps[1]) if ps[1] else None,
                                                                               float(st) if st else None],
-                        te=float(getattr(d, "EchoTime", 0) or 0), field=float(getattr(d, "MagneticFieldStrength", 0) or 0))
+                        te=float(getattr(d, "EchoTime", 0) or 0), field=float(getattr(d, "MagneticFieldStrength", 0) or 0),
+                        study_date=str(getattr(d, "StudyDate", "") or ""), study_uid=str(getattr(d, "StudyInstanceUID", "") or ""),
+                        mr_acq=str(getattr(d, "MRAcquisitionType", "") or ""))
             return info
         except Exception: continue
     return info
@@ -60,14 +62,16 @@ def scan(folder, max_depth=4):
                 img = nib.load(p); vox = [round(float(v), 2) for v in img.header.get_zooms()[:3]]; shape = list(img.shape[:3])
             except Exception as e:
                 out.append(dict(path=p, format="NIfTI", ok=False, error=str(e), name=f)); continue
-            desc = ""
+            desc = ""; sdate = ""; acq = ""
             js = os.path.join(root, name + ".json")
             if os.path.exists(js):
-                try: j = json.load(open(js)); desc = j.get("SeriesDescription", "") + " " + "\\".join(j.get("ImageType", []))
+                try:
+                    j = json.load(open(js)); desc = j.get("SeriesDescription", "") + " " + "\\".join(j.get("ImageType", []))
+                    sdate = str(j.get("AcquisitionDateTime", "") or j.get("StudyDate", ""))[:10].replace("-", ""); acq = j.get("MRAcquisitionType", "")
                 except Exception: pass
             typ, why = classify(f"{os.path.basename(root) if root != folder else ''} {f} {desc}", desc)
             out.append(dict(path=p, format="NIfTI", ok=True, name=(os.path.basename(root) + "/" + f) if root != folder else f, relpath=os.path.relpath(p, folder), files=1, description=desc.strip(), type=typ, reason=why,
-                            voxel=vox, shape=shape, fingerprint=hashlib.sha1(open(p, "rb").read(1 << 16)).hexdigest()[:16]))
+                            voxel=vox, shape=shape, study_date=sdate, mr_acq=acq, fingerprint=hashlib.sha1(open(p, "rb").read(1 << 16)).hexdigest()[:16]))
         dcm = [os.path.join(root, f) for f in files if f.lower().endswith(".dcm") or (not os.path.splitext(f)[1] and is_dicom(os.path.join(root, f)))]
         if dcm:
             inf = _dicom_info(dcm)
@@ -75,6 +79,7 @@ def scan(folder, max_depth=4):
             out.append(dict(path=root, format="DICOM", ok=True, name=os.path.basename(root), relpath=os.path.relpath(root, folder), files=len(dcm),
                             description=inf.get("description", ""), image_type=inf.get("image_type", ""), type=typ, reason=why,
                             voxel=inf.get("voxel"), shape=[None, None, len(dcm)], te=inf.get("te"), field=inf.get("field"),
+                            study_date=inf.get("study_date", ""), study_uid=inf.get("study_uid", ""), mr_acq=inf.get("mr_acq", ""),
                             fingerprint=(inf.get("series_uid") or hashlib.sha1(open(dcm[0], "rb").read(1 << 16)).hexdigest())[:40]))
     return out
 
@@ -89,6 +94,34 @@ def choose(series):
         c = sorted([s for s in series if s.get("ok") and s.get("type") == t], key=lambda s: (_res(s), -s.get("files", 0)))
         if c: pick[t] = c[0]["path"]; alt[t] = [s["path"] for s in c[1:]]
     return pick, alt
+
+NOT_BRAIN = r"neck|spine|cervical|orbit|\biac\b|pituitary|sella|tmj|\bface\b"
+def extent_mm(s):
+    """largest field-of-view side in mm from shape x voxel (DICOM: number of files x slice thickness)"""
+    v = s.get("voxel") or []; sh = s.get("shape") or []
+    e = [a * b for a, b in zip(sh, v) if a and b]
+    return max(e) if e else None
+def t1_quality(s):
+    """-> (usable, rank, reason). Preference: 3-D, voxel <= 1.2 mm, covers the whole brain; neck / orbit / partial series are skipped"""
+    txt = f"{s.get('name', '')} {s.get('description', '')}".lower()
+    m = re.search(NOT_BRAIN, txt)
+    if m: return False, None, f"does not cover the brain ({m.group(0)} series)"
+    ext = extent_mm(s)
+    if ext is not None and ext < 100: return False, None, f"covers only {ext:.0f} mm - not the whole brain"
+    r = _res(s)
+    if r > 6: return False, None, f"{r:g} mm slices - too thick for anatomy"
+    is3d = s.get("mr_acq", "").upper() == "3D" or r <= 1.3
+    return True, (0 if is3d else 1, 0 if r <= 1.2 else 1, r, -(ext or 0)), ("3-D" if is3d else "2-D") + f" · {r:g} mm"
+def choose_t1(series):
+    """-> best usable T1 path (or None), its description, the skipped T1 series with their reason"""
+    ok, skipped = [], []
+    for s in series:
+        if not s.get("ok") or s.get("type") != "T1": continue
+        u, rank, why = t1_quality(s)
+        if u: ok.append((rank, s, why))
+        else: skipped.append(dict(path=s["path"], name=s.get("name", ""), reason=why))
+    ok.sort(key=lambda x: x[0])
+    return (ok[0][1]["path"] if ok else None), (ok[0][2] if ok else ""), skipped
 
 if __name__ == "__main__":
     s = scan(sys.argv[1]); p, a = choose(s)

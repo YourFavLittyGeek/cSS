@@ -84,10 +84,32 @@ else
       || { tail -5 $W/${S}_t1_synthstrip.log; die "mri_synthstrip failed on the T1 (messages above; full log $W/${S}_t1_synthstrip.log)"; }
     T1REF=$W/${S}_t1_brain.nii.gz
   fi
-  echo "[c] register SWI -> T1 (mri_coreg, rigid, mutual information)"
-  mri_coreg --mov $SWI --ref $T1REF --reg $W/${S}_swi2t1.lta --dof 6 > $W/${S}_coreg.log 2>&1 \
-    || die "mri_coreg failed (see $W/${S}_coreg.log)"
-  REGM=mri_coreg; COST=""
+  # v5.11.1: registration method (opt-in; default unchanged = mri_coreg as before). CSS_REG_METHOD=
+  #   coreg         mri_coreg, rigid, mutual information (default)
+  #   coreg_masked  mri_coreg against the T1 BRAIN cut out with the T1's own SynthSeg labels (+2 voxels): no SynthStrip, minutes,
+  #                 for whole-head slips (neck / skull dominating the fit)
+  #   synthmorph    mri_synthmorph rigid (FreeSurfer 8, learned, contrast-independent), minutes; memory use to be confirmed
+  # Whatever the method, detect_css.py's registration gate (label shift <= 1.5 mm) still decides whether the result is used.
+  case "${CSS_REG_METHOD:-coreg}" in
+    coreg_masked)
+      echo "[c] register SWI -> T1 brain (mri_coreg, rigid, T1 masked by its own labels; CSS_REG_METHOD=coreg_masked)"
+      mri_binarize --i $LAB --min 1 --dilate 2 --o $W/${S}_t1labmask.nii.gz > $W/${S}_coreg.log 2>&1 || die "mri_binarize failed (see $W/${S}_coreg.log)"
+      mri_mask $B/data/${S}_t1.nii.gz $W/${S}_t1labmask.nii.gz $W/${S}_t1_labbrain.nii.gz >> $W/${S}_coreg.log 2>&1 || die "mri_mask failed (see $W/${S}_coreg.log)"
+      mri_coreg --mov $SWI --ref $W/${S}_t1_labbrain.nii.gz --reg $W/${S}_swi2t1.lta --dof 6 >> $W/${S}_coreg.log 2>&1 \
+        || die "mri_coreg failed (see $W/${S}_coreg.log)"
+      REGM=mri_coreg_masked; COST="";;
+    synthmorph)
+      echo "[c] register SWI -> T1 (mri_synthmorph rigid, ${CSS_THREADS:-4} threads; CSS_REG_METHOD=synthmorph)"
+      { mri_synthmorph register -m rigid -t $W/${S}_swi2t1.lta -j ${CSS_THREADS:-4} $SWI $T1REF \
+        || mri_synthmorph -m rigid -t $W/${S}_swi2t1.lta -j ${CSS_THREADS:-4} $SWI $T1REF; } > $W/${S}_synthmorph.log 2>&1 \
+        || die "mri_synthmorph failed (see $W/${S}_synthmorph.log)"
+      REGM=mri_synthmorph_rigid; COST="";;
+    *)
+      echo "[c] register SWI -> T1 (mri_coreg, rigid, mutual information)"
+      mri_coreg --mov $SWI --ref $T1REF --reg $W/${S}_swi2t1.lta --dof 6 > $W/${S}_coreg.log 2>&1 \
+        || die "mri_coreg failed (see $W/${S}_coreg.log)"
+      REGM=mri_coreg; COST="";;
+  esac
 fi
 
 # v4.14 QC: registration method + cost (bbregister mincost; mri_coreg reports none) -> review/ID_qc.json

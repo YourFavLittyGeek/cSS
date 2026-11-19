@@ -26,12 +26,13 @@ def jload(name, default):
     except Exception: return default
 def jsave(name, obj):
     p = f"{AD}/{name}"; json.dump(obj, open(p + ".tmp", "w"), indent=1, default=str); os.replace(p + ".tmp", p)
-SET = dict(dict(awake=True, theme="dark", backup_dir="", freesurfer_home=os.environ.get("FREESURFER_HOME", ""), threads=4,
+SET = dict(dict(awake=True, theme="dark", backup_dir="", freesurfer_home=os.environ.get("FREESURFER_HOME", ""), threads=4, parallel=1, auto_path=True,
                 features=dict(duplicate_check=True, preflight=True, qc_snapshot=True, notify=True, version_stamp=True, share=True, backup=True,
                               name_warning=False)), **jload("settings.json", {}))
 PAT = jload("patients.json", [])
 for p in PAT:                                            # resume after a restart: interrupted runs go back to the queue
     if p.get("status") in ("running", "paused"): p.update(status="waiting", step="", note="restarted after the app was closed")
+    p.setdefault("pathway", "recon" if p.get("anatomy") == "recon" else (p.get("reg_method") or "synthseg"))
 def save_pat(): jsave("patients.json", PAT)
 def names():
     import csv
@@ -88,6 +89,29 @@ def find_license(fh, e=None):
         if os.path.isfile(x) and os.access(x, os.R_OK): return x
     return ""
 
+def sysinfo():
+    """chip, cores, memory total / used (GB), free disk; recommended number of patients at the same time"""
+    total = used = 0.0; chip = platform.processor() or platform.machine()
+    try:
+        if mac():
+            total = int(subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True).stdout.strip() or 0) / 1e9
+            chip = subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"], capture_output=True, text=True).stdout.strip() or chip
+            vm = subprocess.run(["vm_stat"], capture_output=True, text=True).stdout
+            ps = int(re.search(r"page size of (\d+)", vm).group(1)) if re.search(r"page size of (\d+)", vm) else 16384
+            pg = lambda k: int(re.search(rf"{k}:\s+(\d+)", vm).group(1)) if re.search(rf"{k}:\s+(\d+)", vm) else 0
+            used = (pg("Pages active") + pg("Pages wired down") + pg("Pages occupied by compressor")) * ps / 1e9
+        else:
+            m = {l.split(":")[0]: int(l.split()[1]) for l in open("/proc/meminfo") if len(l.split()) > 1}
+            total = m["MemTotal"] / 1e6; used = (m["MemTotal"] - m.get("MemAvailable", m.get("MemFree", 0))) / 1e6
+    except Exception: pass
+    cores = os.cpu_count() or 1; disk = shutil.disk_usage(B).free / 1e9
+    try: load = os.getloadavg()[0] / cores * 100
+    except Exception: load = 0
+    rec = max(1, min(4, cores // 4, int((total - 6) // 12) if total else 1))
+    return dict(chip=chip, cores=cores, mem_total=round(total, 1), mem_used=round(used, 1), mem_pct=round(100 * used / total) if total else 0,
+                cpu_pct=round(min(load, 100)), disk_free=round(disk), recommended=rec, per_patient_gb=12)
+MEM_YELLOW, MEM_RED = 70, 85        # % of memory: yellow = no new patient starts; red = warning + "Stop newest patient"
+
 def preflight():
     env = fs_env(); out = []
     du = shutil.disk_usage(B); free = du.free / 1e9
@@ -127,9 +151,14 @@ def scan_patient(folder, folder_is, rule):
     if folder_is == "code": r["code"] = code_from(folder, rule); r["name"] = ""
     elif folder_is == "name": r["code"] = ""; r["name"] = base.replace("_", " ")
     else: r["code"] = ""; r["name"] = ""
+    t1, t1why, skipped = SD.choose_t1(ser)                  # best usable T1 (3-D, <= 1.2 mm, whole brain); neck / partial series skipped
+    if t1: pick_["T1"] = t1
+    else: pick_.pop("T1", None)
+    r["t1_desc"] = t1why; r["t1_skipped"] = skipped
+    check_pathway(r, ser)
     if "SWI" not in pick_: r["warnings"].append("no SWI found - choose one")
-    if "T1" not in pick_: r["warnings"].append("no T1 - SWI-only route: less accurate, and SynthStrip on the SWI can need 30-64 GB of memory - run it alone")
     t1 = next((x for x in ser if x["path"] == pick_.get("T1")), None)
+    if t1 and t1.get("voxel") and SD._res(t1) <= 1.5: t1 = None          # 3-D T1: no 2-D warning
     if t1 and max([v for v in (t1.get("voxel") or []) if v] or [0]) > 1.5:
         r["warnings"].append(f"T1 is 2-D ({max(v for v in t1['voxel'] if v):g} mm slices) - anatomy will be less accurate than with a 3-D T1")
     if any(re.search(r"angio|tof|mra", (x.get("name", "") + " " + x.get("description", "")), re.I) for x in ser) and not pick_.get("SWI"):
@@ -143,6 +172,26 @@ def scan_patient(folder, folder_is, rule):
     if SET["features"].get("name_warning") and folder_is == "code" and looks_like_name(base):
         r["warnings"].append("the folder name looks like a person's name - it will be used as the study code")
     return r
+PATHWAYS = {"synthseg": "SynthSeg", "coreg_masked": "Fast re-registration", "synthmorph": "SynthMorph", "recon": "recon-all", "swi_only": "SWI-only"}
+SOLO = ("swi_only", "synthmorph")       # high / unknown memory: always run alone
+def check_pathway(r, ser):
+    """recommended pathway + check result for one scanned patient (header only, nothing is converted)"""
+    pk = r["chosen"]; sw = next((x for x in ser if x["path"] == pk.get("SWI")), {}); t1 = next((x for x in ser if x["path"] == pk.get("T1")), {})
+    r["overlap"] = ""
+    if not pk.get("SWI"):
+        r.update(check="cannot", pathway="", pathway_reason="needs an SWI - will not be queued"); return
+    if not pk.get("T1"):
+        why = "no T1 found" if not r["t1_skipped"] else "no usable T1 (" + "; ".join(f"{x['name']}: {x['reason']}" for x in r["t1_skipped"][:2]) + ")"
+        r.update(check="changed", pathway="swi_only", pathway_reason=f"{why} -> SWI-only, runs last, alone"); return
+    a, b = sw.get("study_uid") or sw.get("study_date"), t1.get("study_uid") or t1.get("study_date")
+    if sw.get("study_date") and t1.get("study_date") and sw["study_date"] != t1["study_date"]:
+        r["overlap"] = f"different date ({t1['study_date'][:4]} vs {sw['study_date'][:4]})" if t1["study_date"][:4] != sw["study_date"][:4] else "different date"
+        r.update(check="look", pathway="synthseg", pathway_reason="check the T1 is from the same study as the SWI"); return
+    r["overlap"] = "same visit" if (a and b and a == b) else ""
+    if r["t1_skipped"]:
+        r.update(check="changed", pathway="synthseg", pathway_reason="other T1 chosen automatically (" + "; ".join(f"skipped {x['name']}: {x['reason']}" for x in r["t1_skipped"][:2]) + ")"); return
+    r.update(check="ok", pathway="synthseg", pathway_reason="")
+
 def patient_like_subfolders(path):
     """sub-folders that each hold their own MRI series - a sign the chosen folder is a COHORT, not one patient"""
     subs = [os.path.join(path, d) for d in sorted(os.listdir(path)) if os.path.isdir(os.path.join(path, d)) and not d.startswith(".")]
@@ -212,16 +261,34 @@ def add_to_queue(items, st):
         for it in items:
             code = it.get("code") or next_code()
             if st.get("store_names") and it.get("name"): set_name(code, it["name"])
-            p = dict(code=code, cohort=st.get("cohort", ""), anatomy=st.get("anatomy", "synthseg"), mode=st.get("mode", "semi"),
+            pw = it.get("pathway") or ("recon" if st.get("anatomy") == "recon" else "synthseg")
+            rec = it.get("pathway_rec") or pw
+            p = dict(code=code, cohort=st.get("cohort", ""), anatomy="recon" if pw == "recon" else "synthseg", mode=st.get("mode", "semi"), pathway=pw,
                      results_dir=st.get("results_dir", ""), radiologist=it.get("radiologist", ""), grade_R=it.get("grade_R", ""), grade_L=it.get("grade_L", ""),
-                     series=it["chosen"], fingerprint=it.get("fingerprint", ""), status="waiting", step="", steps_done={}, added=time.time(),
+                     series=it["chosen"], fingerprint=it.get("fingerprint", ""), step="", steps_done={}, added=time.time(),
+                     status="decision" if (rec != (st.get("anatomy") or "synthseg") and not SET.get("auto_path", True) and it.get("decided") is not True) else "waiting",
+                     path_note=(it.get("pathway_reason") or "") if rec != (st.get("anatomy") or "synthseg") or it.get("check") in ("changed", "look") else "", path_ack=False,
                      source_folder_hash=hashlib.sha1(it.get("folder", "").encode()).hexdigest()[:12])     # the folder path itself is not stored (may hold a name)
-            PAT.append(p); added.append(code)
+            apply_pathway(p, pw); PAT.append(p); added.append(code)
             coh = jload("cohorts.json", [])
             if p["cohort"] and p["cohort"] not in coh: coh.append(p["cohort"]); jsave("cohorts.json", coh)
         save_pat()
     write_grades_file()
     return dict(ok=True, added=added)
+def apply_pathway(p, pw):
+    """set the run options for a pathway (SWI-only drops the T1 / FLAIR; registration methods go to prep_anat.sh)"""
+    p["pathway"] = pw; p["anatomy"] = "recon" if pw == "recon" else "synthseg"; p.pop("reg_method", None)
+    if pw in ("coreg_masked", "synthmorph"): p["reg_method"] = pw
+    if pw == "swi_only":
+        p.setdefault("series_t1", {k: v for k, v in p["series"].items() if k in ("T1", "FLAIR")})
+        p["series"] = {k: v for k, v in p["series"].items() if k not in ("T1", "FLAIR")}
+    elif p.get("series_t1"): p["series"].update(p.pop("series_t1"))
+def move_bad_registration(p):
+    """a misregistered T1 must not be reused: its labels are moved aside (kept, renamed), never deleted"""
+    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    for f in (f"{B}/work/{p['code']}_t1seg_swispace.nii.gz", f"{B}/work/{p['code']}_swi2t1.lta", f"{B}/work/{p['code']}_brainmask.nii.gz"):
+        if os.path.exists(f): os.replace(f, f"{f}.bad_registration_{stamp}")
+
 def write_grades_file():
     """review/radiologist_grades.csv (study_id,R,L) for the pipeline's own comparison tools; only rows with both grades; existing rows kept"""
     import pandas as pd
@@ -249,7 +316,10 @@ def stage(p):
                     if not os.path.exists(dst): os.symlink(f, dst)
     return d
 
-CUR = dict(proc=None, code=None, caff=None, hold="")      # hold: queue paused because of a setup problem (licence, FreeSurfer, disk)
+CUR = dict(caff=None, hold="", mem_wait=False)      # hold: queue paused because of a setup problem (licence, FreeSurfer, disk)
+PROCS = {}            # code -> running subprocess (several patients can run at the same time)
+RUNNING = {}          # code -> worker thread
+IMPORT_LOCK = threading.Lock()   # cohort.py import rewrites review/cohort_import.csv: one import (and one run start) at a time
 def caffeinate(on):
     if not mac(): return
     if on and SET.get("awake") and CUR["caff"] is None:
@@ -257,15 +327,15 @@ def caffeinate(on):
     if (not on or not SET.get("awake")) and CUR["caff"] is not None:
         CUR["caff"].terminate(); CUR["caff"] = None
 
-def run_logged(cmd, logf, env, on_line=None):
+def run_logged(cmd, logf, env, on_line=None, code=None):
     with open(logf, "a") as lf:
         lf.write(f"\n$ {' '.join(cmd)}\n"); lf.flush()
         pr = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env, text=True, start_new_session=True, bufsize=1)
-        CUR["proc"] = pr
+        PROCS[code] = pr
         for line in pr.stdout:
             lf.write(line); lf.flush()
             if on_line: on_line(line)
-        rc = pr.wait(); CUR["proc"] = None
+        rc = pr.wait(); PROCS.pop(code, None)
     return rc
 
 def step_begin(p, s):
@@ -278,47 +348,58 @@ def step_end(p, s):
 
 def process(p):
     env = fs_env(); code = p["code"]; logf = f"{AD}/logs/{code}.log"
+    if p.get("reg_method"): env["CSS_REG_METHOD"] = p["reg_method"]          # prep_anat.sh registration method (default mri_coreg)
     p.update(status="running", started=time.time(), error="", steps_done={}, version=version() if SET["features"].get("version_stamp") else "")
-    save_pat(); caffeinate(True)
+    env["CSS_THREADS"] = str(max(2, int(SET.get("threads", 4)) // max(1, min(int(SET.get("parallel", 1)), 4)) if int(SET.get("parallel", 1)) > 1 else int(SET.get("threads", 4))))
+    save_pat()
     if FAKE:
         for s in STEPS:
             step_begin(p, s); time.sleep(float(os.environ.get("CSS_APP_FAKE_STEP_S", "0.3")))
             while p["status"] == "paused": time.sleep(0.2)
-            if p["status"] == "stopped": return
+            if p["status"] in ("stopped", "waiting"): return
             step_end(p, s)
+        if os.environ.get("CSS_APP_FAKE_FAIL") == code and not p.get("reg_method"):
+            return fail(p, explain_reg(4.3))
         p.update(status="done", finished=time.time(), step=""); save_pat(); return
     # 1 import (cohort.py import, merged into review/cohort_import.csv instead of replacing it)
     step_begin(p, "import")
-    st = stage(p); tab = f"{B}/review/cohort_import.csv"; bak = None
-    if os.path.exists(tab): bak = open(tab).read()
     d2n = which("dcm2niix", env)
     if not d2n and any(os.path.isdir(v) for v in p["series"].values()):
         return fail(p, "dcm2niix (the DICOM converter) is not installed - Home -> Setup check -> Install dcm2niix, then Retry")
-    cmd = [sys.executable, f"{SC}/cohort.py", "import", os.path.dirname(st), "--ids", code] + (["--dcm2niix", d2n] if d2n else [])
-    dj = which("dcmdjpeg", env)
-    if dj: cmd += ["--dcmdjpeg", dj]
-    rc = run_logged(cmd, logf, env)
-    if bak is not None and os.path.exists(tab):
-        import pandas as pd
-        new = pd.read_csv(tab, dtype=str); old = pd.read_csv(io.StringIO(bak), dtype=str)
-        pd.concat([old[~old.study_id.isin(new.study_id)], new]).to_csv(tab, index=False)
+    with IMPORT_LOCK:
+        st = stage(p); tab = f"{B}/review/cohort_import.csv"; bak = None
+        if os.path.exists(tab): bak = open(tab).read()
+        cmd = [sys.executable, f"{SC}/cohort.py", "import", os.path.dirname(st), "--ids", code] + (["--dcm2niix", d2n] if d2n else [])
+        dj = which("dcmdjpeg", env)
+        if dj: cmd += ["--dcmdjpeg", dj]
+        rc = run_logged(cmd, logf, env, code=code)
+        if bak is not None and os.path.exists(tab):
+            import pandas as pd
+            new = pd.read_csv(tab, dtype=str); old = pd.read_csv(io.StringIO(bak), dtype=str)
+            pd.concat([old[~old.study_id.isin(new.study_id)], new]).to_csv(tab + ".tmp", index=False); os.replace(tab + ".tmp", tab)
+    if p["status"] in ("stopped", "waiting"): return
     if rc != 0: return fail(p, f"import failed (exit {rc}) - see the log")
     step_end(p, "import")
     # 2-4 anatomy, alignment, detection: cohort.py run (run_css.sh), progress from its step lines
     step_begin(p, "anatomy")
+    IMPORT_LOCK.acquire(); held = [True]          # held until cohort.py run has read cohort_import.csv (its first output line)
     def on_line(line):
+        if held[0]: held[0] = False; IMPORT_LOCK.release()
         if line.startswith("[2/4]") and p["step"] == "anatomy": step_end(p, "anatomy"); step_begin(p, "align")
         if line.startswith("[3/4]") and p["step"] in ("anatomy", "align"):
             if p["step"] == "anatomy": step_end(p, "anatomy"); step_begin(p, "align")
             step_end(p, "align"); step_begin(p, "detect")
     cmd = [sys.executable, f"{SC}/cohort.py", "run", "--ids", code, "--redo", "--allow-no-t1"] + (["--no-recon"] if p["anatomy"] == "synthseg" else [])
-    rc = run_logged(cmd, logf, env, on_line)
-    if p["status"] == "stopped": return
+    try: rc = run_logged(cmd, logf, env, on_line, code=code)
+    finally:
+        if held[0]: held[0] = False; IMPORT_LOCK.release()
+    if p["status"] in ("stopped", "waiting"): return
     runlog = f"{B}/logs/{code}_run.log"
     if os.path.exists(runlog):
         open(logf, "a").write(open(runlog).read()[-20000:]); txt = open(runlog).read()
         for ln in txt.splitlines(): on_line(ln + "\n")
     res = _cohort_status(code)
+    if res == "unknown" and os.path.exists(f"{B}/review/{code}_candidates.csv") and os.path.getmtime(f"{B}/review/{code}_candidates.csv") > p["started"]: res = "ok"
     if rc != 0 or res != "ok": return fail(p, explain(code, res))
     if p["step"] != "detect": step_begin(p, "detect")
     step_end(p, "detect")
@@ -341,24 +422,32 @@ def explain(code, status):
     for pat, msg in ((r"license file .* do not have read permission|licen[cs]e.*permission", "FreeSurfer cannot read its licence file - Home -> Setup check -> fix the licence, then Retry all failed"),
                      (r"licen[cs]e file .*(not found|does not exist)|FS_LICENSE", "FreeSurfer licence not found - Home -> Setup check -> Choose licence file"),
                      (r"No space left", "the disk is full"),
-                     (r"registration check|registration_ok|label shift .* > |exit 5\b", "the T1 and SWI do not line up (registration check failed) - check the T1 / SWI pair"),
+                     (r"registration not acceptable|registration check|registration_ok|label shift .* > |exit 5\b", "REGISTRATION"),
                      (r"insufficient_quality|exit 3\b", "image quality too low for scoring (QC: insufficient quality)"),
                      (r"mri_convert could not read", "the SWI file could not be read by FreeSurfer (see the lines just above it in the log)"), (r"no SWI chosen", "no SWI series was chosen"),
                      (r"command not found|not found: mri_", "FreeSurfer tools not found - choose the FreeSurfer folder in Setup")):
         if re.search(pat, log, re.I):
             if msg == "REGISTRATION":
                 m = re.search(r"label shift ([\d.]+) mm", log)
-                return (f"the T1 labels do not line up with the SWI (shift {m.group(1) if m else '?'} mm, limit 1.5 mm) - nothing was written. "
-                        "Retry with recon-all (recommended, better registration, ~2-3 h)")
+                return explain_reg(m.group(1) if m else "?")
             return msg
     app = open(f"{AD}/logs/{code}.log").read()[-4000:] if os.path.exists(f"{AD}/logs/{code}.log") else ""
     if "Traceback" in app:
         last = [l for l in app.strip().splitlines() if l.strip()][-1][:200]
         return f"the pipeline stopped with an error: {last} - open the log for details"
     return f"processing failed ({status}) - open the log for details"
+def explain_reg(shift):
+    return (f"the T1 labels do not line up with the SWI (shift {shift} mm, limit 1.5 mm) - nothing was written. "
+            "choose a retry: fast masked registration (minutes), SynthMorph (minutes) or recon-all (most accurate, ~2-3 h)")
+NEXT_REG = {None: "coreg_masked", "": "coreg_masked", "coreg_masked": "synthmorph"}     # automatic order after a failed registration
 SETUP_ERR = ("licence", "FreeSurfer", "disk is full", "dcm2niix")
 def fail(p, msg):
     with LOCK:
+        if "do not line up" in msg and SET.get("auto_path", True) and p.get("pathway") in ("synthseg", "coreg_masked") and p["series"].get("T1"):
+            nxt = NEXT_REG[p.get("reg_method")]; move_bad_registration(p); apply_pathway(p, nxt)
+            p.update(status="waiting", error="", steps_done={}, path_ack=False,
+                     path_note=f"{msg.split(' - ')[0]} -> retrying automatically with {PATHWAYS[nxt]}")
+            save_pat(); notify("cSS Pipeline", f"{p['code']}: registration retried with {PATHWAYS[nxt]}"); return
         p.update(status="failed", error=msg, finished=time.time()); save_pat()
         if any(k in msg for k in SETUP_ERR): CUR["hold"] = msg
     notify("cSS Pipeline", f"{p['code']} failed: {msg[:60]}")
@@ -386,19 +475,41 @@ def qc_snapshot(code):
         fig.tight_layout(); fig.savefig(f"{AD}/qc/{code}.png", dpi=110, facecolor="#111"); plt.close(fig)
     except Exception as e: open(f"{AD}/logs/{code}.log", "a").write(f"\nQC snapshot not made: {e}\n")
 
+def run_one(p):
+    try: process(p)
+    except Exception as e: fail(p, f"app error: {type(e).__name__}: {e}")
+    finally:
+        RUNNING.pop(p["code"], None)
+def solo(p): return p.get("pathway") in SOLO
+def next_to_start():
+    """the next waiting patient that may start now, or None. Rules: at most SET['parallel'] at once; SWI-only / SynthMorph run alone
+    (and wait until the normal patients are done); no new start while memory is in the yellow / red zone"""
+    if CUR["hold"]: return None
+    wait = [p for p in PAT if p["status"] == "waiting"]
+    if not wait: return None
+    run = [pget(c) for c in list(RUNNING)]; run = [p for p in run if p]
+    if any(solo(p) for p in run): return None
+    if len(run) >= max(1, int(SET.get("parallel", 1))): return None
+    normal = [p for p in wait if not solo(p)]
+    if run and not normal: return None                    # a solo patient waits until everything else has finished
+    if run and not FAKE:
+        CUR["mem_wait"] = sysinfo()["mem_pct"] >= MEM_YELLOW
+        if CUR["mem_wait"]: return None
+    CUR["mem_wait"] = False
+    return normal[0] if normal else wait[0]
 def worker():
     last_backup = ""
     while True:
-        with LOCK: nxt = None if CUR["hold"] else next((p for p in PAT if p["status"] == "waiting"), None)
+        with LOCK:
+            nxt = next_to_start()
+            if nxt: nxt["status"] = "starting"; RUNNING[nxt["code"]] = threading.Thread(target=run_one, args=(nxt,), daemon=True)
         if nxt is None:
-            caffeinate(False)
-            day = datetime.date.today().isoformat()
-            if SET["features"].get("backup") and SET.get("backup_dir") and day != last_backup: backup(); last_backup = day
+            if not RUNNING:
+                caffeinate(False)
+                day = datetime.date.today().isoformat()
+                if SET["features"].get("backup") and SET.get("backup_dir") and day != last_backup: backup(); last_backup = day
             time.sleep(1); continue
-        CUR["code"] = nxt["code"]
-        try: process(nxt)
-        except Exception as e: fail(nxt, f"app error: {type(e).__name__}: {e}")
-        CUR["code"] = None
+        RUNNING[nxt["code"]].start(); time.sleep(2 if not FAKE else 0.1)
 def backup():
     d = os.path.join(os.path.expanduser(SET["backup_dir"]), datetime.date.today().isoformat()); os.makedirs(d, exist_ok=True)
     for f in glob.glob(f"{B}/review/*.csv") + glob.glob(f"{B}/review/*.json") + glob.glob(f"{AD}/*.json"):
@@ -408,7 +519,7 @@ def backup():
 def eta(p):
     tm = jload("timings.json", {}); dflt = DEFAULT_MIN["recon" if p["anatomy"] == "recon" else "synthseg"]
     est = {s: tm.get(f"{p['anatomy']}:{s}", dflt["import_" if s == "import" else s] * 60) for s in STEPS}
-    if p["status"] == "waiting": return 0, sum(est.values())
+    if p["status"] in ("waiting", "decision", "starting"): return 0, sum(est.values())
     if p["status"] != "running" and p["status"] != "paused": return (p.get("finished", 0) - p.get("started", 0)) if p.get("started") else 0, 0
     el = time.time() - p.get("started", time.time()); rem = 0
     for s in STEPS:
@@ -455,7 +566,7 @@ def share_package(codes):
 
 # ------------------------------------------------------------------ pipeline install / rollback
 def install_zip(path):
-    if CUR["code"]: return dict(ok=False, error="a patient is processing - wait or stop it first")
+    if RUNNING: return dict(ok=False, error="a patient is processing - wait or stop it first")
     z = zipfile.ZipFile(path); names_ = z.namelist()
     ver = [n for n in names_ if n.endswith("scripts/VERSION")]
     if not ver: return dict(ok=False, error="this zip does not contain a cSS pipeline (no scripts/VERSION)")
@@ -512,11 +623,15 @@ def state():
         el, rem = eta(p)
         out.append(dict(code=p["code"], name=nm.get(p["code"], ""), cohort=p.get("cohort", ""), mode=p.get("mode"), anatomy=p.get("anatomy"),
                         status=p["status"], step=p.get("step", ""), steps_done=list(p.get("steps_done", {}).keys()), error=p.get("error", ""),
-                        elapsed=el, remaining=rem, has_qc=os.path.exists(f"{AD}/qc/{p['code']}.png"), version=p.get("version", ""),
+                        elapsed=el, remaining=rem, reg_method=p.get("reg_method", ""), pathway=p.get("pathway", "synthseg"),
+                        path_note=p.get("path_note", ""), path_ack=p.get("path_ack", True), solo=solo(p), started=p.get("started", 0), has_qc=os.path.exists(f"{AD}/qc/{p['code']}.png"), version=p.get("version", ""),
                         radiologist=p.get("radiologist", ""), grade_R=p.get("grade_R", ""), grade_L=p.get("grade_L", ""),
                         step_times={k: round(v) for k, v in p.get("steps_done", {}).items()}))
-    q = [x for x in out if x["status"] in ("waiting", "running", "paused")]
-    return dict(patients=out, queue=dict(n=len(q), remaining=sum(x["remaining"] for x in q), running=CUR["code"], hold=CUR["hold"]),
+    q = [x for x in out if x["status"] in ("waiting", "running", "paused", "starting")]
+    par = max(1, int(SET.get("parallel", 1)))
+    rem = sum(x["remaining"] for x in q) / min(par, max(1, len([x for x in q if not x["solo"]]) or 1))
+    return dict(patients=out, queue=dict(n=len(q), remaining=rem, running=",".join(RUNNING), hold=CUR["hold"], mem_wait=CUR["mem_wait"]),
+                sys=sysinfo(), pathways=PATHWAYS, mem_zones=[MEM_YELLOW, MEM_RED],
                 settings=SET, version=version(), cohorts=sorted(set(jload("cohorts.json", [])) | {p.get("cohort", "") for p in PAT} - {""}), steps=STEPS)
 
 class H(BaseHTTPRequestHandler):
@@ -531,6 +646,7 @@ class H(BaseHTTPRequestHandler):
         try:
             if u.path == "/": return self.send(open(f"{HERE}/css_app.html", "rb").read(), ctype="text/html; charset=utf-8")
             if u.path == "/api/state": return self.send(state())
+            if u.path in ("/icon_dark.png", "/icon_light.png"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="image/png")
             if u.path == "/api/preflight": return self.send(preflight())
             if u.path == "/api/log":
                 f = f"{AD}/logs/{q['code']}.log"; return self.send(dict(text=open(f).read()[-30000:] if os.path.exists(f) else "(no log yet)"))
@@ -559,11 +675,11 @@ class H(BaseHTTPRequestHandler):
                         if k == "features": SET["features"].update(v)
                         else: SET[k] = v
                     jsave("settings.json", SET)
-                caffeinate(bool(CUR["code"])); return self.send(dict(ok=True))
+                caffeinate(bool(RUNNING)); return self.send(dict(ok=True))
             if u.path == "/api/control":
                 p = pget(d["code"]); a = d["action"]
                 if not p: return self.send(dict(error="unknown code"))
-                pr = CUR["proc"] if CUR["code"] == p["code"] else None
+                pr = PROCS.get(p["code"])
                 if a == "pause" and p["status"] == "running":
                     p["status"] = "paused"
                     if pr: os.killpg(pr.pid, signal.SIGSTOP)
@@ -574,17 +690,17 @@ class H(BaseHTTPRequestHandler):
                     p.update(status="stopped", error="stopped by you")
                     if pr: os.killpg(pr.pid, signal.SIGCONT); os.killpg(pr.pid, signal.SIGTERM)
                 elif a in ("retry", "rerun") and p["status"] in ("failed", "stopped", "done"): p.update(status="waiting", error="", steps_done={}); CUR["hold"] = ""
-                elif a in ("swi_only", "recon") and p["status"] in ("failed", "stopped", "done"):
-                    # a misregistered T1 must not be reused: its labels are moved aside (kept, renamed), never deleted
-                    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                    for f in (f"{B}/work/{p['code']}_t1seg_swispace.nii.gz", f"{B}/work/{p['code']}_swi2t1.lta", f"{B}/work/{p['code']}_brainmask.nii.gz"):
-                        if os.path.exists(f): os.replace(f, f"{f}.bad_registration_{stamp}")
-                    if a == "swi_only":
-                        p["series"] = {k: v for k, v in p["series"].items() if k not in ("T1", "FLAIR")}; p["note"] = "retried SWI-only after a failed registration"
-                    else:
-                        p["anatomy"] = "recon"; p["note"] = "retried with recon-all + bbregister after a failed registration"
+                elif a in ("swi_only", "recon", "coreg_masked", "synthmorph") and p["status"] in ("failed", "stopped", "done"):
+                    if "do not line up" in p.get("error", ""): move_bad_registration(p)
+                    apply_pathway(p, a); p["note"] = f"retried with {PATHWAYS[a]}"
                     p.update(status="waiting", error="", steps_done={}); CUR["hold"] = ""
-                elif a == "remove" and p["status"] in ("waiting", "failed", "stopped"): PAT.remove(p)
+                elif a == "pathway" and p["status"] in ("waiting", "decision"):          # change the pathway before it runs
+                    apply_pathway(p, d["pathway"]); p.update(status="waiting", path_ack=True)
+                elif a == "accept" : p.update(path_ack=True, status="waiting" if p["status"] == "decision" else p["status"])
+                elif a == "requeue" and p["status"] in ("running", "paused", "starting"):   # memory red zone: stop and put back in the queue
+                    p.update(status="waiting", error="", step="", note="stopped to free memory - starts again from the beginning")
+                    if pr: os.killpg(pr.pid, signal.SIGCONT); os.killpg(pr.pid, signal.SIGTERM)
+                elif a == "remove" and p["status"] in ("waiting", "failed", "stopped", "decision"): PAT.remove(p)
                 else: return self.send(dict(error=f"cannot {a} while {p['status']}"))
                 save_pat(); return self.send(dict(ok=True))
             if u.path == "/api/edit":
@@ -594,7 +710,7 @@ class H(BaseHTTPRequestHandler):
                 if d.get("new_code") and d["new_code"] != p["code"]:
                     nc = d["new_code"]
                     if not re.fullmatch(r"[A-Za-z0-9_\-]{1,32}", nc) or pget(nc): return self.send(dict(error="invalid or duplicate code"))
-                    if p["status"] != "waiting": return self.send(dict(error="a code can only be changed before processing starts (results are filed under it)"))
+                    if p["status"] not in ("waiting", "decision"): return self.send(dict(error="a code can only be changed before processing starts (results are filed under it)"))
                     nm = names().get(p["code"], ""); set_name(nc, nm, old_code=p["code"]); p["code"] = nc
                 for k in ("radiologist", "grade_R", "grade_L"):
                     if k in d: p[k] = d[k]
@@ -637,7 +753,7 @@ class H(BaseHTTPRequestHandler):
                 return self.send(launch_child("blind", d, 8790))
             if u.path == "/api/share": return self.send(dict(ok=True, path=share_package(d["codes"])))
             if u.path == "/api/quit":
-                if CUR["code"] and not d.get("force"): return self.send(dict(ok=False, error="a patient is processing - stop it first, or quit anyway (it restarts from the beginning next time)"))
+                if RUNNING and not d.get("force"): return self.send(dict(ok=False, error="a patient is processing - stop it first, or quit anyway (it restarts from the beginning next time)"))
                 self.send(dict(ok=True)); threading.Timer(0.5, lambda: os._exit(0)).start(); return
             if u.path == "/api/open":
                 if mac(): subprocess.run(["open", d["path"]])
@@ -664,6 +780,9 @@ if __name__ == "__main__":
             if "--no-window" not in a: open_window(f"http://127.0.0.1:{port}/")
             sys.exit(0)
     threading.Thread(target=worker, daemon=True).start()
+    def _caff_watch():
+        while True: caffeinate(bool(RUNNING)); time.sleep(5)
+    threading.Thread(target=_caff_watch, daemon=True).start()
     srv = ThreadingHTTPServer(("127.0.0.1", port), H); url = f"http://127.0.0.1:{port}/"
     print(f"cSS Pipeline app: {url}  (CSS_BASE={B})", flush=True)
     how = None if "--no-window" in a else open_window(url)

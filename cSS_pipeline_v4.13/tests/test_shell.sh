@@ -17,7 +17,7 @@ while [ $# -gt 0 ]; do case "$1" in
 [ -n "$out" ] && [ -n "$in" ] && cp "$in" "$out" 2>/dev/null || true
 EOS
 chmod +x $T/bin/fsstub
-for t in mri_convert mri_synthstrip mri_synthseg mri_coreg mri_vol2vol bbregister recon-all freeview; do ln -s fsstub $T/bin/$t; done
+for t in mri_convert mri_synthstrip mri_synthseg mri_coreg mri_vol2vol bbregister recon-all freeview mri_binarize mri_mask mri_synthmorph; do ln -s fsstub $T/bin/$t; done
 # python stub: logs the call; v5.0 test hooks: STUB_DETECT_RC = exit code of detect_css.py, STUB_SPLIT = what the
 # split lookup in run_css.sh (python -c ...) prints
 cat > $T/bin/python <<'EOS'
@@ -57,6 +57,15 @@ seen "mri_synthstrip -i $T/base/work/P2_raw"; seen "mri_coreg --mov $T/base/data
 seen "mri_coreg --mov $T/base/work/P2_flair_brain.nii.gz --ref $T/base/data/P2_swi.nii"; notseen "swi_mask_from_t1.py"
 notseen "mri_synthseg --i $T/base/data/P2_swi.nii"; notseen recon-all; notseen bbregister
 grep -q '"method": "mri_coreg", "cost": null' $T/base/work/P2_reg.json || fail "registration QC record (mri_coreg)"
+echo "== 4c. CSS_REG_METHOD=coreg_masked: T1 cut out by its own labels, then mri_coreg (no SynthStrip)"
+: > $T/log; CSS_REG_METHOD=coreg_masked $SH $T/base/scripts/run_css.sh P2 $T/swi.nii --t1 $T/t1.nii > /dev/null
+seen "mri_binarize --i $T/base/work/P2_t1synthseg.nii.gz --min 1 --dilate 2"; seen "mri_mask $T/base/data/P2_t1.nii.gz"
+seen "mri_coreg --mov $T/base/data/P2_swi.nii --ref $T/base/work/P2_t1_labbrain.nii.gz"; notseen mri_synthstrip
+grep -q '"method": "mri_coreg_masked"' $T/base/work/P2_reg.json || fail "registration QC record (coreg_masked)"
+echo "== 4d. CSS_REG_METHOD=synthmorph: mri_synthmorph rigid"
+: > $T/log; CSS_REG_METHOD=synthmorph $SH $T/base/scripts/run_css.sh P2 $T/swi.nii --t1 $T/t1.nii > /dev/null
+seen "mri_synthmorph register -m rigid -t $T/base/work/P2_swi2t1.lta"; notseen "mri_coreg --mov $T/base/data/P2_swi.nii"
+grep -q '"method": "mri_synthmorph_rigid"' $T/base/work/P2_reg.json || fail "registration QC record (synthmorph)"
 echo "== 5. --recon (recon-all, bbregister, Destrieux)"
 : > $T/log; $SH $T/base/scripts/run_css.sh P3 $T/swi.nii --t1 $T/t1.nii --recon > /dev/null
 seen "recon-all -s P3"; seen "bbregister --s P3 --mov $T/base/data/P3_swi.nii --reg $T/base/work/P3_swi2t1.lta --t2 --init-coreg"
