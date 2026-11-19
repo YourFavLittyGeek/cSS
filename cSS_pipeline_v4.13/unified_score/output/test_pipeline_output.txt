@@ -1,0 +1,44 @@
+PASS  1 real manifest: 26 included, only M  
+PASS  1 P006 refused  
+PASS  1 PH6 refused  
+PASS  1 T05 refused  
+PASS  1 M18 / M23 / M25 listed as held-out  
+PASS  1 fitting on a held-out study refused  
+PASS  1 non-M prefix refused outside synthetic test mode  
+PASS  1 synthetic mode may not use M  
+PASS  1 manifest including a non-M study refused  
+PASS  2 held-out labels refused in development mode  
+PASS  2 refused access is logged  
+PASS  2 held-out mode without frozen model refused  
+PASS  3 effective df <= 6 and decreases with the penalty  edf 6.00 -> 2.99
+PASS  3 coefficient directions recovered  beta [ 0.02  2.14 -1.64  0.29  0.08  0.04]
+PASS  3 unavailable predictor contributes exactly 0 (never evidence)  
+PASS  3 unreliable predictor value ignored (same score as unavailable)  
+PASS  3 AUC of a perfect score = 1, inverted = 0  
+PASS  3 fallback: 30 events -> x4 dropped (30/4 < 10 -> x5 too)  ['x1_vessel_continuity_mm', 'x2_core_contrast_nu', 'x3_pial_distance_mm'] ['fallback: 30 events / 5 slopes < 10 -> dropped x4_sulcal_alignment', 'fallback: 30 events / 4 slopes < 10 -> dropped x5_extracranial_mm']
+PASS  3 fallback: 61 events keeps all five  
+PASS  4 no leakage: flipping patient P3's labels leaves P3's calibrated predictions unchanged  
+PASS  4 ...and changes other patients' predictions (labels are used for training)  
+PASS  4 penalty chosen per outer fold from training patients  
+PASS  5 refuses an excluded / real study id  
+PASS  5 model trained on development studies only  
+PASS  5 development training read no held-out label  
+PASS  5 model frozen with a hash  
+PASS  5 every candidate has a report (none dropped)  36 / 36
+PASS  5 every report is stamped synthetic  
+INFO  5 categories: {'uncertain': 32, 'alternative_high_confidence': 4}
+PASS  5 report fields complete  
+PASS  5 probability withheld when not justified  
+PASS  5 suppression never applied  4 audit records
+PASS  5 audit records carry model hash, input hash, reliability  
+PASS  5 production-layout inputs unchanged (review/ data/ work/ raw/)  
+PASS  5 held-out evaluation refused with a wrong hash  
+PASS  5 held-out evaluation runs with the frozen hash and is labelled independent  n 12
+PASS  5 held-out access logged as granted only in held-out mode  
+PASS  5 reproducible: same model hash on a second run  
+PASS  5 synthetic model refused for real scoring  
+PASS  5 CRITICAL: no reader-cSS candidate is a high-confidence alternative  []
+PASS  5 cohort report written, marked synthetic, development and held-out sections separate  
+
+uscore pipeline: 0 FAIL
+rc 0

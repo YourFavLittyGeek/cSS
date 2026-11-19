@@ -1,0 +1,334 @@
+PASS  0 verbatim copy matches recorded function sha256  
+PASS  0 module imports only numpy / scipy  
+PASS  1 band: status ok and labelled experimental  
+PASS  1 band: core smaller than bloomed candidate  core 1028 cand 1601
+PASS  1 band: core recalls the deposit  recall 0.94
+PASS  1 band: support = candidate minus core  
+PASS  1 band: core within 1 voxel of candidate  outside candidate 2
+PASS  1 band: some blooming moved to support  bloom kept in core 0.00
+PASS  2 thin: core found  core 54 vox
+PASS  2 thin: core recalls the thin deposit  recall 0.95
+PASS  2 thin: core stays near the deposit (median <= 1 mm)  median 0.00 mm
+PASS  3 curved: core recalls the arc  recall 0.92
+INFO  3 curved: core in 5 pieces, largest holds 0.99 of core voxels
+KNOWN-LIMIT  3 core fragments (per-voxel threshold on noisy contrast)  5 pieces; core connectivity / piece counts are not reliable
+PASS  4a equal bands: both bands in the core  recall 0.94 / 0.96
+PASS  4b strong+weak: strong band kept  strong 1.00
+PASS  4b strong+weak: candidate mask returned unchanged (weak band never lost from the record)  
+PASS  4b strong+weak: weak band not in core is kept as support  
+INFO  4b weak band core recall 0.16
+KNOWN-LIMIT  4b weak band next to a strong one is lost from the core  weak recall 0.16 (v5.13 PH6 #1 behaviour)
+INFO  4b gap voxels between bands in core: 10 of 67
+PASS  5 unstable: fraction reported in [0, 1]  
+PASS  5 unstable: shallow profile at least as unstable as sharp  sharp 0.22 shallow 0.85
+PASS  5 unstable voxels lie inside the 1-voxel zone  
+INFO  6 pure noise: share of candidate called core 0.01 (5 seeds)
+PASS  6 pure noise: core share reported (measured)  
+PASS  7 shell too small: status unavailable  background shell too small
+PASS  8 inputs not modified  
+PASS  8 deterministic  
+PASS  8 separate dark blob reported as adjacent, not core  adjacent 15 core 0
+PASS  8 anisotropic 0.5x0.5x2 mm: core recalls the band  recall 0.95
+INFO  10 verbatim on masked input: 623 masked voxels in core, deposit recall 0.03
+PASS  10 masked edge: no masked-out voxel in the core  filled 48600
+PASS  10 masked edge: deposit recall kept  recall 0.93
+KNOWN-LIMIT  10 verbatim decompose() treats masked zeros as maximal darkness (fixed by input preparation in the wrapper)  623 voxels
+REGIME  band 1 mm blur 0.4 mm k1: deposit median c   2.4  core recall 0.49  pieces 6  unstable 0.67
+REGIME  band 1 mm blur 0.4 mm k2: deposit median c   4.9  core recall 0.83  pieces 5  unstable 0.37
+REGIME  band 1 mm blur 0.4 mm k3: deposit median c   7.2  core recall 0.93  pieces 1  unstable 0.21
+REGIME  band 1 mm blur 0.4 mm k5: deposit median c  12.0  core recall 0.98  pieces 6  unstable 0.06
+REGIME  band 1 mm blur 0.8 mm k1: deposit median c   1.7  core recall 0.35  pieces 4  unstable 0.78
+REGIME  band 1 mm blur 0.8 mm k2: deposit median c   3.4  core recall 0.68  pieces 16  unstable 0.58
+REGIME  band 1 mm blur 0.8 mm k3: deposit median c   5.1  core recall 0.81  pieces 21  unstable 0.43
+REGIME  band 1 mm blur 0.8 mm k5: deposit median c   8.5  core recall 0.94  pieces 17  unstable 0.26
+REGIME  tube 0.5 mm blur 0.4 mm k1: deposit median c   1.4  core recall 0.10  pieces 3  unstable 0.79
+REGIME  tube 0.5 mm blur 0.4 mm k2: deposit median c   3.0  core recall 0.73  pieces 7  unstable 0.67
+REGIME  tube 0.5 mm blur 0.4 mm k3: deposit median c   4.5  core recall 1.00  pieces 2  unstable 0.48
+REGIME  tube 0.5 mm blur 0.4 mm k5: deposit median c   7.2  core recall 1.00  pieces 1  unstable 0.18
+REGIME  tube 0.5 mm blur 0.8 mm k1: deposit median c   0.4  core recall 0.00  pieces 0  unstable None
+REGIME  tube 0.5 mm blur 0.8 mm k2: deposit median c   0.9  core recall 0.07  pieces 3  unstable 0.71
+REGIME  tube 0.5 mm blur 0.8 mm k3: deposit median c   1.5  core recall 0.22  pieces 5  unstable 0.75
+REGIME  tube 0.5 mm blur 0.8 mm k5: deposit median c   2.1  core recall 0.59  pieces 2  unstable 0.78
+
+core_decompose: 0 FAIL, 3 known limits reported (experimental, not ground truth)
+PASS  x2 reliable on a clear plate, several noise units  5.253004723878635
+PASS  x2 no deposit -> not reliable (never 'reliable low')  ['core unstable (> 50 % of core voxels unstable)']
+PASS  x2 shell too small -> unavailable  
+PASS  x3 = known depth (-1.0 mm) within half a voxel  -1.0
+PASS  x3 / x4 unavailable without anatomy  
+PASS  x3 unreliable under bad registration (value kept)  
+PASS  x3 reliable / x4 unreliable at marginal registration (sulcal direction is stricter)  
+PASS  x4 sheet lying in the surface ~ 1  (0.99994221393979, 'sheet')
+PASS  x4 tube crossing the surface ~ 0  (0.0020842343466829227, 'reliable')
+PASS  x4 ball: direction undefined -> unreliable  ['direction undefined (axis ratios 1.07, 1.05 < 2.25)']
+PASS  x1 vessel entering and exiting: traverse, ~ sum of the two reaches (12 + 12 mm, minus zone)  (23.5, [12.0, 11.5])
+PASS  x1 censored at the crop border is a NOTE, status stays reliable  
+PASS  x1 vessel on one side only: contact without traverse -> 0  
+PASS  x1 no vessel map -> unavailable (not 0)  
+PASS  x1 no vessel near -> 0, no contact  
+PASS  x5 band continuing 5.5 mm beyond the brain mask: measured 5.5 .. 7.5 mm (blooming adds length)  7.0
+KNOWN-BIAS  x5 overestimates by +1.5 mm here (blur / noise attached to the band end; first run: +1.5 mm). Documented in FEATURE_SPEC.
+PASS  x5 signal void beyond the mask is not 'continuation'  0.5
+PASS  x5 without unmasked SWI -> unavailable  
+PASS  x5 confined plate -> 0  
+PASS  every feature has a status in the three states  
+PASS  candidate never modified  
+PASS  spec documents units, inputs, reliability, missing data, failure modes for all five  
+
+uscore features: 0 FAIL
+
+== css_sulcal_bank: category uncertain  detectors {'surface_vein': 'not_confirmed', 'extracranial_continuation': 'not_confirmed', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (0.0, 'reliable')
+     x2_core_contrast_nu        (2.91, 'unreliable')
+     x3_pial_distance_mm        (-0.6, 'reliable')
+     x4_sulcal_alignment        (0.99, 'reliable')
+     x5_extracranial_mm         (0.0, 'reliable')
+     protective: ['dark-core decomposition unstable']
+PASS  css_sulcal_bank: original candidate preserved  
+PASS  css_sulcal_bank: CRITICAL genuine cSS not called a high-confidence alternative  
+PASS  css_sulcal_bank: CRITICAL no suppression proposal for genuine cSS  
+
+== css_convexity: category uncertain  detectors {'surface_vein': 'not_confirmed', 'extracranial_continuation': 'not_confirmed', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (0.0, 'reliable')
+     x2_core_contrast_nu        (3.74, 'reliable')
+     x3_pial_distance_mm        (-1.2, 'reliable')
+     x4_sulcal_alignment        (1.0, 'reliable')
+     x5_extracranial_mm         (0.0, 'reliable')
+     protective: []
+PASS  css_convexity: original candidate preserved  
+PASS  css_convexity: CRITICAL genuine cSS not called a high-confidence alternative  
+PASS  css_convexity: CRITICAL no suppression proposal for genuine cSS  
+
+== surface_vein: category alternative_high_confidence  detectors {'surface_vein': 'confirmed', 'extracranial_continuation': 'not_confirmed', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (22.2, 'reliable')
+     x2_core_contrast_nu        (4.49, 'reliable')
+     x3_pial_distance_mm        (1.8, 'reliable')
+     x4_sulcal_alignment        (0.99, 'reliable')
+     x5_extracranial_mm         (0.0, 'reliable')
+     protective: []
+PASS  surface_vein: original candidate preserved  
+PASS  surface_vein: suppression record says not applied  
+DETECTOR  surface_vein: surface_vein -> confirmed  (category alternative_high_confidence)
+
+== vein_parallel_to_sulcus: category uncertain  detectors {'surface_vein': 'confirmed', 'extracranial_continuation': 'not_confirmed', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (22.2, 'reliable')
+     x2_core_contrast_nu        (3.1, 'unreliable')
+     x3_pial_distance_mm        (0.6, 'reliable')
+     x4_sulcal_alignment        (0.99, 'unreliable')
+     x5_extracranial_mm         (0.0, 'reliable')
+     protective: ['dark-core decomposition unstable']
+PASS  vein_parallel_to_sulcus: original candidate preserved  
+
+== vein_overlapping_css: category uncertain  detectors {'surface_vein': 'not_confirmed', 'extracranial_continuation': 'not_confirmed', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (23.4, 'reliable')
+     x2_core_contrast_nu        (4.42, 'reliable')
+     x3_pial_distance_mm        (-0.6, 'reliable')
+     x4_sulcal_alignment        (1.0, 'reliable')
+     x5_extracranial_mm         (0.0, 'reliable')
+     protective: ['mixed vessel / sheet object']
+PASS  vein_overlapping_css: original candidate preserved  
+PASS  vein_overlapping_css: CRITICAL genuine cSS not called a high-confidence alternative  
+PASS  vein_overlapping_css: CRITICAL no suppression proposal for genuine cSS  
+
+== thin_curved_css: category uncertain  detectors {'surface_vein': 'not_confirmed', 'extracranial_continuation': 'not_confirmed', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (0.0, 'reliable')
+     x2_core_contrast_nu        (2.57, 'unreliable')
+     x3_pial_distance_mm        (-1.2, 'reliable')
+     x4_sulcal_alignment        (1.0, 'reliable')
+     x5_extracranial_mm         (0.0, 'reliable')
+     protective: ['dark-core decomposition unstable']
+PASS  thin_curved_css: original candidate preserved  
+PASS  thin_curved_css: CRITICAL genuine cSS not called a high-confidence alternative  
+PASS  thin_curved_css: CRITICAL no suppression proposal for genuine cSS  
+
+== fragmented_css: category uncertain  detectors {'surface_vein': 'not_confirmed', 'extracranial_continuation': 'not_confirmed', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (0.0, 'reliable')
+     x2_core_contrast_nu        (3.37, 'unreliable')
+     x3_pial_distance_mm        (-1.2, 'reliable')
+     x4_sulcal_alignment        (0.99, 'reliable')
+     x5_extracranial_mm         (0.0, 'reliable')
+     protective: ['dark-core decomposition unstable']
+PASS  fragmented_css: original candidate preserved  
+PASS  fragmented_css: CRITICAL genuine cSS not called a high-confidence alternative  
+PASS  fragmented_css: CRITICAL no suppression proposal for genuine cSS  
+
+== adjacent_css_bands: category uncertain  detectors {'surface_vein': 'not_confirmed', 'extracranial_continuation': 'not_confirmed', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (0.0, 'reliable')
+     x2_core_contrast_nu        (2.9, 'unreliable')
+     x3_pial_distance_mm        (-0.6, 'reliable')
+     x4_sulcal_alignment        (0.97, 'unreliable')
+     x5_extracranial_mm         (0.0, 'reliable')
+     protective: ['dark-core decomposition unstable']
+PASS  adjacent_css_bands: original candidate preserved  
+PASS  adjacent_css_bands: CRITICAL genuine cSS not called a high-confidence alternative  
+PASS  adjacent_css_bands: CRITICAL no suppression proposal for genuine cSS  
+
+== mixed_vein_and_sheet: category uncertain  detectors {'surface_vein': 'not_confirmed', 'extracranial_continuation': 'not_confirmed', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (0.0, 'reliable')
+     x2_core_contrast_nu        (4.2, 'reliable')
+     x3_pial_distance_mm        (-0.6, 'reliable')
+     x4_sulcal_alignment        (1.0, 'reliable')
+     x5_extracranial_mm         (0.0, 'reliable')
+     protective: []
+PASS  mixed_vein_and_sheet: original candidate preserved  
+PASS  mixed_vein_and_sheet: CRITICAL genuine cSS not called a high-confidence alternative  
+PASS  mixed_vein_and_sheet: CRITICAL no suppression proposal for genuine cSS  
+
+== extracranial_artifact: category alternative_high_confidence  detectors {'surface_vein': 'not_confirmed', 'extracranial_continuation': 'confirmed', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (0.0, 'reliable')
+     x2_core_contrast_nu        (5.06, 'reliable')
+     x3_pial_distance_mm        (-0.6, 'reliable')
+     x4_sulcal_alignment        (0.0, 'reliable')
+     x5_extracranial_mm         (9.0, 'reliable')
+     protective: []
+PASS  extracranial_artifact: original candidate preserved  
+PASS  extracranial_artifact: suppression record says not applied  
+DETECTOR  extracranial_artifact: extracranial_continuation -> confirmed  (category alternative_high_confidence)
+
+== skull_interface_artifact: category alternative_high_confidence  detectors {'surface_vein': 'not_confirmed', 'extracranial_continuation': 'not_confirmed', 'skull_interface': 'confirmed'}
+     x1_vessel_continuity_mm    (0.0, 'reliable')
+     x2_core_contrast_nu        (16750503.54, 'reliable')
+     x3_pial_distance_mm        (4.8, 'reliable')
+     x4_sulcal_alignment        (1.0, 'reliable')
+     x5_extracranial_mm         (0.0, 'reliable')
+     protective: []
+PASS  skull_interface_artifact: original candidate preserved  
+PASS  skull_interface_artifact: suppression record says not applied  
+DETECTOR  skull_interface_artifact: skull_interface -> confirmed  (category alternative_high_confidence)
+
+== css_subarachnoid_near_skull: category uncertain  detectors {'surface_vein': 'not_confirmed', 'extracranial_continuation': 'not_confirmed', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (0.0, 'reliable')
+     x2_core_contrast_nu        (2.31, 'unreliable')
+     x3_pial_distance_mm        (1.8, 'reliable')
+     x4_sulcal_alignment        (1.0, 'reliable')
+     x5_extracranial_mm         (0.0, 'reliable')
+     protective: ['dark-core decomposition unstable']
+PASS  css_subarachnoid_near_skull: original candidate preserved  
+PASS  css_subarachnoid_near_skull: CRITICAL genuine cSS not called a high-confidence alternative  
+PASS  css_subarachnoid_near_skull: CRITICAL no suppression proposal for genuine cSS  
+
+== css_in_thick_csf_2.4mm: category uncertain  detectors {'surface_vein': 'not_confirmed', 'extracranial_continuation': 'not_confirmed', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (0.0, 'reliable')
+     x2_core_contrast_nu        (6.63, 'reliable')
+     x3_pial_distance_mm        (2.4, 'reliable')
+     x4_sulcal_alignment        (1.0, 'reliable')
+     x5_extracranial_mm         (0.0, 'reliable')
+     protective: []
+PASS  css_in_thick_csf_2.4mm: original candidate preserved  
+PASS  css_in_thick_csf_2.4mm: CRITICAL genuine cSS not called a high-confidence alternative  
+PASS  css_in_thick_csf_2.4mm: CRITICAL no suppression proposal for genuine cSS  
+
+== css_directly_under_skull: category uncertain  detectors {'surface_vein': 'not_confirmed', 'extracranial_continuation': 'not_confirmed', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (0.0, 'reliable')
+     x2_core_contrast_nu        (2.67, 'unreliable')
+     x3_pial_distance_mm        (-0.6, 'reliable')
+     x4_sulcal_alignment        (1.0, 'reliable')
+     x5_extracranial_mm         (0.0, 'reliable')
+     protective: ['dark-core decomposition unstable']
+PASS  css_directly_under_skull: original candidate preserved  
+PASS  css_directly_under_skull: CRITICAL genuine cSS not called a high-confidence alternative  
+PASS  css_directly_under_skull: CRITICAL no suppression proposal for genuine cSS  
+
+== css_touching_sulcal_vein: category uncertain  detectors {'surface_vein': 'not_confirmed', 'extracranial_continuation': 'not_confirmed', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (17.58, 'reliable')
+     x2_core_contrast_nu        (3.37, 'unreliable')
+     x3_pial_distance_mm        (-0.6, 'reliable')
+     x4_sulcal_alignment        (0.99, 'reliable')
+     x5_extracranial_mm         (0.0, 'reliable')
+     protective: ['mixed vessel / sheet object', 'dark-core decomposition unstable']
+PASS  css_touching_sulcal_vein: original candidate preserved  
+PASS  css_touching_sulcal_vein: CRITICAL genuine cSS not called a high-confidence alternative  
+PASS  css_touching_sulcal_vein: CRITICAL no suppression proposal for genuine cSS  
+
+== missing_vessel_map: category uncertain  detectors {'surface_vein': 'unresolved', 'extracranial_continuation': 'not_confirmed', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (None, 'unavailable')
+     x2_core_contrast_nu        (3.85, 'reliable')
+     x3_pial_distance_mm        (-1.2, 'reliable')
+     x4_sulcal_alignment        (1.0, 'reliable')
+     x5_extracranial_mm         (0.0, 'reliable')
+     protective: ['surface_vein: inputs unavailable or unresolved']
+PASS  missing_vessel_map: original candidate preserved  
+PASS  missing_vessel_map: CRITICAL genuine cSS not called a high-confidence alternative  
+PASS  missing_vessel_map: CRITICAL no suppression proposal for genuine cSS  
+PASS  missing vessel map: x1 unavailable  
+PASS  missing vessel map: vein detector unresolved  
+
+== misregistration: category uncertain  detectors {'surface_vein': 'not_confirmed', 'extracranial_continuation': 'unresolved', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (0.0, 'unreliable')
+     x2_core_contrast_nu        (2.94, 'unreliable')
+     x3_pial_distance_mm        (-0.6, 'unreliable')
+     x4_sulcal_alignment        (0.99, 'unreliable')
+     x5_extracranial_mm         (0.0, 'unreliable')
+     protective: ['registration not adequate (unreliable)', 'dark-core decomposition unstable', 'extracranial_continuation: inputs unavailable or unresolved']
+PASS  misregistration: original candidate preserved  
+PASS  misregistration: CRITICAL genuine cSS not called a high-confidence alternative  
+PASS  misregistration: CRITICAL no suppression proposal for genuine cSS  
+PASS  misregistration: x3 and x4 unreliable  
+PASS  misregistration: protective registration flag  
+PASS  suppression disabled (constant)  
+
+adversarial: 0 FAIL over 17 scenes
+css_sulcal_bank                cSS     {'uncertain': 5}
+css_convexity                  cSS     {'uncertain': 5}
+surface_vein                   non-cSS {'alternative_high_confidence': 4, 'uncertain': 1}
+vein_parallel_to_sulcus        non-cSS {'uncertain': 5}
+vein_overlapping_css           cSS     {'uncertain': 5}
+thin_curved_css                cSS     {'uncertain': 5}
+fragmented_css                 cSS     {'uncertain': 5}
+adjacent_css_bands             cSS     {'uncertain': 5}
+mixed_vein_and_sheet           cSS     {'uncertain': 5}
+extracranial_artifact          non-cSS {'alternative_high_confidence': 5}
+skull_interface_artifact       non-cSS {'alternative_high_confidence': 5}
+css_subarachnoid_near_skull    cSS     {'uncertain': 5}
+css_in_thick_csf_2.4mm         cSS     {'uncertain': 5}
+css_directly_under_skull       cSS     {'uncertain': 5}
+css_touching_sulcal_vein       cSS     {'uncertain': 5}
+missing_vessel_map             cSS     {'uncertain': 5}
+misregistration                cSS     {'uncertain': 5}
+
+seeds: 5 per scene; CRITICAL failures 0 []
+PASS  1 real manifest: 26 included, only M  
+PASS  1 P006 refused  
+PASS  1 PH6 refused  
+PASS  1 T05 refused  
+PASS  1 M18 / M23 / M25 listed as held-out  
+PASS  1 fitting on a held-out study refused  
+PASS  1 non-M prefix refused outside synthetic test mode  
+PASS  1 synthetic mode may not use M  
+PASS  1 manifest including a non-M study refused  
+PASS  2 held-out labels refused in development mode  
+PASS  2 refused access is logged  
+PASS  2 held-out mode without frozen model refused  
+PASS  3 effective df <= 6 and decreases with the penalty  edf 6.00 -> 2.99
+PASS  3 coefficient directions recovered  beta [ 0.02  2.14 -1.64  0.29  0.08  0.04]
+PASS  3 unavailable predictor contributes exactly 0 (never evidence)  
+PASS  3 unreliable predictor value ignored (same score as unavailable)  
+PASS  3 AUC of a perfect score = 1, inverted = 0  
+PASS  3 fallback: 30 events -> x4 dropped (30/4 < 10 -> x5 too)  ['x1_vessel_continuity_mm', 'x2_core_contrast_nu', 'x3_pial_distance_mm'] ['fallback: 30 events / 5 slopes < 10 -> dropped x4_sulcal_alignment', 'fallback: 30 events / 4 slopes < 10 -> dropped x5_extracranial_mm']
+PASS  3 fallback: 61 events keeps all five  
+PASS  4 no leakage: flipping patient P3's labels leaves P3's calibrated predictions unchanged  
+PASS  4 ...and changes other patients' predictions (labels are used for training)  
+PASS  4 penalty chosen per outer fold from training patients  
+PASS  5 refuses an excluded / real study id  
+PASS  5 model trained on development studies only  
+PASS  5 development training read no held-out label  
+PASS  5 model frozen with a hash  
+PASS  5 every candidate has a report (none dropped)  36 / 36
+PASS  5 every report is stamped synthetic  
+INFO  5 categories: {'alternative_high_confidence': 4, 'uncertain': 32}
+PASS  5 report fields complete  
+PASS  5 probability withheld when not justified  
+PASS  5 suppression never applied  4 audit records
+PASS  5 audit records carry model hash, input hash, reliability  
+PASS  5 production-layout inputs unchanged (review/ data/ work/ raw/)  
+PASS  5 held-out evaluation refused with a wrong hash  
+PASS  5 held-out evaluation runs with the frozen hash and is labelled independent  n 12
+PASS  5 held-out access logged as granted only in held-out mode  
+PASS  5 reproducible: same model hash on a second run  
+PASS  5 synthetic model refused for real scoring  
+PASS  5 CRITICAL: no reader-cSS candidate is a high-confidence alternative  []
+PASS  5 cohort report written, marked synthetic, development and held-out sections separate  
+
+uscore pipeline: 0 FAIL
+unified-score tests: all passed
+rc 0

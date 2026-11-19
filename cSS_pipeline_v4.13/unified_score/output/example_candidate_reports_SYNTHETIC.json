@@ -1,0 +1,548 @@
+[
+ {
+  "study": "SYN01",
+  "cand_id": 1,
+  "probability": 0.9999999566644681,
+  "raw_score": 0.8542198194628507,
+  "score_note": null,
+  "predictors": {
+   "x1_vessel_continuity_mm": {
+    "value": 0.0,
+    "unit": "mm",
+    "status": "reliable",
+    "reasons": []
+   },
+   "x2_core_contrast_nu": {
+    "value": 3.903997126629033,
+    "unit": "noise units",
+    "status": "reliable",
+    "reasons": []
+   },
+   "x3_pial_distance_mm": {
+    "value": -1.2000000476837158,
+    "unit": "mm",
+    "status": "reliable",
+    "reasons": []
+   },
+   "x4_sulcal_alignment": {
+    "value": 0.9999830537763381,
+    "unit": "-",
+    "status": "reliable",
+    "reasons": []
+   },
+   "x5_extracranial_mm": {
+    "value": 0.0,
+    "unit": "mm",
+    "status": "reliable",
+    "reasons": []
+   }
+  },
+  "contributions": {
+   "x1_vessel_continuity_mm": {
+    "contribution": 0.8416694343522558,
+    "imputed": false,
+    "beta_std": -1.311647079291006
+   },
+   "x2_core_contrast_nu": {
+    "contribution": -4.543694663909423,
+    "imputed": false,
+    "beta_std": 6.427122326298668
+   },
+   "x3_pial_distance_mm": {
+    "contribution": 9.38171595441965,
+    "imputed": false,
+    "beta_std": -12.228525613496704
+   }
+  },
+  "positive_evidence": [
+   "x1_vessel_continuity_mm: +0.84 log-odds",
+   "x3_pial_distance_mm: +9.38 log-odds"
+  ],
+  "negative_evidence": [
+   "x2_core_contrast_nu: -4.54 log-odds"
+  ],
+  "missing_or_unreliable": [],
+  "alternative_detectors": [
+   {
+    "detector": "surface_vein",
+    "status": "not_confirmed",
+    "support": {
+     "enters_and_exits": false,
+     "reaches_mm": [],
+     "centreline_overlap_frac": 0.0,
+     "tubular_cross_section": false,
+     "resolved": true,
+     "all_met": false
+    },
+    "against": [
+     "sheet-compatible component(s) present: [{'voxels': 434, 'ratio': 45.0}]",
+     "no contact with the vessel map"
+    ],
+    "unresolved": [],
+    "reliability": "reliable"
+   },
+   {
+    "detector": "extracranial_continuation",
+    "status": "not_confirmed",
+    "support": {
+     "length_mm": 0.0,
+     "continuous": false,
+     "connected_to_core": false,
+     "all_met": false
+    },
+    "against": [
+     "continuation 0.0 mm < 5.0 mm"
+    ],
+    "unresolved": [],
+    "reliability": "reliable"
+   },
+   {
+    "detector": "skull_interface",
+    "status": "not_confirmed",
+    "support": {
+     "void_distance_mm": 6.0,
+     "parallel_cos": 1.0,
+     "outside_cortex": false,
+     "band_shaped": true,
+     "vessel_overlap": 0.0,
+     "all_met": false
+    },
+    "against": [
+     "core conforms to the cortex (pial distance -1.20 mm)",
+     "core 6.0 mm from the signal void"
+    ],
+    "unresolved": [],
+    "reliability": "reliable"
+   }
+  ],
+  "stability": {
+   "n": 16,
+   "x1_vessel_continuity_mm_unstable_frac": 0.0,
+   "x1_vessel_continuity_mm_range": [
+    0.0,
+    0.0
+   ],
+   "x2_core_contrast_nu_unstable_frac": 0.0,
+   "x2_core_contrast_nu_range": [
+    3.76061756355748,
+    4.06335315639104
+   ],
+   "x3_pial_distance_mm_unstable_frac": 0.0,
+   "x3_pial_distance_mm_range": [
+    -1.7999999523162842,
+    -0.6000000238418579
+   ],
+   "x4_sulcal_alignment_unstable_frac": 0.0,
+   "x4_sulcal_alignment_range": [
+    0.9992223956614329,
+    0.9999830537763381
+   ],
+   "x5_extracranial_mm_unstable_frac": 0.0,
+   "x5_extracranial_mm_range": [
+    0.0,
+    0.0
+   ],
+   "traverse_kept_frac": null,
+   "x5_min_mm": 0.0,
+   "core_jaccard_median": 1.0,
+   "core_kept_frac": 0.9375,
+   "unstable": true,
+   "score_range": [
+    3.888353255752308e-08,
+    0.9999999999999993
+   ]
+  },
+  "category": "uncertain",
+  "category_reasons": [
+   "score 1.00 below ordering cut 1.00 (not evidence of an alternative)"
+  ],
+  "protective_flags": [
+   "unstable under perturbation"
+  ],
+  "v510_confidence_pct": NaN,
+  "decomposition": {
+   "feature_version": "uscore-features/1.0",
+   "decomposition": "ok",
+   "decomposition_label": "experimental",
+   "candidate_voxels": 654,
+   "core_voxels": 436,
+   "core_pieces": 3,
+   "core_unstable_frac": 0.3738532110091743,
+   "registration": "ok",
+   "shape_resolvable": true
+  },
+  "registration": "ok",
+  "model_version": "uscore-model/1.0",
+  "model_hash": "eca8f132ad94d87184e83699ce6b08e42b1853a014a33552d44cc7064a9ae12a",
+  "feature_version": "uscore-features/1.0",
+  "synthetic_test": true,
+  "disclaimer": "EXPERIMENTAL research output; not a diagnosis; the dark core is an experimental representation, not ground truth"
+ },
+ {
+  "study": "SYN01",
+  "cand_id": 2,
+  "probability": 0.9999999999998626,
+  "raw_score": 0.9526007510635711,
+  "score_note": null,
+  "predictors": {
+   "x1_vessel_continuity_mm": {
+    "value": 0.0,
+    "unit": "mm",
+    "status": "reliable",
+    "reasons": []
+   },
+   "x2_core_contrast_nu": {
+    "value": 2.8712519653530464,
+    "unit": "noise units",
+    "status": "unreliable",
+    "reasons": [
+     "core unstable (> 50 % of core voxels unstable)"
+    ]
+   },
+   "x3_pial_distance_mm": {
+    "value": -0.6000000238418579,
+    "unit": "mm",
+    "status": "reliable",
+    "reasons": []
+   },
+   "x4_sulcal_alignment": {
+    "value": 0.9962828960682667,
+    "unit": "-",
+    "status": "reliable",
+    "reasons": []
+   },
+   "x5_extracranial_mm": {
+    "value": 0.0,
+    "unit": "mm",
+    "status": "reliable",
+    "reasons": []
+   }
+  },
+  "contributions": {
+   "x1_vessel_continuity_mm": {
+    "contribution": 0.8416694343522558,
+    "imputed": false,
+    "beta_std": -1.311647079291006
+   },
+   "x2_core_contrast_nu": {
+    "contribution": 0.0,
+    "imputed": true,
+    "beta_std": 6.427122326298668
+   },
+   "x3_pial_distance_mm": {
+    "contribution": 6.070522097828524,
+    "imputed": false,
+    "beta_std": -12.228525613496704
+   }
+  },
+  "positive_evidence": [
+   "x1_vessel_continuity_mm: +0.84 log-odds",
+   "x3_pial_distance_mm: +6.07 log-odds"
+  ],
+  "negative_evidence": [],
+  "missing_or_unreliable": [
+   "x2_core_contrast_nu: unreliable (core unstable (> 50 % of core voxels unstable)) - no evidence either way"
+  ],
+  "alternative_detectors": [
+   {
+    "detector": "surface_vein",
+    "status": "not_confirmed",
+    "support": {
+     "enters_and_exits": false,
+     "reaches_mm": [],
+     "centreline_overlap_frac": 0.0,
+     "tubular_cross_section": false,
+     "resolved": false,
+     "all_met": false
+    },
+    "against": [
+     "sheet-compatible component(s) present: [{'voxels': 275, 'ratio': 50.6}]",
+     "no contact with the vessel map"
+    ],
+    "unresolved": [],
+    "reliability": "reliable"
+   },
+   {
+    "detector": "extracranial_continuation",
+    "status": "not_confirmed",
+    "support": {
+     "length_mm": 0.0,
+     "continuous": false,
+     "connected_to_core": false,
+     "all_met": false
+    },
+    "against": [
+     "continuation 0.0 mm < 5.0 mm"
+    ],
+    "unresolved": [],
+    "reliability": "reliable"
+   },
+   {
+    "detector": "skull_interface",
+    "status": "not_confirmed",
+    "support": {
+     "void_distance_mm": 9.0,
+     "parallel_cos": 0.02,
+     "outside_cortex": false,
+     "band_shaped": true,
+     "vessel_overlap": 0.0,
+     "all_met": false
+    },
+    "against": [
+     "core conforms to the cortex (pial distance -0.60 mm)",
+     "core 9.0 mm from the signal void",
+     "band not parallel to the interface (|cos| 0.02)"
+    ],
+    "unresolved": [],
+    "reliability": "reliable"
+   }
+  ],
+  "stability": {
+   "n": 16,
+   "x1_vessel_continuity_mm_unstable_frac": 0.0,
+   "x1_vessel_continuity_mm_range": [
+    0.0,
+    0.0
+   ],
+   "x2_core_contrast_nu_unstable_frac": 0.0,
+   "x2_core_contrast_nu_range": [
+    2.8712519653530464,
+    2.9016410613901495
+   ],
+   "x3_pial_distance_mm_unstable_frac": 0.0625,
+   "x3_pial_distance_mm_range": [
+    -1.2000000476837158,
+    0.6000000238418579
+   ],
+   "x4_sulcal_alignment_unstable_frac": 0.0,
+   "x4_sulcal_alignment_range": [
+    0.9956992857383661,
+    0.9982407984054926
+   ],
+   "x5_extracranial_mm_unstable_frac": 0.0,
+   "x5_extracranial_mm_range": [
+    0.0,
+    0.0
+   ],
+   "traverse_kept_frac": null,
+   "x5_min_mm": 0.0,
+   "core_jaccard_median": 1.0,
+   "core_kept_frac": 1.0,
+   "unstable": true,
+   "score_range": [
+    6.305116760146985e-16,
+    0.9999999999999993
+   ]
+  },
+  "category": "uncertain",
+  "category_reasons": [
+   "x2_core_contrast_nu unreliable"
+  ],
+  "protective_flags": [
+   "dark-core decomposition unstable",
+   "unstable under perturbation"
+  ],
+  "v510_confidence_pct": NaN,
+  "decomposition": {
+   "feature_version": "uscore-features/1.0",
+   "decomposition": "ok",
+   "decomposition_label": "experimental",
+   "candidate_voxels": 394,
+   "core_voxels": 275,
+   "core_pieces": 1,
+   "core_unstable_frac": 0.6618181818181819,
+   "registration": "ok",
+   "shape_resolvable": true
+  },
+  "registration": "ok",
+  "model_version": "uscore-model/1.0",
+  "model_hash": "eca8f132ad94d87184e83699ce6b08e42b1853a014a33552d44cc7064a9ae12a",
+  "feature_version": "uscore-features/1.0",
+  "synthetic_test": true,
+  "disclaimer": "EXPERIMENTAL research output; not a diagnosis; the dark core is an experimental representation, not ground truth"
+ },
+ {
+  "study": "SYN01",
+  "cand_id": 3,
+  "probability": 6.305116760146985e-16,
+  "raw_score": 1.984961509038877e-06,
+  "score_note": null,
+  "predictors": {
+   "x1_vessel_continuity_mm": {
+    "value": 22.200000882148743,
+    "unit": "mm",
+    "status": "reliable",
+    "reasons": []
+   },
+   "x2_core_contrast_nu": {
+    "value": 4.303745966660868,
+    "unit": "noise units",
+    "status": "unreliable",
+    "reasons": [
+     "core unstable (> 50 % of core voxels unstable)"
+    ]
+   },
+   "x3_pial_distance_mm": {
+    "value": 1.7999999523162842,
+    "unit": "mm",
+    "status": "reliable",
+    "reasons": []
+   },
+   "x4_sulcal_alignment": {
+    "value": 0.9952699279390791,
+    "unit": "-",
+    "status": "reliable",
+    "reasons": []
+   },
+   "x5_extracranial_mm": {
+    "value": 0.0,
+    "unit": "mm",
+    "status": "reliable",
+    "reasons": []
+   }
+  },
+  "contributions": {
+   "x1_vessel_continuity_mm": {
+    "contribution": -2.044054340569764,
+    "imputed": false,
+    "beta_std": -1.311647079291006
+   },
+   "x2_core_contrast_nu": {
+    "contribution": 0.0,
+    "imputed": true,
+    "beta_std": 6.427122326298668
+   },
+   "x3_pial_distance_mm": {
+    "contribution": -7.174252670660891,
+    "imputed": false,
+    "beta_std": -12.228525613496704
+   }
+  },
+  "positive_evidence": [],
+  "negative_evidence": [
+   "x1_vessel_continuity_mm: -2.04 log-odds",
+   "x3_pial_distance_mm: -7.17 log-odds"
+  ],
+  "missing_or_unreliable": [
+   "x2_core_contrast_nu: unreliable (core unstable (> 50 % of core voxels unstable)) - no evidence either way"
+  ],
+  "alternative_detectors": [
+   {
+    "detector": "surface_vein",
+    "status": "confirmed",
+    "support": {
+     "enters_and_exits": true,
+     "reaches_mm": [
+      11.4,
+      10.8
+     ],
+     "centreline_overlap_frac": 0.66,
+     "tubular_cross_section": true,
+     "resolved": true,
+     "all_met": true
+    },
+    "against": [],
+    "unresolved": [],
+    "reliability": "reliable"
+   },
+   {
+    "detector": "extracranial_continuation",
+    "status": "not_confirmed",
+    "support": {
+     "length_mm": 0.0,
+     "continuous": false,
+     "connected_to_core": false,
+     "all_met": false
+    },
+    "against": [
+     "continuation 0.0 mm < 5.0 mm"
+    ],
+    "unresolved": [],
+    "reliability": "reliable"
+   },
+   {
+    "detector": "skull_interface",
+    "status": "not_confirmed",
+    "support": {
+     "void_distance_mm": 3.6,
+     "parallel_cos": 0.46,
+     "outside_cortex": false,
+     "band_shaped": false,
+     "vessel_overlap": 0.8472505091649695,
+     "all_met": false
+    },
+    "against": [
+     "not a broad band (tube- or line-like): a susceptibility band is planar",
+     "lies on the vessel map (overlap 0.85)",
+     "core conforms to the cortex (pial distance 1.80 mm)",
+     "core 3.6 mm from the signal void",
+     "band not parallel to the interface (|cos| 0.46)"
+    ],
+    "unresolved": [],
+    "reliability": "reliable"
+   }
+  ],
+  "stability": {
+   "n": 16,
+   "x1_vessel_continuity_mm_unstable_frac": 0.0,
+   "x1_vessel_continuity_mm_range": [
+    20.40000081062317,
+    23.40000092983246
+   ],
+   "x2_core_contrast_nu_unstable_frac": 0.1875,
+   "x2_core_contrast_nu_range": [
+    3.916074936477493,
+    5.070027934079527
+   ],
+   "x3_pial_distance_mm_unstable_frac": 0.0,
+   "x3_pial_distance_mm_range": [
+    1.2000000476837158,
+    2.4000000953674316
+   ],
+   "x4_sulcal_alignment_unstable_frac": 0.0,
+   "x4_sulcal_alignment_range": [
+    0.9951592034952953,
+    0.9984888629605349
+   ],
+   "x5_extracranial_mm_unstable_frac": 0.0,
+   "x5_extracranial_mm_range": [
+    0.0,
+    0.6000000238418579
+   ],
+   "traverse_kept_frac": 1.0,
+   "x5_min_mm": 0.0,
+   "core_jaccard_median": 1.0,
+   "core_kept_frac": 1.0,
+   "unstable": false,
+   "score_range": [
+    6.305116760146985e-16,
+    6.305116760146985e-16
+   ]
+  },
+  "category": "uncertain",
+  "category_reasons": [
+   "alternative suspected (surface_vein) but protected: dark-core decomposition unstable"
+  ],
+  "protective_flags": [
+   "dark-core decomposition unstable"
+  ],
+  "v510_confidence_pct": NaN,
+  "decomposition": {
+   "feature_version": "uscore-features/1.0",
+   "decomposition": "ok",
+   "decomposition_label": "experimental",
+   "candidate_voxels": 491,
+   "core_voxels": 306,
+   "core_pieces": 7,
+   "core_unstable_frac": 0.5130718954248366,
+   "registration": "ok",
+   "shape_resolvable": true
+  },
+  "registration": "ok",
+  "model_version": "uscore-model/1.0",
+  "model_hash": "eca8f132ad94d87184e83699ce6b08e42b1853a014a33552d44cc7064a9ae12a",
+  "feature_version": "uscore-features/1.0",
+  "synthetic_test": true,
+  "disclaimer": "EXPERIMENTAL research output; not a diagnosis; the dark core is an experimental representation, not ground truth"
+ }
+]
