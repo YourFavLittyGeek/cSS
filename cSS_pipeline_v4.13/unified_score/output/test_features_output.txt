@@ -1,0 +1,25 @@
+PASS  x2 reliable on a clear plate, several noise units  5.253004723878635
+PASS  x2 no deposit -> not reliable (never 'reliable low')  ['core unstable (> 50 % of core voxels unstable)']
+PASS  x2 shell too small -> unavailable  
+PASS  x3 = known depth (-1.0 mm) within half a voxel  -1.0
+PASS  x3 / x4 unavailable without anatomy  
+PASS  x3 unreliable under bad registration (value kept)  
+PASS  x3 reliable / x4 unreliable at marginal registration (sulcal direction is stricter)  
+PASS  x4 sheet lying in the surface ~ 1  (0.99994221393979, 'sheet')
+PASS  x4 tube crossing the surface ~ 0  (0.0020842343466829227, 'reliable')
+PASS  x4 ball: direction undefined -> unreliable  ['direction undefined (axis ratios 1.07, 1.05 < 2.25)']
+PASS  x1 vessel entering and exiting: traverse, ~ sum of the two reaches (12 + 12 mm, minus zone)  (23.5, [12.0, 11.5])
+PASS  x1 censored at the crop border is a NOTE, status stays reliable  
+PASS  x1 vessel on one side only: contact without traverse -> 0  
+PASS  x1 no vessel map -> unavailable (not 0)  
+PASS  x1 no vessel near -> 0, no contact  
+PASS  x5 band continuing 5.5 mm beyond the brain mask: measured 5.5 .. 7.5 mm (blooming adds length)  7.0
+KNOWN-BIAS  x5 overestimates by +1.5 mm here (blur / noise attached to the band end; first run: +1.5 mm). Documented in FEATURE_SPEC.
+PASS  x5 signal void beyond the mask is not 'continuation'  0.5
+PASS  x5 without unmasked SWI -> unavailable  
+PASS  x5 confined plate -> 0  
+PASS  every feature has a status in the three states  
+PASS  candidate never modified  
+PASS  spec documents units, inputs, reliability, missing data, failure modes for all five  
+
+uscore features: 0 FAIL

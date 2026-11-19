@@ -1,0 +1,571 @@
+{
+ "css_sulcal_bank": {
+  "category": "uncertain",
+  "detectors": {
+   "surface_vein": "not_confirmed",
+   "extracranial_continuation": "not_confirmed",
+   "skull_interface": "not_confirmed"
+  },
+  "features": {
+   "x1_vessel_continuity_mm": [
+    0.0,
+    "reliable"
+   ],
+   "x2_core_contrast_nu": [
+    2.91,
+    "unreliable"
+   ],
+   "x3_pial_distance_mm": [
+    -0.6,
+    "reliable"
+   ],
+   "x4_sulcal_alignment": [
+    0.99,
+    "reliable"
+   ],
+   "x5_extracranial_mm": [
+    0.0,
+    "reliable"
+   ]
+  },
+  "flags": [
+   "dark-core decomposition unstable"
+  ],
+  "unstable": false
+ },
+ "css_convexity": {
+  "category": "uncertain",
+  "detectors": {
+   "surface_vein": "not_confirmed",
+   "extracranial_continuation": "not_confirmed",
+   "skull_interface": "not_confirmed"
+  },
+  "features": {
+   "x1_vessel_continuity_mm": [
+    0.0,
+    "reliable"
+   ],
+   "x2_core_contrast_nu": [
+    3.74,
+    "reliable"
+   ],
+   "x3_pial_distance_mm": [
+    -1.2,
+    "reliable"
+   ],
+   "x4_sulcal_alignment": [
+    1.0,
+    "reliable"
+   ],
+   "x5_extracranial_mm": [
+    0.0,
+    "reliable"
+   ]
+  },
+  "flags": [],
+  "unstable": false
+ },
+ "surface_vein": {
+  "category": "alternative_high_confidence",
+  "detectors": {
+   "surface_vein": "confirmed",
+   "extracranial_continuation": "not_confirmed",
+   "skull_interface": "not_confirmed"
+  },
+  "features": {
+   "x1_vessel_continuity_mm": [
+    22.2,
+    "reliable"
+   ],
+   "x2_core_contrast_nu": [
+    4.49,
+    "reliable"
+   ],
+   "x3_pial_distance_mm": [
+    1.8,
+    "reliable"
+   ],
+   "x4_sulcal_alignment": [
+    0.99,
+    "reliable"
+   ],
+   "x5_extracranial_mm": [
+    0.0,
+    "reliable"
+   ]
+  },
+  "flags": [],
+  "unstable": false
+ },
+ "vein_parallel_to_sulcus": {
+  "category": "uncertain",
+  "detectors": {
+   "surface_vein": "confirmed",
+   "extracranial_continuation": "not_confirmed",
+   "skull_interface": "not_confirmed"
+  },
+  "features": {
+   "x1_vessel_continuity_mm": [
+    22.2,
+    "reliable"
+   ],
+   "x2_core_contrast_nu": [
+    3.1,
+    "unreliable"
+   ],
+   "x3_pial_distance_mm": [
+    0.6,
+    "reliable"
+   ],
+   "x4_sulcal_alignment": [
+    0.99,
+    "unreliable"
+   ],
+   "x5_extracranial_mm": [
+    0.0,
+    "reliable"
+   ]
+  },
+  "flags": [
+   "dark-core decomposition unstable"
+  ],
+  "unstable": false
+ },
+ "vein_overlapping_css": {
+  "category": "uncertain",
+  "detectors": {
+   "surface_vein": "not_confirmed",
+   "extracranial_continuation": "not_confirmed",
+   "skull_interface": "not_confirmed"
+  },
+  "features": {
+   "x1_vessel_continuity_mm": [
+    23.4,
+    "reliable"
+   ],
+   "x2_core_contrast_nu": [
+    4.42,
+    "reliable"
+   ],
+   "x3_pial_distance_mm": [
+    -0.6,
+    "reliable"
+   ],
+   "x4_sulcal_alignment": [
+    1.0,
+    "reliable"
+   ],
+   "x5_extracranial_mm": [
+    0.0,
+    "reliable"
+   ]
+  },
+  "flags": [
+   "mixed vessel / sheet object"
+  ],
+  "unstable": false
+ },
+ "thin_curved_css": {
+  "category": "uncertain",
+  "detectors": {
+   "surface_vein": "not_confirmed",
+   "extracranial_continuation": "not_confirmed",
+   "skull_interface": "not_confirmed"
+  },
+  "features": {
+   "x1_vessel_continuity_mm": [
+    0.0,
+    "reliable"
+   ],
+   "x2_core_contrast_nu": [
+    2.57,
+    "unreliable"
+   ],
+   "x3_pial_distance_mm": [
+    -1.2,
+    "reliable"
+   ],
+   "x4_sulcal_alignment": [
+    1.0,
+    "reliable"
+   ],
+   "x5_extracranial_mm": [
+    0.0,
+    "reliable"
+   ]
+  },
+  "flags": [
+   "dark-core decomposition unstable"
+  ],
+  "unstable": false
+ },
+ "fragmented_css": {
+  "category": "uncertain",
+  "detectors": {
+   "surface_vein": "not_confirmed",
+   "extracranial_continuation": "not_confirmed",
+   "skull_interface": "not_confirmed"
+  },
+  "features": {
+   "x1_vessel_continuity_mm": [
+    0.0,
+    "reliable"
+   ],
+   "x2_core_contrast_nu": [
+    3.37,
+    "unreliable"
+   ],
+   "x3_pial_distance_mm": [
+    -1.2,
+    "reliable"
+   ],
+   "x4_sulcal_alignment": [
+    0.99,
+    "reliable"
+   ],
+   "x5_extracranial_mm": [
+    0.0,
+    "reliable"
+   ]
+  },
+  "flags": [
+   "dark-core decomposition unstable"
+  ],
+  "unstable": false
+ },
+ "adjacent_css_bands": {
+  "category": "uncertain",
+  "detectors": {
+   "surface_vein": "not_confirmed",
+   "extracranial_continuation": "not_confirmed",
+   "skull_interface": "not_confirmed"
+  },
+  "features": {
+   "x1_vessel_continuity_mm": [
+    0.0,
+    "reliable"
+   ],
+   "x2_core_contrast_nu": [
+    2.9,
+    "unreliable"
+   ],
+   "x3_pial_distance_mm": [
+    -0.6,
+    "reliable"
+   ],
+   "x4_sulcal_alignment": [
+    0.97,
+    "unreliable"
+   ],
+   "x5_extracranial_mm": [
+    0.0,
+    "reliable"
+   ]
+  },
+  "flags": [
+   "dark-core decomposition unstable"
+  ],
+  "unstable": false
+ },
+ "mixed_vein_and_sheet": {
+  "category": "uncertain",
+  "detectors": {
+   "surface_vein": "not_confirmed",
+   "extracranial_continuation": "not_confirmed",
+   "skull_interface": "not_confirmed"
+  },
+  "features": {
+   "x1_vessel_continuity_mm": [
+    0.0,
+    "reliable"
+   ],
+   "x2_core_contrast_nu": [
+    4.2,
+    "reliable"
+   ],
+   "x3_pial_distance_mm": [
+    -0.6,
+    "reliable"
+   ],
+   "x4_sulcal_alignment": [
+    1.0,
+    "reliable"
+   ],
+   "x5_extracranial_mm": [
+    0.0,
+    "reliable"
+   ]
+  },
+  "flags": [],
+  "unstable": false
+ },
+ "extracranial_artifact": {
+  "category": "alternative_high_confidence",
+  "detectors": {
+   "surface_vein": "not_confirmed",
+   "extracranial_continuation": "confirmed",
+   "skull_interface": "not_confirmed"
+  },
+  "features": {
+   "x1_vessel_continuity_mm": [
+    0.0,
+    "reliable"
+   ],
+   "x2_core_contrast_nu": [
+    5.06,
+    "reliable"
+   ],
+   "x3_pial_distance_mm": [
+    -0.6,
+    "reliable"
+   ],
+   "x4_sulcal_alignment": [
+    0.0,
+    "reliable"
+   ],
+   "x5_extracranial_mm": [
+    9.0,
+    "reliable"
+   ]
+  },
+  "flags": [],
+  "unstable": false
+ },
+ "skull_interface_artifact": {
+  "category": "alternative_high_confidence",
+  "detectors": {
+   "surface_vein": "not_confirmed",
+   "extracranial_continuation": "not_confirmed",
+   "skull_interface": "confirmed"
+  },
+  "features": {
+   "x1_vessel_continuity_mm": [
+    0.0,
+    "reliable"
+   ],
+   "x2_core_contrast_nu": [
+    16750503.54,
+    "reliable"
+   ],
+   "x3_pial_distance_mm": [
+    4.8,
+    "reliable"
+   ],
+   "x4_sulcal_alignment": [
+    1.0,
+    "reliable"
+   ],
+   "x5_extracranial_mm": [
+    0.0,
+    "reliable"
+   ]
+  },
+  "flags": [],
+  "unstable": false
+ },
+ "css_subarachnoid_near_skull": {
+  "category": "uncertain",
+  "detectors": {
+   "surface_vein": "not_confirmed",
+   "extracranial_continuation": "not_confirmed",
+   "skull_interface": "not_confirmed"
+  },
+  "features": {
+   "x1_vessel_continuity_mm": [
+    0.0,
+    "reliable"
+   ],
+   "x2_core_contrast_nu": [
+    2.31,
+    "unreliable"
+   ],
+   "x3_pial_distance_mm": [
+    1.8,
+    "reliable"
+   ],
+   "x4_sulcal_alignment": [
+    1.0,
+    "reliable"
+   ],
+   "x5_extracranial_mm": [
+    0.0,
+    "reliable"
+   ]
+  },
+  "flags": [
+   "dark-core decomposition unstable"
+  ],
+  "unstable": false
+ },
+ "css_in_thick_csf_2.4mm": {
+  "category": "uncertain",
+  "detectors": {
+   "surface_vein": "not_confirmed",
+   "extracranial_continuation": "not_confirmed",
+   "skull_interface": "not_confirmed"
+  },
+  "features": {
+   "x1_vessel_continuity_mm": [
+    0.0,
+    "reliable"
+   ],
+   "x2_core_contrast_nu": [
+    6.63,
+    "reliable"
+   ],
+   "x3_pial_distance_mm": [
+    2.4,
+    "reliable"
+   ],
+   "x4_sulcal_alignment": [
+    1.0,
+    "reliable"
+   ],
+   "x5_extracranial_mm": [
+    0.0,
+    "reliable"
+   ]
+  },
+  "flags": [],
+  "unstable": false
+ },
+ "css_directly_under_skull": {
+  "category": "uncertain",
+  "detectors": {
+   "surface_vein": "not_confirmed",
+   "extracranial_continuation": "not_confirmed",
+   "skull_interface": "not_confirmed"
+  },
+  "features": {
+   "x1_vessel_continuity_mm": [
+    0.0,
+    "reliable"
+   ],
+   "x2_core_contrast_nu": [
+    2.67,
+    "unreliable"
+   ],
+   "x3_pial_distance_mm": [
+    -0.6,
+    "reliable"
+   ],
+   "x4_sulcal_alignment": [
+    1.0,
+    "reliable"
+   ],
+   "x5_extracranial_mm": [
+    0.0,
+    "reliable"
+   ]
+  },
+  "flags": [
+   "dark-core decomposition unstable"
+  ],
+  "unstable": false
+ },
+ "css_touching_sulcal_vein": {
+  "category": "uncertain",
+  "detectors": {
+   "surface_vein": "not_confirmed",
+   "extracranial_continuation": "not_confirmed",
+   "skull_interface": "not_confirmed"
+  },
+  "features": {
+   "x1_vessel_continuity_mm": [
+    17.58,
+    "reliable"
+   ],
+   "x2_core_contrast_nu": [
+    3.37,
+    "unreliable"
+   ],
+   "x3_pial_distance_mm": [
+    -0.6,
+    "reliable"
+   ],
+   "x4_sulcal_alignment": [
+    0.99,
+    "reliable"
+   ],
+   "x5_extracranial_mm": [
+    0.0,
+    "reliable"
+   ]
+  },
+  "flags": [
+   "mixed vessel / sheet object",
+   "dark-core decomposition unstable"
+  ],
+  "unstable": false
+ },
+ "missing_vessel_map": {
+  "category": "uncertain",
+  "detectors": {
+   "surface_vein": "unresolved",
+   "extracranial_continuation": "not_confirmed",
+   "skull_interface": "not_confirmed"
+  },
+  "features": {
+   "x1_vessel_continuity_mm": [
+    null,
+    "unavailable"
+   ],
+   "x2_core_contrast_nu": [
+    3.85,
+    "reliable"
+   ],
+   "x3_pial_distance_mm": [
+    -1.2,
+    "reliable"
+   ],
+   "x4_sulcal_alignment": [
+    1.0,
+    "reliable"
+   ],
+   "x5_extracranial_mm": [
+    0.0,
+    "reliable"
+   ]
+  },
+  "flags": [
+   "surface_vein: inputs unavailable or unresolved"
+  ],
+  "unstable": false
+ },
+ "misregistration": {
+  "category": "uncertain",
+  "detectors": {
+   "surface_vein": "not_confirmed",
+   "extracranial_continuation": "unresolved",
+   "skull_interface": "not_confirmed"
+  },
+  "features": {
+   "x1_vessel_continuity_mm": [
+    0.0,
+    "unreliable"
+   ],
+   "x2_core_contrast_nu": [
+    2.94,
+    "unreliable"
+   ],
+   "x3_pial_distance_mm": [
+    -0.6,
+    "unreliable"
+   ],
+   "x4_sulcal_alignment": [
+    0.99,
+    "unreliable"
+   ],
+   "x5_extracranial_mm": [
+    0.0,
+    "unreliable"
+   ]
+  },
+  "flags": [
+   "registration not adequate (unreliable)",
+   "dark-core decomposition unstable",
+   "extracranial_continuation: inputs unavailable or unresolved"
+  ],
+  "unstable": false
+ }
+}

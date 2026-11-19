@@ -1,0 +1,58 @@
+{
+ "seeds": 5,
+ "table": {
+  "css_sulcal_bank": {
+   "uncertain": 5
+  },
+  "css_convexity": {
+   "uncertain": 5
+  },
+  "surface_vein": {
+   "alternative_high_confidence": 4,
+   "uncertain": 1
+  },
+  "vein_parallel_to_sulcus": {
+   "uncertain": 5
+  },
+  "vein_overlapping_css": {
+   "uncertain": 5
+  },
+  "thin_curved_css": {
+   "uncertain": 5
+  },
+  "fragmented_css": {
+   "uncertain": 5
+  },
+  "adjacent_css_bands": {
+   "uncertain": 5
+  },
+  "mixed_vein_and_sheet": {
+   "uncertain": 5
+  },
+  "extracranial_artifact": {
+   "alternative_high_confidence": 5
+  },
+  "skull_interface_artifact": {
+   "alternative_high_confidence": 5
+  },
+  "css_subarachnoid_near_skull": {
+   "uncertain": 5
+  },
+  "css_in_thick_csf_2.4mm": {
+   "uncertain": 5
+  },
+  "css_directly_under_skull": {
+   "uncertain": 5
+  },
+  "css_touching_sulcal_vein": {
+   "uncertain": 5
+  },
+  "missing_vessel_map": {
+   "uncertain": 5
+  },
+  "misregistration": {
+   "uncertain": 5
+  }
+ },
+ "critical": []
+}
