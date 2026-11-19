@@ -567,3 +567,20 @@ Reviewer viewer rebuilt (docs/CHANGELOG_v5.6.md): single un-zoomed image, layout
   108 ids: dev M02-M11, held-out M01, M12-M26); held-out labels only via run_unified.py heldout HASH (logged). App: after every
   finished patient `run_unified.py app ID` -> $CSS_BASE/uscore/reports/ID.json + results columns unified_*; no model is fitted
   until `run_unified.py train` on the Mac. Detector, rules and score_css unchanged. tests/run_uscore_tests.sh.
+- v5.14.1-gui (branch experimental/unified-gui from 3bbfa14; docs/GUI_VALIDATION_WORKFLOW_v514.md, docs/gui_v514/ screenshots + test
+  outputs): app tab "Unified (experimental)" = guided workflow (audit, features, reliability, train + nested CV, freeze with typed FREEZE,
+  candidates, synthetic robustness, export) + in-app test protocol T1-T15 (app/unified_gui.py, gui_protocol.py, unified_view.js);
+  reviewer "Unified score" card + 3-D layers dark core / support (hidden in a validation read). Unified step now OPT-IN, runs after
+  "done" + results save in the background, 15 min limit, status pending/running/completed/failed/interrupted. Training no longer
+  freezes (pipeline.freeze). Held-out evaluation: no GUI route; CLI needs frozen model + written uscore/heldout_authorization.json.
+  Fixes: run_tests.sh set -o pipefail (+ head -> first) so piped checks gate the suite; install.sh now installs review_web.html /
+  morph3d_view.js (were never installed), VERSION, real BUILD stamp; scripts/BUILD = $Format placeholder (was a stale literal).
+  docs/INVESTIGATION_morph3d_cylinder.md: the v5.12 local-shape classifier calls an in-plane 2.4 mm tube at 0.5x0.5x2 mm 100 % sheet
+  (no 'below resolution' outcome) - real defect, test left FAILING, fix proposed not applied.
+- v5.14.1-gui cycle 2: css_morph3d local shape has a resolution-confidence gate (classes unresolved / acquisition_limited; a class needs
+  > 2 samples across along the directions it depends on; sheets with an unresolved thickness must be >= 2x wider than the hidden
+  thickness) - docs/INVESTIGATION_morph3d_cylinder.md, tests/check_morph3d_resolution.py (100-case matrix). Feature audit:
+  docs/FEATURE_DICTIONARY_v514.md (x4 measures surface conformity, not sulcal-axis alignment; exploratory x4b not in the model).
+  Held-out audit: docs/HELDOUT_PROTECTION_AUDIT_v514.md - authorization + recomputed model hash enforced inside LabelAccess,
+  private _read_calls, cohort_audit no longer opens held-out calls, protocol integrity check signs reader files by stat only;
+  tests/check_heldout_protection.py. Protocol: auto vs manual sections, manual items never auto-passed, auto results not editable.

@@ -74,6 +74,24 @@ r6, i6 = scene(band, 6007, raw_extra=voidf); F10, _ = fe.extract(band & brain, i
 check("x5 signal void beyond the mask is not 'continuation'", F10["x5_extracranial_mm"]["value"] <= 1.0, F10["x5_extracranial_mm"]["value"])
 check("x5 without unmasked SWI -> unavailable", F8["x5_extracranial_mm"]["status"] == "unavailable")
 check("x5 confined plate -> 0", F["x5_extracranial_mm"]["value"] == 0)
+# x4 audit (cycle 2): line-mode x4 is surface TANGENCY, not alignment with the sulcal axis; x4b (exploratory) measures the latter
+sys.path.insert(0, H); import uscore_synth as sy
+lines = {"along": (np.abs(sy.X - (sy.SULC_X - sy.SULC_W / 2 - 0.4)) <= 0.3) & (np.abs(sy.Y - 18) <= 7) & (np.abs(sy.Z - (sy.PIAL_Z - 4)) <= 0.3),
+         "across": (np.abs(sy.Y - 18) <= 0.3) & (np.abs(sy.X - 14) <= 5) & (np.abs(sy.Z - (sy.PIAL_Z - 0.4)) <= 0.3) & ~sy.SULC,
+         "flat": (np.abs(sy.Y - 18) <= 0.3) & (np.abs(sy.X - 36) <= 4) & (np.abs(sy.Z - (sy.PIAL_Z - 0.4)) <= 0.3)}
+X4 = {}
+for nm, mk in lines.items():
+    rw, im = sy.render([(mk, 3.0)], 7700); Fx, _ = fe.extract(mk, im, sy.VOX, raw=rw, psd=sy.PSD, brain=sy.BRAIN, reg="ok"); X4[nm] = Fx
+check("x4 audit: line-mode x4 cannot tell along-sulcus from across-sulcus (both ~1: it measures surface tangency)",
+      abs(X4["along"]["x4_sulcal_alignment"]["value"] - X4["across"]["x4_sulcal_alignment"]["value"]) < 0.1,
+      f"{X4['along']['x4_sulcal_alignment']['value']:.2f} vs {X4['across']['x4_sulcal_alignment']['value']:.2f}")
+check("x4b (exploratory): along the sulcus ~1", (X4["along"]["x4b_sulcal_axis_exploratory"]["value"] or 0) > 0.9, X4["along"]["x4b_sulcal_axis_exploratory"]["value"])
+check("x4b (exploratory): across the sulcus ~0", X4["across"]["x4b_sulcal_axis_exploratory"]["value"] is not None and X4["across"]["x4b_sulcal_axis_exploratory"]["value"] < 0.2,
+      X4["across"]["x4b_sulcal_axis_exploratory"]["value"])
+check("x4b (exploratory): flat convexity -> unavailable (no sulcal axis), never a value", X4["flat"]["x4b_sulcal_axis_exploratory"]["status"] == "unavailable")
+from uscore.common import PREDICTORS
+check("x4b is NOT a model predictor", "x4b_sulcal_axis_exploratory" not in PREDICTORS)
+
 # general
 check("every feature has a status in the three states", all(F[k]["status"] in ("reliable", "unreliable", "unavailable") for k in fe.FEATURE_SPEC))
 check("candidate never modified", np.array_equal(cand, plate))

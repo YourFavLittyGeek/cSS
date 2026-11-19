@@ -18,7 +18,12 @@ from scipy.spatial import cKDTree
 
 S26 = ndi.generate_binary_structure(3, 3)
 HESS_SIGMAS_MM = (0.8, 1.6)          # same scales as detect_css.py (HESS_SIGMAS_MM)
-CLASS_NAMES = ["tube", "sheet", "blob", "uncertain"]
+CLASS_NAMES = ["tube", "sheet", "blob", "uncertain", "unresolved", "acquisition_limited"]
+# v5.14-gui resolution confidence (docs/INVESTIGATION_morph3d_cylinder.md): a shape class is only claimed when every direction it
+# depends on is sampled by MORE than two voxels across the structure (two samples cannot tell a width <= w from one up to 2w).
+K_RESOLVED = 2.2      # samples spanned along a direction; > 2, with 0.2 margin for the discretisation of round cross-sections
+ANISO_LIMITED = 1.5   # an unresolved direction sampled >= 1.5 x more coarsely than the finest voxel side = limited by acquisition
+FLAT_FACTOR = 2.0     # a sheet with an unresolved thickness must be >= 2 x wider than the thickness that sampling could hide
 
 
 # ---------------------------------------------------------------- basic geometry
@@ -127,27 +132,71 @@ def skeleton_graph(sk, vox):
 
 
 # ---------------------------------------------------------------- local shape (geometry) and Hessian (image)
-def local_shape(P_mm, radius, thick, vmax, comp=None):
-    """neighbourhood PCA of the mask coordinates around every voxel (radius mm): spreads s1 >= s2 >= s3 (sd, mm).
+def sampling_width(u, vox):
+    """sampling interval (mm) of the voxel grid along unit direction u = width of one voxel box projected on u
+    (sum |u_i| v_i): exactly the voxel side for axis-aligned u, and continuous under small rotations of u."""
+    return float(np.sum(np.abs(np.asarray(u)) * np.asarray(vox)))
+
+
+def axis_extent_mm(proj_mm, w_mm):
+    """physical extent of the structure along a direction, from the voxel-centre projections: span + min(largest gap between
+    consecutive projected centres, w). Axis-aligned (also slightly rotated) axes: the centres form clusters one voxel apart, the
+    largest gap is ~w, so extent = span + w. Oblique axes: the lattice projects densely, the centres reach the boundary, the
+    largest gap is small, so extent ~ span (adding a whole w there double-counts - found by the oblique cases of
+    check_morph3d_resolution). Span-based, so it does not depend on the profile shape (an sd-based count called a 2.4 mm tube at
+    1 mm voxels unresolved)."""
+    p = np.sort(np.asarray(proj_mm, float))
+    if len(p) < 2: return float(w_mm)
+    return float(np.ptp(p) + min(float(np.max(np.diff(p))), w_mm))
+
+
+def samples_across(proj_mm, w_mm):
+    """samples across = extent / sampling interval along that direction (axis-aligned: span / w + 1)."""
+    return axis_extent_mm(proj_mm, w_mm) / max(w_mm, 1e-9)
+
+
+def local_shape(P_mm, radius, thick, vmax, comp=None, vox=None):
+    """neighbourhood PCA of the mask coordinates around every voxel (radius mm): spreads s1 >= s2 >= s3 (sd, mm), axes e1-e3.
+    Geometric candidate (unchanged rules):
     blob   : s3 / s1 >= 0.5 (spread in all three directions) AND local thickness >= 3 x s3 (solid: a folded or
              two-layer sheet, e.g. both banks of a sulcus, spreads in 3-D too but is thin everywhere -> sheet)
     tube   : s2 <= 0.45 x local thickness + 0.25 x largest voxel AND s2 <= 1.8 x s3 (+0.15 voxel): thin and round across
              (a ribbon is thin in one direction only, s2 >> s3)
     sheet  : otherwise (thin in one direction only)
-    uncertain: fewer than 8 neighbours. Absolute widths (not ratios) are used because the EDGE of a sheet has a
-    line-like neighbourhood ratio (a half disc) while its width s2 stays large. Returns spreads, class, neighbour count."""
+    Resolution confidence (v5.14-gui): the candidate class is kept only if the directions it DEPENDS ON are resolved, i.e. the
+    structure spans k > 2 grid samples (k >= K_RESOLVED; k = span of the neighbourhood along the axis / sampling interval + 1)
+    along them, with the sampling interval taken along that direction for
+    anisotropic voxels (sampling_width) - so oblique structures are judged on their own axes:
+      tube needs e2 and e3 (the cross-section shape), sheet needs e1 and e2 (the in-plane extent) - its thickness e3 may be
+      below resolution only if the width along e2 is >= FLAT_FACTOR x the thickness the sampling along e3 could hide
+      (k3 x w3); blob needs all three.
+    Otherwise: acquisition_limited when an unresolved direction is sampled >= ANISO_LIMITED x more coarsely than the finest
+    voxel side (the slice geometry, not the structure, prevents the decision), else unresolved (too small for the grid).
+    uncertain: fewer than 8 neighbours. Returns spreads, class, neighbour count, samples spanned (k1, k2, k3)."""
+    vox = np.full(3, vmax) if vox is None else np.asarray(vox, float); vmin = float(vox.min())
     tree = cKDTree(P_mm); out = np.zeros((len(P_mm), 3)); cls = np.full(len(P_mm), 3, int); nn = np.zeros(len(P_mm), int)
+    kk = np.zeros((len(P_mm), 3))
     for i, nbrs in enumerate(tree.query_ball_point(P_mm, radius)):
         if comp is not None: nbrs = [j for j in nbrs if comp[j] == comp[i]]       # never mix separate pieces
         nn[i] = len(nbrs)
         if len(nbrs) < 8: continue
-        Q = P_mm[nbrs]; s = np.sqrt(np.sort(np.clip(np.linalg.eigvalsh(np.cov((Q - Q.mean(0)).T)), 0, None))[::-1])
+        Q = P_mm[nbrs]; ev, V = np.linalg.eigh(np.cov((Q - Q.mean(0)).T)); o = np.argsort(ev)[::-1]
+        s = np.sqrt(np.clip(ev[o], 0, None)); E = V[:, o]
         out[i] = s
         if s[0] <= 0: continue
+        w = np.array([sampling_width(E[:, a], vox) for a in range(3)]); Qc = Q - Q.mean(0)
+        k = np.array([samples_across(Qc @ E[:, a], w[a]) for a in range(3)]); kk[i] = k
         tube = s[1] <= 0.45 * thick[i] + 0.25 * vmax and s[1] <= 1.8 * s[2] + 0.15 * vmax and s[0] >= 2 * s[1]   # thin, round across, elongated
         solid = thick[i] >= 3.0 * s[2]            # a ball is thick where it spreads; two thin sheets a few mm apart are not
-        cls[i] = 2 if (s[2] / s[0] >= 0.5 and solid) else (0 if tube else 1)
-    return out, cls, nn
+        cand, need = (2, (0, 1, 2)) if (s[2] / s[0] >= 0.5 and solid) else ((0, (1, 2)) if tube else (1, (0, 1)))
+        bad = [a for a in need if k[a] < K_RESOLVED]
+        if cand == 1 and not bad and k[2] < K_RESOLVED:
+            # a sheet may be thin below resolution, but only if it is clearly WIDER than the thickness the sampling could hide:
+            # otherwise a tube (round cross-section) seen in one coarse slice would be called a sheet
+            if axis_extent_mm(Qc @ E[:, 1], w[1]) < FLAT_FACTOR * max(k[2], 1.0) * w[2]: bad = [2]
+        if not bad: cls[i] = cand
+        else: cls[i] = 5 if any(w[a] >= ANISO_LIMITED * vmin for a in bad) else 4
+    return out, cls, nn, kk
 
 
 def hessian_features(img, mask, vox, sigmas_mm=HESS_SIGMAS_MM):
@@ -219,12 +268,15 @@ def analyse(mask, vox, img=None, psd=None, cortex=None, vessel=None, radius_mm=N
     # width while a thin tube next to a sheet is judged on itself
     Rv = np.clip(3.0 * tv, max(4.0, 3.0 * vmax), max(7.0, 3.0 * vmax)) if radius_mm is None else np.full(n, float(radius_mm))
     R = float(np.median(Rv))
-    desc, gcls, nn = local_shape(P, Rv, tv, vmax, comp=lab[mask])
-    share = {CLASS_NAMES[k]: round(float((gcls == k).mean()), 3) for k in range(4)}
+    desc, gcls, nn, kk = local_shape(P, Rv, tv, vmax, comp=lab[mask], vox=vox)
+    share = {CLASS_NAMES[k]: round(float((gcls == k).mean()), 3) for k in range(len(CLASS_NAMES))}
     sk, sk_note = skeleton(mask); sg = skeleton_graph(sk, vox)
     tube_share = share["tube"]
-    sk_ok = tube_share >= 0.4 and len(sg["points"]) >= 3
-    if not sk_ok: sk_note = (sk_note + "; " if sk_note else "") + ("not shown: the object is not curve-like (the medial set of a sheet is a surface)" if tube_share < 0.4 else "too few skeleton voxels")
+    # v5.14-gui: a curve skeleton (length along a line) is meaningful for any clearly ELONGATED object whose cross-section is
+    # tube-like OR not resolvable - it does not require a confident tube class; never for sheets
+    line_like = (tube_share + share["unresolved"] + share["acquisition_limited"]) >= 0.4 and sd[0] > 0 and sd[1] / sd[0] <= 0.5
+    sk_ok = line_like and len(sg["points"]) >= 3
+    if not sk_ok: sk_note = (sk_note + "; " if sk_note else "") + ("not shown: the object is not curve-like (the medial set of a sheet is a surface)" if not line_like else "too few skeleton voxels")
     xs = cross_sections(P, ax, vox)
     xs_ok = [c for c in xs if "area_mm2" in c]
     cv = float(np.std([c["eq_diam_mm"] for c in xs_ok]) / max(np.mean([c["eq_diam_mm"] for c in xs_ok]), 1e-6)) if len(xs_ok) >= 3 else np.nan
@@ -237,7 +289,11 @@ def analyse(mask, vox, img=None, psd=None, cortex=None, vessel=None, radius_mm=N
                smoothing_volume_change_pct=round(100 * (vol_mesh_s - vol_mesh_raw) / vol_mesh_raw, 1) if vol_mesh_raw else None,
                thickness_mm=dict(mean=round(float(tv.mean()), 2), median=round(float(np.median(tv)), 2), min=round(float(tv.min()), 2), max=round(float(tv.max()), 2),
                                  p10=round(float(np.percentile(tv, 10)), 2), p90=round(float(np.percentile(tv, 90)), 2)),
-               local_radius_mm=round(R, 2), local_share=share, xsections=xs, xsection_cv=round(cv, 2) if np.isfinite(cv) else None,
+               local_radius_mm=round(R, 2), local_share=share,
+               resolution=dict(rule=f"a class is claimed only when the structure spans >= {K_RESOLVED} samples along every direction it depends on",
+                               resolved_share=round(float(np.isin(gcls, (0, 1, 2)).mean()), 3),
+                               indeterminate_share=round(float(np.isin(gcls, (4, 5)).mean()), 3),
+                               samples_median=[round(float(x), 2) for x in np.median(kk[nn >= 8], 0)] if (nn >= 8).any() else None), xsections=xs, xsection_cv=round(cv, 2) if np.isfinite(cv) else None,
                skeleton=dict(ok=bool(sk_ok), note=sk_note, length_mm=sg["length_mm"], n_end=sg["n_end"], n_branch=sg["n_branch"]))
     arr = dict(P_idx=P_idx, gcls=gcls, desc=desc, thick=tv, sk=sg["points"] if sk_ok else np.zeros((0, 3), int),
                sk_branch=sg["branch_pts"] if sk_ok else np.zeros((0, 3), int), mesh_raw=(v_raw, f_raw), mesh=(v_s, f_s))
@@ -248,7 +304,7 @@ def analyse(mask, vox, img=None, psd=None, cortex=None, vessel=None, radius_mm=N
     # image Hessian (separate from geometry)
     if img is not None:
         h = hessian_features(img, mask, vox); arr["hess"] = h
-        hs = {CLASS_NAMES[k]: round(float((h["cls"] == k).mean()), 3) for k in range(4)}
+        hs = {CLASS_NAMES[k]: round(float((h["cls"] == k).mean()), 3) for k in range(4)}   # image Hessian: no resolution classes
         res["hessian"] = dict(convention="eigenvalues sorted by |l| ascending, scale-normalised, dark structure -> positive l3 (detect_css.py)",
                               sigmas_mm=list(HESS_SIGMAS_MM), share=hs, tube_med=round(float(np.median(h["tube"])), 2),
                               sheet_med=round(float(np.median(h["sheet"])), 2), blob_med=round(float(np.median(h["blob"])), 2),
@@ -281,7 +337,9 @@ def reliability(r, vox):
     if r["thickness_mm"]["median"] < 1.5 * vmax: notes.append(f"median thickness {r['thickness_mm']['median']} mm is close to the largest voxel side ({vmax:g} mm)")
     if vmax / vmin > 2: notes.append(f"anisotropic voxels ({vmax / vmin:.1f}:1): shapes along the slice direction are coarse")
     if len(r["components"]) > 1: notes.append(f"{len(r['components'])} separate pieces")
-    lvl = "low" if (r["n_vox"] < 30 or len(notes) >= 3) else ("moderate" if notes else "good")
+    ind = r.get("resolution", {}).get("indeterminate_share", 0) or 0
+    if ind >= 0.2: notes.append(f"{round(100 * ind)} % of voxels: shape not resolvable at this voxel size (unresolved / acquisition-limited)")
+    lvl = "low" if (r["n_vox"] < 30 or len(notes) >= 3 or ind >= 0.5) else ("moderate" if notes else "good")
     return lvl, notes
 
 
@@ -289,7 +347,11 @@ def summary(r):
     s = r["local_share"]; ranked = sorted([(s[k], k) for k in ("sheet", "tube", "blob")], reverse=True)
     main, second = ranked[0], ranked[1]
     word = {"sheet": "sheet-like", "tube": "tube-like", "blob": "blob-like"}
-    if main[0] < 0.4: txt = "mixed / indeterminate local geometry"
+    ind = s.get("unresolved", 0) + s.get("acquisition_limited", 0)
+    if ind >= 0.4:
+        why = "the slice geometry (acquisition-limited)" if s.get("acquisition_limited", 0) >= s.get("unresolved", 0) else "the structure being small for the voxel grid"
+        txt = f"local shape NOT resolvable for {round(100 * ind)} % of voxels because of {why}; no tube / sheet / blob claim"
+    elif main[0] < 0.4: txt = "mixed / indeterminate local geometry"
     elif second[0] >= 0.2: txt = f"predominantly {word[main[1]]} geometry with a {word[second[1]]} part ({round(100 * second[0])} %) - mixed"
     else: txt = f"predominantly {word[main[1]]} geometry"
     if r.get("surface", {}).get("within_1mm") is not None:

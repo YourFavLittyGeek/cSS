@@ -1,0 +1,89 @@
+ M CLAUDE.md
+ M app/README.md
+ M app/css_app.html
+ M app/css_app.py
+ M "app/mac/cSS Pipeline.app/Contents/Resources/app/css_app.html"
+ M "app/mac/cSS Pipeline.app/Contents/Resources/app/css_app.py"
+ M install.sh
+ M scripts/BUILD
+ M scripts/VERSION
+ M scripts/css_morph3d.py
+ M scripts/morph3d_view.js
+ M scripts/review_web.html
+ M scripts/review_web.py
+ M scripts/score_css.py
+ M tests/check_morph3d.py
+ M tests/check_morph3d_api.py
+ M tests/check_uscore_features.py
+ M tests/check_uscore_pipeline.py
+ M tests/check_uscore_seeds.py
+ M tests/run_tests.sh
+ M tests/run_uscore_tests.sh
+ M tests/uscore_synthbase.py
+ M unified_score/cohort_audit.py
+ M unified_score/output/COHORT_REPORT_SYNTHETIC_TEST.md
+ M unified_score/output/example_candidate_reports_SYNTHETIC.json
+ M unified_score/run_unified.py
+ M unified_score/uscore/common.py
+ M unified_score/uscore/decision.py
+ M unified_score/uscore/detectors.py
+ M unified_score/uscore/features.py
+ M unified_score/uscore/model.py
+ M unified_score/uscore/pipeline.py
+ M unified_score/uscore/report.py
+?? app/gui_protocol.py
+?? "app/mac/cSS Pipeline.app/Contents/Resources/app/gui_protocol.py"
+?? "app/mac/cSS Pipeline.app/Contents/Resources/app/processing_manager.py"
+?? "app/mac/cSS Pipeline.app/Contents/Resources/app/production_reference.json"
+?? "app/mac/cSS Pipeline.app/Contents/Resources/app/unified_gui.py"
+?? "app/mac/cSS Pipeline.app/Contents/Resources/app/unified_view.js"
+?? app/mac_experimental/launcher.sh
+?? app/mac_experimental/uninstall_experimental.sh
+?? app/processing_manager.py
+?? app/production_reference.json
+?? app/unified_gui.py
+?? app/unified_view.js
+?? docs/FEATURE_DICTIONARY_v514.md
+?? docs/GUI_VALIDATION_WORKFLOW_v514.md
+?? docs/HELDOUT_PROTECTION_AUDIT_v514.md
+?? docs/INVESTIGATION_morph3d_cylinder.md
+?? docs/gui_v514/CHECKPOINT_v514_gui.md
+?? docs/gui_v514/DIFF_vs_3bbfa14.patch
+?? docs/gui_v514/TEST_morph3d_resolution.txt
+?? docs/gui_v514/TEST_run_tests.txt
+?? docs/gui_v514/TEST_run_tests_continue_past_morph3d.txt
+?? docs/gui_v514/TEST_shell.txt
+?? docs/gui_v514/TEST_uscore.txt
+?? docs/gui_v514/cycle2/CHECKPOINT_cycle2.md
+?? docs/gui_v514/cycle2/DIFF_cycle2_vs_previous_state.patch
+?? docs/gui_v514/cycle2/FILES_changed_cycle2.txt
+?? docs/gui_v514/cycle2/TEST_run_tests.txt
+?? docs/gui_v514/cycle2/TEST_run_tests_attempt1_FAILED_morph3d_api.txt
+?? docs/gui_v514/cycle2/TEST_shell.txt
+?? docs/gui_v514/cycle2/TEST_uscore.txt
+?? docs/gui_v514/cycle3/PLAN_revised_pilot_reference_cohort.md
+?? docs/gui_v514/cycle3/audit_review_package/README_AUDIT_REVIEW.md
+?? docs/gui_v514/cycle3/audit_review_package/audit_local_dataset.py
+?? docs/gui_v514/cycle3/audit_review_package/check_audit_local.py
+?? docs/gui_v514/cycle3/audit_review_package/check_local_only.py
+?? docs/gui_v514/cycle3/audit_review_package/netguard/sitecustomize.py
+?? docs/gui_v514/morph3d_resolution_matrix.csv
+?? docs/gui_v514/rc1/DIFF_vs_3bbfa14.patch
+?? docs/gui_v514/rc1/FILES_changed_vs_3bbfa14.txt
+?? docs/gui_v514/rc1/INSTALL_AND_USER_GUIDE_RC1.md
+?? docs/gui_v514/rc1/RC1_INVENTORY.md
+?? scripts/audit_local_dataset.py
+?? tests/check_app_unified.py
+?? tests/check_audit_local.py
+?? tests/check_export_safety.py
+?? tests/check_heldout_protection.py
+?? tests/check_link_study.py
+?? tests/check_local_only.py
+?? tests/check_morph3d_resolution.py
+?? tests/check_pm_full_pipeline.py
+?? tests/check_processing_manager.py
+?? tests/e2e_rc1.py
+?? tests/e2e_rc1_gui.js
+?? tests/netguard/sitecustomize.py
+?? tests/uscore_synth_columns.json
+?? tools/build_experimental_app.sh

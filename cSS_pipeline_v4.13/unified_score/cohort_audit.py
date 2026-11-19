@@ -70,8 +70,8 @@ def scoreability(i):
 rows = []
 for i in sorted(set(seen) | set(prov)):
     m = i.startswith("M"); p = prov.get(i, {}); role = p.get("role") if m and p else ("excluded" if not m else "unassigned")
-    calls = sorted(glob.glob(f"{B}/review/{i}_calls*.csv"))
-    n_called = 0
+    calls = sorted(glob.glob(f"{B}/review/{i}_calls*.csv")) if role == "development" else []   # held-out call files are never opened
+    n_called = 0 if role == "development" else "not inspected (held-out)"
     for f in calls:
         try: n_called = max(n_called, sum(1 for r in csv.DictReader(open(f)) if (r.get("call") or "").strip()))
         except Exception: pass
@@ -110,5 +110,5 @@ with open(f"{H}/cohort_manifest.csv", "w", newline="") as f:
 dev = [r for r in inc if r["role"] == "development"]; ho = [r for r in inc if r["role"] == "held-out"]
 print(f"cohort audit: {len(rows)} identifiers, {len(inc)} included (development {len(dev)}, held-out {len(ho)}), {len(rows) - len(inc)} excluded -> unified_score/cohort_manifest.csv")
 print(f"  development candidates {sum(int(r['n_candidates'] or 0) for r in dev)}, read {sum(int(r['n_reader_calls'] or 0) for r in dev)};"
-      f" held-out candidates {sum(int(r['n_candidates'] or 0) for r in ho)}, read {sum(int(r['n_reader_calls'] or 0) for r in ho)}")
+      f" held-out candidates {sum(int(r['n_candidates'] or 0) for r in ho)} (reader calls of held-out studies are not opened)")
 print("\n".join("  PROBLEM: " + p for p in problems) or "  no problems found")

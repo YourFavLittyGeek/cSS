@@ -1,0 +1,20 @@
+(zsh not installed: using bash as a stand-in)
+== 1. SWI only
+== 2. re-run: SynthSeg re-used
+== 3. SWI re-imported -> stale SynthSeg is redone
+== 4. SWI + T1 + FLAIR (SynthSeg on T1, mri_coreg)
+== 4b. CSS_SWI_SKULLSTRIP=synthstrip keeps the old route (SynthStrip on SWI, T1 and FLAIR)
+== 4c. CSS_REG_METHOD=coreg_masked: T1 cut out by its own labels, then mri_coreg (no SynthStrip)
+== 4d. CSS_REG_METHOD=synthmorph: mri_synthmorph rigid
+== 5. --recon (recon-all, bbregister, Destrieux)
+== 6. recon-all already done -> re-used without --recon; bbregister mincost recorded
+== 6a. v4.17.2: a missing --t1 file stops prep_anat and run_css before anything runs
+== 6a2. the imported copy data/ID_t1.nii.gz can be given as --t1
+== 6c. v4.18 run_lemon.sh: GRE -> SWI -> recon route for each subject, fixed P2xx ids, re-run keeps ids
+== 6c2. recon-all fails (P203): unfinished subject folder moved aside, SynthSeg fallback on the T1, still OK
+== 6b. --phase is imported for the reviewer
+== 8. v5.0: CSS_QC_STRICT exit 3 from detection stops run_css with a message
+== 8b. v5.0: ranking model applied only to dev-split studies
+== 7. batch run_all.sh reaches detection for every subject
+SHELL TESTS PASSED
+rc 0

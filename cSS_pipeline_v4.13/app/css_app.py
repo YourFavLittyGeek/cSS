@@ -11,6 +11,12 @@ HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import series_detect as SD
 
 B = os.environ.get("CSS_BASE", os.path.expanduser("~/css_project"))
+sys.path.insert(0, os.path.join(HERE, "guard")); import css_writeguard as WG      # v5.14.2-rc2: central production write guard
+EXPERIMENTAL = os.environ.get("CSS_EXPERIMENTAL") == "1"
+if EXPERIMENTAL:
+    _okb, _why = WG.check_base(B)
+    if not _okb: sys.exit(f"cSS experimental app refused to start: project folder {_why}")
+    WG.install()                                     # every write in this process (and, via PYTHONPATH, in every Python child) is checked
 SC = os.path.join(B, "scripts"); AD = os.path.join(B, "app_data"); PRIV = os.path.join(B, "private")
 for d in (AD, f"{AD}/staging", f"{AD}/qc", f"{AD}/logs", PRIV): os.makedirs(d, exist_ok=True)
 FAKE = os.environ.get("CSS_APP_FAKE_RUN") == "1"            # tests only: simulate the pipeline steps
@@ -27,13 +33,186 @@ def jload(name, default):
 def jsave(name, obj):
     p = f"{AD}/{name}"; json.dump(obj, open(p + ".tmp", "w"), indent=1, default=str); os.replace(p + ".tmp", p)
 SET = dict(dict(awake=True, theme="dark", backup_dir="", freesurfer_home=os.environ.get("FREESURFER_HOME", ""), threads=4, parallel=1, auto_path=True, auto_retry=True, rerun_mode="choose",
-                features=dict(unified_score=True, duplicate_check=True, preflight=True, qc_snapshot=True, notify=True, version_stamp=True, share=True, backup=True,
+                features=dict(unified_score=False, duplicate_check=True, preflight=True, qc_snapshot=True, notify=True, version_stamp=True, share=True, backup=True,
                               name_warning=False)), **jload("settings.json", {}))
 PAT = jload("patients.json", [])
 for p in PAT:                                            # resume after a restart: interrupted runs go back to the queue
     if p.get("status") in ("running", "paused"): p.update(status="waiting", step="", note="restarted after the app was closed")
+    p.pop("pm_run", None)                                # its history record is marked interrupted by PM.recover_all below
     p.setdefault("pathway", "recon" if p.get("anatomy") == "recon" else (p.get("reg_method") or "synthseg"))
+    if p.get("uscore_status") in ("pending", "running"):   # v5.14-gui recovery: an unified job cut off by a restart is marked, never left "running"
+        p.update(uscore_status="interrupted", uscore_error="the app was closed during the unified step - press 'Score patient' to run it again")
 def save_pat(): jsave("patients.json", PAT)
+import processing_manager as PM                       # v5.14-gui Previous Processing Manager
+try: PM_RECOVERED = PM.recover_all(B)                 # runs left "running" by a closed app become "interrupted" (previous outputs restored)
+except Exception as _e: PM_RECOVERED = {"error": str(_e)}
+try: PM_IMPORTS_ROLLED_BACK = PM.recover_imports(B)  # imports cut off by a crash / quit are rolled back (nothing half-imported stays)
+except Exception as _e: PM_IMPORTS_ROLLED_BACK = [f"error: {_e}"]
+PM_JOBS = {}                                          # code -> {"run_id", "stage", "started"} while a Processing Manager run works
+def _pm_code(c): return c if re.fullmatch(r"[A-Za-z0-9_\-]{1,32}", c or "") else None
+def proc_get(op, q):
+    if op == "studies":
+        out = []
+        for c in PM.studies_on_disk(B):
+            st = PM.Study(B, c); act = st.active_manifest() or {}; h = st.history()
+            out.append(dict(code=c, in_app=pget(c) is not None, runs=len(h), active=act.get("run_id"), last_status=(h[-1]["status"] if h else None),
+                            has_fs=os.path.isdir(os.path.join(st.SD, c)), has_candidates=os.path.exists(f"{B}/review/{c}_candidates.csv"), busy=c in PM_JOBS))
+        return dict(ok=True, studies=out, recovered=PM_RECOVERED, imports_rolled_back=PM_IMPORTS_ROLLED_BACK)
+    if op == "models": return dict(ok=True, models=PM.models_status(B))
+    if op == "scan_source":
+        src = os.path.expanduser(q.get("path", ""))
+        if not os.path.isdir(src) or os.path.realpath(src) == os.path.realpath(B): return dict(ok=False, error="choose another project folder (not this one)")
+        here = set(PM.studies_on_disk(B))
+        return dict(ok=True, studies=[dict(code=c, has_fs=os.path.isdir(f"{src}/subjects/{c}"), has_candidates=os.path.exists(f"{src}/review/{c}_candidates.csv"),
+                                         here=c in here) for c in PM.studies_on_disk(src)])
+    code = _pm_code(q.get("code"))
+    if not code: return dict(ok=False, error="bad code")
+    st = PM.Study(B, code)
+    if op == "audit": return dict(ok=True, busy=PM_JOBS.get(code), **st.audit())
+    if op == "history": return dict(ok=True, runs=st.history(), active=(st.active_manifest() or {}).get("run_id"), recovered=PM_RECOVERED, busy=PM_JOBS.get(code))
+    if op == "log":
+        rid = q.get("run_id", "")
+        if not re.fullmatch(r"r[0-9\-x]+", rid): return dict(ok=False, error="bad run id")
+        f = os.path.join(B, "runs", code, rid, "run.log")
+        return dict(ok=True, log=open(f, errors="replace").read()[-6000:] if os.path.exists(f) else "")
+    return dict(ok=False, error="unknown")
+
+PM_STEP = {"align": "align_seg.py", "detect": "detect_css.py"}
+def pm_execute(code, plan, note):
+    """runs plan['run'] for an existing study in the background: align / detect (+ surface features) / unified.
+    Anatomy and registration are NOT run here: they need the raw series and run_css.sh (Patients -> Re-run, which reuses a
+    finished FreeSurfer automatically)."""
+    st = PM.Study(B, code); env = fs_env(); sw = dict(pipeline=version(), python=platform.python_version())
+    man = st.start_run(plan, note, software=sw); rid = man["run_id"]; logf = os.path.join(B, man["log"])
+    PM_JOBS[code] = dict(run_id=rid, stage="", started=time.time())
+    def run():
+        ok, msg = True, ""
+        try:
+            if "detect" in plan["run"]: st._upd(rid, production_models=pm_models_note(logf))
+            for stage in plan["run"]:
+                PM_JOBS[code]["stage"] = stage; st.stage_state(rid, stage, "running")
+                if stage in PM_STEP:
+                    cmd = [sys.executable, f"{SC}/{PM_STEP[stage]}", code] + (["-2.5", "85", "3"] if stage == "detect" else [])
+                    rc = run_logged(cmd, logf, env, code="pm:" + code)
+                    if rc != 0:
+                        why = {3: "case cannot be scored (QC insufficient quality)", 5: "registration gate: registration not acceptable"}.get(rc, f"exit {rc}")
+                        ok, msg = False, f"{stage} failed: {why}"; st.stage_done(rid, stage, False, why); break
+                    if stage == "detect" and os.path.exists(f"{st.SD}/{code}/surf/lh.pial") and os.path.exists(f"{st.SD}/{code}/mri/orig.mgz") and os.path.exists(f"{B}/work/{code}_swi2t1.lta"):   # = run_css.sh [3b] condition
+                        if run_logged([sys.executable, f"{SC}/surface_features.py", code], logf, env, code="pm:" + code) != 0:
+                            open(logf, "a").write("WARNING: surface_features.py failed - detection results are unaffected\n")
+                    if stage == "detect":
+                        pm_rank_like_production(code, env, logf)            # = run_css.sh [3c]: ranking model only for dev-split studies
+                        e_ = ai_score(code, env); open(logf, "a").write("AI score (green-band candidates, not validated): " + ("written\n" if not e_ else "not available: " + e_ + "\n"))
+                elif stage == "unified":
+                    import unified_gui as UG
+                    r = UG.score_patient(code); open(logf, "a").write(f"\nunified: {json.dumps(r, default=str)[:600]}\n")
+                    if pget(code): pget(code).update(uscore=r, uscore_status=r.get("status", "failed"), uscore_error=r.get("error", "")); save_pat()
+                    if r.get("status") != "completed": ok, msg = False, "unified failed: " + str(r.get("error", ""))[:300]; st.stage_done(rid, stage, False, msg); break
+                else:
+                    ok, msg = False, f"{stage} cannot run from the Processing Manager (needs the raw series): use Patients -> Re-run"; st.stage_done(rid, stage, False, msg); break
+                st.stage_done(rid, stage)
+        except Exception as e:
+            ok, msg = False, f"error: {str(e)[:300]}"
+        try:
+            if not ok: msg += "\nlog tail:\n" + (open(logf, errors="replace").read()[-1500:] if os.path.exists(logf) else "")
+            st.finish_run(rid, ok, msg)
+            p = pget(code)
+            if ok and p and "detect" in plan["run"]:
+                if SET["features"].get("qc_snapshot"): qc_snapshot(code)
+                save_pat()
+                try: write_results_file()
+                except Exception: pass
+        finally: PM_JOBS.pop(code, None)
+    threading.Thread(target=run, daemon=True).start()
+    return rid
+
+def pm_begin_full(p):
+    """the normal pipeline (Add patients / Re-run) is recorded as a run too: the current outputs are archived first and put back if
+    it fails. FreeSurfer is NOT renamed (prep_anat reuses a finished recon itself). Never blocks processing."""
+    if FAKE: return
+    try:
+        st = PM.Study(B, p["code"])
+        m = st.start_run(dict(run=list(PM.STAGES), reuse=[]), "full pipeline (" + ("re-run" if st.history() else "first processing") + ")",
+                         software=dict(pipeline=version(), pathway=p.get("pathway", "")), rename_fs=False)
+        p["pm_run"] = m["run_id"]
+    except Exception as e: p["pm_run"] = ""; print("processing history not recorded:", e, flush=True)
+def pm_end_full(p, ok, msg=""):
+    rid = p.pop("pm_run", "")
+    if not rid: return
+    try:
+        st = PM.Study(B, p["code"])
+        for s_ in ("anatomy", "registration", "align", "detect"): st.stage_state(rid, s_, "done" if ok else "not completed")
+        st.stage_state(rid, "unified", "runs separately after 'done' (opt-in)" if ok else "not run")
+        st.finish_run(rid, ok, msg)
+    except Exception as e: print("processing history not updated:", e, flush=True)
+def pm_models_note(logf):
+    """written at the start of every detection run: which production models are in force, verified and compatible"""
+    ms = PM.models_status(B); lines = []
+    for n, m in ms.items():
+        if m["present"] and m["compatible"] and m["verified_copy_of_production"]: lines.append(f"{n}: verified copy of the production model, compatible ({'; '.join(m['notes'])})")
+        elif not m["present"]: lines.append(f"{n}: NOT PRESENT - production parity NOT met for this model ({m['import_status']})")
+        else: lines.append(f"{n}: PRODUCTION PARITY NOT MET - present={m['present']} compatible={m['compatible']} verified={m['verified_copy_of_production']} {'; '.join(m['reasons'])}")
+    open(logf, "a").write("\nproduction models:\n  " + "\n  ".join(lines) + "\n")
+    return ms
+def pm_rank_like_production(code, env, logf):
+    """run_css.sh step [3c] reproduced: rank_candidates.py only when review/ranker_model.json exists AND the study's split (production
+    labels/study_meta.csv, recorded at import) is 'dev'; otherwise the reason is logged. Nothing broader than production."""
+    if not os.path.exists(f"{B}/review/ranker_model.json"):
+        open(logf, "a").write("[3c] ranking model not applied: no review/ranker_model.json in this project\n"); return
+    imp = PM._jl(f"{B}/runs/{code}/import.json", {}) or {}
+    sp = (imp.get("production_split") or {}).get("split", "")
+    if not imp:                                                            # a study added in this project: its own labels/study_meta.csv, as run_css.sh
+        try:
+            import csv
+            for row in csv.DictReader(open(f"{B}/labels/study_meta.csv")):
+                if row.get("study_id") == code: sp = row.get("split", "") or ""
+        except Exception: sp = ""
+    if sp != "dev":
+        open(logf, "a").write(f"[3c] ranking model not applied: {code} split is '{sp or 'unassigned'}' (only dev studies are ranked automatically - as in production)\n"); return
+    if not PM.models_status(B)["ranker_model.json"]["compatible"]:
+        open(logf, "a").write("[3c] ranking model NOT applied: incompatible with this pipeline (see production models above) - production parity NOT met\n"); return
+    open(logf, "a").write("[3c] trained ranking model (rank_candidates.py; dev split)\n")
+    if run_logged([sys.executable, f"{SC}/rank_candidates.py", code], logf, env, code="pm:" + code) != 0:
+        open(logf, "a").write(f"      WARNING: rank_candidates.py did not rank {code} - the score_v4 order stands (as in production)\n")
+def proc_post(op, d):
+    if op == "link":
+        src = os.path.expanduser(d.get("source", "")); out = []
+        try: models = PM.import_production_models(src, B)         # project-level production models, byte-for-byte + verified (rc2b)
+        except Exception as e: models = {"error": str(e)[:300]}
+        for c in d.get("codes", []):
+            if not _pm_code(c): out.append(dict(code=c, ok=False, error="bad code")); continue
+            try:
+                r = PM.import_study(src, B, c); fsr = r["freesurfer"] or {}
+                out.append(dict(code=c, ok=True, copied=len(r["copied"]), historical=len(r["historical"]), freesurfer=bool(fsr),
+                                fs_method=fsr.get("method", ""), fs_files=fsr.get("files", 0), verified=r["verified"]))
+                with LOCK:
+                    if not pget(c):                      # visible in Results / reviewer; processing of a linked study goes through the Processing tab
+                        PAT.append(dict(code=c, cohort="linked", anatomy="recon" if r["freesurfer"] else "synthseg", mode="semi", pathway="recon" if r["freesurfer"] else "synthseg",
+                                        series={}, step="", steps_done={}, added=time.time(), status="done", linked=True,
+                                        note="imported from another project (verified copy, FreeSurfer included); new runs: Processing tab (raw series not copied)"))
+                        save_pat()
+            except Exception as e: out.append(dict(code=c, ok=False, error=str(e)[:200]))
+        return dict(ok=all(x["ok"] for x in out), results=out, models={k: dict(status=v.get("status"), parity=v.get("parity")) for k, v in models.items()} if isinstance(models, dict) and "error" not in models else models)
+    code = _pm_code(d.get("code"))
+    if not code: return dict(ok=False, error="bad code")
+    st = PM.Study(B, code)
+    try:
+        if op == "plan": return st.plan(d.get("choice", "selective"), d.get("rerun_from"), bool(d.get("force_anatomy")))
+        if op == "adopt": return dict(ok=True, run=st.adopt_existing(d.get("note", "confirmed by the user")))
+        if code in PM_JOBS or any(p.get("code") == code and p.get("status") == "running" for p in PAT):
+            return dict(ok=False, error="this study is being processed; wait until it finishes")
+        if op == "set_active":
+            if d.get("confirm") is not True: return dict(ok=False, needs_confirm=True, error="making another run active replaces the current outputs (they stay archived): confirm")
+            st.set_active(d["run_id"]); return dict(ok=True)
+        if op in ("start", "resume"):
+            pl = st.resume_plan(d["run_id"]) if op == "resume" else st.plan(d.get("choice", "selective"), d.get("rerun_from"), bool(d.get("force_anatomy")))
+            if not pl.get("ok"): return pl
+            if not pl["run"]: return dict(ok=False, error=pl.get("note") or "nothing to run")
+            early = [s for s in pl["run"] if s in ("anatomy", "registration")]
+            if early: return dict(ok=False, error=f"{', '.join(early)} must be re-run from the raw series: Patients -> Re-run (a finished compatible FreeSurfer is reused automatically)")
+            return dict(ok=True, run_id=pm_execute(code, pl, d.get("note", op)), run=pl["run"], reuse=pl["reuse"])
+    except (ValueError, KeyError) as e: return dict(ok=False, error=str(e))
+    return dict(ok=False, error="unknown")
 def reread_failures():
     """failures written by an older app version ('processing failed') are explained again from the run log"""
     for p in PAT:
@@ -297,6 +476,9 @@ def add_to_queue(items, st):
             if c in codes_now or c in seen: errs.append(f"{c}: duplicate code")
             seen.add(c)
         if not it.get("chosen", {}).get("SWI"): errs.append(f"{it.get('code') or it.get('folder_name')}: no SWI chosen")
+    if st.get("results_dir"):
+        okd, why = verify_local_dest(st["results_dir"])
+        if not okd: errs.append(f"results folder refused: {why}")
     if errs: return dict(ok=False, errors=errs)
     added = []
     with LOCK:
@@ -392,6 +574,7 @@ def process(p):
     env = fs_env(); code = p["code"]; logf = f"{AD}/logs/{code}.log"
     if p.get("reg_method"): env["CSS_REG_METHOD"] = p["reg_method"]          # prep_anat.sh registration method (default mri_coreg)
     p.update(status="running", started=time.time(), error="", steps_done={}, version=version() if SET["features"].get("version_stamp") else "")
+    pm_begin_full(p)
     env["CSS_THREADS"] = str(max(2, int(SET.get("threads", 4)) // max(1, min(int(SET.get("parallel", 1)), 4)) if int(SET.get("parallel", 1)) > 1 else int(SET.get("threads", 4))))
     save_pat()
     if FAKE:
@@ -449,11 +632,12 @@ def process(p):
     step_begin(p, "qc")
     if SET["features"].get("qc_snapshot"): qc_snapshot(code)
     p["ai_note"] = ai_score(code, env)              # AI score computed for every patient (labelled "AI only, not validated")
-    if SET["features"].get("unified_score", True): p["uscore"] = unified_score(code, env)   # v5.14 experimental unified score (display only)
     copy_results(p); step_end(p, "qc")
+    pm_end_full(p, True)
     p.update(status="done", finished=time.time(), step=""); save_pat(); notify("cSS Pipeline", f"{code} finished")
     try: write_results_file()
     except Exception as e: open(logf, "a").write(f"\nresults file not updated: {e}\n")
+    queue_unified(p)                                # v5.14-gui: AFTER results are saved and the patient is done; background; opt-in
 def _cohort_status(code):
     import pandas as pd
     p = f"{B}/review/cohort_run.csv"
@@ -496,6 +680,51 @@ def qc_grade(p):
     if st == "low_confidence_review" and i < len(GRADES) - 1 and (sh > 1.5 or i < 3): i += 1      # a passed registration stays >= B
     return GRADES[i][1], f"label shift {sh:.2f} mm" + (" · QC status low confidence (one grade lower)" if st == "low_confidence_review" else "") + \
         " · A+ <= 0.5 · A <= 0.8 · B+ <= 1.0 · B <= 1.5 (pass) · C <= 2.5 · F > 2.5 mm"
+# ------------------------------------------------------------------ v5.14-gui: Unified (experimental) section (screens A and C)
+def unified_get(op, q):
+    import unified_gui as UG, gui_protocol as GP
+    try:
+        if op == "state":
+            st = UG.state()
+            st["enabled"] = bool(SET["features"].get("unified_score"))
+            st["patients"] = [dict(code=p["code"], status=p["status"], unified=p.get("uscore_status", ""), error=p.get("uscore_error", ""),
+                                   counts={k: (p.get("uscore") or {}).get(k) for k in ("css_compatible", "uncertain", "alternative_high_confidence")}) for p in PAT]
+            return st
+        if op == "audit": return json.load(open(f"{UG.OUT}/gui_audit.json")) if os.path.exists(f"{UG.OUT}/gui_audit.json") else dict(available=False)
+        if op == "reliability": return UG.reliability()
+        if op == "validation": return UG.validation()
+        if op == "candidates": return dict(study=q["study"], candidates=UG.candidates(q["study"]))
+        if op == "candidate": return UG.candidate(q["study"], int(q["cand"])) or dict(available=False)
+        if op == "perturb": return UG.perturbation(q["study"], int(q["cand"]))
+        if op == "log": return UG.joblog(q.get("job", ""))
+        if op == "protocol": return GP.load()
+        if op == "robustness": return json.load(open(f"{UG.OUT}/gui_robustness.json")) if os.path.exists(f"{UG.OUT}/gui_robustness.json") else dict(available=False)
+        return dict(error=f"unknown {op}")
+    except Exception as e:
+        return dict(error=str(e)[-400:])
+def unified_post(op, d):
+    import unified_gui as UG, gui_protocol as GP
+    try:
+        if op == "enable":
+            SET["features"]["unified_score"] = bool(d.get("on")); jsave("settings.json", SET); return dict(ok=True, enabled=SET["features"]["unified_score"])
+        if op == "audit": return UG.start("audit", UG.audit)
+        if op == "extract": return UG.extract(d.get("which", "all"))
+        if op == "train": return UG.train()
+        if op == "freeze": return dict(ok=True, **UG.freeze(d.get("confirm", "")))
+        if op == "score": return UG.score_all()
+        if op == "score_patient":
+            p = next((x for x in PAT if x["code"] == d["code"]), None)
+            if p is None or p["status"] != "done": return dict(ok=False, error="patient not finished")
+            queue_unified(p, force=True); return dict(ok=True)
+        if op == "robustness": return UG.robustness(int(d.get("seeds", 3)))
+        if op == "export": return dict(ok=True, **UG.export())
+        if op == "stop": return UG.stop(d.get("job", ""))
+        if op == "protocol_run": return GP.run_auto(PAT, write_results_file, queue_unified)
+        if op == "protocol_mark": return GP.mark(d["id"], d["result"], d.get("note", ""))
+        if op == "protocol_save": return dict(ok=True, **GP.save_record())
+        return dict(ok=False, error=f"unknown {op}")
+    except Exception as e:
+        return dict(ok=False, error=str(e)[-400:])
 def last_activity(code):
     m = [os.path.getmtime(f) for f in (f"{AD}/logs/{code}.log", f"{B}/logs/{code}_run.log") if os.path.exists(f)]
     return max(m) if m else 0
@@ -503,30 +732,38 @@ def ai_score(code, env=None):
     """AI score (green-band candidates, not validated) -> review/ID_score_ai.json; never touches the reader's files"""
     r = subprocess.run([sys.executable, f"{HERE}/ai_score_cli.py", code], capture_output=True, text=True, env=env or fs_env())
     return "" if r.returncode == 0 else (r.stderr or r.stdout)[-300:]
-def unified_score(code, env=None):
-    """v5.14 EXPERIMENTAL unified candidate score for one finished patient -> $CSS_BASE/uscore/reports/ID.json (categories, reasons,
-    feature reliability). Uses the frozen model only if one was trained on the development studies; never reads reader labels,
-    never suppresses or hides a candidate, never changes the detector's files. Failure only leaves a note."""
-    cli = f"{B}/unified_score/run_unified.py"
-    if not os.path.exists(cli): return dict(error="unified score not installed (run install.sh)")
-    try:
-        r = subprocess.run([sys.executable, cli, "app", code], capture_output=True, text=True, env=env or fs_env(), timeout=3600)
-        if r.returncode != 0: return dict(error=(r.stderr or r.stdout)[-300:])
-        return json.loads(r.stdout.strip().splitlines()[-1])
-    except Exception as e:
-        return dict(error=str(e)[:300])
+UQ_LOCK = threading.Lock()                          # unified jobs run one at a time, in the background
+def queue_unified(p, force=False):
+    """v5.14-gui fail-safe: the experimental unified score runs only when enabled (Unified tab), only for a finished patient,
+    after its original results were saved; status pending -> running -> completed / failed; 15-minute limit. It can never change
+    the patient's status, its detector files, reader files or the original exports."""
+    if not (SET["features"].get("unified_score") or force) or p.get("status") != "done": return
+    p["uscore_status"] = "pending"; p["uscore_error"] = ""; save_pat()
+    def run():
+        with UQ_LOCK:
+            p["uscore_status"] = "running"; p["uscore_started"] = time.time(); save_pat()
+            try:
+                import unified_gui as UG
+                r = UG.score_patient(p["code"])
+            except Exception as e:
+                r = dict(status="failed", error=str(e)[:400])
+            p["uscore"] = r; p["uscore_status"] = r.get("status", "failed"); p["uscore_error"] = r.get("error", ""); save_pat()
+            try: write_results_file()
+            except Exception: pass
+    threading.Thread(target=run, daemon=True).start()
 def ai_backfill():
     """finished patients without an AI score get one (in the background, at start and after each finished patient)"""
     for p in list(PAT):
         if p["status"] == "done" and os.path.exists(f"{B}/review/{p['code']}_candidates.csv") and not os.path.exists(f"{B}/review/{p['code']}_score_ai.json"):
             p["ai_note"] = ai_score(p["code"])
-        if p["status"] == "done" and SET["features"].get("unified_score", True) and os.path.exists(f"{B}/review/{p['code']}_candidates.csv") \
-                and not os.path.exists(f"{B}/uscore/reports/{p['code']}.json"):
-            p["uscore"] = unified_score(p["code"])
+        if p["status"] == "done" and SET["features"].get("unified_score") and os.path.exists(f"{B}/review/{p['code']}_candidates.csv") \
+                and not os.path.exists(f"{B}/uscore/reports/{p['code']}.json") and p.get("uscore_status") not in ("pending", "running"):
+            queue_unified(p)
     try: write_results_file()
     except Exception as e: print("results file not written:", e, flush=True)
 def results_file():
-    d = os.path.expanduser(next((p.get("results_dir") for p in PAT if p.get("results_dir")), "") or f"{B}/results")
+    d = next((p.get("results_dir") for p in PAT if p.get("results_dir")), "")
+    d = os.path.expanduser(d) if d and verify_local_dest(d)[0] else f"{B}/results"       # outside the base only when verified local
     os.makedirs(d, exist_ok=True); return f"{d}/cSS_results.xlsx"
 def write_results_file():
     f = results_file(); open(f + ".tmp", "wb").write(export_xlsx()); os.replace(f + ".tmp", f); return f
@@ -542,12 +779,14 @@ def fail(p, msg):
             m = re.search(r"shift ([\d.?]+) mm", msg)
             p.setdefault("tried", []).append(dict(pathway=p.get("pathway", "synthseg"), shift=m.group(1) if m else "?"))
             move_bad_registration(p)
+            pm_end_full(p, False, msg)                   # bad registration renamed aside first, then the previous outputs are put back
             nxt = next_rec(p)
             if SET.get("auto_retry", True) and nxt in ("coreg_masked", "synthmorph") and p["series"].get("T1"):
                 apply_pathway(p, nxt)
                 p.update(status="waiting", error="", steps_done={}, path_ack=False,
                          path_note=f"{msg.split(' - ')[0]} -> retrying automatically with {PATHWAYS[nxt]} ({PW_TIME[nxt]})")
                 save_pat(); notify("cSS Pipeline", f"{p['code']}: registration retried with {PATHWAYS[nxt]}"); return
+        pm_end_full(p, False, msg)                       # previous outputs put back; this attempt stays in the history as failed
         p.update(status="failed", error=msg, finished=time.time()); save_pat()
         if any(k in msg for k in SETUP_ERR): CUR["hold"] = msg
     notify("cSS Pipeline", f"{p['code']} failed: {msg[:60]}")
@@ -555,7 +794,9 @@ def copy_results(p):
     """codes-only copy of the patient's result files into the chosen results folder"""
     d = p.get("results_dir")
     if not d: return
-    d = os.path.expanduser(d); os.makedirs(d, exist_ok=True)
+    okd, why = verify_local_dest(d)
+    if not okd: print(f"results copy for {p['code']} refused: {why}", flush=True); return
+    d = os.path.expanduser(d)
     for f in glob.glob(f"{B}/review/{p['code']}_*"):
         if f.endswith((".csv", ".json")) and "manifest" not in f: shutil.copy2(f, d)
     q = f"{AD}/qc/{p['code']}.png"
@@ -579,6 +820,7 @@ def run_one(p):
     try: process(p)
     except Exception as e: fail(p, f"app error: {type(e).__name__}: {e}")
     finally:
+        if p.get("pm_run"): pm_end_full(p, False, f"stopped ({p.get('status')}) before the pipeline finished")   # stop / pause-stop: recorded, outputs restored
         RUNNING.pop(p["code"], None)
 def solo(p): return p.get("pathway") in SOLO
 def next_to_start():
@@ -610,7 +852,20 @@ def worker():
                 if SET["features"].get("backup") and SET.get("backup_dir") and day != last_backup: backup(); last_backup = day
             time.sleep(1); continue
         RUNNING[nxt["code"]].start(); time.sleep(2 if not FAKE else 0.1)
+CLOUD_MARKERS = ("/Library/Mobile Documents/", "/Library/CloudStorage/", "/Dropbox", "/Google Drive", "/OneDrive", "/iCloud", "/Box/", "/pCloud")
+def cloud_synced(path):
+    """local-only rule: clinical-derived data must not go to a cloud-synced folder"""
+    p = os.path.realpath(os.path.expanduser(path)) + "/"
+    return any(m.lower() in p.lower() for m in CLOUD_MARKERS)
+def verify_local_dest(path):
+    """(ok, reason): one rule set for every user-chosen destination (export, share, backup, results) - css_writeguard.check_dest:
+    refuses the production project and anything inside it or resolving into it, cloud-synced folders, ~/Desktop, ~/Documents,
+    missing and read-only folders"""
+    return WG.check_dest(path)
 def backup():
+    okd, why = verify_local_dest(SET["backup_dir"])
+    if not okd:
+        open(f"{AD}/logs/backup.log", "a").write(f"{datetime.datetime.now():%Y-%m-%d %H:%M} backup refused: {why} (local-only rule)\n"); return False
     d = os.path.join(os.path.expanduser(SET["backup_dir"]), datetime.date.today().isoformat()); os.makedirs(d, exist_ok=True)
     for f in glob.glob(f"{B}/review/*.csv") + glob.glob(f"{B}/review/*.json") + glob.glob(f"{AD}/*.json"):
         shutil.copy2(f, d)
@@ -646,6 +901,7 @@ def results():
                 j = json.load(open(f)); r[f"{tag}_L"] = j.get("L_score"); r[f"{tag}_R"] = j.get("R_score"); r[f"{tag}_total"] = j.get("multifocality_0_4")
         r["qc_grade"], r["qc_tip"] = qc_grade(p); r["ai_err"] = p.get("ai_note", "")
         u = p.get("uscore") or {}                   # v5.14 experimental unified score (counts of candidates per category; none hidden)
+        r["unified_status"] = p.get("uscore_status") or ("off" if not SET["features"].get("unified_score") else "")
         if u and not u.get("error"):
             r.update(unified_css_compatible=u.get("css_compatible"), unified_uncertain=u.get("uncertain"),
                      unified_alternative=u.get("alternative_high_confidence"), unified_model="fitted" if u.get("model") else "no model yet (detectors only)")
@@ -657,12 +913,19 @@ def export_xlsx():
     import pandas as pd
     df = pd.DataFrame(results()).drop(columns=["name", "qc_tip", "ai_err"], errors="ignore")
     bio = io.BytesIO(); df.to_excel(bio, index=False, sheet_name="results"); return bio.getvalue()
+class ExportRefused(Exception): pass
+EXPORT_WARNING = ("This file holds clinical-derived research data (study codes, candidate calls, grades, scores). "
+                  "It is written only to your chosen local folder and is never uploaded. Do not move it to cloud storage, e-mail or chat.")
+def export_dest():
+    okd, why = verify_local_dest(SET.get("export_dir", ""))
+    if not okd: raise ExportRefused(f"export refused: {why}. Choose a verified local export folder in Settings (not Desktop / Documents / cloud).")
+    return os.path.realpath(os.path.expanduser(SET["export_dir"]))
 def export_as(fmt, cohort=""):
-    """results (codes only) -> ~/Desktop/cSS_results_<cohort>_<time>.<fmt>; fmt xlsx / csv / docx / pdf"""
+    """results (codes only) -> <verified export folder>/cSS_results_<cohort>_<time>.<fmt>; fmt xlsx / csv / docx / pdf"""
     import pandas as pd
     rows = [r for r in results() if not cohort or cohort == "all" or r["cohort"] == cohort]
     df = pd.DataFrame(rows).drop(columns=["name", "qc_tip", "ai_err"], errors="ignore")
-    out = os.path.expanduser(f"~/Desktop/cSS_results_{(cohort or 'all').replace('/', '_')}_{datetime.datetime.now():%Y%m%d_%H%M}.{fmt}")
+    out = os.path.join(export_dest(), f"cSS_results_{(cohort or 'all').replace('/', '_')}_{datetime.datetime.now():%Y%m%d_%H%M}.{fmt}")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     if fmt == "xlsx": df.to_excel(out, index=False, sheet_name="results")
     elif fmt == "csv": df.to_csv(out, index=False)
@@ -708,7 +971,7 @@ def write_pdf(out, df, cohort):
             pdf.savefig(fig); plt.close(fig)
 
 def share_package(codes):
-    out = os.path.expanduser(f"~/Desktop/cSS_share_{datetime.datetime.now():%Y%m%d_%H%M}.zip")
+    out = os.path.join(export_dest(), f"cSS_share_{datetime.datetime.now():%Y%m%d_%H%M}.zip")
     import pandas as pd
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         for c in codes:
@@ -810,6 +1073,7 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/vset":
                 f = f"{B}/review/viewer_settings.json"; return self.send(json.load(open(f)) if os.path.exists(f) else {})
             if u.path in ("/icon_dark.png", "/icon_light.png"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="image/png")
+            if u.path == "/unified_view.js": return self.send(open(f"{HERE}/unified_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/api/preflight": return self.send(preflight())
             if u.path == "/api/log":
                 f = f"{AD}/logs/{q['code']}.log"; t = open(f).read()[-30000:] if os.path.exists(f) else "(no log yet)"
@@ -838,6 +1102,8 @@ class H(BaseHTTPRequestHandler):
                 return self.send(html.encode(), ctype="text/html; charset=utf-8")
             if u.path == "/api/qc":
                 f = f"{AD}/qc/{q['code']}.png"; return self.send(open(f, "rb").read(), ctype="image/png")
+            if u.path.startswith("/api/proc/"): return self.send(proc_get(u.path[10:], {k: v[0] for k, v in parse_qs(u.query).items()}))
+            if u.path.startswith("/api/u/"): return self.send(unified_get(u.path[7:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path == "/api/results": return self.send(results())
             if u.path == "/api/export.xlsx": return self.send(export_xlsx(), ctype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fname="cSS_results.xlsx")
             if u.path == "/api/grades_template.xlsx": return self.send(grades_template(), ctype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fname="grades_template.xlsx")
@@ -856,6 +1122,10 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/grades": return self.send(read_grades(d["path"]))
             if u.path == "/api/queue": return self.send(add_to_queue(d["patients"], d["settings"]))
             if u.path == "/api/settings":
+                for k_ in ("backup_dir", "export_dir"):
+                    if d.get(k_):
+                        okd, why = verify_local_dest(d[k_])
+                        if not okd: return self.send(dict(ok=False, error=f"{k_.replace('_dir', '')} folder refused: {why}. Clinical-derived data stays on this Mac - choose a local or external-disk folder."))
                 with LOCK:
                     for k, v in d.items():
                         if k == "features": SET["features"].update(v)
@@ -875,6 +1145,8 @@ class H(BaseHTTPRequestHandler):
                 elif a == "stop" and p["status"] in ("running", "paused"):
                     p.update(status="stopped", error="stopped by you")
                     if pr: os.killpg(pr.pid, signal.SIGCONT); os.killpg(pr.pid, signal.SIGTERM)
+                elif a in ("retry", "rerun") and p.get("linked"):
+                    return self.send(dict(ok=False, error="this study was brought in from another project without its raw series: use the Processing tab (new detection run; anatomy is reused)"))
                 elif a in ("retry", "rerun") and p["status"] in ("failed", "stopped", "done"):
                     if d.get("pathway") in PATHWAYS and d["pathway"] != p.get("pathway"): apply_pathway(p, d["pathway"])
                     p.update(status="waiting", error="", steps_done={}); CUR["hold"] = ""
@@ -941,7 +1213,7 @@ class H(BaseHTTPRequestHandler):
                 for p in done: groups.setdefault(p.get("cohort") or "-", []).append(p["code"])
                 start = d["codes"][0]
                 if d.get("cohort"): d["codes"] = groups.get(d["cohort"], d["codes"]); start = d["codes"][0] if d["codes"] else start
-                else: d["codes"] = [p["code"] for p in done] or d["codes"]
+                else: d["codes"] = [p["code"] for p in done] + [c for c in d["codes"] if c not in {p["code"] for p in done}]   # studies found on disk (Processing tab) too
                 json.dump(groups, open(f"{AD}/review_groups.json", "w")); d["start"] = start
                 r = launch_child("review", d, 8765)
                 if r.get("ok") and WIN["webview"]:
@@ -958,6 +1230,13 @@ class H(BaseHTTPRequestHandler):
                     import webview; webview.create_window(d.get("title", "cSS"), f"http://127.0.0.1:{WIN['port']}{d['url']}", width=1150, height=560)
                     return self.send(dict(open=False))
                 return self.send(dict(open=True))
+            if u.path.startswith("/api/proc/"): return self.send(proc_post(u.path[10:], d))
+            if u.path.startswith("/api/u/"): return self.send(unified_post(u.path[7:], d))
+            if u.path in ("/api/share", "/api/export"):           # explicit warning + confirmation, verified local folder only
+                if d.get("confirm_clinical") is not True: return self.send(dict(ok=False, needs_confirm=True, warning=EXPORT_WARNING,
+                                                                     error="export needs your confirmation of the clinical-data warning (dialog pending design approval)"))
+                try: export_dest()
+                except ExportRefused as e: return self.send(dict(ok=False, error=str(e)))
             if u.path == "/api/share": return self.send(dict(ok=True, path=share_package(d["codes"])))
             if u.path == "/api/vset":                  # reviewer settings (same file the reviewer reads at start)
                 f = f"{B}/review/viewer_settings.json"; os.makedirs(os.path.dirname(f), exist_ok=True)

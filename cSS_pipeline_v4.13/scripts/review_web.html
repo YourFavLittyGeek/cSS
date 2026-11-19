@@ -135,6 +135,7 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
     <div id="s3body"><button class="btn" id="bM3" style="width:100%;margin-bottom:6px" title="Isolated 3-D analysis of this candidate: surface, voxels, local tube / sheet / blob, thickness, cross-sections, Hessian, vessels, pial surface">Open 3-D analysis ▸</button><canvas id="s3cv" width="300" height="200" style="width:100%;border-radius:8px;background:#0e1116;cursor:grab;touch-action:none"></canvas>
     <div class="mut sm">drag = rotate · wheel = zoom · double-click = reset · <span style="color:#e04b4b">red</span> structure, <span style="color:#ffd25a">yellow</span> detector object, <span style="color:#7d8590">grey</span> cortex</div>
     <div class="say" id="s3say"></div><div class="mut sm" id="s3meas"></div></div></div>
+   <div class="card" id="ucard"><div class="h"><span>Unified score (experimental)</span><span class="mut sm">research only</span></div><div id="ubody" class="sm"><span class="mut">—</span></div></div>
    <div class="card" id="deccard"><div class="h"><span>Your decision</span><span class="mut sm" id="curcall"></span></div>
     <div class="dec" id="dec"></div>
     <input type="text" id="comment" placeholder="Add a comment…  (C)" maxlength="500" autocomplete="off">
@@ -811,7 +812,7 @@ const M3DEF={volume:"voxel count x voxel volume (mm3)",surface:"area of the marc
  hess:"image intensity Hessian at 0.8 / 1.6 mm (detect_css.py convention: |l1|<=|l2|<=|l3|, dark structure -> l3 > 0): curvature of the SWI signal, independent of the mask",
  surf:"share of candidate voxels within 1 mm of the pial surface (signed distance of the T1 labels); footprint = cortex-surface voxels within 1.5 mm",
  ves:"the detector's vessel map (work/ID_vessels): a connection is evidence of vascular anatomy, not proof that the candidate is a vein"};
-function m3Defaults(){return {mode:"isolated",rep:"surface",color:"geometry",layers:{vessel:false,dark:false,cortex:false,skeleton:false,pca:false,footprint:false,contact:true,mri:{axial:false,coronal:false,sagittal:false}},comp:null,slab:-1,margin:8,light:document.documentElement.dataset.theme==="light"}}
+function m3Defaults(){return {mode:"isolated",rep:"surface",color:"geometry",layers:{vessel:false,dark:false,cortex:false,skeleton:false,pca:false,footprint:false,contact:true,core:false,support:false,mri:{axial:false,coronal:false,sagittal:false}},comp:null,slab:-1,margin:8,light:document.documentElement.dataset.theme==="light"}}
 async function m3Open(){const c=M&&M.cands[ci];if(!c||c.audit){status("3-D analysis: choose a shown candidate",true);return}
   $("#m3d").classList.add("show");m3open=true;if(!m3o)m3o=m3Defaults();m3o.light=document.documentElement.dataset.theme==="light";
   if(!m3init){try{M3.init($("#m3cv"),m3o);m3init=true}catch(e){$("#m3left").innerHTML=`<p class="err">${esc(e.message)}</p>`;return}}
@@ -819,17 +820,18 @@ async function m3Open(){const c=M&&M.cands[ci];if(!c||c.audit){status("3-D analy
   try{const d=await api(`/api/morph3d?study=${M.study}&cand=${c.id}&margin=${m3o.margin}`);M3.load(d,m3Pick);m3Panels();m3Prof();M3.setMarker(cur)}
   catch(e){$("#m3right").innerHTML=`<p class="err">${esc(e.message)}</p>`}}
 function m3Close(){$("#m3d").classList.remove("show");m3open=false}
-function m3Pick(idx,k){cur=idx.slice();ctr=cur.slice();draw();M3.setMarker(cur);const V=M3.data().voxels,cl=["tube-like","sheet-like","blob-like","uncertain"];
+function m3Pick(idx,k){cur=idx.slice();ctr=cur.slice();draw();M3.setMarker(cur);const V=M3.data().voxels,cl=["tube-like","sheet-like","blob-like","uncertain","not resolved (too small for the voxel grid)","not resolved (slice geometry / acquisition-limited)"];
   $("#m3slab").innerHTML=`<b>voxel ${idx.join(", ")}</b><br>local geometry: ${vmode?"🔒":cl[V.gcls[k]]}<br>thickness ${V.thick[k]} mm<br>spread ${V.spread[k].join(" / ")} mm`+(V.heig?`<br>Hessian l1,l2,l3 ${V.heig[k].join(", ")}<br>image: ${vmode?"🔒":cl[V.hcls[k]]}`:"")+`<br><span class="mut">MRI slices moved here</span>`}
 function m3Panels(){const d=M3.data(),m=d.measures,o=m3o,sel=(g,cur,opts)=>`<div class="m3seg" data-g="${g}">${opts.map(([v,l,t])=>`<button data-v="${v}" class="${String(cur)===String(v)?"on":""}" title="${t||""}">${l}</button>`).join("")}</div>`;
   const ck=(k,l,col,on)=>`<label><input type="checkbox" data-l="${k}" ${on?"checked":""}><span class="m3sw" style="background:${col}"></span>${l}</label>`,L=o.layers,lock=vmode;
-  if(lock&&["geometry","hessian"].includes(o.color))o.color="plain";
+  if(lock&&["geometry","hessian"].includes(o.color))o.color="plain";if(lock){L.core=false;L.support=false}
   $("#m3left").innerHTML=`<h5>View</h5>${sel("mode",o.mode,[["isolated","Isolated"],["context","Anatomical context"]])}
    <h5>Representation</h5>${sel("rep",o.rep,[["surface","Surface","marching cubes + Taubin smoothing of a display copy"],["voxels","Voxels","the exact original mask, one box per voxel"],["both","Both"]])}
    <h5>Colour by</h5>${sel("color",o.color,[["geometry","Local shape",lock?"hidden in a validation read":""],["hessian","Image Hessian"],["thickness","Thickness"],["component","Piece"],["plain","Plain"]].filter(x=>!lock||!["geometry","hessian"].includes(x[0])))}
-   <div class="mut sm" style="margin-top:4px">${o.color==="geometry"||o.color==="hessian"?'<span style="color:#4aa3ff">■</span> tube <span style="color:#f0a040">■</span> sheet <span style="color:#c77dff">■</span> blob <span style="color:#8a8f98">■</span> uncertain':o.color==="thickness"?"blue thin → red thick (p10–p90)":""}</div>
+   <div class="mut sm" style="margin-top:4px">${o.color==="geometry"||o.color==="hessian"?'<span style="color:#4aa3ff">■</span> tube <span style="color:#f0a040">■</span> sheet <span style="color:#c77dff">■</span> blob <span style="color:#5c5e66">■</span> unresolved <span style="color:#d9d9d1">■</span> acquisition-limited <span style="color:#8a8f98">■</span> uncertain':o.color==="thickness"?"blue thin → red thick (p10–p90)":""}</div>
    <h5>Layers</h5>${ck("vessel","Vessel map nearby","#4aa3ff",L.vessel)}${ck("dark","Other dark structures","#6b6b73",L.dark)}${ck("cortex","Cortical surface","#9ea3ad",L.cortex)}
    ${ck("mri.axial","MRI axial plane","#ddd",L.mri.axial)}${ck("mri.coronal","MRI coronal plane","#ddd",L.mri.coronal)}${ck("mri.sagittal","MRI sagittal plane","#ddd",L.mri.sagittal)}
+   ${lock?'<div class="mut sm">dark core / support: hidden in a validation read 🔒</div>':`${ck("core","Dark core (experimental)","#ff4b4b",L.core)}${ck("support","Blooming / support","#4aa3ff",L.support)}`}
    ${ck("contact","Contact with vessels","#ff3399",L.contact)}${ck("footprint","Cortical footprint","#5cd980",L.footprint)}${ck("skeleton","Skeleton"+(m.skeleton.ok?"":" (n/a)"),"#fff",L.skeleton)}${ck("pca","Principal axes","#ff5050",L.pca)}
    <h5>Pieces (${m.components.length})</h5>${m.components.map(c=>`<label><input type="checkbox" data-c="${c.id}" ${!o.comp||o.comp.has(c.id)?"checked":""}>piece ${c.id} · ${c.volume_mm3} mm³</label>`).join("")}
    <h5>Camera</h5><div class="m3seg">${["R","L","A","P","S","I"].map(k=>`<button data-cam="${k}">${k}</button>`).join("")}<button data-cam="best" title="look along the thinnest axis">Best</button><button data-cam="fit">Fit</button></div>
@@ -846,7 +848,13 @@ function m3Panels(){const d=M3.data(),m=d.measures,o=m3o,sel=(g,cur,opts)=>`<div
    ${tr("ves","Vessel map",vs.present?(vs.connected?`connected (${vs.n_connected_segments} segment${vs.n_connected_segments>1?"s":""})`:"near, not connected"):"no vessel map")}
    ${tr("volume","Voxel size",m.vox.join(" × ")+" mm")}${tr("volume","Pieces",m.components.length)}</table>
    ${lock?'<p class="mut" style="margin-top:8px">🔒 Shape interpretation is hidden during a validation read (measurements stay visible).</p>':`
-   <h5 title="${esc(M3DEF.local)}">Local shape of the mask (share of voxels)</h5>${bar("Tube-like",m.local_share.tube,"#4aa3ff")}${bar("Sheet-like",m.local_share.sheet,"#f0a040")}${bar("Blob-like",m.local_share.blob,"#c77dff")}${bar("Uncertain",m.local_share.uncertain,"#8a8f98")}
+   <h5 title="${esc(M3DEF.local)}">Local shape of the mask (share of voxels)</h5>${bar("Tube-like",m.local_share.tube,"#4aa3ff")}${bar("Sheet-like",m.local_share.sheet,"#f0a040")}${bar("Blob-like",m.local_share.blob,"#c77dff")}${bar("Uncertain",m.local_share.uncertain,"#8a8f98")}${bar("Unresolved",m.local_share.unresolved||0,"#5c5e66")}${bar("Acq.-limited",m.local_share.acquisition_limited||0,"#d9d9d1")}
+   <div class="mut sm">${esc(m.resolution?m.resolution.rule:"")}</div>
+   ${((m.local_share.unresolved||0)+(m.local_share.acquisition_limited||0))>=0.05?`<div class="sm" style="margin-top:4px;padding:6px;border-left:3px solid #d9d9d1">
+    <b>Why part of this structure is not resolved:</b>
+    ${(m.local_share.acquisition_limited||0)>0?`<div>• <b>Acquisition-limited (${Math.round(100*m.local_share.acquisition_limited)} %)</b>: the structure spans two or fewer samples along the coarse slice direction ${m.vox?`(voxel ${esc(m.vox.join(" × "))} mm)`:""}, so a round tube and a flat sheet look the same there. Thinner slices would decide it.</div>`:""}
+    ${(m.local_share.unresolved||0)>0?`<div>• <b>Unresolved (${Math.round(100*m.local_share.unresolved)} %)</b>: the structure is two or fewer voxels across in the directions its shape depends on; the grid is too coarse for it in every direction.</div>`:""}
+    <div><b>Unresolved does not mean absent.</b> It says nothing against cSS: it means the scan cannot show this structure's 3-D shape. Judge the candidate on the images and the other evidence.</div></div>`:""}
    ${h?`<h5 title="${esc(M3DEF.hess)}">Image Hessian (separate source)</h5>${bar("Tube-like",h.share.tube,"#4aa3ff")}${bar("Sheet-like",h.share.sheet,"#f0a040")}${bar("Blob-like",h.share.blob,"#c77dff")}
      <div class="mut sm">agrees with the mask geometry on ${h.agree_with_geometry!=null?Math.round(h.agree_with_geometry*100)+" %":"–"} of voxels</div>`:""}
    <div class="m3sum">${esc(m.summary)}</div>`}
@@ -953,4 +961,25 @@ window.addEventListener("keydown",e=>{const tag=(e.target.tagName||"").toLowerCa
   if(used)e.preventDefault()});
 theme(LS("theme","dark"));buildPalette();setTab(lastTab);buildPanes();setTool(tool==="miss"?"pan":tool);tog();setCompare(compareOn);applyPanel();
 loadStudy("").catch(e=>status("Could not load: "+e.message,true));
+// ---------- v5.14-gui screen B: experimental unified score (read-only; never writes calls; hidden in a validation read) ----------
+const UPN={x1_vessel_continuity_mm:"vessel continuity",x2_core_contrast_nu:"dark-core contrast",x3_pial_distance_mm:"distance to surface",x4_sulcal_alignment:"surface conformity (x4)",x5_extracranial_mm:"extracranial"};
+const UCAT={css_compatible:["cSS-compatible / prioritized","#3aa655"],uncertain:["Uncertain / requires review","#c99a1c"],alternative_high_confidence:["High-confidence alternative","#b48cff"]};
+let uKey="";
+async function uLoad(){const b=$("#ubody");if(!b||!M||!M.cands||!M.cands.length)return;const c=M.cands[ci];if(!c)return;
+  if(vmode){b.innerHTML='<span class="mut">hidden in a validation read 🔒 (shown after your final save)</span>';return}
+  if(c.audit){b.innerHTML='<span class="mut">not scored (audit object)</span>';return}
+  const key=M.study+"|"+c.id;uKey=key;b.innerHTML='<span class="mut">loading…</span>';
+  let r;try{r=await api(`/api/uscore?study=${M.study}&cand=${c.id}`)}catch(e){b.innerHTML=`<span class="mut">unavailable (${esc(e.message)})</span>`;return}
+  if(uKey!==key)return;
+  if(!r||r.available===false){b.innerHTML='<span class="mut">no unified report for this candidate (Unified tab in the app: score the patient). The detector result above is unchanged.</span>';return}
+  const cat=UCAT[r.category]||[r.category,"#999"],con=r.contributions||{};
+  b.innerHTML=`<div style="color:${cat[1]};font-weight:700">${esc(cat[0])}</div><div class="mut">${(r.category_reasons||[]).map(esc).join("; ")}</div>
+   <div>${r.probability!=null?`probability ${r.probability.toFixed(2)}`:r.raw_score!=null?`raw score ${r.raw_score.toFixed(2)} <span class="mut">(not a probability)</span>`:'<span class="mut">no model score</span>'}</div>
+   <table style="width:100%;margin-top:4px">${Object.entries(r.predictors).map(([k,p])=>`<tr title="${esc((p.reasons||[]).join("; "))}"><td>${UPN[k]}</td><td>${p.value==null?"–":(+p.value).toFixed(2)}</td><td style="color:${p.status==="reliable"?"#3aa655":p.status==="unreliable"?"#c99a1c":"#888"}">${p.status}</td><td>${con[k]?(con[k].imputed?"0":con[k].contribution.toFixed(2)):""}</td></tr>`).join("")}</table>
+   <div style="margin-top:4px">${(r.alternative_detectors||[]).map(d=>`<div><b>${esc(d.detector.replace("_"," "))}</b>: ${esc(d.status)}${(d.against||[]).length?` <span class="mut">· against: ${esc(d.against[0])}</span>`:""}</div>`).join("")}</div>
+   <div class="mut">stability: ${r.stability?(r.stability.unstable?"unstable":"stable"):"–"} · protective: ${(r.protective_flags||[]).map(esc).join("; ")||"none"}</div>
+   <div class="mut">dark core: experimental representation, not ground truth — 3-D button → layers</div>`}
+{const g0=go;go=function(i,k){const out=g0(i,k);uLoad();return out}}
+{const p=new URLSearchParams(location.search),ws=p.get("study"),wc=p.get("cand");if(wc){let n=0;const t=setInterval(()=>{n++;
+  if(M&&M.cands&&M.cands.length&&(!ws||M.study===ws)){const i=M.cands.findIndex(c=>String(c.id)===wc);if(i>=0)go(i);clearInterval(t)}if(n>60)clearInterval(t)},250)}}
 </script></body></html>

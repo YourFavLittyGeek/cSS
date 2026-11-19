@@ -374,7 +374,7 @@ print(f"  volume: candidates {result['candidate_volume_mm3']} mm3, grown (full e
 if os.path.exists(seg_p):
     print(f"  cortical surface covered: {result['surface_mm2']} mm2  (L {result['L_surface_pct']} %, "
           f"R {result['R_surface_pct']} % of the hemisphere surface)  [{result['volume_note']}]")
-print(f"  regions: {', '.join(result['regions'])}")
+print(f"  regions: {', '.join(map(str, result['regions']))}")
 if result["n_unreviewed"]:
     print(f"  WARNING: {result['n_unreviewed']} of {result['n_candidates']} candidates were not reviewed "
           f"- score is a LOWER BOUND")

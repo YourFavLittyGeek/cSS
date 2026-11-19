@@ -275,6 +275,15 @@ class Study:
             if ves is not None: near &= ~ves
             out["dark_mesh"] = other_mesh(near)
         if ctx is not None: out["cortex_mesh"] = other_mesh(ctx, step=2)
+        try:                                                            # v5.14-gui: experimental dark core / blooming support (display layers only)
+            sys.path.insert(0, os.path.join(B, "unified_score")); sys.path.insert(0, os.path.join(os.path.dirname(HERE), "unified_score"))
+            from uscore import core_decompose as _cd
+            Dk = _cd.decompose_experimental(mask, img, vox, valid=img != 0)
+            if Dk.get("status") in ("ok", "no_core"):
+                out["core_pts"] = rel(np.argwhere(Dk["core"])); out["support_pts"] = rel(np.argwhere(Dk["support"]))
+                out["core_note"] = dict(label="experimental, not ground truth", core_voxels=int(Dk["core"].sum()), unstable=Dk.get("core_unstable_frac"))
+        except Exception as e:
+            out["core_note"] = dict(error=str(e)[:200])
         # MRI context: three orthogonal planes through the centroid (window p1-p99 of the crop)
         lo_w, hi_w = np.percentile(img[img > 0], [1, 99]) if (img > 0).any() else (0, 1)
         q = lambda a: np.clip((a - lo_w) / max(hi_w - lo_w, 1e-6) * 255, 0, 255).astype(np.uint8)
@@ -568,6 +577,27 @@ def side_check(s):
     except Exception as e: return dict(n=0, agree=0, bad=False, labels_ok=None, error=str(e))
 
 
+def _usafe(o):
+    """NaN / inf -> None recursively (NaN is not valid JSON)"""
+    if isinstance(o, float): return o if np.isfinite(o) else None
+    if isinstance(o, dict): return {k: _usafe(v) for k, v in o.items()}
+    if isinstance(o, list): return [_usafe(v) for v in o]
+    return o
+
+
+def uscore_report(study, cid):
+    """v5.14-gui: the experimental unified-score report of one candidate, read from $CSS_BASE/uscore/reports (never written here)."""
+    for f in (f"{B}/uscore/reports/{study}.json",):
+        if os.path.exists(f):
+            for r in json.load(open(f)).get("reports", []):
+                if int(r["cand_id"]) == cid: return _usafe(r)
+    f = f"{B}/uscore/reports/candidates.json"
+    if os.path.exists(f):
+        for r in json.load(open(f)):
+            if r["study"] == study and int(r["cand_id"]) == cid: return _usafe(r)
+    return dict(available=False)
+
+
 def meta(sid, reviewer, mode=""):
     s = study(sid); calls, note = s.load_calls(reviewer) if reviewer else ({}, "")
     audit = (mode == "validation" or SHOW_EXCL) and bool(reviewer)
@@ -614,6 +644,7 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/seqmeta":
                 s = study(q["study"]); s.volume(q["seq"]); return self._send(s.meta_seq[q["seq"]])
             if u.path == "/api/struct3d": return self._send(study(q["study"]).struct3d(int(q["cand"])))
+            if u.path == "/api/uscore": return self._send(uscore_report(q["study"], int(q["cand"])))   # v5.14-gui screen B (read-only)
             if u.path == "/api/morph3d": return self._send(study(q["study"]).morph3d(int(q["cand"]), float(q.get("margin", 8))))
             if u.path == "/morph3d.js": return self._send(open(os.path.join(HERE, "morph3d_view.js"), "rb").read(), "text/javascript; charset=utf-8")
             if u.path == "/api/labels":

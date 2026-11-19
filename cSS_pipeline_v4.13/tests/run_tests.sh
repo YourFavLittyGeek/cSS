@@ -3,6 +3,9 @@
 # usage: bash tests/run_tests.sh      (from the package root, inside the 'css' conda env)
 # Shell flow of run_css.sh / prep_anat.sh with stubbed FreeSurfer: bash tests/test_shell.sh
 set -e
+set -o pipefail      # v5.14-gui: a check that exits non-zero fails the suite even when its output is piped (was lost before)
+first(){ awk -v n="$1" 'NR<=n'; }   # like head -n but reads all input, so pipefail never sees SIGPIPE in the writer
+# piped 'grep -q' is written 'grep ... >/dev/null' for the same reason (grep -q stops reading -> writer exit 141)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 T=$(mktemp -d); export CSS_BASE=$T FREESURFER_HOME=$T/fs CSS_REVIEW_TEST=1
 mkdir -p $T/data $T/synthseg $T/work $T/review $T/results $T/fs $T/scripts
@@ -11,11 +14,11 @@ printf '0 Unknown 0 0 0 0\n2 Left-Cerebral-White-Matter 245 245 245 0\n24 CSF 60
 S=$T/scripts
 echo "== phantoms";            python $ROOT/tests/phantom.py PH1 1; python $ROOT/tests/phantom.py PH2 2
 echo "== align";               python $S/align_seg.py PH1; python $S/align_seg.py PH2
-echo "== detect (clean)";      python $S/detect_css.py PH1 | head -1
+echo "== detect (clean)";      python $S/detect_css.py PH1 | first 1
 echo "== export";              python $S/export_review.py PH1 3
-echo "== synthetic lesions";   python $S/make_synthetic.py PH1 8 0.6 1 | head -1
+echo "== synthetic lesions";   python $S/make_synthetic.py PH1 8 0.6 1 | first 1
 cp $T/synthseg/PH1_seg.nii.gz $T/synthseg/PH1S_seg.nii.gz; python $S/align_seg.py PH1S > /dev/null
-python $S/detect_css.py PH1S | head -1
+python $S/detect_css.py PH1S | first 1
 R=$(python $S/eval_synthetic.py PH1S | grep RESULT); echo "$R"
 FOUND=$(echo "$R" | sed -E 's/.*found=([0-9]+).*/\1/')
 [ "$FOUND" -ge 4 ] || { echo "FAIL: sensitivity too low ($FOUND/8)"; exit 1; }
@@ -35,21 +38,21 @@ for cid, call in calls.items():          # every re-attached call must sit on th
 print(f"   {len(calls)}/{len(raw)} calls re-attached by fingerprint" + (f"; {warn}" if warn else ""))
 PYEOF
 python $S/detect_css.py PH1S > /dev/null
-echo "== feature report";      python $S/feature_report.py | head -3
+echo "== feature report";      python $S/feature_report.py | first 3
 echo "== stress test (small)"; python $S/stress_test.py --hosts PH1,PH2 --depths 0.6 --seeds 1 --tag test | grep -A2 SUMMARY
 python $S/stress_test.py --hosts PH1 --depths 0.6 --seeds 1 --tag test_legacy --legacy | grep -A1 SUMMARY
 echo "== v4 phantom: tram-track / convexity cSS vs tubular & surface veins, ICH, sulcal scoring"
 python $ROOT/tests/phantom_v4.py PH3 1; python $S/align_seg.py PH3 > /dev/null
-python $S/detect_css.py PH3 | head -1
+python $S/detect_css.py PH3 | first 1
 python $ROOT/tests/check_v4.py PH3 | tail -3
 echo "== surface measure + agreement statistics (van Harten 2023)"
 python $S/score_css.py PH3 --truth | grep "cortical surface covered" || { echo "FAIL: surface measure"; exit 1; }
 cp -R $T/review $T/sessA; cp -R $T/review $T/sessB
 python $S/score_css.py PH1S --truth > /dev/null; cp $T/review/css_scores.csv $T/sessA/; cp $T/review/css_scores.csv $T/sessB/
-python $S/agreement.py --a $T/sessA --b $T/sessB | grep -q "ICC(A,1) 1.000" || { echo "FAIL: agreement on identical sessions"; exit 1; }
+python $S/agreement.py --a $T/sessA --b $T/sessB | grep "ICC(A,1) 1.000" >/dev/null || { echo "FAIL: agreement on identical sessions"; exit 1; }
 echo "   identical sessions -> ICC 1.000"
 echo "== rule_test (known lesions vs a negative scan)"
-python $S/rule_test.py --pos PH3 --old $T/work/PH3_truth.nii.gz --ids 1,2,3,4,5,6 --neg PH1 | grep -q "known cSS (PH3)" || { echo "FAIL: rule_test"; exit 1; }
+python $S/rule_test.py --pos PH3 --old $T/work/PH3_truth.nii.gz --ids 1,2,3,4,5,6 --neg PH1 | grep "known cSS (PH3)" >/dev/null || { echo "FAIL: rule_test"; exit 1; }
 python $S/score_css.py PH3 --truth > $T/score_v4.log
 grep -q "3/4" $T/score_v4.log && grep -q "sulcal (Destrieux)" $T/score_v4.log || { cat $T/score_v4.log; echo "FAIL: sulcal score on PH3 should be 3/4 (L1 + R2)"; exit 1; }
 grep -A3 "cSS multifocality" $T/score_v4.log
@@ -76,7 +79,7 @@ grep -q "Boston v2.0 cSS count: 1 focus" $T/score_b2.log || { cat $T/score_b2.lo
 grep "Boston" $T/score_v4.log $T/score_b2.log
 echo "== expert sheet (blinded PDF) + import of the expert's letters"
 python $S/detect_css.py PH3 > /dev/null
-python $S/expert_sheet.py PH3 | head -1
+python $S/expert_sheet.py PH3 | first 1
 [ -s $T/review/PH3_expert_sheet.pdf ] || { echo "FAIL: no expert sheet"; exit 1; }
 python - "$T" <<'PYEOF'
 import sys, pandas as pd, nibabel as nib, numpy as np
@@ -94,14 +97,14 @@ want = open(b + "/letters.txt").read().count("C")
 assert (e.call == "cSS").sum() == want, (e.call.value_counts(), want)   # every C mapped back to its candidate
 print("   expert calls mapped back to the right candidates")
 PYEOF
-python $S/feature_report.py | head -2
+python $S/feature_report.py | first 2
 echo "== normal anatomy: a dark line on the cerebellum must be excluded, cSS lesions kept"
 python $ROOT/tests/phantom_infra.py; python $S/align_seg.py PH4 > /dev/null
-python $S/detect_css.py PH4 | head -1
-python $S/check_known.py PH4 --old $T/work/PH3_truth.nii.gz --ids 1,2,3,4,5,6 | tail -1 | grep -q "6 of 6" \
+python $S/detect_css.py PH4 | first 1
+python $S/check_known.py PH4 --old $T/work/PH3_truth.nii.gz --ids 1,2,3,4,5,6 | tail -1 | grep "6 of 6" >/dev/null \
   || { python $S/check_known.py PH4 --old $T/work/PH3_truth.nii.gz --ids 1,2,3,4,5,6; echo "FAIL: cSS lost on PH4"; exit 1; }
-python $S/check_known.py PH4 --old $T/work/PH4_infra_line.nii.gz --ids 1 | head -1
-python $S/check_known.py PH4 --old $T/work/PH4_infra_line.nii.gz --ids 1 | head -1 | grep -q "kept" \
+python $S/check_known.py PH4 --old $T/work/PH4_infra_line.nii.gz --ids 1 | first 1
+python $S/check_known.py PH4 --old $T/work/PH4_infra_line.nii.gz --ids 1 | first 1 | grep "kept" >/dev/null \
   && { echo "FAIL: cerebellar line still shown as a candidate"; exit 1; }
 echo "== partial-coverage slab (bottom cut off) with T1 anatomy: skull-base rules must switch off"
 python - "$T" <<'PYEOF'
@@ -114,14 +117,14 @@ nib.save(nib.Nifti1Image(seg, img.affine), b + "/synthseg/PH5_seg.nii.gz")
 nib.save(nib.Nifti1Image(seg, img.affine), b + "/work/PH5_t1seg_swispace.nii.gz")   # pretend T1 labels
 PYEOF
 python $S/align_seg.py PH5 > /dev/null
-python $S/detect_css.py PH5 | head -2 | tee $T/ph5.log
+python $S/detect_css.py PH5 | first 2 | tee $T/ph5.log
 grep -q "anatomy T1" $T/ph5.log && grep -q "cut off at the bottom" $T/ph5.log || { echo "FAIL: coverage / anatomy detection"; exit 1; }
 grep -q "skull base" $T/ph5.log && { echo "FAIL: skull-base rule active on a cut-off slab"; exit 1; }
 echo "== T1 anatomy on the cerebellum phantom: position rules active, cSS kept"
 cp $T/synthseg/PH4_seg.nii.gz $T/work/PH4_t1seg_swispace.nii.gz; python $S/align_seg.py PH4 > /dev/null
-python $S/detect_css.py PH4 | head -2
-python $S/check_known.py PH4 --old $T/work/PH3_truth.nii.gz --ids 1,2,3,4,5,6 | tail -1 | grep -q "6 of 6" || { echo "FAIL: cSS lost (T1 mode)"; exit 1; }
-python $S/check_known.py PH4 --old $T/work/PH4_infra_line.nii.gz --ids 1 | head -1 | grep -q "kept" && { echo "FAIL: cerebellar line kept (T1 mode)"; exit 1; }
+python $S/detect_css.py PH4 | first 2
+python $S/check_known.py PH4 --old $T/work/PH3_truth.nii.gz --ids 1,2,3,4,5,6 | tail -1 | grep "6 of 6" >/dev/null || { echo "FAIL: cSS lost (T1 mode)"; exit 1; }
+python $S/check_known.py PH4 --old $T/work/PH4_infra_line.nii.gz --ids 1 | first 1 | grep "kept" >/dev/null && { echo "FAIL: cerebellar line kept (T1 mode)"; exit 1; }
 echo "== v4.14 case QC, generation-gate log, extent at the volume edge, CSV column contract"
 python $ROOT/tests/check_qc.py | tee $T/qc.log | grep -v "^RESULT"
 grep -q "RESULT qc OK" $T/qc.log || { echo "FAIL: v4.14 QC checks"; exit 1; }
@@ -200,6 +203,9 @@ echo "== v5.7 reviewer in a browser (skipped without node + Playwright)"
 python $ROOT/tests/check_viewer.py | tee $T/viewer.log | grep -v "^RESULT"
 echo "== v5.12 3-D morphology (synthetic shapes + PH6 api)"
 python $ROOT/tests/check_morph3d.py | grep -v "^ok" ; python $ROOT/tests/check_morph3d_api.py | grep -v "^ok"
+echo "== v5.14-gui 3-D morphology resolution confidence (tubes / sheets / blobs x 6 orientations x 5 voxel spacings incl. 0.5x0.5x2 / 3 mm)"
+python $ROOT/tests/check_morph3d_resolution.py | tee $T/m3res.log | grep -E "^(FAIL|NOT-REP|RESULT)"
+grep "RESULT morph3d_resolution OK" $T/m3res.log >/dev/null || { echo "FAIL: morph3d resolution matrix"; exit 1; }
 grep -q "RESULT viewer OK" $T/viewer.log || { echo "FAIL: viewer checks"; exit 1; }
 echo "== v5.7 zone probe (read-only anatomical zones vs calls)"
 python $ROOT/tests/check_zone_probe.py | tee $T/zone.log | grep -v "^RESULT"

@@ -61,6 +61,16 @@ def _lite(F): return {k: (v if k == "_meta" else dict(value=v["value"], unit=v["
                       for k, v in F.items()}
 
 
+def _clean(v):
+    """NaN / numpy scalars -> JSON-safe values (NaN is not valid JSON and breaks the app's pages)"""
+    try:
+        if v is None: return None
+        if isinstance(v, (float, np.floating)) and not np.isfinite(v): return None
+        if isinstance(v, np.generic): return v.item()
+    except Exception: pass
+    return v
+
+
 def candidate_record(S, cid, do_perturb=True):
     C = crop(S, cid)
     F, D = fe.extract(C["cand"], C["img"], S["vox"], raw=C["raw"], ves=C["ves"], psd=C["psd"], brain=C["brain"], reg=S["reg"], crop_edge=C["edge"])
@@ -71,7 +81,7 @@ def candidate_record(S, cid, do_perturb=True):
     flags = dc.protective_flags(F, D, det, stab, S["reg"], row)
     return dict(study=S["sid"], cand_id=int(cid), F=_lite(F), detectors=det, stability=stab, perturbation_rows=rows,
                 protective_flags_pre=flags, registration=S["reg"], raw_note=S["raw_note"], input_hash=S["input_hash"],
-                v510_confidence_pct=row.get("confidence_pct"), cand_row={k: row.get(k) for k in ("infra_frac", "infratentorial", "near_ich_suggest", "region")},
+                v510_confidence_pct=_clean(row.get("confidence_pct")), cand_row={k: _clean(row.get(k)) for k in ("infra_frac", "infratentorial", "near_ich_suggest", "region")},
                 voxel_mm=list(S["vox"]), versions=versions())
 
 
@@ -112,6 +122,7 @@ def train(base, cohort, out, labels_access=None):
     """development only. Returns the model dict (frozen) and the development report dict."""
     dev = cohort.studies("development"); cohort.check_fit_set(dev)
     LA = labels_access or LabelAccess(cohort, base, mode="development", log_dir=out)
+    if LA.mode != "development": raise CohortError("training accepts only a development-mode label boundary")
     import pandas as pd
     rows, y, pid, warn = [], [], [], []
     for s in dev:
@@ -144,16 +155,32 @@ def train(base, cohort, out, labels_access=None):
                v510_auc_same_candidates=md.auc(y[vok], v510[vok]) if vok.sum() else None,
                v510_note="v5.10 was fitted on these same M02-M11 calls: its AUC here is IN-SAMPLE (optimistic), the unified score's is out-of-fold",
                penalty_at_grid_boundary=bool(any(f['lam'] in (md.LAMBDAS[0], md.LAMBDAS[-1]) for f in folds)),
-               label_warnings=warn, feature_missingness=_missing(rows), estimate_type="DEVELOPMENT (nested LOPO, out-of-fold)")
+               label_warnings=warn, feature_missingness=_missing(rows), estimate_type="CROSS-VALIDATION (nested leave-one-patient-out on the development patients; every prediction out-of-fold)")
     rep.update(_operating(y[ok], (p_cal if prob_ok else p_raw)[ok], pid[ok], cut))
     M = final.to_json(train_studies=dev, ordering_cut=cut, probability_output=prob_ok, cohort_manifest_sha=cohort.manifest_sha,
                       synthetic_test=cohort.synthetic, development_report_summary=dict(auc=a_cal, slope=slope))
-    M["frozen"] = True
+    M["frozen"] = False                    # v5.14-gui: training never freezes; freeze() is a separate, confirmed step
     os.makedirs(out, exist_ok=True)
-    json.dump(M, open(f"{out}/model_frozen.json", "w"), indent=1)
+    json.dump(M, open(f"{out}/model_trained.json", "w"), indent=1)
     json.dump(dict(oof=[dict(study=r["study"], cand_id=r["cand_id"], y=int(t), p_raw=float(a), p_cal=float(b)) for r, t, a, b in zip(rows, y, p_raw, p_cal) if np.isfinite(b)],
                    **rep), open(f"{out}/development_report.json", "w"), indent=1, default=_np)
     return M, rep
+
+
+def freeze(out, confirm):
+    """Freezes the trained model (model_trained.json -> model_frozen.json, frozen=True). confirm must be the text 'FREEZE'."""
+    if confirm != "FREEZE": raise ValueError("freeze refused: confirmation text must be FREEZE")
+    p = f"{out}/model_trained.json"
+    if not os.path.exists(p): raise FileNotFoundError("no trained model: run train first")
+    M = json.load(open(p))
+    if M.get("synthetic_test") is None: raise ValueError("model has no cohort mode")
+    import datetime as _dt
+    M["frozen"] = True; M["frozen_at"] = _dt.datetime.now().isoformat(timespec="seconds")
+    json.dump(M, open(f"{out}/model_frozen.json", "w"), indent=1)
+    return dict(model_hash=M["model_hash"], frozen_at=M["frozen_at"], synthetic_test=M["synthetic_test"])
+
+
+from .common import HELDOUT_STATEMENT, heldout_authorization      # kept importable from here (GUI, tests)
 
 
 def _bins(y, p, k=5):
@@ -234,7 +261,7 @@ def score_application(base, sid, cohort, out, model_path=None):
     recs = extract_study(base, sid, cohort, out, application=True)
     mp = model_path or f"{out}/model_frozen.json"
     M = json.load(open(mp)) if os.path.exists(mp) else None
-    if M and (not M.get("frozen") or M.get("synthetic_test")): M = None
+    if M and (not M.get("frozen") or bool(M.get("synthetic_test")) != bool(cohort.synthetic)): M = None   # never mix synthetic and real
     m = md.Fitted.from_json(M) if M else None
     reps = []
     for r in recs:
@@ -264,7 +291,8 @@ def score_application(base, sid, cohort, out, model_path=None):
 def evaluate_heldout(base, cohort, out, frozen_hash):
     """Held-out evaluation with the frozen model. Opens held-out labels ONLY here, after the hash check."""
     import pandas as pd
-    LA = LabelAccess(cohort, base, mode="heldout_evaluation", frozen_model=f"{out}/model_frozen.json", frozen_hash=frozen_hash, log_dir=out)
+    LA = LabelAccess(                      # authorization, recomputed hash and model integrity are enforced inside LabelAccess
+cohort, base, mode="heldout_evaluation", frozen_model=f"{out}/model_frozen.json", frozen_hash=frozen_hash, log_dir=out)
     M = json.load(open(f"{out}/model_frozen.json")); m = md.Fitted.from_json(M); prob_ok = M["probability_output"]
     y, p, pid = [], [], []
     for s in cohort.studies("held-out"):

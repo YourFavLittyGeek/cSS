@@ -4,6 +4,7 @@ collision with real patients); the manifest marks them synthetic. Never use thes
 import os, csv, json
 import numpy as np
 import uscore_synth as sy
+TEMPLATE = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "uscore_synth_columns.json")))
 
 KINDS = [("css_convexity", "cSS"), ("css_sulcal_bank", "cSS"), ("surface_vein", "Vessel"), ("skull_interface_artifact", "Artifact"),
          ("thin_curved_css", "cSS"), ("vein_parallel_to_sulcus", "Vessel"), ("extracranial_artifact", "Artifact"), ("fragmented_css", "cSS")]
@@ -23,14 +24,20 @@ def write_base(B, n_dev=6, n_ho=3, seed=5000):
         for j, b in enumerate(blocks):
             m = np.zeros(img.shape, bool); m[j * sy.SHAPE[0]:(j + 1) * sy.SHAPE[0]] = b["cand"]; lab[m] = j + 1
             P = np.argwhere(m).mean(0); vol = float(m.sum() * np.prod(sy.VOX))
-            rows.append(dict(cand_id=j + 1, vox_i=P[0], vox_j=P[1], vox_k=P[2], volume_mm3=vol, infra_frac=0.0, infratentorial=0,
-                             near_ich_suggest=0, region="synthetic", confidence_pct=""))
-            calls.append(dict(cand_id=j + 1, call=picks[j][1], vox_i=P[0], vox_j=P[1], vox_k=P[2], volume_mm3=vol))
+            row = dict(TEMPLATE)            # every production candidate column, neutral defaults (so the reviewer can open the study)
+            row.update(cand_id=j + 1, vox_i=int(round(P[0])), vox_j=int(round(P[1])), vox_k=int(round(P[2])), volume_mm3=vol, label=j + 1,
+                       infra_frac=0.0, infratentorial=0, near_ich_suggest=0, region="synthetic", hemi="L" if j % 2 == 0 else "R", score=1.0 - 0.1 * j)
+            rows.append(row)
+            calls.append(dict(cand_id=j + 1, call=picks[j][1], vox_i=int(round(P[0])), vox_j=int(round(P[1])), vox_k=int(round(P[2])), volume_mm3=vol))
         A = np.diag(list(sy.VOX) + [1.0])
         nib.save(nib.Nifti1Image(lab, A), f"{B}/review/{sid}_candidates.nii.gz")
         nib.save(nib.Nifti1Image(img, A), f"{B}/data/{sid}_swi.nii")
         nib.save(nib.Nifti1Image(ves.astype(np.uint8), A), f"{B}/work/{sid}_vessels.nii.gz")
         nib.save(nib.Nifti1Image(psd.astype(np.float32), A), f"{B}/work/{sid}_pial_sd.nii.gz")
+        dark = (img > 0) & ((sy.MU - img) / sy.SD >= 2.0)                    # detector-style dark-voxel map (for the reviewer's 3-D view)
+        nib.save(nib.Nifti1Image(dark.astype(np.uint8), A), f"{B}/work/{sid}_dark.nii.gz")
+        seg = np.zeros(img.shape, np.int16); seg[(psd < 0) & (psd > -3)] = 1028; seg[psd <= -3] = 2; seg[(psd >= 0) & (img > 0)] = 24
+        nib.save(nib.Nifti1Image(seg, A), f"{B}/work/{sid}_seg_swispace.nii.gz")
         os.makedirs(f"{B}/raw/{sid}/SWI", exist_ok=True); nib.save(nib.Nifti1Image(raw, A), f"{B}/raw/{sid}/SWI/swi.nii.gz")
         for name, rr in ((f"{sid}_candidates.csv", rows), (f"{sid}_calls.csv", calls)):
             with open(f"{B}/review/{name}", "w", newline="") as f:

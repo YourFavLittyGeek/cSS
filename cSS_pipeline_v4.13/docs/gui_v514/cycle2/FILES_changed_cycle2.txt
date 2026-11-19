@@ -1,0 +1,30 @@
+M CLAUDE.md
+M app/gui_protocol.py
+M app/mac/cSS Pipeline.app/Contents/Resources/app/gui_protocol.py
+M app/mac/cSS Pipeline.app/Contents/Resources/app/unified_gui.py
+M app/mac/cSS Pipeline.app/Contents/Resources/app/unified_view.js
+M app/unified_gui.py
+M app/unified_view.js
+A docs/FEATURE_DICTIONARY_v514.md
+A docs/HELDOUT_PROTECTION_AUDIT_v514.md
+M docs/INVESTIGATION_morph3d_cylinder.md
+A docs/gui_v514/morph3d_resolution_matrix.csv
+M scripts/css_morph3d.py
+M scripts/morph3d_view.js
+M scripts/review_web.html
+M tests/check_app_unified.py
+A tests/check_heldout_protection.py
+M tests/check_morph3d.py
+M tests/check_morph3d_api.py
+A tests/check_morph3d_resolution.py
+M tests/check_uscore_features.py
+M tests/run_tests.sh
+M tests/run_uscore_tests.sh
+M unified_score/cohort_audit.py
+M unified_score/output/COHORT_REPORT_SYNTHETIC_TEST.md
+M unified_score/output/adversarial_seeds.json
+M unified_score/uscore/common.py
+M unified_score/uscore/detectors.py
+M unified_score/uscore/features.py
+M unified_score/uscore/model.py
+M unified_score/uscore/pipeline.py

@@ -65,20 +65,52 @@ class Cohort:
         if bad: raise CohortError(f"model fitting refused: non-development studies {bad}")
 
 
+HELDOUT_STATEMENT = "I authorize the one-time evaluation of the frozen unified model on the held-out cohort."
+
+
+def heldout_authorization(out_dir, model_hash_value):
+    """Held-out evaluation needs a WRITTEN authorization file created by the user outside the app:
+    <out_dir>/heldout_authorization.json = {"model_hash", "authorized_by", "date", "statement": HELDOUT_STATEMENT}.
+    A model hash or a GUI confirmation alone is not sufficient. Returns (ok, reason)."""
+    p = os.path.join(out_dir, "heldout_authorization.json")
+    if not os.path.exists(p): return False, "no written authorization file (heldout_authorization.json)"
+    try: a = json.load(open(p))
+    except Exception: return False, "authorization file unreadable"
+    if a.get("model_hash") != model_hash_value: return False, "authorization is for a different model"
+    if not str(a.get("authorized_by", "")).strip() or not str(a.get("date", "")).strip(): return False, "authorization lacks name or date"
+    if a.get("statement") != HELDOUT_STATEMENT: return False, "authorization statement missing or altered"
+    return True, "authorized"
+
+
 class LabelAccess:
-    """The only way the engine reads reader labels. Development mode: development studies only. Held-out labels can be read
-    only in mode 'heldout_evaluation' with a frozen model whose hash is given and matches. Every access is logged."""
+    """The ONLY way the engine reads reader labels (the label-access boundary). Development mode: development studies only.
+    Held-out mode is granted only when ALL of these hold, checked here (not by the caller):
+      - the frozen model file exists, is frozen, and its hash RECOMPUTED from its content equals both the stored hash and the
+        hash given by the caller (an edited model cannot pass with its old hash);
+      - the model was not trained on any held-out study;
+      - a written authorization file names that hash, a person, a date and the exact statement.
+    The model file is re-verified before every label read (it cannot be swapped after authorization). Every access is logged."""
     def __init__(self, cohort, base, mode="development", frozen_model=None, frozen_hash=None, log_dir=None):
         self.c, self.base, self.mode = cohort, base, mode
         self.log = os.path.join(log_dir or os.path.join(base, "uscore"), "label_access_log.csv")
         if mode not in ("development", "heldout_evaluation"): raise HeldOutAccessError(f"unknown mode {mode}")
         if mode == "heldout_evaluation":
-            if not frozen_model or not os.path.exists(frozen_model): raise HeldOutAccessError("held-out evaluation needs a frozen model file")
-            m = json.load(open(frozen_model))
-            if not m.get("frozen") or m.get("model_hash") != frozen_hash:
-                raise HeldOutAccessError("held-out evaluation refused: model not frozen or hash mismatch")
-            if set(m.get("train_studies", [])) & set(cohort.studies("held-out")):
-                raise HeldOutAccessError("frozen model was trained on held-out studies")
+            self.frozen_model, self.frozen_hash = frozen_model, frozen_hash
+            self._verify_model()
+            ok, why = heldout_authorization(os.path.dirname(os.path.abspath(frozen_model)), frozen_hash)
+            if not ok: raise HeldOutAccessError(f"held-out evaluation refused: {why}")
+            self.model_file_sha = sha256_file(frozen_model)
+
+    def _verify_model(self):
+        from .model import model_hash
+        if not self.frozen_model or not os.path.exists(self.frozen_model): raise HeldOutAccessError("held-out evaluation needs a frozen model file")
+        m = json.load(open(self.frozen_model))
+        if not m.get("frozen"): raise HeldOutAccessError("held-out evaluation refused: model not frozen")
+        rec = model_hash(m)
+        if rec != m.get("model_hash"): raise HeldOutAccessError("held-out evaluation refused: model content does not match its stored hash (file edited)")
+        if rec != self.frozen_hash: raise HeldOutAccessError("held-out evaluation refused: hash mismatch")
+        if set(m.get("train_studies", [])) & set(self.c.studies("held-out")):
+            raise HeldOutAccessError("frozen model was trained on held-out studies")
 
     def _log(self, sid, role, ok):
         os.makedirs(os.path.dirname(self.log), exist_ok=True); new = not os.path.exists(self.log)
@@ -92,10 +124,14 @@ class LabelAccess:
         ok = (role == "development") or (role == "held-out" and self.mode == "heldout_evaluation")
         self._log(sid, role, ok)
         if not ok: raise HeldOutAccessError(f"{sid} is held-out: labels are not readable in mode '{self.mode}'")
-        return read_calls(self.base, sid, cand_table)
+        if self.mode == "heldout_evaluation":
+            self._verify_model()
+            if sha256_file(self.frozen_model) != self.model_file_sha: raise HeldOutAccessError("model file changed after authorization")
+        return _read_calls(self.base, sid, cand_table)
 
 
-def read_calls(base, sid, cand_table):
+def _read_calls(base, sid, cand_table):
+    """PRIVATE: called only by LabelAccess.labels (tests/check_heldout_protection.py checks that no other code references it)."""
     """Reader calls -> {cand_id: 1 (cSS) / 0 (non-cSS)}; Unsure / unread / Near ICH are left out (not negatives)."""
     import pandas as pd, sys
     sys.path.insert(0, os.path.join(os.path.dirname(US), "scripts"))

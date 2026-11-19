@@ -19,5 +19,6 @@ for k, (name, sc) in enumerate(sy.scenes().items()):
         if sc["is_css"] and cat == "alternative_high_confidence": crit.append((name, s, [d["detector"] for d in det if d["status"] == "confirmed"]))
 for name, c in tab.items(): print(f"{name:30s} {'cSS' if sy.scenes()[name]['is_css'] else 'non-cSS':7s} {dict(c)}")
 print(f"\nseeds: {N} per scene; CRITICAL failures {len(crit)} {crit}")
+os.makedirs(os.path.join(H, "..", "unified_score", "output"), exist_ok=True)
 json.dump(dict(seeds=N, table={k: dict(v) for k, v in tab.items()}, critical=crit), open(os.path.join(H, "..", "unified_score", "output", "adversarial_seeds.json"), "w"), indent=1)
 sys.exit(1 if crit else 0)

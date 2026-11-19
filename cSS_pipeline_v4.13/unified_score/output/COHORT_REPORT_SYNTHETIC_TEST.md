@@ -1,6 +1,6 @@
 # Unified cSS score: cohort report — SYNTHETIC TEST (not a result)
 
-Model `uscore-model/1.0` hash `eca8f132ad94d871`; predictors x1_vessel_continuity_mm, x2_core_contrast_nu, x3_pial_distance_mm; ridge lambda 0.01; effective df 3.13. Probability output: **yes**. EXPERIMENTAL research output; not a diagnosis.
+Model `uscore-model/1.0` hash `eca8f132ad94d871` (FROZEN 2026-11-19T23:17:11); predictors x1_vessel_continuity_mm, x2_core_contrast_nu, x3_pial_distance_mm; ridge lambda 0.01; effective df 3.13. Probability output: **yes**. EXPERIMENTAL research output; not a diagnosis.
 
 ## 1. Development estimates (nested leave-one-patient-out, out-of-fold; SYN01, SYN02, SYN03, SYN04, SYN05, SYN06)
 
@@ -10,7 +10,6 @@ Model `uscore-model/1.0` hash `eca8f132ad94d871`; predictors x1_vessel_continuit
 - calibration: slope 0.97, intercept -0.19; Brier 0.000 (CI [2.4669119607478186e-21, 3.893679134296391e-19])
 - reliability bins (mean predicted vs observed): 0.00→0.00 (n 11); 0.00→0.00 (n 11); 0.00→0.00 (n 14); 1.00→1.00 (n 10); 1.00→1.00 (n 8)
 - at the ordering cut 1.00 (prioritisation only): candidate sensitivity 1.00, specificity 1.00, FP per patient 0.00, patient sensitivity 1.00 (6 cSS-positive patients)
-- v5.10 confidence_pct on the same candidates: AUC – — v5.10 was fitted on these same M02-M11 calls: its AUC here is IN-SAMPLE (optimistic), the unified score's is out-of-fold
 
 ### Coefficient stability across outer folds (standardised)
 
@@ -35,13 +34,23 @@ Penalty per fold: [0.01, 0.01, 0.01, 0.01, 0.01, 0.01]; effective df per fold: [
 ### False positives / false negatives at the ordering cut (out-of-fold; * = not reliable)
 
 
+### Estimate types (not interchangeable)
+
+- **Cross-validation estimate** (this section): nested leave-one-patient-out on the development patients; every prediction is out-of-fold.
+- **Apparent / in-sample estimate**: a model scored on the data it was fitted on. Not reported for the unified model.
+- **Independent held-out estimate**: frozen model on the held-out cohort (section 3). Only this estimates performance on new patients.
+
+### v5.10 (separate; NOT comparable)
+
+v5.10 `confidence_pct` was fitted on these same development calls, so its AUC here (–) is an **in-sample** figure. It must not be set beside the cross-validation estimate above as if they were equivalent. A fair comparison is only possible on the independent held-out cohort.
+
 ## 2. Candidate categories (all included studies scored by the frozen model)
 
-- development: {'uncertain': 22, 'alternative_high_confidence': 2}
-- held-out: {'uncertain': 10, 'alternative_high_confidence': 2}
+- development: {'css_compatible': 3, 'uncertain': 19, 'alternative_high_confidence': 2}
+- held-out: {'uncertain': 6, 'css_compatible': 4, 'alternative_high_confidence': 2}
 - protective conditions: unstable under perturbation (22); dark-core decomposition unstable (16)
 - perturbation-unstable candidates: 22 / 36
-- categories by registration state: ok: {'uncertain': 32, 'alternative_high_confidence': 4}
+- categories by registration state: ok: {'css_compatible': 7, 'uncertain': 25, 'alternative_high_confidence': 4}
 
 ## 3. Independent held-out results (frozen model)
 

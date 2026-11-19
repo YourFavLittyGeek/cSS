@@ -45,3 +45,5 @@ changes detector thresholds or rules. Names (optional) only in $CSS_BASE/private
   workbook columns unified_css_compatible / unified_uncertain / unified_alternative / unified_model. Without a trained model
   ("no model yet") only the alternative-explanation detectors and feature reliability are reported. Nothing is hidden or
   suppressed; reader files are never touched. install.sh copies unified_score/ to $CSS_BASE. No screen layout changed.
+- v5.14.1-gui: tab **Unified (experimental)** (workflow + test protocol) - see docs/GUI_VALIDATION_WORKFLOW_v514.md. The unified score
+  after each patient is now OFF by default (switch in that tab) and runs only after the patient is done and its results are saved.

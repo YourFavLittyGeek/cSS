@@ -78,6 +78,15 @@ def calib_slope(y, p):
     b, _ = ridge_fit(lp[:, None], y, 1e-6); return float(b[1]), float(b[0])
 
 
+HASH_EXCLUDE = ("model_hash", "frozen", "frozen_at")
+
+
+def model_hash(d):
+    """sha256 of the model content (everything except the hash itself and the freeze stamp). Used when the model is written
+    AND recomputed independently at the held-out label boundary, so an edited model file cannot pass with its old hash."""
+    return hashlib.sha256(json.dumps({k: v for k, v in d.items() if k not in HASH_EXCLUDE}, sort_keys=True).encode()).hexdigest()
+
+
 class Fitted:
     def __init__(self, predictors, beta, mu, sd, lam, edf, platt=None):
         self.predictors, self.beta, self.mu, self.sd, self.lam, self.edf, self.platt = predictors, beta, mu, sd, lam, edf, platt
@@ -101,8 +110,7 @@ class Fitted:
         d = dict(model_version=MODEL_VERSION, feature_version=FEATURE_VERSION, predictors=self.predictors, beta=list(map(float, self.beta)),
                  mu=list(map(float, self.mu)), sd=list(map(float, self.sd)), lam=float(self.lam), edf=float(self.edf),
                  platt=None if self.platt is None else list(self.platt), **extra)
-        d["model_hash"] = hashlib.sha256(json.dumps({k: v for k, v in d.items() if k not in ("model_hash", "frozen", "frozen_at")},
-                                                    sort_keys=True).encode()).hexdigest()
+        d["model_hash"] = model_hash(d)
         return d
 
     @staticmethod

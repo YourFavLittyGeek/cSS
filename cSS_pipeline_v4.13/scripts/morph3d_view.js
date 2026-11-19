@@ -3,10 +3,10 @@
 // z superior), origin = candidate centroid. Read-only: nothing here changes the candidate or any detector output.
 "use strict";
 const M3 = (() => {
-  const COL = { tube: [0.29, 0.64, 1.0], sheet: [0.94, 0.63, 0.25], blob: [0.78, 0.49, 1.0], unc: [0.55, 0.56, 0.6],
+  const COL = { tube: [0.29, 0.64, 1.0], sheet: [0.94, 0.63, 0.25], blob: [0.78, 0.49, 1.0], unc: [0.55, 0.56, 0.6], unres: [0.36, 0.37, 0.4], acq: [0.85, 0.85, 0.82],
     cand: [0.95, 0.62, 0.28], vessel: [0.29, 0.64, 1.0], vconn: [0.15, 0.45, 1.0], cortex: [0.62, 0.64, 0.68], dark: [0.42, 0.42, 0.45],
     skel: [1, 1, 1], branch: [1, 0.3, 0.3], marker: [1, 0.92, 0.2], foot: [0.36, 0.85, 0.5], contact: [1, 0.2, 0.6], slab: [1, 1, 1] };
-  const CLS = ["tube", "sheet", "blob", "unc"];
+  const CLS = ["tube", "sheet", "blob", "unc", "unres", "acq"];   // v5.14-gui: 4 unresolved, 5 acquisition-limited
   let gl, cv, P = {}, D = null, onPick = null, marker = null, buf = {}, opts = null, cam = { yaw: -0.7, pitch: 0.45, dist: 60, tx: 0, ty: 0, tz: 0, fov: 0.6 };
   const VS_L = `attribute vec3 p;attribute vec3 n;attribute vec3 c;uniform mat4 M;uniform float ps;varying vec3 vn;varying vec3 vc;
     void main(){vn=n;vc=c;gl_Position=M*vec4(p,1.0);gl_PointSize=ps;}`;
@@ -78,6 +78,7 @@ const M3 = (() => {
     for (const [k, key, c] of [["vessel_mesh", "ves", COL.vessel], ["vessel_conn_mesh", "vconn", COL.vconn], ["cortex_mesh", "ctx", COL.cortex], ["dark_mesh", "dark", COL.dark]]) {
       const o = D[k]; if (o && o.f.length) upload(key, o.v, meshNormals(o.v, o.f), new Array(o.v.length).fill(0).map((_, i) => c[i % 3]), o.f); else delete buf[key] }
     const pts = (key, arr, c) => { if (arr && arr.length) upload(key, arr.flat(), null, arr.map(() => c).flat(), null); else delete buf[key] };
+    pts("core", D.core_pts, [1.0, 0.29, 0.29]); pts("supp", D.support_pts, [0.29, 0.64, 1.0]);   // v5.14-gui experimental layers
     pts("skel", D.skeleton, COL.skel); pts("branch", D.branch, COL.branch); pts("foot", D.footprint, COL.foot); pts("contact", D.contact, COL.contact);
     const slabPts = opts.slab >= 0 && V.slab.length ? V.p.filter((_, k) => V.slab[k] === opts.slab) : []; pts("slab", slabPts, COL.slab);
     // principal axes (2 sd each way), drawn as lines
@@ -104,6 +105,8 @@ const M3 = (() => {
     if (L.pca) { gl.disable(gl.DEPTH_TEST); draw1("pca", gl.LINES, 1, 0); gl.enable(gl.DEPTH_TEST) }
     if (opts.slab >= 0) { gl.disable(gl.DEPTH_TEST); draw1("slab", gl.POINTS, 1, 0, 5 * devicePixelRatio); gl.enable(gl.DEPTH_TEST) }
     if (L.contact) draw1("contact", gl.POINTS, 1, 0, 6 * devicePixelRatio);
+    if (L.core || L.support) { gl.disable(gl.DEPTH_TEST);   // drawn on top: they lie inside the candidate surface
+      if (L.support) draw1("supp", gl.POINTS, 1, 0, 3 * devicePixelRatio); if (L.core) draw1("core", gl.POINTS, 1, 0, 5 * devicePixelRatio); gl.enable(gl.DEPTH_TEST) }
     if (L.footprint) draw1("foot", gl.POINTS, 1, 0, 3 * devicePixelRatio);
     if (marker) { upload("mk", marker.flat(), null, marker.map(() => COL.marker).flat(), null); gl.disable(gl.DEPTH_TEST); draw1("mk", gl.LINES, 1, 0); gl.enable(gl.DEPTH_TEST) }
     // translucent context last (never hides the candidate: depth write off)

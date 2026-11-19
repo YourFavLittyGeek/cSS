@@ -35,9 +35,17 @@ td input{padding:3px 6px;min-width:80px;max-width:150px}td select{padding:3px 26
 #log{position:fixed;left:0;right:0;bottom:0;height:34%;background:#07090b;color:#b7c0c9;border-top:1px solid var(--line);display:none;z-index:9;font:12px ui-monospace,Menlo,monospace}
 #log pre{margin:0;padding:8px 12px;height:calc(100% - 34px);overflow:auto;white-space:pre-wrap}#log .h{display:flex;gap:8px;align-items:center;padding:4px 10px;background:#11161b}
 .err{color:var(--bad)}.steps span{margin-right:12px;font-size:12px}.hide{display:none}#toast{position:fixed;right:16px;bottom:16px;background:var(--panel);border:1px solid var(--line);padding:10px 14px;border-radius:8px;display:none;z-index:10;max-width:520px}
+.cat{display:inline-block;border-radius:999px;padding:1px 9px;font-size:11.5px;white-space:nowrap;font-weight:600}
+.cat.compatible,.cat.completed,.cat.done{background:color-mix(in srgb,var(--ok) 22%,transparent);color:var(--ok)}
+.cat.compatible_with_limitations,.cat.adopted{background:color-mix(in srgb,var(--ok) 12%,transparent);color:color-mix(in srgb,var(--ok) 70%,var(--warn))}
+.cat.incomplete,.cat.interrupted,.cat.running,.cat.pending{background:color-mix(in srgb,var(--warn) 22%,transparent);color:var(--warn)}
+.cat.incompatible,.cat.failed,.cat.corrupted{background:color-mix(in srgb,var(--bad) 22%,transparent);color:var(--bad)}
+.cat.unknown,.cat.missing,.cat.upstream_rerun,.cat.reused,.cat.not_applicable{background:color-mix(in srgb,var(--mut) 22%,transparent);color:var(--mut)}
+.opt{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:6px 0;cursor:pointer;display:block}.opt.on{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 10%,transparent)}.opt.dis{opacity:.45;cursor:not-allowed}
+tr.sel td{background:color-mix(in srgb,var(--acc) 10%,transparent)}.mono{font:12px ui-monospace,Menlo,monospace;color:var(--mut)}
 </style></head><body>
 <div class="top"><img id="logo" src="/icon_dark.png" alt=""><b>cSS Pipeline</b><span class="mut" id="ver"></span>
- <nav><button data-v="home" class="on">Home</button><button data-v="add">Add patients</button><button data-v="pts">Patients</button><button data-v="res">Results</button><button data-v="read">Review / Blind read</button><button data-v="set">Settings</button></nav>
+ <nav><button data-v="home" class="on">Home</button><button data-v="add">Add patients</button><button data-v="pts">Patients</button><button data-v="proc">Processing</button><button data-v="res">Results</button><button data-v="read">Review / Blind read</button><button data-v="uni">Unified (experimental)</button><button data-v="set">Settings</button></nav>
  <span class="sp"></span><span class="seg ico" id="awake"><button data-a="1" title="Keep the Mac awake while patients are processing">☕</button><button data-a="0" title="Sleep allowed">🛏</button></span>
  <span class="seg ico" id="theme"><button data-t="light" title="Light theme">☀</button><button data-t="dark" title="Dark theme">☾</button></span><button class="b" id="logbtn">⌨ Show log</button></div>
 <div class="wrap" id="view"></div>
@@ -77,7 +85,7 @@ $("#logcopy").onclick=()=>{navigator.clipboard.writeText($("#logtext").textConte
 async function loadLog(){const c=$("#logcode").value;if(!c){$("#logtext").textContent="(no patient yet)";return}const r=await api("/api/log?code="+encodeURIComponent(c));const t=$("#logtext"),bot=t.scrollTop+t.clientHeight>=t.scrollHeight-20;t.textContent=r.text;if(bot)t.scrollTop=t.scrollHeight}
 // ---------------- views
 async function render(){await refresh();const v=$("#view");
-  if(V==="home")return homeView(v);if(V==="add")return addView(v);if(V==="pts")return ptsView(v);if(V==="res")return resView(v);if(V==="read")return readView(v);if(V==="set")return setView(v)}
+  if(V==="home")return homeView(v);if(V==="add")return addView(v);if(V==="pts")return ptsView(v);if(V==="res")return resView(v);if(V==="read")return readView(v);if(V==="set")return setView(v);if(V==="uni")return uniView(v);if(V==="proc")return procView(v)}
 async function homeView(v){const pf=await api("/api/preflight");const q=S.queue;
   v.innerHTML=`<div class="card"><h2>Setup check</h2><table>${pf.map(x=>`<tr><td style="width:30px" class="${x.ok?"ok":"bad"}">${x.ok?"✓":"✗"}</td><td style="width:220px">${esc(x.item)}</td><td class="mut">${esc(x.detail)} ${x.fix==="dcm2niix"?`<button class="b pri" data-fix="dcm2niix">Install dcm2niix</button>`:""}${x.fix==="pywebview"?`<button class="b pri" data-fix="pywebview">Install (own window + Dock icon)</button>`:""}${x.fix==="licence"?`${x.fix_path?`<button class="b pri" data-lic="perm" data-p="${esc(x.fix_path)}">Make it readable (asks for your Mac password)</button> `:""}<button class="b" data-lic="choose">Choose licence file…</button>`:""}</td></tr>`).join("")}</table>
    ${pf.some(x=>!x.ok)?'<p class="note">Fix ✗ items in <b>Settings</b> (FreeSurfer folder, licence) before processing.</p>':""}</div>
@@ -287,7 +295,7 @@ async function resView(v){const all=await api("/api/results");const hide=!!v._hi
     <button class="b" id="openx" title="Open the results workbook (updated automatically after every patient)">📂 Open Excel</button>
     <span style="position:relative"><button class="b" id="shareb">Share ▾</button><div id="sharem" class="card hide" style="position:absolute;right:0;top:34px;width:230px;z-index:6;padding:6px">
       ${[["xlsx","Excel (.xlsx)"],["csv","CSV (.csv)"],["docx","Word (.docx)"],["pdf","PDF (.pdf)"]].map(([f,l])=>`<button class="b" data-fmt="${f}" style="width:100%;margin:2px 0;text-align:left;border:0">${l}</button>`).join("")}
-      <div class="note" style="padding:4px 8px">codes only · saved to the Desktop and opened</div><button class="b" id="pkg" style="width:100%;margin:2px 0;text-align:left;border:0">Share package (.zip)</button></div></span></div>
+      <div class="note" style="padding:4px 8px">codes only · saved to your verified export folder (Settings) after a warning</div><button class="b" id="pkg" style="width:100%;margin:2px 0;text-align:left;border:0">Share package (.zip)</button></div></span></div>
    <table class="fix"><colgroup><col style="width:70px"><col style="width:120px"><col style="width:70px"><col style="width:52px"><col style="width:80px"><col style="width:110px"><col style="width:130px"><col><col style="width:120px"><col style="width:120px"></colgroup>
    <tr><th>Code</th><th>Name</th><th>Cohort</th><th>QC</th><th>Candidates</th><th>Reviewed / cSS</th><th>Reader L / R = total</th><th>AI L / R = total</th><th>Radiologist R / L</th><th>Version</th></tr>
    ${R.map(r=>`<tr><td><b>${esc(r.code)}</b></td><td>${hide?"•••":esc(r.name||"—")}</td><td>${esc(r.cohort)}</td><td>${grade(r.qc_grade,r.qc_tip)}</td><td>${r.candidates??"—"}</td><td>${r.reviewed!=null?`${r.reviewed} / ${r.css_called}`:"not read"}</td>
@@ -299,8 +307,8 @@ async function resView(v){const all=await api("/api/results");const hide=!!v._hi
   $("#aiall").onclick=async()=>{await api("/api/ai_scores",{});toast("AI scores are being updated - the column fills in within a minute")};
   $("#openx").onclick=async()=>{const r=await api("/api/open_results",{});toast(r.ok?`opened ${esc(r.path)}`:esc(r.error),!r.ok)};
   $("#shareb").onclick=()=>$("#sharem").classList.toggle("hide");
-  v.querySelectorAll("[data-fmt]").forEach(b=>b.onclick=async()=>{$("#sharem").classList.add("hide");const r=await api("/api/export",{fmt:b.dataset.fmt,cohort:v._c});toast(r.ok?`saved ${esc(r.path)}`:esc(r.error),!r.ok)});
-  $("#pkg").onclick=async()=>{$("#sharem").classList.add("hide");const codes=R.filter(r=>r.candidates!=null).map(r=>r.code);const r=await api("/api/share",{codes});toast(r.ok?`saved ${esc(r.path)}`:esc(r.error),!r.ok)}}
+  v.querySelectorAll("[data-fmt]").forEach(b=>b.onclick=async()=>{$("#sharem").classList.add("hide");await clinicalExport("/api/export",{fmt:b.dataset.fmt,cohort:v._c})});
+  $("#pkg").onclick=async()=>{$("#sharem").classList.add("hide");const codes=R.filter(r=>r.candidates!=null).map(r=>r.code);await clinicalExport("/api/share",{codes})}}
 function agreement(R){let n=0,a=0;R.forEach(r=>{if(r.score_total==null||r.rad_R==="")return;[["score_R","rad_R"],["score_L","rad_L"]].forEach(([s,g])=>{n++;if(String(r[s])===String(r[g]))a++})});
   return n?`Reader score vs radiologist: ${a} of ${n} hemispheres agree.`:"Agreement with the radiologist appears here once patients are read and graded."}
 // ---------------- review / blind read
@@ -333,6 +341,99 @@ async function vsetDlg(){const V=await api("/api/vset"),g=(k,d)=>V[k]===undefine
   $("#shade").style.display="flex";$("#dlg").querySelectorAll("button[data-v]").forEach(x=>x.onclick=async()=>{$("#shade").style.display="none";if(x.dataset.v!=="ok")return;const o={};
     $("#dlg").querySelectorAll("[data-vk]").forEach(e=>o[e.dataset.vk]=e.checked);$("#dlg").querySelectorAll("[data-vs]").forEach(e=>o[e.dataset.vs]=e.dataset.vs==="autosec"?+e.value:e.value);
     await api("/api/vset",o);toast("reviewer settings saved")})}
+
+// export / share: explicit warning + verified local folder (never the Desktop)
+async function clinicalExport(url,body){const r0=await api(url,body);
+  if(!r0.needs_confirm){toast(r0.ok?`saved ${esc(r0.path)}`:esc(r0.error),!r0.ok);return}
+  const d=S.settings.export_dir||"";window._xok=false;
+  const x=await ask("Export clinical-derived data?",`<span class="warn">${esc(r0.warning)}</span><br><br>Destination: ${d?`<b class="mono">${esc(d)}</b>`:'<b class="bad">no export folder chosen</b> — set one in Settings (not Desktop, Documents or a cloud folder)'}<br><br><label><input type="checkbox" id="xok"> I understand this file contains clinical-derived data and stays on approved local storage</label>`,[["no","Cancel"],["set","Settings…"],["yes","Export","pri"]]);
+  if(x==="set")return go("set");if(x!=="yes")return;
+  if(!window._xok)return toast("export not done: tick the confirmation box",1);
+  const r=await api(url,{...body,confirm_clinical:true});toast(r.ok?`saved ${esc(r.path)}`:esc(r.error),!r.ok)}
+document.addEventListener("change",e=>{if(e.target&&e.target.id==="xok")window._xok=e.target.checked});
+// ---------------- processing manager (v5.14-gui; sketch v2)
+let PMS={code:null,opt:null,from:"detect",timer:null};
+const cat=(st,lab)=>`<span class="cat ${esc(st)}">${esc(lab||String(st).replace(/_/g," "))}</span>`;
+const SN={anatomy:"Anatomy (FreeSurfer / SynthSeg)",registration:"Registration (SWI → T1)",align:"Labels on the SWI grid",detect:"cSS detection + morphology + features",unified:"Unified score + explanations"};
+const tstamp=t=>t?new Date(t*1000).toLocaleString([], {dateStyle:"short",timeStyle:"short"}):"";
+async function procView(v){clearTimeout(PMS.timer);const L=await api("/api/proc/studies");const MS=(await api("/api/proc/models")).models||{};if(V!=="proc")return;
+  const mrow=(n,m)=>`<tr><td class="mono">review/${esc(n)}</td><td>${m.present&&m.compatible&&m.verified_copy_of_production?cat("compatible","verified copy of production · compatible"):m.present?cat("incompatible","PRODUCTION PARITY NOT MET"):cat("missing","not present — production parity NOT met")}</td><td class="note">${esc([m.import_status,...(m.reasons||[]),...(m.notes||[])].filter(Boolean).join(" · "))}</td></tr>`;
+  const mcard=`<div class="card"><h2>Production models in this project</h2><table>${Object.entries(MS).map(([n,m])=>mrow(n,m)).join("")}</table><div class="note">Copied byte-for-byte from the source project when studies are brought in (sha256 verified, never modified, never retrained). The confidence model gives confidence_pct and, with the production setting CSS_CONF=1, rule E30; the ranking model is applied only to studies whose production split is "dev" — exactly as production.</div></div>`;
+  if(!PMS.code&&L.studies.length)PMS.code=L.studies[0].code;
+  const rb=(L.imports_rolled_back||[]).length?`<div class="card notice w">An import was cut off when the app was last closed and has been rolled back (nothing half-imported kept): <b>${L.imports_rolled_back.map(esc).join(", ")}</b>. Bring it in again.</div>`:"";
+  const rec0=L.recovered&&Object.keys(L.recovered).length&&!L.recovered.error?`<div class="card notice w">After the last restart, ${Object.entries(L.recovered).map(([c,r])=>`<b>${esc(c)}</b> (${r.length} run)`).join(", ")} were found cut off: marked <b>interrupted</b>, previous outputs restored. See their history below.</div>`:"";
+  const rec=rb+(rec0||"");
+  v.innerHTML=`${rec}${mcard}<div class="card"><h2>Studies found on this Mac (${L.studies.length})</h2><div class="note">Every study with an SWI in data/ or a candidate list in review/, including studies processed in Terminal or by older app versions. Nothing is changed by looking.</div>
+   <div style="max-height:220px;overflow:auto;margin-top:6px"><table><tr><th>Study</th><th>In app</th><th>FreeSurfer</th><th>Candidates</th><th>Runs</th><th>Active run</th><th>Last run</th></tr>
+   ${L.studies.map(x=>`<tr data-pc="${esc(x.code)}" class="${x.code===PMS.code?"sel":""}" style="cursor:pointer"><td><b>${esc(x.code)}</b></td><td>${x.in_app?"yes":'<span class="mut">no (found on disk)</span>'}</td><td>${x.has_fs?"✓":'<span class="mut">—</span>'}</td><td>${x.has_candidates?"✓":'<span class="mut">—</span>'}</td><td>${x.runs}</td><td class="mono">${esc(x.active||"—")}</td><td>${x.busy?cat("running"):x.last_status?cat(x.last_status):'<span class="mut">none recorded</span>'}</td></tr>`).join("")||'<tr><td colspan="7" class="mut">no study found in this project folder</td></tr>'}</table></div></div><div class="card"><h2>Bring in studies from another project folder (read-only)</h2>
+   <div class="note">For testing on studies already processed elsewhere (e.g. your production project). Everything this project needs is <b>copied and verified</b> (sha256 of every file, source checked unchanged before and after): images, registrations, labels, earlier detector outputs and the <b>FreeSurfer folder</b> (an isolated copy — APFS clone on macOS when available). Earlier reader files go to <span class="mono">historical/</span> for comparison only. The source folder is only read; the app refuses every write into the production project.</div>
+   <div class="row"><span class="lab">Source project folder</span><input class="wide" id="lsrc" value="${esc(PMS.src||"")}" placeholder="/Users/you/css_project"><button class="b" id="lsc">Choose…</button><button class="b" id="lscan">List studies</button></div><div id="llist"></div></div>
+  <div id="pmd"></div>`;
+  v.querySelectorAll("[data-pc]").forEach(r=>r.onclick=()=>{PMS.code=r.dataset.pc;PMS.opt=null;procView(v)});
+  $("#lsc").onclick=async()=>{const p=await pick("folder","Choose the other project folder");if(p)$("#lsrc").value=p.replace(/\/$/,"")};
+  const listSrc=async()=>{PMS.src=$("#lsrc").value.trim();const r=await api("/api/proc/scan_source?path="+encodeURIComponent(PMS.src));
+    if(!r.ok){$("#llist").innerHTML=`<div class="bad">${esc(r.error)}</div>`;return}
+    $("#llist").innerHTML=`<div style="max-height:200px;overflow:auto"><table><tr><th></th><th>Study</th><th>FreeSurfer</th><th>Candidates</th><th></th></tr>${r.studies.map(x=>`<tr><td>${x.here?"":`<input type="checkbox" data-lk="${esc(x.code)}">`}</td><td><b>${esc(x.code)}</b></td><td>${x.has_fs?"✓ (will be copied)":'<span class="mut">—</span>'}</td><td>${x.has_candidates?"✓":'<span class="mut">—</span>'}</td><td class="mut">${x.here?"already in this project":""}</td></tr>`).join("")}</table></div>
+     <div class="row"><button class="b pri" id="lgo">Bring selected into this project</button></div>`;
+    $("#lgo").onclick=async()=>{const codes=[...document.querySelectorAll("[data-lk]:checked")].map(e=>e.dataset.lk);if(!codes.length)return toast("tick at least one study",1);
+      $("#lgo").disabled=true;$("#lgo").textContent="copying…";const x=await api("/api/proc/link",{source:PMS.src,codes});
+      toast((x.models&&!x.models.error?Object.entries(x.models).map(([n,m])=>`${esc(n)}: ${esc(m.status)}`).join("<br>")+"<br>":"")+x.results.map(y=>y.ok?`${esc(y.code)}: ${y.copied} files copied + verified${y.freesurfer?`, FreeSurfer ${y.fs_method==="apfs_clone"?"cloned":"copied"} (${y.fs_files} files, verified)`:""}`:`${esc(y.code)}: ${esc(y.error)}`).join("<br>"),!x.ok);PMS.code=codes[0];PMS.opt=null;procView(v)}};
+  $("#lscan").onclick=listSrc;
+  if(PMS.code)procDetail($("#pmd"))}
+async function procDetail(el){const c=PMS.code,a=await api("/api/proc/audit?code="+encodeURIComponent(c));if(V!=="proc"||c!==PMS.code)return;
+  if(!a.ok){el.innerHTML=`<div class="card bad">${esc(a.error)}</div>`;return}
+  const I=a.identity||{},im=x=>x?`<span class="mono">${esc((x.sha256||"").slice(0,4))}…${esc((x.sha256||"").slice(-3))} · ${(x.dims||[]).join("×")} · ${(x.voxel_mm||[]).join("×")} mm · ${esc(x.orientation||"?")}</span>${x.header_error?` <span class="bad">header unreadable</span>`:""}`:'<span class="mut">not present</span>';
+  const RU=["compatible","compatible_with_limitations","unknown","not_applicable"],st=a.stages,first=["anatomy","registration","align","detect","unified"].find(s=>!RU.includes(st[s].status));
+  const allOk=!first,fsOk=RU.includes(st.anatomy.status)&&st.anatomy.kind==="freesurfer";
+  const early=first==="anatomy"||first==="registration";
+  if(!PMS.opt)PMS.opt=allOk||!early?"fresh":"full";
+  const busy=a.busy;
+  el.innerHTML=`<div class="card"><h2>${esc(c)} · earlier processing</h2>
+   <table><tr><th style="width:190px">MRI identity (now in data/)</th><td><b>SWI</b> ${im(I.swi)}<br><b>T1</b> ${im(I.t1)}</td></tr>
+    <tr><th>FreeSurfer</th><td>${I.freesurfer?`<span class="mono">${esc(I.freesurfer.path)}</span> · ${esc(I.freesurfer.version||"version not recorded")}${I.freesurfer.no_v8?" · -no-v8":""}`:'<span class="mut">no recon-all folder</span>'}</td></tr>
+    <tr><th>Previous detection</th><td>${I.detection?`${esc(I.detection.pipeline_version||"?")} ${I.detection.run_at?"· "+esc(I.detection.run_at):""}`:'<span class="mut">none</span>'}</td></tr></table>
+   <h2 style="margin-top:12px">Compatibility per stage (dependency order)</h2>
+   <table><tr><th style="width:260px">Stage</th><th style="width:210px">Status</th><th>Evidence</th><th>Output found</th></tr>
+   ${Object.values(st).map(r=>`<tr><td>${SN[r.stage]}</td><td>${cat(r.status,r.label)}</td><td>${esc(r.why)}</td><td class="mono" title="${esc(r.files.join("\n"))}">${esc(r.files.slice(0,2).join(", "))}${r.files.length>2?` +${r.files.length-2}`:""}</td></tr>`).join("")}</table>
+   ${!a.adopted&&Object.values(st).some(r=>r.status==="unknown")?`<div class="tip notice w"><b>Confirm the earlier outputs.</b> They are not yet linked to this MRI by a run record (e.g. made in Terminal). If you know they were made from these images, record them as the first run — nothing is changed or moved. <button class="b pri" id="adopt">Confirm and record as run</button></div>`:""}
+  </div>
+  <div class="card"><h2>What to do</h2>${busy?`<div class="notice card">Working: run <span class="mono">${esc(busy.run_id)}</span> · stage <b>${esc(busy.stage||"starting")}</b> · started ${tstamp(busy.started)}. Other actions wait until it finishes.</div>`:""}
+   <label class="opt ${PMS.opt==="fresh"?"on":""} ${early?"dis":""}" data-o="fresh"><b>● New detection run</b> (recommended for your test) — reuse anatomy, registration and labels; run cSS detection, morphology, features, unified score and explanations again with this version.${early?`<div class="bad note">not possible: ${esc(SN[first])} is ${esc(st[first].label)} — use the last option</div>`:""}</label>
+   <label class="opt ${PMS.opt==="from"?"on":""} ${early?"dis":""}" data-o="from"><b>○ Re-run from a stage</b> <select id="pmfrom">${["align","detect","unified"].map(s=>`<option value="${s}" ${s===PMS.from?"selected":""}>${SN[s]}</option>`).join("")}</select><div class="note">later stages always follow (dependencies)</div></label>
+   <label class="opt ${PMS.opt==="reuse"?"on":""} ${allOk?"":"dis"}" data-o="reuse"><b>○ Use everything as is</b>${allOk?" — no processing; the current outputs stay active":` — unavailable: ${esc(SN[first])} is ${esc(st[first].label)}`}</label>
+   <label class="opt ${PMS.opt==="full"?"on":""}" data-o="full"><b>○ Re-run anatomy / registration</b> — needs the raw series: Patients → Re-run. ${fsOk?"A finished FreeSurfer is reused automatically; a new reconstruction is never started without you asking for it.":""}</label>
+   <div class="tip notice w">Nothing is deleted or overwritten: the current outputs are archived as a run before anything runs; if the run fails, they are put back. Reader files (calls, reviewers) are never touched.</div>
+   <div class="row"><button class="b pri" id="pmgo" ${busy?"disabled":""}>Start</button><button class="b" id="pmrev">Open candidates in the reviewer (3-D, explanations)</button></div></div>
+  <div class="card"><h2>Processing history</h2><div id="pmh"></div></div>`;
+  el.querySelectorAll("[data-o]").forEach(o=>o.onclick=e=>{if(o.classList.contains("dis")||e.target.tagName==="SELECT")return;PMS.opt=o.dataset.o;procDetail(el)});
+  const fr=$("#pmfrom");if(fr)fr.onchange=()=>{PMS.from=fr.value;PMS.opt="from";procDetail(el)};
+  if($("#adopt"))$("#adopt").onclick=async()=>{const r=await api("/api/proc/adopt",{code:c});toast(r.ok?"earlier outputs recorded as the first run":esc(r.error),!r.ok);procDetail(el)};
+  $("#pmrev").onclick=async()=>{toast("starting the reviewer…");const r=await api("/api/review",{codes:[c],cohort:"",reviewer:localStorage.getItem("cssapp_reviewer")||""});if(r.ok)openWin(r.url,"reviewer");else toast(esc(r.error),1)};
+  $("#pmgo").onclick=async()=>{const o=PMS.opt;
+    if(o==="reuse"){toast("nothing to run: the current outputs stay active");return}
+    if(o==="full"){go("pts");toast("Patients → choose the patient → Re-run. A finished FreeSurfer is reused.");return}
+    const from=o==="fresh"?"detect":PMS.from;
+    const ok=await ask("Start a new run?",`${esc(c)}: re-run <b>${esc(SN[from])}</b> and every later stage. Reused: ${["anatomy","registration","align","detect"].filter(s=>["anatomy","registration","align","detect","unified"].indexOf(s)<["anatomy","registration","align","detect","unified"].indexOf(from)).map(s=>esc(SN[s])).join(", ")}. The current outputs stay archived.`,[["no","Cancel"],["yes","Start","pri"]]);
+    if(ok!=="yes")return;const r=await api("/api/proc/start",{code:c,choice:"selective",rerun_from:from});toast(r.ok?`run ${esc(r.run_id)} started: ${esc(r.run.join(" → "))}`:esc(r.error),!r.ok);procDetail(el)};
+  procHistory($("#pmh"),c,a);
+  if(busy)PMS.timer=setTimeout(()=>{if(V==="proc"&&PMS.code===c)procDetail(el)},2500)}
+function procHistory(el,c,a){const R=(a.runs||[]).slice().reverse();
+  el.innerHTML=R.length?`<table><tr><th>Run</th><th>Started – ended</th><th>Run · reused</th><th>Status</th><th>Software</th><th></th></tr>
+  ${R.map(m=>`<tr><td class="mono"><b>${esc(m.run_id)}</b>${m.run_id===a.active_run?' <b style="color:var(--acc)">★ active</b>':""}</td><td>${tstamp(m.created)}${m.finished?" – "+tstamp(m.finished):m.status==="interrupted"?" – (app closed)":""}</td>
+   <td>${m.status==="adopted"?"found on disk (confirmed)":`${esc((m.run||[]).join(", "))}${(m.reuse||[]).length?` · <span class="mut">${esc(m.reuse.join(", "))}</span>`:""}`}</td><td>${cat(m.status)}</td><td class="mono">${esc((m.software||{}).pipeline||"")}</td>
+   <td class="acts">${["completed","adopted"].includes(m.status)&&m.run_id!==a.active_run?`<button class="b" data-act="${esc(m.run_id)}">Make active…</button>`:""}${["failed","interrupted"].includes(m.status)?`<button class="b" data-res="${esc(m.run_id)}">Resume…</button>`:""}<button class="b" data-det="${esc(m.run_id)}">Details</button></td></tr>
+   <tr class="hide" id="d_${esc(m.run_id)}"><td colspan="6">${m.message?`<div class="tip ${m.status==="completed"?"":"err"}" style="white-space:pre-wrap">${esc(m.message)}</div>`:""}
+    <div class="note">Stages: ${Object.entries(m.stages||{}).map(([k,s])=>`${esc(k)} ${cat(String(s).startsWith("reused")?"reused":String(s).split(":")[0],s)}`).join(" ")}</div>
+    <div class="note">MRI: <span class="mono">SWI ${esc(((m.mri||{}).swi||"").slice(0,10))}… · T1 ${esc(((m.mri||{}).t1||"—").slice(0,10))}</span> · parent ${esc(m.parent||"—")} · archive <span class="mono">runs/${esc(c)}/${esc(m.run_id)}/</span>${m.restored_files!=null?` · previous outputs restored (${m.restored_files} files)`:""}</div>
+    <pre class="mono" id="lg_${esc(m.run_id)}" style="max-height:200px;overflow:auto;white-space:pre-wrap"></pre></td></tr>`).join("")}</table>`
+   :'<div class="mut">No run recorded yet. Earlier outputs (if any) are listed above; confirming them records the first run.</div>';
+  el.querySelectorAll("[data-det]").forEach(b=>b.onclick=async()=>{const r=b.dataset.det,row=$("#d_"+r);row.classList.toggle("hide");if(!row.classList.contains("hide")){const g=await api(`/api/proc/log?code=${encodeURIComponent(c)}&run_id=${encodeURIComponent(r)}`);$("#lg_"+r).textContent=g.log||"(no log: nothing was run in this record)"}});
+  el.querySelectorAll("[data-act]").forEach(b=>b.onclick=async()=>{const r=b.dataset.act;
+    if(await ask("Make this run active?",`${esc(c)}: the outputs of run <b>${esc(r)}</b> are put back in place. The current active outputs stay archived in their own run and can be restored the same way.`,[["no","Cancel"],["yes","Make active","pri"]])!=="yes")return;
+    const x=await api("/api/proc/set_active",{code:c,run_id:r,confirm:true});toast(x.ok?`${esc(r)} is now active`:esc(x.error),!x.ok);procDetail($("#pmd"))});
+  el.querySelectorAll("[data-res]").forEach(b=>b.onclick=async()=>{const r=b.dataset.res;
+    if(await ask("Resume this run?",`A new run starts from the first unfinished stage of <b>${esc(r)}</b>. The record of ${esc(r)} is kept as it is.`,[["no","Cancel"],["yes","Resume","pri"]])!=="yes")return;
+    const x=await api("/api/proc/resume",{code:c,run_id:r});toast(x.ok?`run ${esc(x.run_id)} started`:esc(x.error),!x.ok);procDetail($("#pmd"))})}
 // ---------------- settings
 function setView(v){const s=S.settings,F=s.features;const L={duplicate_check:"Duplicate-scan check",preflight:"Pre-flight check before processing",qc_snapshot:"QC snapshot per patient",notify:"Notification when a patient finishes / fails",
    version_stamp:"Version stamp on every result",share:"Share package (codes only)",backup:"Automatic daily backup (calls, grades, results - no images)",name_warning:"Warn when a folder name looks like a person's name"};
@@ -345,7 +446,9 @@ function setView(v){const s=S.settings,F=s.features;const L={duplicate_check:"Du
   <div class="card"><h2>Reviewer</h2><div class="row"><button class="b" id="vsetb">⚙ Reviewer settings…</button><span class="note">the same settings window as in the reviewer (shared by every reviewer window)</span></div></div>
   <div class="card"><h2>When a retry is needed (T1 / SWI misaligned)</h2><div class="row">${seg("ar",[["1","Retry automatically (next pathway)"],["0","Let me choose (recommended marked)"]],s.auto_retry===false?"0":"1")}</div>
    <div class="note">Order: Fast re-registration (~4 min) → SynthMorph (~5 min, alone) → recon-all (~2-3 h, always asks) → SWI-only. In both modes a failed retry moves the recommendation to the next pathway; the failed attempt's files are kept, renamed.</div></div>
-  <div class="card"><h2>Backup</h2><div class="row"><span class="lab">Backup folder</span><input class="wide" id="bk" value="${esc(s.backup_dir||"")}" placeholder="e.g. an external drive"><button class="b" id="bkc">Choose…</button></div></div>
+  <div class="card"><h2>Backup and export folders (this Mac only)</h2><div class="row"><span class="lab">Backup folder</span><input class="wide" id="bk" value="${esc(s.backup_dir||"")}" placeholder="e.g. /Volumes/LabDisk/cSS_backup"><button class="b" id="bkc">Choose…</button></div>
+   <div class="row"><span class="lab">Export / share folder</span><input class="wide" id="xd" value="${esc(s.export_dir||"")}" placeholder="e.g. /Volumes/LabDisk/cSS_exports"><button class="b" id="xdc">Choose…</button></div>
+   <div class="note">Both must be existing local folders. Refused: ~/Desktop and ~/Documents (iCloud "Desktop &amp; Documents" can sync them silently), iCloud Drive, Dropbox, Google Drive, OneDrive and other cloud folders. Nothing is ever uploaded.</div></div>
   <div class="card"><h2>Features</h2>${Object.keys(L).map(k=>`<div class="row"><label><input type="checkbox" data-ft="${k}" ${F[k]?"checked":""}> ${L[k]}</label></div>`).join("")}</div>
   <div class="row"><button class="b" id="quit">Quit the app</button><span class="note">closing the window does not stop processing; Quit does</span><span class="sp"></span><button class="b pri" id="save">Save settings</button></div>`;
   bindSeg("rr",async x=>{await api("/api/settings",{rerun_mode:x});render()});$("#vsetb").onclick=vsetDlg;
@@ -353,8 +456,9 @@ function setView(v){const s=S.settings,F=s.features;const L={duplicate_check:"Du
   bindSeg("ap",async x=>{await api("/api/settings",{auto_path:x==="1"});render()});
   $("#quit").onclick=async()=>{if(!confirm("Quit cSS Pipeline?"))return;let r=await api("/api/quit",{});if(!r.ok&&confirm(r.error+"\n\nQuit anyway?"))r=await api("/api/quit",{force:true});if(r.ok)document.body.innerHTML='<p style="padding:40px">cSS Pipeline has stopped. Open it again from Applications.</p>'};
   $("#licc").onclick=async()=>{const p=await pick("file","Choose your FreeSurfer license.txt");if(p)$("#lic").value=p};
-  $("#fsc").onclick=async()=>{const p=await pick("folder","Choose the FreeSurfer folder");if(p)$("#fs").value=p.replace(/\/$/,"")};$("#bkc").onclick=async()=>{const p=await pick("folder","Choose the backup folder");if(p)$("#bk").value=p};
+  $("#fsc").onclick=async()=>{const p=await pick("folder","Choose the FreeSurfer folder");if(p)$("#fs").value=p.replace(/\/$/,"")};$("#bkc").onclick=async()=>{const p=await pick("folder","Choose the backup folder");if(p)$("#bk").value=p};$("#xdc").onclick=async()=>{const p=await pick("folder","Choose the export folder");if(p)$("#xd").value=p};
   $("#save").onclick=async()=>{const f={};document.querySelectorAll("[data-ft]").forEach(x=>f[x.dataset.ft]=x.checked);
-    await api("/api/settings",{fs_license:$("#lic").value.trim(),freesurfer_home:$("#fs").value.trim(),threads:+$("#thr").value,backup_dir:$("#bk").value.trim(),features:f});toast("settings saved");render()}}
+    const r=await api("/api/settings",{fs_license:$("#lic").value.trim(),freesurfer_home:$("#fs").value.trim(),threads:+$("#thr").value,backup_dir:$("#bk").value.trim(),export_dir:$("#xd").value.trim(),features:f});toast(r.ok?"settings saved":esc(r.error),!r.ok);render()}}
 render();setInterval(async()=>{if(V==="res"&&!document.activeElement.matches("input,select")&&$("#sharem")&&$("#sharem").classList.contains("hide")&&$("#shade").style.display!=="flex")await render();else if(V==="pts"&&!document.activeElement.matches("input,select")&&$("#shade").style.display!=="flex")await render();else if(V==="home")await refresh();if($("#log").style.display==="block")loadLog()},3000);
-</script></body></html>
+</script><script src="/unified_view.js"></script>
+</body></html>

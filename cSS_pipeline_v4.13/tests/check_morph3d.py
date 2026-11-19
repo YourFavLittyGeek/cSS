@@ -33,15 +33,26 @@ for nm in mp.NAMES:
                      smooth_vol_change_pct=r["smoothing_volume_change_pct"], summary=r["summary"]))
 
 g = lambda nm: res[nm][0]
+# v5.14-gui EXPECTATION CHANGE (docs/INVESTIGATION_morph3d_cylinder.md): the default tubes (diameter 2.0 mm at 0.8 x 0.8 x 1.2 mm)
+# render about TWO voxels across (e.g. a 2 x 2 cross-section) - the two-sample limit, where round and flat cannot be told apart.
+# The classifier now reports such voxels as unresolved / acquisition-limited instead of a confident class. These checks therefore
+# require "tube OR indeterminate, and NEVER sheet / blob" (stricter on misclassification than before); confident classification
+# of RESOLVED tubes is checked separately below (radius 2.0 mm) and in tests/check_morph3d_resolution.py.
+ind = lambda s: s.get("unresolved", 0) + s.get("acquisition_limited", 0)
 # 1-3 tubes
 for nm in ("cylinder", "curved_cylinder"):
-    check(g(nm)["local_share"]["tube"] >= 0.8, f"{nm}: tube-like share {g(nm)['local_share']['tube']} >= 0.8")
+    s_ = g(nm)["local_share"]
+    check(s_["tube"] + ind(s_) >= 0.8 and s_["sheet"] + s_["blob"] <= 0.1, f"{nm}: tube-like or indeterminate {s_['tube'] + ind(s_):.2f} >= 0.8, never sheet / blob ({s_['sheet'] + s_['blob']:.2f})")
     check(g(nm)["skeleton"]["ok"], f"{nm}: skeleton shown (curve-like object)")
     check(abs(g(nm)["thickness_mm"]["median"] - 2.0) <= 0.8, f"{nm}: thickness {g(nm)['thickness_mm']['median']} mm ~ diameter 2.0 mm (+-1 voxel)")
 check(abs(g("cylinder")["skeleton"]["length_mm"] - 18) <= 4, f"cylinder: skeleton length {g('cylinder')['skeleton']['length_mm']} mm ~ 18 mm")
 check(g("cylinder")["xsection_cv"] is not None and g("cylinder")["xsection_cv"] <= 0.35, f"cylinder: cross-section diameter CV {g('cylinder')['xsection_cv']} <= 0.35 (stable radius)")
 check(g("curved_cylinder")["skeleton"]["length_mm"] > g("curved_cylinder")["extent_mm"][0] * 0.9, "curved cylinder: skeleton length follows the curve (>= 0.9 x first principal extent)")
-check(g("branching_tube")["local_share"]["tube"] >= 0.6, f"branching tube: tube-like share {g('branching_tube')['local_share']['tube']} >= 0.6")
+s_ = g("branching_tube")["local_share"]
+check(s_["tube"] + ind(s_) >= 0.6, f"branching tube: tube-like or indeterminate {s_['tube'] + ind(s_):.2f} >= 0.6")
+# KNOWN LIMITATION (not resolution): at the junction a Y-shaped neighbourhood is genuinely planar, so some voxels read sheet-like.
+# The pre-v5.14-gui classifier gave 0.33 sheet here; require no worse than that.
+check(s_["sheet"] <= 0.33 and s_["blob"] <= 0.05, f"branching tube: junction sheet-like share {s_['sheet']} <= 0.33 (previous classifier 0.33), blob {s_['blob']}")
 # 4-6 sheets
 for nm in ("sheet", "curved_sheet", "irregular_patch"):
     check(g(nm)["local_share"]["sheet"] >= 0.8, f"{nm}: sheet-like share {g(nm)['local_share']['sheet']} >= 0.8")
@@ -55,19 +66,22 @@ check(g("blob")["sphericity"] >= 0.6, f"blob: sphericity {g('blob')['sphericity'
 check(g("blob")["sphericity"] > g("sheet")["sphericity"] and g("blob")["sphericity"] > g("cylinder")["sphericity"], "sphericity orders blob > sheet, tube")
 # 8 mixed: the tube part is found where it is
 r, a, t = res["sheet_plus_tube"]; P = a["P_idx"] * np.array(t["vox"]); far = P[:, 0] > 15; near = P[:, 0] < 9
-check((a["gcls"][far] == 0).mean() >= 0.8, f"sheet + tube: voxels of the tube part (x > 15 mm) called tube-like ({(a['gcls'][far] == 0).mean():.2f})")
+tl = np.isin(a["gcls"][far], (0, 4, 5)).mean()       # expectation change: tube part (2 voxels across) tube-like OR indeterminate
+check(tl >= 0.8 and (a["gcls"][far] == 1).mean() <= 0.1, f"sheet + tube: tube part (x > 15 mm) tube-like or indeterminate ({tl:.2f}), not sheet")
 check((a["gcls"][near] == 1).mean() >= 0.8, f"sheet + tube: voxels of the sheet part (x < 9 mm) called sheet-like ({(a['gcls'][near] == 1).mean():.2f})")
-check("tube" in r["summary"] or r["local_share"]["tube"] > 0, "sheet + tube: the tube part is reported")
+check(r["local_share"]["tube"] + ind(r["local_share"]) > 0, "sheet + tube: the tube part is reported (tube-like or indeterminate share > 0)")
 # 9 two pieces
 r, a, t = res["two_pieces"]
 check(len(r["components"]) == 2, f"two pieces: {len(r['components'])} components")
 lab, _ = ndi.label(mp.make("two_pieces")[0], cm.S26); comp = lab[tuple(a["P_idx"].T)]
 big = [c["id"] for c in r["components"]]
-per = {k: np.bincount(a["gcls"][comp == k], minlength=4) for k in big}
-check(any(v[0] / v.sum() >= 0.8 for v in per.values()) and any(v[1] / v.sum() >= 0.8 for v in per.values()), f"two pieces: one piece tube-like, the other sheet-like ({ {k: v.tolist() for k, v in per.items()} })")
+per = {k: np.bincount(a["gcls"][comp == k], minlength=6) for k in big}
+check(any((v[0] + v[4] + v[5]) / v.sum() >= 0.8 and v[1] / v.sum() <= 0.1 for v in per.values()) and any(v[1] / v.sum() >= 0.8 for v in per.values()),
+      f"two pieces: one piece tube-like or indeterminate (never sheet), the other sheet-like ({ {k: v.tolist() for k, v in per.items()} })")
 # 10 fragmented sheet: small pieces kept, judged as sheet
 check(len(g("fragmented_sheet")["components"]) >= 3, f"fragmented sheet: {len(g('fragmented_sheet')['components'])} pieces kept (none discarded)")
-check(g("fragmented_sheet")["local_share"]["sheet"] >= 0.6, f"fragmented sheet: sheet-like share {g('fragmented_sheet')['local_share']['sheet']}")
+s_ = g("fragmented_sheet")["local_share"]           # expectation change: 4-5 mm patches, 2 slices thick -> not clearly flatter than
+check(s_["sheet"] + ind(s_) >= 0.6 and s_["tube"] <= 0.1, f"fragmented sheet: sheet-like or indeterminate {s_['sheet'] + ind(s_):.2f}, never tube ({s_['tube']})")   # the thickness the slices hide
 # 11 thin anisotropic
 r = g("thin_aniso")
 check(r["reliability"] != "good" and any("anisotropic" in n for n in r["reliability_notes"]), f"thin anisotropic sheet: reliability '{r['reliability']}' with the anisotropy note")
@@ -85,7 +99,21 @@ for vox in ((0.5, 0.5, 2.0), (0.8, 0.8, 1.2), (1.0, 1.0, 1.0)):
     for axis, pts in (("x", [(3, c, c), (21, c, c)]), ("z", [(c, c, 3), (c, c, 21)])):
         m = mp._down(mp._tube(g_, pts, 1.2), n_, vox); r, _ = cm.analyse(m, vox)
         true_v = np.pi * 1.2 ** 2 * 18 + 4 / 3 * np.pi * 1.2 ** 3
-        check(r["local_share"]["tube"] >= 0.7, f"cylinder r 1.2 along {axis}, voxels {vox}: tube-like {r['local_share']['tube']}")
+        s_ = r["local_share"]
+        if vox == (0.5, 0.5, 2.0) and axis == "x":
+            # THE ORIGINAL FAILING CHECK (expected tube >= 0.7). Expectation changed: the 2.4 mm tube lies in-plane and is sampled by
+            # two 2-mm slices, so its cross-section cannot be resolved; before v5.14-gui it was called 100 % SHEET (a confident
+            # misclassification). Required now: no sheet / blob, and the voxels reported acquisition-limited (slice geometry).
+            check(s_["sheet"] + s_["blob"] <= 0.1 and s_["acquisition_limited"] >= 0.7,
+                  f"cylinder r 1.2 along x, voxels (0.5, 0.5, 2.0): NOT sheet ({s_['sheet']}), acquisition-limited {s_['acquisition_limited']} >= 0.7")
+        else:
+            check(s_["tube"] + ind(s_) >= 0.7 and s_["sheet"] + s_["blob"] <= 0.1,
+                  f"cylinder r 1.2 along {axis}, voxels {vox}: tube-like or indeterminate {s_['tube'] + ind(s_):.2f} (tube {s_['tube']}), never sheet / blob")
+        m2 = mp._down(mp._tube(g_, pts, 2.0), n_, vox); s2 = cm.analyse(m2, vox)[0]["local_share"]   # resolved version: 4 mm tube
+        if not (vox == (0.5, 0.5, 2.0) and axis == "x"):       # 4 mm across 2-mm slices = 2 samples: still unresolved by design
+            check(s2["tube"] >= 0.7 and s2["sheet"] + s2["blob"] <= 0.1, f"cylinder r 2.0 (resolved) along {axis}, voxels {vox}: tube-like {s2['tube']} >= 0.7")
+        else:
+            check(s2["sheet"] + s2["blob"] <= 0.1, f"cylinder r 2.0 along x, voxels (0.5, 0.5, 2.0) (2 slices across): never sheet / blob ({s2['sheet'] + s2['blob']:.2f})")
         tol = 0.45 if max(vox) <= 1.2 else 1.3          # thick slices: a 2.4 mm tube spans 2 slices -> volume up to ~2x (documented)
         check(abs(r["volume_mm3"] - true_v) / true_v <= tol, f"   volume {r['volume_mm3']} mm3 vs true {true_v:.0f} (partial volume, <= {round(100 * tol)} %)")
         check(abs(r["extent_mm"][0] - 20.4) <= 1.5 + 2 * max(vox), f"   length (first principal extent) {r['extent_mm'][0]} mm vs true 20.4 mm (+- 1.5 mm + 2 voxels)")
@@ -103,7 +131,7 @@ if "--report" in sys.argv:
     for k, nm in enumerate(mp.NAMES):
         r, a, t = res[nm]; P = a["P_idx"] * np.array(t["vox"]); ax = fig.add_subplot(3, 4, k + 1, projection="3d"); ax.set_facecolor("#111418")
         # local class of the geometry: sheet orange, tube blue, blob purple, uncertain grey
-        ax.scatter(P[:, 0], P[:, 1], P[:, 2], c=col[np.array([1, 0, 2, 3])[a["gcls"]]], s=6, depthshade=False)
+        ax.scatter(P[:, 0], P[:, 1], P[:, 2], c=col[np.array([1, 0, 2, 3, 3, 3])[a["gcls"]]], s=6, depthshade=False)
         s = r["local_share"]; ax.set_title(f"{nm}\ntube {s['tube']:.2f} sheet {s['sheet']:.2f} blob {s['blob']:.2f}", color="w", fontsize=8)
         ax.set_box_aspect(np.ptp(P, 0) + 1); ax.set_axis_off(); ax.view_init(25, -60)
     fig.text(0.5, 0.02, "local geometry per voxel: blue = tube-like, orange = sheet-like, purple = blob-like, grey = uncertain", color="w", ha="center")

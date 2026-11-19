@@ -10,12 +10,13 @@ def _f(v, n=2):
 
 
 def cohort_report(out):
-    D = json.load(open(f"{out}/development_report.json")); C = json.load(open(f"{out}/reports/candidates.json"))
-    M = json.load(open(f"{out}/model_frozen.json")); HO = json.load(open(f"{out}/heldout_report.json")) if os.path.exists(f"{out}/heldout_report.json") else None
+    D = json.load(open(f"{out}/development_report.json"))
+    C = json.load(open(f"{out}/reports/candidates.json")) if os.path.exists(f"{out}/reports/candidates.json") else []
+    M = json.load(open(f"{out}/model_frozen.json")) if os.path.exists(f"{out}/model_frozen.json") else json.load(open(f"{out}/model_trained.json")); HO = json.load(open(f"{out}/heldout_report.json")) if os.path.exists(f"{out}/heldout_report.json") else None
     L = []; a = L.append
     syn = M.get("synthetic_test")
     a("# Unified cSS score: cohort report" + (" — SYNTHETIC TEST (not a result)" if syn else ""))
-    a(f"\nModel `{M['model_version']}` hash `{M['model_hash'][:16]}`; predictors {', '.join(M['predictors'])}; ridge lambda {M['lam']:.3g}; "
+    a(f"\nModel `{M['model_version']}` hash `{M['model_hash'][:16]}` ({'FROZEN ' + M.get('frozen_at', '') if M.get('frozen') else 'trained, NOT frozen'}); predictors {', '.join(M['predictors'])}; ridge lambda {M['lam']:.3g}; "
       f"effective df {M['edf']:.2f}. Probability output: **{'yes' if M['probability_output'] else 'NO (raw score + feature profile only)'}**. "
       "EXPERIMENTAL research output; not a diagnosis.\n")
     a(f"## 1. Development estimates (nested leave-one-patient-out, out-of-fold; {', '.join(M['train_studies'])})\n")
@@ -28,7 +29,6 @@ def cohort_report(out):
         a(f"- at the ordering cut {_f(D['ordering_cut'])} (prioritisation only): candidate sensitivity {_f(D['candidate_sensitivity'])}, "
           f"specificity {_f(D['candidate_specificity'])}, FP per patient {_f(D['fp_per_patient'])}, patient sensitivity {_f(D['patient_sensitivity'])} "
           f"({D['cSS_positive_patients']} cSS-positive patients)")
-    a(f"- v5.10 confidence_pct on the same candidates: AUC {_f(D['v510_auc_same_candidates'])} — {D['v510_note']}")
     a("\n### Coefficient stability across outer folds (standardised)\n")
     st = D["coefficient_stability"]
     a("| predictor | mean | SD | sign agreement |\n|---|---|---|---|")
@@ -50,6 +50,13 @@ def cohort_report(out):
         a("\n### False positives / false negatives at the ordering cut (out-of-fold; * = not reliable)\n")
         for nm, lst in (("FP", fps), ("FN", fns)):
             for o in lst: a(f"- {nm} {o['study']} #{o['cand_id']} p {o[key]:.2f}: {prof(o)}")
+    a("\n### Estimate types (not interchangeable)\n")
+    a("- **Cross-validation estimate** (this section): nested leave-one-patient-out on the development patients; every prediction is out-of-fold.")
+    a("- **Apparent / in-sample estimate**: a model scored on the data it was fitted on. Not reported for the unified model.")
+    a("- **Independent held-out estimate**: frozen model on the held-out cohort (section 3). Only this estimates performance on new patients.")
+    a(f"\n### v5.10 (separate; NOT comparable)\n\nv5.10 `confidence_pct` was fitted on these same development calls, so its AUC here "
+      f"({_f(D.get('v510_auc_same_candidates'))}) is an **in-sample** figure. It must not be set beside the cross-validation estimate above as if they were "
+      "equivalent. A fair comparison is only possible on the independent held-out cohort.")
     a("\n## 2. Candidate categories (all included studies scored by the frozen model)\n")
     roles = collections.defaultdict(collections.Counter)
     for c in C: roles["development" if c["study"] in M["train_studies"] else "held-out"][c["category"]] += 1
@@ -62,7 +69,7 @@ def cohort_report(out):
     for c in C: by[c["registration"]].append(c["category"])
     a("- categories by registration state: " + "; ".join(f"{k}: {dict(collections.Counter(v))}" for k, v in by.items()))
     a("\n## 3. Independent held-out results (frozen model)\n")
-    if HO is None: a("**Not run.** Held-out labels have not been opened. This needs the user's approval and the frozen model hash.")
+    if HO is None: a("**Not run.** Held-out labels have not been opened. Evaluation needs a frozen model AND a separate written authorization file from the user; a hash or GUI confirmation alone is not sufficient.")
     else:
         a(f"- {HO['estimate_type']}: n {HO['n']} ({HO['n_cSS']} cSS, {HO['patients']} patients); AUC {_f(HO['auc'])} (CI {HO['auc_ci']}); "
           f"Brier {_f(HO['brier'], 3)}; calibration slope {_f(HO.get('calibration_slope'))}")

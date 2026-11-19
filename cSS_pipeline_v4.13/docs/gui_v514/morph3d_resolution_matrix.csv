@@ -1,0 +1,101 @@
+case,orientation,vox,k_physics,pieces,expected,tube,sheet,blob,unresolved,acquisition_limited,indeterminate
+tube_r2.0,x,0.5x0.5x0.5,5.66,1,resolved,0.955,0.0,0.045,0.0,0.0,0.0
+tube_r2.0,x,0.5x0.5x1,3.58,1,resolved,0.955,0.0,0.045,0.0,0.0,0.0
+tube_r2.0,x,0.5x0.5x2,1.94,1,unresolved,0.0,0.0,0.0,0.0,1.0,1.0
+tube_r2.0,x,0.5x0.5x3,1.32,1,unresolved,0.0,0.0,0.0,0.0,1.0,1.0
+tube_r2.0,x,1x1x1,2.83,1,grey,1.0,0.0,0.0,0.0,0.0,0.0
+tube_r0.6,x,0.5x0.5x0.5,1.7,1,unresolved,0.0,0.0,0.0,1.0,0.0,1.0
+tube_r0.6,x,0.5x0.5x1,1.08,1,unresolved,0.0,0.0,0.0,0.0,1.0,1.0
+tube_r0.6,x,0.5x0.5x2,,0,not representable,,,,,,
+tube_r0.6,x,0.5x0.5x3,,0,not representable,,,,,,
+tube_r0.6,x,1x1x1,,0,not representable,,,,,,
+sheet_t1.0,x,0.5x0.5x0.5,22.63,1,resolved,0.0,1.0,0.0,0.0,0.0,0.0
+sheet_t1.0,x,0.5x0.5x1,14.34,1,resolved,0.0,1.0,0.0,0.0,0.0,0.0
+sheet_t1.0,x,0.5x0.5x2,7.76,1,resolved,0.0,1.0,0.0,0.0,0.0,0.0
+sheet_t1.0,x,0.5x0.5x3,5.26,1,resolved,0.0,1.0,0.0,0.0,0.0,0.0
+sheet_t1.0,x,1x1x1,11.31,1,resolved,0.0,1.0,0.0,0.0,0.0,0.0
+tube_r2.0,y,0.5x0.5x0.5,5.66,1,resolved,0.955,0.0,0.045,0.0,0.0,0.0
+tube_r2.0,y,0.5x0.5x1,3.58,1,resolved,0.955,0.0,0.045,0.0,0.0,0.0
+tube_r2.0,y,0.5x0.5x2,1.94,1,unresolved,0.0,0.0,0.0,0.0,1.0,1.0
+tube_r2.0,y,0.5x0.5x3,1.32,1,unresolved,0.0,0.0,0.0,0.0,1.0,1.0
+tube_r2.0,y,1x1x1,2.83,1,grey,1.0,0.0,0.0,0.0,0.0,0.0
+tube_r0.6,y,0.5x0.5x0.5,1.7,1,unresolved,0.0,0.0,0.0,1.0,0.0,1.0
+tube_r0.6,y,0.5x0.5x1,1.08,1,unresolved,0.0,0.0,0.0,0.0,1.0,1.0
+tube_r0.6,y,0.5x0.5x2,,0,not representable,,,,,,
+tube_r0.6,y,0.5x0.5x3,,0,not representable,,,,,,
+tube_r0.6,y,1x1x1,,0,not representable,,,,,,
+sheet_t1.0,y,0.5x0.5x0.5,22.63,1,resolved,0.0,1.0,0.0,0.0,0.0,0.0
+sheet_t1.0,y,0.5x0.5x1,14.34,1,resolved,0.0,1.0,0.0,0.0,0.0,0.0
+sheet_t1.0,y,0.5x0.5x2,7.76,1,resolved,0.0,1.0,0.0,0.0,0.0,0.0
+sheet_t1.0,y,0.5x0.5x3,5.26,1,resolved,0.0,1.0,0.0,0.0,0.0,0.0
+sheet_t1.0,y,1x1x1,11.31,1,resolved,0.0,1.0,0.0,0.0,0.0,0.0
+tube_r2.0,z,0.5x0.5x0.5,5.66,1,resolved,0.955,0.0,0.045,0.0,0.0,0.0
+tube_r2.0,z,0.5x0.5x1,5.66,1,resolved,0.909,0.0,0.091,0.0,0.0,0.0
+tube_r2.0,z,0.5x0.5x2,5.66,1,resolved,1.0,0.0,0.0,0.0,0.0,0.0
+tube_r2.0,z,0.5x0.5x3,5.66,1,resolved,1.0,0.0,0.0,0.0,0.0,0.0
+tube_r2.0,z,1x1x1,2.83,1,grey,1.0,0.0,0.0,0.0,0.0,0.0
+tube_r0.6,z,0.5x0.5x0.5,1.7,1,unresolved,0.0,0.0,0.0,1.0,0.0,1.0
+tube_r0.6,z,0.5x0.5x1,1.7,1,unresolved,0.0,0.0,0.0,1.0,0.0,1.0
+tube_r0.6,z,0.5x0.5x2,1.7,1,unresolved,0.0,0.0,0.0,0.8,0.2,1.0
+tube_r0.6,z,0.5x0.5x3,1.7,1,unresolved,0.0,0.0,0.0,0.714,0.286,1.0
+tube_r0.6,z,1x1x1,,0,not representable,,,,,,
+sheet_t1.0,z,0.5x0.5x0.5,22.63,1,resolved,0.0,1.0,0.0,0.0,0.0,0.0
+sheet_t1.0,z,0.5x0.5x1,22.63,1,resolved,0.0,1.0,0.0,0.0,0.0,0.0
+sheet_t1.0,z,0.5x0.5x2,,0,not representable,,,,,,
+sheet_t1.0,z,0.5x0.5x3,,0,not representable,,,,,,
+sheet_t1.0,z,1x1x1,11.31,1,resolved,0.0,1.0,0.0,0.0,0.0,0.0
+tube_r2.0,oblique_xy,0.5x0.5x0.5,4.62,1,resolved,0.98,0.005,0.014,0.0,0.0,0.0
+tube_r2.0,oblique_xy,0.5x0.5x1,3.27,1,grey,0.972,0.028,0.0,0.0,0.0,0.0
+tube_r2.0,oblique_xy,0.5x0.5x2,1.89,1,unresolved,0.0,0.0,0.0,0.0,1.0,1.0
+tube_r2.0,oblique_xy,0.5x0.5x3,1.3,1,unresolved,0.0,0.0,0.0,0.0,1.0,1.0
+tube_r2.0,oblique_xy,1x1x1,2.31,1,grey,1.0,0.0,0.0,0.0,0.0,0.0
+tube_r0.6,oblique_xy,0.5x0.5x0.5,1.39,1,unresolved,0.0,0.0,0.0,1.0,0.0,1.0
+tube_r0.6,oblique_xy,0.5x0.5x1,0.98,1,unresolved,0.0,0.0,0.0,0.0,1.0,1.0
+tube_r0.6,oblique_xy,0.5x0.5x2,,0,not representable,,,,,,
+tube_r0.6,oblique_xy,0.5x0.5x3,,0,not representable,,,,,,
+tube_r0.6,oblique_xy,1x1x1,0.69,1,unresolved,0.0,0.0,0.0,0.929,0.0,0.929
+sheet_t1.0,oblique_xy,0.5x0.5x0.5,18.49,1,resolved,0.0,1.0,0.0,0.0,0.0,0.0
+sheet_t1.0,oblique_xy,0.5x0.5x1,13.07,1,resolved,0.0,1.0,0.0,0.0,0.0,0.0
+sheet_t1.0,oblique_xy,0.5x0.5x2,7.55,1,resolved,0.0,1.0,0.0,0.0,0.0,0.0
+sheet_t1.0,oblique_xy,0.5x0.5x3,5.19,1,resolved,0.0,1.0,0.0,0.0,0.0,0.0
+sheet_t1.0,oblique_xy,1x1x1,9.24,1,resolved,0.0,0.986,0.0,0.0,0.014,0.014
+tube_r2.0,oblique_xz,0.5x0.5x0.5,4.62,1,resolved,0.98,0.005,0.014,0.0,0.0,0.0
+tube_r2.0,oblique_xz,0.5x0.5x1,3.42,1,grey,0.971,0.029,0.0,0.0,0.0,0.0
+tube_r2.0,oblique_xz,0.5x0.5x2,2.18,1,grey,0.768,0.065,0.0,0.0,0.167,0.167
+tube_r2.0,oblique_xz,0.5x0.5x3,1.59,1,unresolved,0.0,0.0,0.0,0.0,1.0,1.0
+tube_r2.0,oblique_xz,1x1x1,2.31,1,grey,1.0,0.0,0.0,0.0,0.0,0.0
+tube_r0.6,oblique_xz,0.5x0.5x0.5,1.39,1,unresolved,0.0,0.0,0.0,1.0,0.0,1.0
+tube_r0.6,oblique_xz,0.5x0.5x1,1.02,1,unresolved,0.0,0.0,0.0,0.0,1.0,1.0
+tube_r0.6,oblique_xz,0.5x0.5x2,0.65,8,grey,0.0,0.0,0.0,0.0,0.0,0.0
+tube_r0.6,oblique_xz,0.5x0.5x3,,0,not representable,,,,,,
+tube_r0.6,oblique_xz,1x1x1,0.69,1,unresolved,0.0,0.0,0.0,0.857,0.0,0.857
+sheet_t1.0,oblique_xz,0.5x0.5x0.5,18.49,1,resolved,0.0,1.0,0.0,0.0,0.0,0.0
+sheet_t1.0,oblique_xz,0.5x0.5x1,13.66,1,resolved,0.0,1.0,0.0,0.0,0.0,0.0
+sheet_t1.0,oblique_xz,0.5x0.5x2,8.71,1,resolved,0.0,1.0,0.0,0.0,0.0,0.0
+sheet_t1.0,oblique_xz,0.5x0.5x3,6.35,3,grey,0.0,0.0,0.0,0.0,1.0,1.0
+sheet_t1.0,oblique_xz,1x1x1,9.24,1,resolved,0.0,0.972,0.0,0.0,0.028,0.028
+tube_r2.0,oblique_xyz,0.5x0.5x0.5,4.9,1,resolved,0.994,0.006,0.0,0.0,0.0,0.0
+tube_r2.0,oblique_xyz,0.5x0.5x1,3.27,1,grey,0.977,0.009,0.014,0.0,0.0,0.0
+tube_r2.0,oblique_xyz,0.5x0.5x2,1.96,1,unresolved,0.171,0.0,0.0,0.0,0.829,0.829
+tube_r2.0,oblique_xyz,0.5x0.5x3,1.4,1,unresolved,0.0,0.0,0.0,0.0,1.0,1.0
+tube_r2.0,oblique_xyz,1x1x1,2.45,1,grey,0.988,0.0,0.0,0.0,0.013,0.013
+tube_r0.6,oblique_xyz,0.5x0.5x0.5,1.47,1,unresolved,0.0,0.0,0.0,0.0,1.0,1.0
+tube_r0.6,oblique_xyz,0.5x0.5x1,0.98,1,unresolved,0.0,0.0,0.0,0.0,1.0,1.0
+tube_r0.6,oblique_xyz,0.5x0.5x2,0.59,6,grey,0.0,0.0,0.0,0.0,0.0,0.0
+tube_r0.6,oblique_xyz,0.5x0.5x3,,0,not representable,,,,,,
+tube_r0.6,oblique_xyz,1x1x1,0.73,1,unresolved,0.0,0.0,0.0,0.0,0.0,0.0
+sheet_t1.0,oblique_xyz,0.5x0.5x0.5,19.6,1,resolved,0.0,1.0,0.0,0.0,0.0,0.0
+sheet_t1.0,oblique_xyz,0.5x0.5x1,13.06,1,resolved,0.0,1.0,0.0,0.0,0.0,0.0
+sheet_t1.0,oblique_xyz,0.5x0.5x2,7.84,1,resolved,0.0,1.0,0.0,0.0,0.0,0.0
+sheet_t1.0,oblique_xyz,0.5x0.5x3,5.6,5,grey,0.0,0.0,0.0,0.0,0.981,0.981
+sheet_t1.0,oblique_xyz,1x1x1,9.8,1,resolved,0.0,1.0,0.0,0.0,0.0,0.0
+blob_r3.0,-,0.5x0.5x0.5,12.0,1,resolved,0.0,0.0,1.0,0.0,0.0,0.0
+blob_r3.0,-,0.5x0.5x1,6.0,1,resolved,0.0,0.0,1.0,0.0,0.0,0.0
+blob_r3.0,-,0.5x0.5x2,3.0,1,grey,0.0,0.0,0.0,0.0,1.0,1.0
+blob_r3.0,-,0.5x0.5x3,2.0,1,unresolved,0.0,0.0,0.0,0.0,1.0,1.0
+blob_r3.0,-,1x1x1,6.0,1,resolved,0.0,0.0,1.0,0.0,0.0,0.0
+blob_r1.0,-,0.5x0.5x0.5,4.0,1,resolved,0.0,0.0,1.0,0.0,0.0,0.0
+blob_r1.0,-,0.5x0.5x1,2.0,1,unresolved,0.0,0.0,0.0,0.0,1.0,1.0
+blob_r1.0,-,0.5x0.5x2,,0,not representable,,,,,,
+blob_r1.0,-,0.5x0.5x3,,0,not representable,,,,,,
+blob_r1.0,-,1x1x1,2.0,1,unresolved,0.0,0.0,0.0,1.0,0.0,1.0

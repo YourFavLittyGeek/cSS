@@ -152,14 +152,14 @@
     0.9999999999999993
    ]
   },
-  "category": "uncertain",
+  "category": "css_compatible",
   "category_reasons": [
-   "score 1.00 below ordering cut 1.00 (not evidence of an alternative)"
+   "score 1.00 >= ordering cut 1.00; core and surface relation reliable; no confirmed alternative"
   ],
   "protective_flags": [
    "unstable under perturbation"
   ],
-  "v510_confidence_pct": NaN,
+  "v510_confidence_pct": null,
   "decomposition": {
    "feature_version": "uscore-features/1.0",
    "decomposition": "ok",
@@ -342,7 +342,7 @@
    "dark-core decomposition unstable",
    "unstable under perturbation"
   ],
-  "v510_confidence_pct": NaN,
+  "v510_confidence_pct": null,
   "decomposition": {
    "feature_version": "uscore-features/1.0",
    "decomposition": "ok",
@@ -526,7 +526,7 @@
   "protective_flags": [
    "dark-core decomposition unstable"
   ],
-  "v510_confidence_pct": NaN,
+  "v510_confidence_pct": null,
   "decomposition": {
    "feature_version": "uscore-features/1.0",
    "decomposition": "ok",

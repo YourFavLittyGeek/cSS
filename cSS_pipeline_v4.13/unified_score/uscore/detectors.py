@@ -93,7 +93,8 @@ def extracranial(F, D, cand, raw, brain, vox, stability):
         contact_core = bool(ext.any())
     stab = stability.get("x5_min_mm") if stability else None
     if stab is None and v >= EXTRA_MIN_MM: unresolved.append("perturbation stability not measured")
-    elif stab < EXTRA_MIN_MM and v >= EXTRA_MIN_MM: unresolved.append(f"continuation not stable (min {stab:.1f} mm under perturbation)")
+    elif stab is not None and stab < EXTRA_MIN_MM and v >= EXTRA_MIN_MM:   # cycle 2 fix: crashed when stability was not measured
+        unresolved.append(f"continuation not stable (min {stab:.1f} mm under perturbation)")
     if v < EXTRA_MIN_MM: against.append(f"continuation {v:.1f} mm < {EXTRA_MIN_MM} mm")
     if e.get("pieces", 0) > 1: against.append("extracranial part is fragmented")
     support = dict(length_mm=round(v, 2), continuous=e.get("pieces", 0) == 1, connected_to_core=contact_core,

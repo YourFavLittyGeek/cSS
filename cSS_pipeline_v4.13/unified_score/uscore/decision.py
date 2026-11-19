@@ -41,13 +41,13 @@ def categorise(F, flags, detectors, p, cut):
         cat = "alternative_high_confidence"; why.append(f"confirmed alternative: {', '.join(conf)}; no protective condition")
     elif conf:
         cat = "uncertain"; why.append(f"alternative suspected ({', '.join(conf)}) but protected: {'; '.join(flags)}")
-    elif p is not None and cut is not None and p >= cut - 1e-9 and F["x2_core_contrast_nu"]["status"] == "reliable" \
+    elif p is not None and cut is not None and p >= cut - 1e-6 and F["x2_core_contrast_nu"]["status"] == "reliable" \
             and F["x3_pial_distance_mm"]["status"] == "reliable":
         cat = "css_compatible"; why.append(f"score {p:.2f} >= ordering cut {cut:.2f}; core and surface relation reliable; no confirmed alternative")
     else:
         cat = "uncertain"
         if p is None: why.append("no statistically justified score")
-        elif cut is not None and p < cut - 1e-9: why.append(f"score {p:.2f} below ordering cut {cut:.2f} (not evidence of an alternative)")
+        elif cut is not None and p < cut - 1e-6: why.append(f"score {p:.2f} below ordering cut {cut:.2f} (not evidence of an alternative)")
         for k in ("x2_core_contrast_nu", "x3_pial_distance_mm"):
             if F[k]["status"] != "reliable": why.append(f"{k} {F[k]['status']}")
     return dict(category=cat, reasons=why, protective_flags=list(flags), confirmed_alternatives=conf, decision_version=DECISION_VERSION)

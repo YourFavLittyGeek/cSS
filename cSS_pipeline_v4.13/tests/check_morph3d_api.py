@@ -12,7 +12,11 @@ tr = s._grid(f"{B}/work/PH6_truth.nii.gz", 0); ve = s._grid(f"{B}/work/PH6_veins
 for c in range(1, len(s.df) + 1):
     o = s.morph3d(c); m = o["measures"]; obj = s.lab == c; t, v = (tr[obj] > 0).mean(), (ve[obj] > 0).mean()
     sh = m["local_share"]; kind = "cSS" if t >= 0.3 else ("vein" if v >= 0.3 else "other")
-    ok = (kind != "cSS" or sh["sheet"] >= 0.8) and (kind != "vein" or c != 6 or sh["tube"] >= 0.6)
+    # v5.14-gui EXPECTATION CHANGE for the vein (#6), docs/INVESTIGATION_morph3d_cylinder.md: the detected vein object is 0.8 mm thick
+    # and spans ~1.8 x 1.2 samples across (0.8 x 0.8 x 1.2 mm voxels) - below the two-sample limit, so round vs flat cannot be
+    # decided. Required: tube-like OR not resolvable >= 0.6, and NEVER sheet-like. (Before: tube >= 0.6.) cSS sheets unchanged.
+    ind = sh.get("unresolved", 0) + sh.get("acquisition_limited", 0)
+    ok = (kind != "cSS" or sh["sheet"] >= 0.8) and (kind != "vein" or c != 6 or (sh["tube"] + ind >= 0.6 and sh["sheet"] <= 0.1))
     print(("ok    " if ok else "FAIL  ") + f"PH6 #{c} ({kind}): tube {sh['tube']} sheet {sh['sheet']} blob {sh['blob']} | {m['summary'][:70]}")
     if not ok: fails.append(c)
     assert len(o["voxels"]["p"]) == int(obj.sum()), "every candidate voxel is sent (no subsampling)"

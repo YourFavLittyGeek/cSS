@@ -24,7 +24,7 @@ Definitions (mm, noise units = robust SD of the 2-5 mm background shell from cor
   x2 dark-core contrast (noise units, 0..~40): median of c = (mu_b - I)/sd_b over the decomposed core; with no core the median
      over the candidate is reported with status unreliable.
   x3 distance to the brain surface (mm, about -10..+10; - = inside tissue): median psd over the core (candidate if no core).
-  x4 sulcal alignment / surface conformity (0..1): n = mean unit gradient of psd over the core (candidate if no core) = local
+  x4 SURFACE CONFORMITY (0..1; internal key x4_sulcal_alignment kept for file compatibility; NOT alignment along a sulcus): n = mean unit gradient of psd over the core (candidate if no core) = local
      surface normal; principal axes from the core coordinates in mm (lambda1 >= lambda2 >= lambda3).
        elongated (lambda1/lambda2 >= 2.25):  x4 = 1 - |t . n|, t = first axis (a line running along the surface scores 1)
        else planar (lambda2/lambda3 >= 2.25): x4 = |m . n|, m = third axis = plane normal (a sheet lying in the surface /
@@ -148,6 +148,27 @@ def x4_sulcal(D, cand, psd, vox, reg):
     return _feat(val, "-", "unreliable" if rs else "reliable", rs, mode=mode, axis_ratio_12=e12, axis_ratio_23=e23, normal_coherence=R)
 
 
+def x4b_sulcal_axis(D, cand, psd, vox, reg, radius_mm=6.0):
+    """EXPLORATORY, not a model predictor (feature audit, cycle 2). Alignment of a LINE-like object with the local sulcal axis.
+    Surface normals n = unit gradient of the pial distance field at near-surface voxels (|psd| <= 2 mm) within radius_mm of the
+    object; structure tensor J = mean(n n^T), eigenvalues l0 <= l1 <= l2. A sulcus has normals in two directions (both banks /
+    crown / fundus), so l1 is substantial and the sulcal axis s = e0 (orthogonal to all normals). value = |t . s|, t = first
+    principal axis: 1 = runs along the sulcus, 0 = crosses it. Unavailable when the surface around is not folded (l1 < 0.1:
+    flat convexity - no sulcal axis) or the object is not line-like (sheets: x4 sheet mode already asks "lies in the wall")."""
+    if psd is None: return _feat(None, "-", "unavailable", ["no pial distance map (no anatomy)"])
+    ref = _ref(D, cand); p = pca_mm(ref, vox)
+    if p is None: return _feat(None, "-", "unavailable", ["fewer than 3 voxels"])
+    w, V = p
+    if w[0] / max(w[1], 1e-9) < 2.25: return _feat(None, "-", "unavailable", ["not line-like (applies to lines; sheets: x4 sheet mode)"])
+    near = (ndi.distance_transform_edt(~ref, sampling=vox) <= radius_mm) & (np.abs(psd) <= 2.0)
+    g = np.stack(np.gradient(psd, *vox), -1)[near]; nr = np.linalg.norm(g, axis=1); g = g[nr > 1e-6] / nr[nr > 1e-6, None]
+    if len(g) < 20: return _feat(None, "-", "unavailable", ["too few surface voxels around the object"])
+    J = (g[:, :, None] * g[:, None, :]).mean(0); ev, EV = np.linalg.eigh(J)
+    if ev[1] < 0.1: return _feat(None, "-", "unavailable", [f"surface around is not folded (l1 {ev[1]:.2f} < 0.1): no sulcal axis"])
+    val = abs(float(V[:, 0] @ EV[:, 0])); rs = reg_reasons(reg, strict=True)
+    return _feat(val, "-", "unreliable" if rs else "reliable", rs, tensor_eigen=[round(float(x), 3) for x in ev], role="exploratory, not in the model")
+
+
 def x5_extracranial(D, cand, raw, brain, vox, crop_edge, reg):
     if raw is None: return _feat(None, "mm", "unavailable", ["no unmasked SWI"])
     if brain is None: return _feat(None, "mm", "unavailable", ["no brain mask"])
@@ -176,7 +197,8 @@ def extract(cand, img, vox, raw=None, ves=None, psd=None, brain=None, reg="unver
          "x2_core_contrast_nu": x2_core(D),
          "x3_pial_distance_mm": x3_pial(D, cand, psd, reg),
          "x4_sulcal_alignment": x4_sulcal(D, cand, psd, vox, reg),
-         "x5_extracranial_mm": x5_extracranial(D, cand, raw, brain, vox, crop_edge, reg)}
+         "x5_extracranial_mm": x5_extracranial(D, cand, raw, brain, vox, crop_edge, reg),
+         "x4b_sulcal_axis_exploratory": x4b_sulcal_axis(D, cand, psd, vox, reg)}       # NOT in PREDICTORS: never enters the model
     F["_meta"] = dict(feature_version=FEATURE_VERSION, decomposition=D["status"], decomposition_label=D["label"],
                       candidate_voxels=int(cand.sum()), core_voxels=int(D["core"].sum()) if "core" in D else 0,
                       core_pieces=int(ndi.label(D["core"], S26)[1]) if "core" in D else 0,
@@ -197,7 +219,7 @@ FEATURE_SPEC = {
     "x3_pial_distance_mm": dict(unit="mm (- tissue, + CSF)", range="-10 .. +10", inputs="core/candidate, pial distance map",
         reliable_if="T1 anatomy and label shift <= 1.0 mm", missing="unavailable without anatomy",
         failure_modes="a 3-4 mm shift gives 1.3-2.4 mm median error (synthetic test); SWI-only anatomy is coarse"),
-    "x4_sulcal_alignment": dict(unit="0..1", range="0 (crosses the surface) .. 1 (runs along it)", inputs="core/candidate, pial distance map",
+    "x4_sulcal_alignment": dict(unit="0..1", range="0 (crosses the surface) .. 1 (conforms to it: tangent line / sheet in the surface); not alignment along a sulcus", name="surface conformity", inputs="core/candidate, pial distance map",
         reliable_if="T1 anatomy, label shift <= 0.5 mm, line or sheet shape (axis ratio >= 2.25), normal coherence >= 0.5", missing="unavailable without anatomy",
         failure_modes="surface veins running along a sulcus also score 1; direction errors 13-48 deg at 3-4 mm shift"),
     "x5_extracranial_mm": dict(unit="mm", range="0 .. crop margin", inputs="candidate, unmasked SWI, brain mask",
