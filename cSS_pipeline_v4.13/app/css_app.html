@@ -8,7 +8,10 @@
 .top b{font-size:17px}.sp{flex:1}.mut{color:var(--mut)}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
 nav button{background:none;border:0;color:var(--mut);font:inherit;padding:6px 10px;border-radius:7px;cursor:pointer}nav button.on{color:var(--ink);background:var(--panel)}
 .seg{display:inline-flex;background:var(--in);border:1px solid var(--line);border-radius:999px;padding:3px}.seg button{background:none;border:0;color:var(--ink);font:inherit;padding:4px 12px;border-radius:999px;cursor:pointer}
-.seg button.on{background:var(--acc);color:#fff}
+.seg button.on{background:var(--acc);color:#fff}.seg.ico button{font-size:16px;padding:3px 11px;line-height:1.2}#theme button.on[data-t=dark]{background:#4a5260}
+.g{display:inline-block;border-radius:6px;padding:1px 7px;font-weight:700;font-size:12px}.gA{background:color-mix(in srgb,var(--ok) 22%,transparent);color:var(--ok)}
+.gB{background:color-mix(in srgb,var(--warn) 22%,transparent);color:var(--warn)}.gC{background:color-mix(in srgb,var(--bad) 22%,transparent);color:var(--bad)}
+button.b.bang{background:var(--bad);border-color:var(--bad);color:#fff;font-weight:800;min-width:26px!important;padding:4px 8px!important}
 .wrap{padding:16px 20px;max-width:1500px}.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:12px}
 h2{margin:0 0 10px;font-size:16px}.row{display:flex;align-items:center;gap:10px;margin:7px 0;flex-wrap:wrap}.lab{width:190px;color:var(--mut)}
 input,select{background:var(--in);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:inherit}
@@ -35,8 +38,8 @@ td input{padding:3px 6px;min-width:80px;max-width:150px}td select{padding:3px 26
 </style></head><body>
 <div class="top"><img id="logo" src="/icon_dark.png" alt=""><b>cSS Pipeline</b><span class="mut" id="ver"></span>
  <nav><button data-v="home" class="on">Home</button><button data-v="add">Add patients</button><button data-v="pts">Patients</button><button data-v="res">Results</button><button data-v="read">Review / Blind read</button><button data-v="set">Settings</button></nav>
- <span class="sp"></span><span class="seg" id="awake"><button data-a="1">☀ Awake</button><button data-a="0">☾ Sleep allowed</button></span>
- <span class="seg" id="theme"><button data-t="light">☀ Light</button><button data-t="dark">☾ Dark</button></span><button class="b" id="logbtn">⌨ Show log</button></div>
+ <span class="sp"></span><span class="seg ico" id="awake"><button data-a="1" title="Keep the Mac awake while patients are processing">☕</button><button data-a="0" title="Sleep allowed">🛏</button></span>
+ <span class="seg ico" id="theme"><button data-t="light" title="Light theme">☀</button><button data-t="dark" title="Dark theme">☾</button></span><button class="b" id="logbtn">⌨ Show log</button></div>
 <div class="wrap" id="view"></div>
 <div id="log"><div class="h"><b>Log</b><select id="logcode"></select><span class="sp"></span><button class="b" id="logcopy">Copy log</button><button class="b" id="logclose">Close</button></div><pre id="logtext"></pre></div>
 <div id="toast"></div><div id="shade"><div class="card" id="dlg"></div></div>
@@ -48,12 +51,14 @@ const toast=(t,bad)=>{const e=$("#toast");e.innerHTML=t;e.style.borderColor=bad?
 // confirmation box: ask(title, html, [[value,label,class]...]) -> value of the button pressed
 const ask=(title,html,btns)=>new Promise(res=>{$("#dlg").innerHTML=`<h2 class="warn">⚠ ${title}</h2><p>${html}</p><div class="acts">${btns.map(([v,l,c])=>`<button class="b ${c||""}" data-v="${v}">${l}</button>`).join("")}</div>`;
   $("#shade").style.display="flex";$("#dlg").querySelectorAll("button").forEach(b=>b.onclick=()=>{$("#shade").style.display="none";res(b.dataset.v)})});
-const PW=()=>S.pathways;
+const PW=()=>S.pathways;const auto=()=>S.settings.auto_retry!==false;
+const grade=(g,tip)=>g?`<span class="g g${g[0]==="A"?"A":g[0]==="B"?"B":"C"}" title="${esc(tip)}">${g}</span>`:'<span class="mut">—</span>';
 const pwSel=(cur,rec,attrs,tried)=>{const t={};(tried||[]).forEach(x=>t[x.pathway]=x.shift);const ord=Object.keys(PW()).sort((a,b)=>(a in t)-(b in t));
   return `<select ${attrs}>${ord.map(k=>`<option value="${k}" ${k===cur?"selected":""}>${PW()[k]}${["swi_only","synthmorph"].includes(k)?" (runs alone)":""} · ${S.pw_time[k]}${k===rec?"  ✓ recommended":""}${k in t?`  · tried ✗ ${t[k]} mm`:""}</option>`).join("")}</select>`};
 const recTag=(sel,rec)=>sel===rec?'<span class="rec">✓ recommended</span>':"";
 async function openWin(url,name){const r=await api("/api/window",{url,title:name});if(r.open)window.open(url,name,"width=1150,height=560")}
 async function confirmPath(code,chosen,rec,why){if(chosen===rec)return true;
+  if(auto()){toast(`${esc(code)}: ${esc(PW()[chosen])} chosen instead of the recommended ${esc(PW()[rec])} (automatic mode - no confirmation)`);return true}
   const r=await ask("Not the recommended pathway",`${esc(code)}: you chose <b>${esc(PW()[chosen])}</b>, but the recommended pathway is <b>${esc(PW()[rec])}</b>${why?` (${esc(why)})`:""}. It may fail or give less accurate anatomy for this patient.`,[["back","Back"],["rec","Use recommended","pri"],["go","Continue anyway","wb"]]);
   return r==="go"?true:r==="rec"?"rec":false}
 const hms=s=>{s=Math.max(0,Math.round(s||0));const h=Math.floor(s/3600),m=Math.floor(s%3600/60);return h?`${h} h ${String(m).padStart(2,"0")} min`:m?`${m} min`:`${s % 60} s`};
@@ -187,6 +192,7 @@ function ptsView(v){const q=S.queue,sy=S.sys,z=S.mem_zones,coh=["all"].concat(S.
   const cnt=k=>S.patients.filter(p=>k.includes(p.status)).length,par=S.settings.parallel||1,rec=S.rec,run=S.patients.filter(p=>["running","paused","starting"].includes(p.status));
   const misreg=p=>p.status==="failed"&&/do not line up/.test(p.error);
   const st=p=>{if(p.status==="running"||p.status==="paused"||p.status==="starting"){const tot=p.elapsed+p.remaining,pc=tot?Math.round(100*p.elapsed/tot):0;
+     if(p.stalled)return `<span class="warn" title="no new log line for ${p.stalled} min - open the Log; if nothing uses CPU in Activity Monitor, Stop and Retry">⚠ no progress for ${p.stalled} min</span>`;
      return `<div class="row" style="margin:0;flex-wrap:nowrap"><div class="bar" style="flex:0 0 140px;min-width:0"><i style="width:${pc}%"></i></div><span class="note">${p.status==="paused"?"paused · ":"● "}${Math.max(1,S.steps.indexOf(p.step)+1)}/5 ${esc(p.step||"starting")} · ${hms(p.elapsed)} · ≈ ${hms(p.remaining)} left</span></div>`}
     if(p.status==="waiting")return `<span class="mut">waiting · ≈ ${hms(p.remaining)}${p.solo?" · runs alone":""}</span>`;
     if(p.status==="decision")return `<span class="warn">⚠ waiting for your decision</span>`;
@@ -195,9 +201,10 @@ function ptsView(v){const q=S.queue,sy=S.sys,z=S.mem_zones,coh=["all"].concat(S.
     return `<span class="${p.status==="failed"?"bad":"warn"}" title="${esc(p.error)}">✗ ${esc(p.status)}${p.error?": "+esc(p.error):""}</span>`};
   const btn=(a,code,cls)=>`<button class="b ${cls||""}" data-act="${a}" data-code="${esc(code)}" title="${esc(ACT_HELP[a]||"")}">${a}</button>`;
   const acts=p=>{const c=p.code,lg=`<button class="b" data-lg="${esc(c)}" title="${esc(ACT_HELP.Log)}">Log</button>`;
-    if(misreg(p))return lg+pwSel(p.next_rec,p.next_rec,`data-retry="${esc(c)}" data-rec="${esc(p.next_rec)}" style="width:330px"`,p.tried)+btn("Retry",c,"pri");
+    if(misreg(p))return lg+`<button class="b bang" data-bang="${esc(c)}" title="Change the pathway by hand">!</button>`+pwSel(p.next_rec,p.next_rec,`data-retry="${esc(c)}" data-rec="${esc(p.next_rec)}" style="width:330px"`,p.tried)+btn("Retry",c,"pri");
+    const bang=["failed","waiting","decision","stopped"].includes(p.status)?`<button class="b bang" data-bang="${esc(c)}" title="Change the pathway by hand">!</button>`:"";
     const a=({running:["Pause","Stop"],starting:["Stop"],paused:["Resume","Stop"],waiting:["Remove"],decision:["Remove"],failed:["Retry","Remove"],stopped:["Retry","Remove"],done:["Re-run"]}[p.status]||[]).map(x=>btn(x,c)).join("");
-    return lg+(p.has_qc?`<button class="b" data-qc="${esc(c)}" title="${esc(ACT_HELP.QC)} Opens in its own window.">QC ↗</button>`:"")+a+(p.status==="done"?`<button class="b pri" data-rv="${esc(c)}" title="${esc(ACT_HELP.Review)}">Review</button>`:"")};
+    return lg+bang+(p.has_qc?`<button class="b" data-qc="${esc(c)}" title="${esc(ACT_HELP.QC)} Opens in its own window.">QC ↗</button>`:"")+a+(p.status==="done"?`<button class="b pri" data-rv="${esc(c)}" title="${esc(ACT_HELP.Review)}">Review</button>`:"")};
   const notes=S.patients.filter(p=>p.path_note&&!p.path_ack&&p.status!=="done");
   const nwait=notes.some(p=>p.status==="decision");
   const pop=notes.length?`<div id="npop" class="card ${v._np?"":"hide"}" style="position:absolute;right:16px;top:48px;width:640px;z-index:6;padding:8px 12px;box-shadow:0 12px 30px #0009">
@@ -221,11 +228,11 @@ function ptsView(v){const q=S.queue,sy=S.sys,z=S.mem_zones,coh=["all"].concat(S.
    ${sy.mem_pct>=z[1]&&run.length?`<div class="row bad"><b>⚠ Memory in the danger zone (${sy.mem_pct} %)</b> - the Mac may freeze. <button class="b wb" id="stopnew">Stop newest patient (${esc(run.slice().sort((a,b)=>b.started-a.started)[0].code)}) - it goes back to the queue</button></div>`:""}</div>
   ${q.hold?`<div class="card" style="border-color:var(--bad)"><b class="bad">⏸ Queue paused - setup problem:</b> ${esc(q.hold)}<br><span class="note">Fix it on the Home screen (Setup check), then press "Retry all failed". Waiting patients were not touched.</span></div>`:""}
   <div class="card"><div class="row" style="margin-top:0"><span class="sp"></span><select id="cf">${coh.map(c=>`<option ${c===v._f?"selected":""}>${esc(c)}</option>`).join("")}</select><label><input type="checkbox" id="hn" ${hide?"checked":""}> Hide names</label></div>
-   <table class="fix"><colgroup><col style="width:90px"><col style="width:160px"><col style="width:90px"><col style="width:170px"><col><col style="width:540px"></colgroup>
-   <tr><th>Code</th><th>Name</th><th>Cohort</th><th>Pathway</th><th>Status</th><th style="text-align:right">Actions</th></tr>
+   <table class="fix"><colgroup><col style="width:90px"><col style="width:150px"><col style="width:80px"><col style="width:160px"><col style="width:52px"><col><col style="width:540px"></colgroup>
+   <tr><th>Code</th><th>Name</th><th>Cohort</th><th>Pathway</th><th>QC</th><th>Status</th><th style="text-align:right">Actions</th></tr>
    ${P.map(p=>`<tr><td><b>${esc(p.code)}</b>${["waiting","decision"].includes(p.status)?` <button class="b" data-ren="${esc(p.code)}" title="change the code (only before processing starts)" style="padding:0 5px;border:0">✎</button>`:""}</td>
     <td>${hide?"•••":`<input data-code="${esc(p.code)}" data-f="name" value="${esc(p.name)}" placeholder="—" style="width:100%;max-width:none">`}</td><td>${esc(p.cohort)}</td>
-    <td>${esc(PW()[p.pathway]||"SynthSeg")}${p.path_note?` <span class="tag" title="${esc(p.path_note)}">auto</span>`:""}${p.mode==="auto"?' <span class="tag ai">Auto · AI only</span>':""}</td><td>${st(p)}</td><td><div class="acts">${acts(p)}</div></td></tr>`).join("")||'<tr><td colspan="6" class="mut">No patients yet.</td></tr>'}</table>
+    <td>${esc(PW()[p.pathway]||"SynthSeg")}${p.path_note?` <span class="tag" title="${esc(p.path_note)}">auto</span>`:""}${p.mode==="auto"?' <span class="tag ai">Auto · AI only</span>':""}</td><td>${grade(p.qc,p.qc_tip)}</td><td>${st(p)}</td><td><div class="acts">${acts(p)}</div></td></tr>`).join("")||'<tr><td colspan="7" class="mut">No patients yet.</td></tr>'}</table>
    <div class="note" style="margin-top:6px">You can close this window; processing continues and resumes after a restart. A code can be changed (✎) until processing starts; names any time.</div></div><div id="qcimg"></div>`;
   $("#cf").onchange=e=>{v._f=e.target.value;ptsView(v)};$("#why").onclick=()=>{v._why=!v._why;$("#whytip").classList.toggle("hide")};
   $("#par").onchange=async e=>{const n=+e.target.value;if(n>rec){const r=await ask("More than recommended",`You chose <b>${n} patients</b> at the same time; <b>${rec}</b> is recommended for this Mac (${sy.mem_total} GB). The Mac may slow down; if memory reaches the red zone you will be warned and new patients won't start.`,[["back","Back"],["rec",`Keep ${rec}`,"pri"],["go",`Use ${n} anyway`,"wb"]]);
@@ -237,6 +244,12 @@ function ptsView(v){const q=S.queue,sy=S.sys,z=S.mem_zones,coh=["all"].concat(S.
   $("#ackall")&&($("#ackall").onclick=async()=>{for(const p of notes)await api("/api/control",{code:p.code,action:"accept"});v._np=false;render()});
   v.querySelectorAll("[data-pw]").forEach(el=>el.onchange=async()=>{const p=S.patients.find(x=>x.code===el.dataset.pw),recp=p.pathway;const r=await confirmPath(p.code,el.value,recp,p.path_note);
     if(r===true)await api("/api/control",{code:p.code,action:"pathway",pathway:el.value});render()});
+  v.querySelectorAll("[data-bang]").forEach(b=>b.onclick=async()=>{const p=S.patients.find(x=>x.code===b.dataset.bang),rec=p.status==="failed"?(p.next_rec||"coreg_masked"):p.pathway;
+    $("#dlg").innerHTML=`<h2>Change the pathway - ${esc(p.code)}</h2><p class="note">Now: <b>${esc(PW()[p.pathway]||p.pathway)}</b>${p.tried&&p.tried.length?` · tried: ${p.tried.map(t=>esc(PW()[t.pathway]||t.pathway)+" ("+t.shift+" mm)").join(", ")}`:""}. ${auto()?"Automatic mode: the change is applied at once.":"The change asks for confirmation if it is not the recommended one."}</p>
+     <div class="row">${pwSel(rec,rec,'id="bangsel" style="width:100%"',p.tried)}</div><div class="acts" style="margin-top:10px"><button class="b" data-v="x">Cancel</button><button class="b pri" data-v="ok">Apply</button></div>`;
+    $("#shade").style.display="flex";$("#dlg").querySelectorAll("button").forEach(x=>x.onclick=async()=>{const val=$("#bangsel").value;$("#shade").style.display="none";if(x.dataset.v!=="ok")return;
+      const r=await confirmPath(p.code,val,rec,"");if(r===false)return;const chosen=r==="rec"?rec:val;
+      const res=await api("/api/control",["waiting","decision"].includes(p.status)?{code:p.code,action:"pathway",pathway:chosen}:{code:p.code,action:chosen});if(res.error)toast(esc(res.error),1);else toast(`${esc(p.code)}: ${esc(PW()[chosen])}`);render()})});
   v.querySelectorAll("[data-ren]").forEach(b=>b.onclick=async()=>{const nc=prompt("New study code for "+b.dataset.ren,b.dataset.ren);if(!nc||nc===b.dataset.ren)return;const r=await api("/api/edit",{code:b.dataset.ren,new_code:nc.trim()});if(r.error)toast(esc(r.error),1);render()});
   v.querySelectorAll("[data-act]").forEach(b=>b.onclick=async()=>{let a=b.dataset.act.toLowerCase().replace("re-run","rerun");
     if(a==="retry"){const sel=v.querySelector(`[data-retry="${b.dataset.code}"]`);if(sel){const recp=sel.dataset.rec,r=await confirmPath(b.dataset.code,sel.value,recp,"after a failed registration");
@@ -255,16 +268,31 @@ function ptsView(v){const q=S.queue,sy=S.sys,z=S.mem_zones,coh=["all"].concat(S.
    <p class="note">The failed attempt's files are kept (renamed), never deleted. The method used is shown in the Pathway column.</p></div>`;$("#qcimg").scrollIntoView({behavior:"smooth"})});
   v.querySelectorAll("[data-qc]").forEach(b=>b.onclick=()=>openWin("/qc?code="+encodeURIComponent(b.dataset.qc),"cssqc"));
   v.querySelectorAll("[data-rv]").forEach(b=>b.onclick=()=>review([b.dataset.rv]))}
-async function review(codes){toast("starting the reviewer…");const r=await api("/api/review",{codes,reviewer:localStorage.getItem("cssapp_reviewer")||""});if(!r.ok)return toast(esc(r.error),1);window.open(r.url,"_blank")}
+async function review(codes,cohort){const w=window.open("about:blank","cssreview");if(w)w.document.write('<p style="font:16px -apple-system,sans-serif;padding:30px;color:#888;background:#111418;margin:0;height:100vh">starting the reviewer…</p>');
+  toast("starting the reviewer…");const r=await api("/api/review",{codes,cohort,reviewer:localStorage.getItem("cssapp_reviewer")||""});
+  if(!r.ok){if(w)w.close();return toast(esc(r.error),1)}if(r.opened){if(w)w.close();return}if(w)w.location=r.url;else toast(`pop-up blocked - open <a href="${r.url}" target="_blank">${r.url}</a>`,1)}
 // ---------------- results
-async function resView(v){const R=await api("/api/results");const hide=!!v._hide;
-  v.innerHTML=`<div class="card"><div class="row"><b>Results</b><span class="sp"></span><label><input type="checkbox" id="hn" ${hide?"checked":""}> Hide names</label><a class="b" href="/api/export.xlsx" style="text-decoration:none">Export Excel (codes only)</a><button class="b" id="share">Share package (codes only)…</button></div>
-   <table><tr><th>Code</th><th>Name</th><th>Cohort</th><th>Status</th><th>Candidates</th><th>Reviewed / cSS called</th><th>Reader score L / R = total</th><th>AI score L / R = total</th><th>Radiologist R / L</th><th>Version</th></tr>
-   ${R.map(r=>`<tr><td>${esc(r.code)}</td><td>${hide?"•••":esc(r.name||"—")}</td><td>${esc(r.cohort)}</td><td>${esc(r.status)}</td><td>${r.candidates??"—"}</td><td>${r.reviewed!=null?`${r.reviewed} / ${r.css_called}`:"not read"}</td>
-     <td>${r.score_total!=null?`${r.score_L} / ${r.score_R} = <b>${r.score_total}</b>`:"—"}</td><td>${r.ai_total!=null?`${r.ai_L} / ${r.ai_R} = ${r.ai_total} <span class="tag ai">AI only, not validated</span>`:"—"}</td>
+async function resView(v){const all=await api("/api/results");const hide=!!v._hide,coh=["all"].concat(S.cohorts);v._c=v._c||"all";const R=all.filter(r=>v._c==="all"||r.cohort===v._c);
+  v.innerHTML=`<div class="card"><div class="row"><b>Results</b><select id="rc">${coh.map(c=>`<option ${c===v._c?"selected":""}>${esc(c)}</option>`).join("")}</select><label><input type="checkbox" id="hn" ${hide?"checked":""}> Hide names</label><span class="sp"></span>
+    <button class="b pri" id="revc" title="Open the reviewer with every finished patient of this cohort (◂ ▸ to move between them)">▶ Review cohort</button>
+    <button class="b" id="aiall" title="AI scores are computed automatically after every patient; this fills any that are missing">⚙ Update AI scores</button>
+    <button class="b" id="openx" title="Open the results workbook (updated automatically after every patient)">📂 Open Excel</button>
+    <span style="position:relative"><button class="b" id="shareb">Share ▾</button><div id="sharem" class="card hide" style="position:absolute;right:0;top:34px;width:230px;z-index:6;padding:6px">
+      ${[["xlsx","Excel (.xlsx)"],["csv","CSV (.csv)"],["docx","Word (.docx)"],["pdf","PDF (.pdf)"]].map(([f,l])=>`<button class="b" data-fmt="${f}" style="width:100%;margin:2px 0;text-align:left;border:0">${l}</button>`).join("")}
+      <div class="note" style="padding:4px 8px">codes only · saved to the Desktop and opened</div><button class="b" id="pkg" style="width:100%;margin:2px 0;text-align:left;border:0">Share package (.zip)</button></div></span></div>
+   <table class="fix"><colgroup><col style="width:70px"><col style="width:120px"><col style="width:70px"><col style="width:52px"><col style="width:80px"><col style="width:110px"><col style="width:130px"><col><col style="width:120px"><col style="width:120px"></colgroup>
+   <tr><th>Code</th><th>Name</th><th>Cohort</th><th>QC</th><th>Candidates</th><th>Reviewed / cSS</th><th>Reader L / R = total</th><th>AI L / R = total</th><th>Radiologist R / L</th><th>Version</th></tr>
+   ${R.map(r=>`<tr><td><b>${esc(r.code)}</b></td><td>${hide?"•••":esc(r.name||"—")}</td><td>${esc(r.cohort)}</td><td>${grade(r.qc_grade,r.qc_tip)}</td><td>${r.candidates??"—"}</td><td>${r.reviewed!=null?`${r.reviewed} / ${r.css_called}`:"not read"}</td>
+     <td>${r.score_total!=null?`${r.score_L} / ${r.score_R} = <b>${r.score_total}</b>`:"—"}</td><td>${r.ai_total!=null?`${r.ai_L} / ${r.ai_R} = ${r.ai_total} <span class="tag ai">AI only, not validated</span>`:(r.candidates!=null?(r.ai_err?`<span class="mut" title="${esc(r.ai_err)}">not available ⓘ</span>`:'<span class="mut">computing…</span>'):"—")}</td>
      <td>${r.rad_R!==""?`${r.rad_R} / ${r.rad_L}`:"—"}${r.radiologist?` <span class="note">${esc(r.radiologist)}</span>`:""}</td><td class="note">${esc(r.version)}</td></tr>`).join("")}</table>
-   <div class="note" style="margin-top:6px">${agreement(R)}</div></div>`;
-  $("#hn").onchange=e=>{v._hide=e.target.checked;resView(v)};$("#share").onclick=async()=>{const codes=R.filter(r=>r.candidates!=null).map(r=>r.code);const r=await api("/api/share",{codes});toast(r.ok?`saved ${esc(r.path)}`:esc(r.error),!r.ok)}}
+   <div class="note" style="margin-top:6px">${agreement(R)} · The Excel workbook in the results folder is updated automatically after every patient; AI scores are computed automatically too.</div></div>`;
+  $("#rc").onchange=e=>{v._c=e.target.value;resView(v)};$("#hn").onchange=e=>{v._hide=e.target.checked;resView(v)};
+  $("#revc").onclick=()=>{const c=R.filter(r=>r.candidates!=null).map(r=>r.code);if(!c.length)return toast("no finished patient in this cohort",1);review(c,v._c==="all"?"":v._c)};
+  $("#aiall").onclick=async()=>{await api("/api/ai_scores",{});toast("AI scores are being updated - the column fills in within a minute")};
+  $("#openx").onclick=async()=>{const r=await api("/api/open_results",{});toast(r.ok?`opened ${esc(r.path)}`:esc(r.error),!r.ok)};
+  $("#shareb").onclick=()=>$("#sharem").classList.toggle("hide");
+  v.querySelectorAll("[data-fmt]").forEach(b=>b.onclick=async()=>{$("#sharem").classList.add("hide");const r=await api("/api/export",{fmt:b.dataset.fmt,cohort:v._c});toast(r.ok?`saved ${esc(r.path)}`:esc(r.error),!r.ok)});
+  $("#pkg").onclick=async()=>{$("#sharem").classList.add("hide");const codes=R.filter(r=>r.candidates!=null).map(r=>r.code);const r=await api("/api/share",{codes});toast(r.ok?`saved ${esc(r.path)}`:esc(r.error),!r.ok)}}
 function agreement(R){let n=0,a=0;R.forEach(r=>{if(r.score_total==null||r.rad_R==="")return;[["score_R","rad_R"],["score_L","rad_L"]].forEach(([s,g])=>{n++;if(String(r[s])===String(r[g]))a++})});
   return n?`Reader score vs radiologist: ${a} of ${n} hemispheres agree.`:"Agreement with the radiologist appears here once patients are read and graded."}
 // ---------------- review / blind read
@@ -300,5 +328,5 @@ function setView(v){const s=S.settings,F=s.features;const L={duplicate_check:"Du
   $("#fsc").onclick=async()=>{const p=await pick("folder","Choose the FreeSurfer folder");if(p)$("#fs").value=p.replace(/\/$/,"")};$("#bkc").onclick=async()=>{const p=await pick("folder","Choose the backup folder");if(p)$("#bk").value=p};
   $("#save").onclick=async()=>{const f={};document.querySelectorAll("[data-ft]").forEach(x=>f[x.dataset.ft]=x.checked);
     await api("/api/settings",{fs_license:$("#lic").value.trim(),freesurfer_home:$("#fs").value.trim(),threads:+$("#thr").value,backup_dir:$("#bk").value.trim(),features:f});toast("settings saved");render()}}
-render();setInterval(async()=>{if(V==="pts"&&!document.activeElement.matches("input,select")&&$("#shade").style.display!=="flex")await render();else if(V==="home")await refresh();if($("#log").style.display==="block")loadLog()},3000);
+render();setInterval(async()=>{if(V==="res"&&!document.activeElement.matches("input,select")&&$("#sharem")&&$("#sharem").classList.contains("hide")&&$("#shade").style.display!=="flex")await render();else if(V==="pts"&&!document.activeElement.matches("input,select")&&$("#shade").style.display!=="flex")await render();else if(V==="home")await refresh();if($("#log").style.display==="block")loadLog()},3000);
 </script></body></html>

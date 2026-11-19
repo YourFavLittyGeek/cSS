@@ -22,3 +22,11 @@ changes detector thresholds or rules. Names (optional) only in $CSS_BASE/private
   through patients); recommended number of patients at once recalculated from the pathways in the queue (memory per pathway:
   SynthSeg / masked 12 GB, recon-all 5 GB, SynthMorph / SWI-only alone); optional pywebview window with a Dock icon that
   follows the Mac appearance (Home > Setup check > Install).
+- app12: icon-only Awake (☕) / Sleep (🛏) and theme (☀ / ☾, dark = grey) switches; QC grade from the label shift
+  (A+ <= 0.5, A <= 0.8, B+ <= 1.0, B <= 1.5 pass, C <= 2.5, F; low-confidence one grade lower, a pass stays >= B);
+  red ! = change the pathway by hand (automatic mode applies at once with a notice, "let me choose" asks);
+  AI score computed automatically for every finished patient (and back-filled at start); results workbook
+  <results folder or $CSS_BASE/results>/cSS_results.xlsx updated after every patient, "Open Excel"; Share as xlsx / csv /
+  docx / pdf (codes only, Desktop); Review opens the window at the click (pop-up fix) with every finished patient, the
+  reviewer has Cohort + Patient drop-downs and ◂ ▸ (review_web.py --groups FILE --start ID); live run log in the Log
+  window; "no progress for N min" after 20 min without a log line.

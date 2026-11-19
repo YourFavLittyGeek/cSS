@@ -448,11 +448,11 @@ def process(p):
     # 5 QC snapshot, AI score (automatic mode), version stamp
     step_begin(p, "qc")
     if SET["features"].get("qc_snapshot"): qc_snapshot(code)
-    if p["mode"] == "auto":
-        r = subprocess.run([sys.executable, f"{HERE}/ai_score_cli.py", code], capture_output=True, text=True, env=env)
-        p["ai_note"] = "" if r.returncode == 0 else (r.stderr or r.stdout)[-300:]
+    p["ai_note"] = ai_score(code, env)              # AI score computed for every patient (labelled "AI only, not validated")
     copy_results(p); step_end(p, "qc")
     p.update(status="done", finished=time.time(), step=""); save_pat(); notify("cSS Pipeline", f"{code} finished")
+    try: write_results_file()
+    except Exception as e: open(logf, "a").write(f"\nresults file not updated: {e}\n")
 def _cohort_status(code):
     import pandas as pd
     p = f"{B}/review/cohort_run.csv"
@@ -478,6 +478,43 @@ def explain(code, status):
         last = [l for l in app.strip().splitlines() if l.strip()][-1][:200]
         return f"the pipeline stopped with an error: {last} - open the log for details"
     return f"processing failed ({status}) - open the log for details"
+GRADES = [(0.5, "A+"), (0.8, "A"), (1.0, "B+"), (1.5, "B"), (2.5, "C"), (1e9, "F")]
+def qc_grade(p):
+    """grade from the label shift (mm): A+ <= 0.5, A <= 0.8, B+ <= 1.0, B <= 1.5 (pass), C <= 2.5, F; one step lower when the QC
+    status is low_confidence. -> (grade, tooltip) or ("", "")"""
+    sh, st = None, ""
+    try:
+        j = json.load(open(f"{B}/review/{p['code']}_qc.json")); sh = j.get("label_shift_mm"); st = j.get("status", "")
+        if j.get("registration_ok") is False and p["status"] != "done": sh = None
+    except Exception: pass
+    if p["status"] == "failed" and p.get("tried"):
+        try: sh = float(p["tried"][-1]["shift"])
+        except Exception: pass
+    if sh is None: return "", ""
+    sh = float(sh); i = next(k for k, (lim, _) in enumerate(GRADES) if sh <= lim)
+    if st == "low_confidence_review" and i < len(GRADES) - 1 and (sh > 1.5 or i < 3): i += 1      # a passed registration stays >= B
+    return GRADES[i][1], f"label shift {sh:.2f} mm" + (" · QC status low confidence (one grade lower)" if st == "low_confidence_review" else "") + \
+        " · A+ <= 0.5 · A <= 0.8 · B+ <= 1.0 · B <= 1.5 (pass) · C <= 2.5 · F > 2.5 mm"
+def last_activity(code):
+    m = [os.path.getmtime(f) for f in (f"{AD}/logs/{code}.log", f"{B}/logs/{code}_run.log") if os.path.exists(f)]
+    return max(m) if m else 0
+def ai_score(code, env=None):
+    """AI score (green-band candidates, not validated) -> review/ID_score_ai.json; never touches the reader's files"""
+    r = subprocess.run([sys.executable, f"{HERE}/ai_score_cli.py", code], capture_output=True, text=True, env=env or fs_env())
+    return "" if r.returncode == 0 else (r.stderr or r.stdout)[-300:]
+def ai_backfill():
+    """finished patients without an AI score get one (in the background, at start and after each finished patient)"""
+    for p in list(PAT):
+        if p["status"] == "done" and os.path.exists(f"{B}/review/{p['code']}_candidates.csv") and not os.path.exists(f"{B}/review/{p['code']}_score_ai.json"):
+            p["ai_note"] = ai_score(p["code"])
+    try: write_results_file()
+    except Exception as e: print("results file not written:", e, flush=True)
+def results_file():
+    d = os.path.expanduser(next((p.get("results_dir") for p in PAT if p.get("results_dir")), "") or f"{B}/results")
+    os.makedirs(d, exist_ok=True); return f"{d}/cSS_results.xlsx"
+def write_results_file():
+    f = results_file(); open(f + ".tmp", "wb").write(export_xlsx()); os.replace(f + ".tmp", f); return f
+
 def explain_reg(shift):
     return (f"the T1 labels do not line up with the SWI (shift {shift} mm, limit 1.5 mm) - nothing was written. "
             "choose a retry: fast masked registration (minutes), SynthMorph (minutes) or recon-all (most accurate, ~2-3 h)")
@@ -591,13 +628,64 @@ def results():
             f = f"{B}/review/{c}_score{key}.json"
             if os.path.exists(f):
                 j = json.load(open(f)); r[f"{tag}_L"] = j.get("L_score"); r[f"{tag}_R"] = j.get("R_score"); r[f"{tag}_total"] = j.get("multifocality_0_4")
+        r["qc_grade"], r["qc_tip"] = qc_grade(p); r["ai_err"] = p.get("ai_note", "")
         r["label"] = "reviewed" if r.get("score_total") is not None else ("AI only, not validated" if r.get("ai_total") is not None else "")
         rows.append(r)
     return rows
 def export_xlsx():
     import pandas as pd
-    df = pd.DataFrame(results()).drop(columns=["name"], errors="ignore")
+    df = pd.DataFrame(results()).drop(columns=["name", "qc_tip", "ai_err"], errors="ignore")
     bio = io.BytesIO(); df.to_excel(bio, index=False, sheet_name="results"); return bio.getvalue()
+def export_as(fmt, cohort=""):
+    """results (codes only) -> ~/Desktop/cSS_results_<cohort>_<time>.<fmt>; fmt xlsx / csv / docx / pdf"""
+    import pandas as pd
+    rows = [r for r in results() if not cohort or cohort == "all" or r["cohort"] == cohort]
+    df = pd.DataFrame(rows).drop(columns=["name", "qc_tip", "ai_err"], errors="ignore")
+    out = os.path.expanduser(f"~/Desktop/cSS_results_{(cohort or 'all').replace('/', '_')}_{datetime.datetime.now():%Y%m%d_%H%M}.{fmt}")
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    if fmt == "xlsx": df.to_excel(out, index=False, sheet_name="results")
+    elif fmt == "csv": df.to_csv(out, index=False)
+    elif fmt == "docx": write_docx(out, df, cohort)
+    elif fmt == "pdf": write_pdf(out, df, cohort)
+    else: raise ValueError(f"unknown format {fmt}")
+    return out
+COLS_SHORT = [("code", "Code"), ("cohort", "Cohort"), ("status", "Status"), ("qc_grade", "QC"), ("candidates", "Candidates"), ("score_L", "Reader L"),
+              ("score_R", "Reader R"), ("score_total", "Reader total"), ("ai_total", "AI total*"), ("rad_R", "Radiologist R"), ("rad_L", "Radiologist L")]
+def _cells(df):
+    cols = [(k, h) for k, h in COLS_SHORT if k in df.columns]
+    rows = [[("" if (v is None or (isinstance(v, float) and v != v)) else (str(int(v)) if isinstance(v, float) and v == int(v) else str(v))) for v in (r[k] for k, _ in cols)] for _, r in df.iterrows()]
+    return [h for _, h in cols], rows
+def write_docx(out, df, cohort):
+    """minimal Word file (no extra package): title + table + note"""
+    from xml.sax.saxutils import escape as x
+    head, rows = _cells(df)
+    cell = lambda t, b=False: f'<w:tc><w:p><w:r>{"<w:rPr><w:b/></w:rPr>" if b else ""}<w:t xml:space="preserve">{x(t)}</w:t></w:r></w:p></w:tc>'
+    tbl = ('<w:tbl><w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="0" w:type="auto"/><w:tblBorders>' + "".join(f'<w:{e} w:val="single" w:sz="4" w:color="999999"/>' for e in ("top", "left", "bottom", "right", "insideH", "insideV")) +
+           '</w:tblBorders></w:tblPr>' + "<w:tr>" + "".join(cell(h, True) for h in head) + "</w:tr>" + "".join("<w:tr>" + "".join(cell(c) for c in r) + "</w:tr>" for r in rows) + "</w:tbl>")
+    para = lambda t, b=False, sz=22: f'<w:p><w:r><w:rPr>{"<w:b/>" if b else ""}<w:sz w:val="{sz}"/></w:rPr><w:t xml:space="preserve">{x(t)}</w:t></w:r></w:p>'
+    body = (para(f"cSS results{' - cohort ' + cohort if cohort and cohort != 'all' else ''}", True, 32) + para(f"Pipeline {version()} · {datetime.datetime.now():%Y-%m-%d %H:%M} · codes only") + tbl +
+            para("* AI score = detector's green-band candidates, AI only, not validated. QC grade from the label shift (A+ <= 0.5 mm ... F > 2.5 mm).", False, 18))
+    doc = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' + body +
+           '<w:sectPr><w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/><w:pgMar w:top="720" w:right="720" w:bottom="720" w:left="720"/></w:sectPr></w:body></w:document>')
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>')
+        z.writestr("_rels/.rels", '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>')
+        z.writestr("word/document.xml", doc)
+def write_pdf(out, df, cohort):
+    import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
+    from matplotlib.backends.backend_pdf import PdfPages
+    head, rows = _cells(df); per = 28
+    with PdfPages(out) as pdf:
+        for k in range(0, max(1, len(rows)), per):
+            fig = plt.figure(figsize=(11.69, 8.27)); fig.text(0.04, 0.95, f"cSS results{' - cohort ' + cohort if cohort and cohort != 'all' else ''}", fontsize=15, weight="bold")
+            fig.text(0.04, 0.92, f"Pipeline {version()} · {datetime.datetime.now():%Y-%m-%d %H:%M} · codes only · * AI only, not validated", fontsize=9, color="#555")
+            ax = fig.add_axes([0.04, 0.06, 0.92, 0.83]); ax.axis("off")
+            part = rows[k:k + per] or [[""] * len(head)]
+            t = ax.table(cellText=part, colLabels=head, loc="upper center", cellLoc="center"); t.auto_set_font_size(False); t.set_fontsize(8.5); t.scale(1, 1.25)
+            for (r, c), cl in t.get_celld().items():
+                if r == 0: cl.set_facecolor("#e8ecf2"); cl.set_text_props(weight="bold")
+            pdf.savefig(fig); plt.close(fig)
+
 def share_package(codes):
     out = os.path.expanduser(f"~/Desktop/cSS_share_{datetime.datetime.now():%Y%m%d_%H%M}.zip")
     import pandas as pd
@@ -656,6 +744,7 @@ def launch_child(kind, args, port0):
     if kind == "review": cmd = [sys.executable, f"{SC}/review_web.py", ",".join(args["codes"]), "--open", "--no-browser", "--port", str(port)]
     else: cmd = [sys.executable, f"{B}/reference_audit/blind_read/blind_read.py", args["packet"], args["reader"], "--port", str(port), "--no-browser"]
     if kind == "review" and args.get("reviewer"): cmd += ["--reviewer", args["reviewer"]]
+    if kind == "review": cmd += ["--groups", f"{AD}/review_groups.json", "--start", args.get("start", args["codes"][0])]
     CHILD[kind] = subprocess.Popen(cmd, stdout=open(f"{AD}/logs/{kind}.log", "w"), stderr=subprocess.STDOUT, env=env)
     for _ in range(100):
         time.sleep(0.2)
@@ -673,7 +762,8 @@ def state():
                         status=p["status"], step=p.get("step", ""), steps_done=list(p.get("steps_done", {}).keys()), error=p.get("error", ""),
                         elapsed=el, remaining=rem, reg_method=p.get("reg_method", ""), pathway=p.get("pathway", "synthseg"),
                         path_note=p.get("path_note", ""), path_ack=p.get("path_ack", True), solo=solo(p), started=p.get("started", 0),
-                        tried=p.get("tried", []), next_rec=next_rec(p) if p["status"] == "failed" else "", has_qc=os.path.exists(f"{AD}/qc/{p['code']}.png"), version=p.get("version", ""),
+                        tried=p.get("tried", []), next_rec=next_rec(p) if p["status"] == "failed" else "", qc=qc_grade(p)[0], qc_tip=qc_grade(p)[1],
+                        stalled=round((time.time() - last_activity(p["code"])) / 60) if p["status"] == "running" and last_activity(p["code"]) and time.time() - last_activity(p["code"]) > 1200 else 0, has_qc=os.path.exists(f"{AD}/qc/{p['code']}.png"), version=p.get("version", ""),
                         radiologist=p.get("radiologist", ""), grade_R=p.get("grade_R", ""), grade_L=p.get("grade_L", ""),
                         step_times={k: round(v) for k, v in p.get("steps_done", {}).items()}))
     q = [x for x in out if x["status"] in ("waiting", "running", "paused", "starting")]
@@ -699,7 +789,11 @@ class H(BaseHTTPRequestHandler):
             if u.path in ("/icon_dark.png", "/icon_light.png"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="image/png")
             if u.path == "/api/preflight": return self.send(preflight())
             if u.path == "/api/log":
-                f = f"{AD}/logs/{q['code']}.log"; return self.send(dict(text=open(f).read()[-30000:] if os.path.exists(f) else "(no log yet)"))
+                f = f"{AD}/logs/{q['code']}.log"; t = open(f).read()[-30000:] if os.path.exists(f) else "(no log yet)"
+                p = pget(q["code"]); rl = f"{B}/logs/{q['code']}_run.log"
+                if p and p["status"] in ("running", "paused") and os.path.exists(rl) and os.path.getmtime(rl) >= p.get("started", 0):
+                    t += "\n----- live pipeline log (logs/" + q["code"] + "_run.log) -----\n" + open(rl, errors="replace").read()[-20000:]
+                return self.send(dict(text=t))
             if u.path == "/qc":
                 done = [p["code"] for p in PAT if os.path.exists(f"{AD}/qc/{p['code']}.png")]; c = q.get("code", done[0] if done else "")
                 i = done.index(c) if c in done else 0; th = SET.get("theme", "dark")
@@ -816,7 +910,18 @@ class H(BaseHTTPRequestHandler):
                 return self.send(dict(ok=True, n=n))
             if u.path == "/api/install": return self.send(install_zip(d["path"]))
             if u.path == "/api/rollback": return self.send(rollback())
-            if u.path == "/api/review": return self.send(launch_child("review", d, 8765))
+            if u.path == "/api/review":
+                done = [p for p in PAT if p["status"] == "done" and os.path.exists(f"{B}/review/{p['code']}_candidates.csv")]
+                groups = {}
+                for p in done: groups.setdefault(p.get("cohort") or "-", []).append(p["code"])
+                start = d["codes"][0]
+                if d.get("cohort"): d["codes"] = groups.get(d["cohort"], d["codes"]); start = d["codes"][0] if d["codes"] else start
+                else: d["codes"] = [p["code"] for p in done] or d["codes"]
+                json.dump(groups, open(f"{AD}/review_groups.json", "w")); d["start"] = start
+                r = launch_child("review", d, 8765)
+                if r.get("ok") and WIN["webview"]:
+                    import webview; webview.create_window("cSS reviewer", r["url"], width=1500, height=950); r["opened"] = True
+                return self.send(r)
             if u.path == "/api/blind":
                 if d.get("new_packet"):
                     r = subprocess.run([sys.executable, f"{B}/reference_audit/ws_prepare.py", d["packet"], "--studies", ",".join(d["codes"]), "--readers", d["reader"]],
@@ -829,6 +934,16 @@ class H(BaseHTTPRequestHandler):
                     return self.send(dict(open=False))
                 return self.send(dict(open=True))
             if u.path == "/api/share": return self.send(dict(ok=True, path=share_package(d["codes"])))
+            if u.path == "/api/export":
+                out = export_as(d.get("fmt", "xlsx"), d.get("cohort", ""))
+                if mac(): subprocess.run(["open", out])
+                return self.send(dict(ok=True, path=out))
+            if u.path == "/api/open_results":
+                f = write_results_file()
+                if mac(): subprocess.run(["open", f])
+                return self.send(dict(ok=True, path=f))
+            if u.path == "/api/ai_scores":
+                threading.Thread(target=ai_backfill, daemon=True).start(); return self.send(dict(ok=True))
             if u.path == "/api/quit":
                 if RUNNING and not d.get("force"): return self.send(dict(ok=False, error="a patient is processing - stop it first, or quit anyway (it restarts from the beginning next time)"))
                 self.send(dict(ok=True)); threading.Timer(0.5, lambda: os._exit(0)).start(); return
@@ -875,6 +990,7 @@ if __name__ == "__main__":
             if "--no-window" not in a: open_window(f"http://127.0.0.1:{port}/")
             sys.exit(0)
     reread_failures()
+    threading.Thread(target=ai_backfill, daemon=True).start()
     threading.Thread(target=worker, daemon=True).start()
     def _caff_watch():
         while True: caffeinate(bool(RUNNING)); time.sleep(5)

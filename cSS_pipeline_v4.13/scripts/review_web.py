@@ -40,6 +40,8 @@ slug = lambda s: re.sub(r"[^A-Za-z0-9]+", "_", s.strip()).strip("_") or "reviewe
 now = lambda: time.strftime("%Y-%m-%d %H:%M:%S")
 AUDIT_OFFSET, AUDIT_FRAC = 10000, 0.20   # v5.7 validation read: excluded objects shown as ids 10000 + excl_id, 20 % sample
 SHOW_EXCL = False                         # v5.8.3: --show-excluded = every excluded object listed with its rule
+GROUPS = {}                               # app: cohort -> study ids (--groups FILE.json), for the cohort drop-down
+START = [""]                              # app: study opened first (--start ID)
 OPEN_READ = False                         # v5.8.1: --open = full viewer, no blind validation read
 AUDIT_ON = False                          # v5.7-E-fix5: the excluded-object audit sample only with --audit (user: show the final list, exclusions applied)
 
@@ -508,7 +510,7 @@ def meta(sid, reviewer, mode=""):
                           feat={k: g(k) for k in ("darkness_z", "pial_dist_mm", "tube_ratio", "tram_frac", "extent_mm", "n_slices",
                                                   "css_evidence", "vein_evidence", "score")}))
     if audit: cands += s.audit_cands(reviewer)
-    return dict(study=sid, studies=IDS, shape=list(s.shape), vox=s.vox, cands=cands, calls=calls, mode="validation" if audit else "", open_read=OPEN_READ, note=note, qc=s.qc,
+    return dict(study=sid, studies=IDS, groups=GROUPS, shape=list(s.shape), vox=s.vox, cands=cands, calls=calls, mode="validation" if audit else "", open_read=OPEN_READ, note=note, qc=s.qc,
                 seqs=[dict(key=k, **{a: b for a, b in s.meta_seq.get(k, dict(label=SEQ_NAMES[k])).items()}) for k in s.avail],
                 missing_seqs=[SEQ_NAMES[k] for k in ("flair", "t1", "t2", "phase") if k not in s.avail], ai_score=ai_score(s),
                 reader_score=(_score_json(score_path(sid, reviewer)) if calls else None),
@@ -532,7 +534,7 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path); q = {k: v[0] for k, v in parse_qs(u.query).items()}
         try:
             if u.path == "/": return self._send(open(os.path.join(HERE, "review_web.html"), "rb").read(), "text/html; charset=utf-8")
-            if u.path == "/api/meta": return self._send(meta(q.get("study") or IDS[0], q.get("reviewer", ""), q.get("mode", "")))
+            if u.path == "/api/meta": return self._send(meta(q.get("study") or START[0], q.get("reviewer", ""), q.get("mode", "")))
             if u.path == "/api/vol":
                 s = study(q["study"]); return self._send(s.volume(q.get("seq", "swi")).tobytes(order="F"), "application/octet-stream")
             if u.path == "/api/seqmeta":
@@ -666,6 +668,10 @@ if __name__ == "__main__":
     IDS = [s for s in a[0].split(",") if s]
     port = int(a[a.index("--port") + 1]) if "--port" in a else 8765
     if "--reviewer" in a: reviewers(a[a.index("--reviewer") + 1])
+    if "--groups" in a:
+        try: GROUPS.update(json.load(open(a[a.index("--groups") + 1])))
+        except Exception as e: print(f"groups file not read: {e}")
+    START[0] = a[a.index("--start") + 1] if "--start" in a and a[a.index("--start") + 1] in IDS else IDS[0]
     AUDIT_ON = "--audit" in a; OPEN_READ = "--open" in a; SHOW_EXCL = "--show-excluded" in a
     for sid in IDS:
         for f in (f"{B}/data/{sid}_swi.nii", f"{B}/review/{sid}_candidates.csv", f"{B}/review/{sid}_candidates.nii.gz"):
@@ -679,7 +685,7 @@ if __name__ == "__main__":
     if SHOW_EXCL: print("SHOW EXCLUDED: every rule-excluded object is listed after the candidates (number 10000 + id, rule shown); its calls are never scored", flush=True)
     if OPEN_READ: print("OPEN READ: AI meter and AI score visible, no blind validation read", flush=True)
     print("shown candidates only (rule-excluded objects hidden)" if not AUDIT_ON else "AUDIT: a 20 % sample of the rule-excluded objects is mixed into validation reads", flush=True)
-    study(IDS[0])
+    study(START[0])
     if "--no-browser" not in a: threading.Timer(0.5, lambda: webbrowser.open(url)).start()
     try: srv.serve_forever()
     except KeyboardInterrupt: print("\nstopped; all decisions were saved as they were made")

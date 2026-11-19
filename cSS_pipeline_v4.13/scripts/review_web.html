@@ -87,10 +87,11 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
 .sc{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:8px 0}.sc .card{background:var(--bg)}.sc .big{font-size:30px;font-weight:800;line-height:1.1}
 .banner{background:#7a5b00;color:#fff;padding:5px 14px;font-size:13px;display:none}
 .toast{position:fixed;left:24px;bottom:66px;background:#1f6b36;color:#fff;border-radius:10px;padding:9px 14px;font-size:13px;z-index:60;box-shadow:0 6px 20px rgba(0,0,0,.5);display:none;user-select:text}
+.hide{display:none!important}#prevStudy,#nextStudy{padding:3px 9px;color:var(--ink)}
 .toast.err{background:#8a2b2b}.toast u{cursor:pointer;margin-left:8px}
 </style></head><body>
 <div class="top"><b>cSS Reviewer</b>
- <select id="study" title="Study"></select>
+ <select id="cohort" title="Cohort" class="hide"></select><select id="study" title="Patient"></select><button class="b" id="prevStudy" title="Previous patient">◂</button><button class="b" id="nextStudy" title="Next patient">▸</button>
  <span class="mut" id="candinfo"></span><div class="prog"><div id="progbar"></div></div><span class="mut" id="progtxt"></span><span class="sp"></span>
  <span id="vsym" class="vsym" title="Validation read: AI meter hidden and locked, candidates shuffled, some excluded objects mixed in (click: Settings)"><svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7c2 0 3.8.8 5.3 1.8M22 12s-4 7-10 7c-2 0-3.8-.8-5.3-1.8"/><path d="M3 21L21 3"/><rect x="15" y="13" width="7" height="6" rx="1" fill="currentColor"/><path d="M16.5 13v-1.5a2 2 0 0 1 4 0V13"/></svg></span>
  <span id="scorechip" class="chipbox" title="cSS score 0-4: reviewer (after Q) and AI (rule-based, not validated)"></span>
@@ -402,7 +403,11 @@ function setMissed(m){missed=(m||[]).map(r=>{let pts=null;try{pts=r.points?JSON.
 let loadSeq=0;
 async function loadStudy(sid){status("loading study ...");const my=++loadSeq,stale=()=>my!==loadSeq;   // a newer load wins
   const M0=await api(`/api/meta?study=${sid||""}&reviewer=${encodeURIComponent(reviewer())}`);if(stale())return;M=M0;[nx,ny,nz]=M.shape;vox=M.vox;vols={};luts={};WLs={};seqmeta={};M.seqs.forEach(s=>seqmeta[s.key]=s);
-  $("#study").innerHTML=M.studies.map(s=>`<option ${s===M.study?"selected":""}>${esc(s)}</option>`).join("");
+  {const G=M.groups||{},gs=Object.keys(G),cur=gs.find(g=>G[g].includes(M.study));$("#cohort").classList.toggle("hide",!gs.length);
+   if(gs.length)$("#cohort").innerHTML=gs.map(g=>`<option ${g===cur?"selected":""}>${esc(g)}</option>`).join("");
+   const list=cur?G[cur].filter(s=>M.studies.includes(s)):M.studies,i=list.indexOf(M.study);
+   $("#study").innerHTML=list.map((s,k)=>`<option value="${esc(s)}" ${s===M.study?"selected":""}>${esc(s)} (${k+1} / ${list.length})</option>`).join("");
+   $("#prevStudy").disabled=i<=0;$("#nextStudy").disabled=i<0||i>=list.length-1;$("#prevStudy").onclick=()=>loadStudy(list[i-1]);$("#nextStudy").onclick=()=>loadStudy(list[i+1])}
   $("#seq").innerHTML=M.seqs.map((s,i)=>`<option value="${s.key}">${s.label}  (${i+1})</option>`).join("");
   $("#revlist").innerHTML=M.reviewers.names.map(n=>`<option value="${esc(n)}">`).join("");
   if(!reviewer()&&M.reviewers.last){$("#reviewer").value=M.reviewers.last;const Mr=await api(`/api/meta?study=${M.study}&reviewer=${encodeURIComponent(reviewer())}`);if(stale())return;M=Mr}
@@ -753,6 +758,7 @@ $("#lt").addEventListener("click",e=>{if(e.target.closest(".ahb"))return;const d
 $("#pt").addEventListener("click",e=>{const s=e.target.closest("span");if(!s)return;if(s.dataset.pl!==undefined)setPlane(+s.dataset.pl);else if(s.dataset.lay)setLayout(s.dataset.lay);else if(s.dataset.a==="fit")fitView();else if(s.dataset.a==="actual")actualSize();else if(s.dataset.a==="cand")gotoCandidate()});
 $("#seq").onchange=e=>{setSeq(e.target.value);e.target.blur()};
 $("#study").onchange=e=>{loadStudy(e.target.value);e.target.blur()};
+$("#cohort").onchange=e=>{const l=((M.groups||{})[e.target.value]||[]).filter(s=>M.studies.includes(s));if(l.length)loadStudy(l[0]);e.target.blur()};
 $("#zoom").oninput=e=>{const p=panes[act];zoomFrom(p,p.cv.clientWidth/2,p.cv.clientHeight/2,zoom,ctr.slice(),0.25*Math.pow(96,e.target.value/100))};
 $("#win").oninput=e=>setWLp(panes[act].seq,101-e.target.value,getWL(panes[act].seq)[1]);$("#lev").oninput=e=>setWLp(panes[act].seq,getWL(panes[act].seq)[0],+e.target.value);
 $("#tMark").onclick=A.mark.f;$("#tOther").onclick=A.other.f;$("#tMip").onclick=A.mip.f;$("#tAuto").onclick=A.auto.f;
