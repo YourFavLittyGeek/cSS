@@ -1,0 +1,193 @@
+1000 band indeterminate indeterminate 0.6
+1002 paired_veins indeterminate indeterminate 0.4
+1003 vein_on_band indeterminate indeterminate 1.2
+1004 band_vein_adjacent indeterminate indeterminate 0.5
+1005 band indeterminate indeterminate 0.8
+1006 vein blob-like blob-like 0.3
+1007 paired_veins indeterminate indeterminate 0.4
+1008 vein_on_band tube-compatible tube-compatible 0.6
+1009 band_vein_adjacent blob-like blob-like 0.4
+1010 band indeterminate indeterminate 0.3
+1011 vein tube-compatible tube-compatible 0.4
+1012 paired_veins blob-like blob-like 0.4
+1013 vein_on_band indeterminate indeterminate 0.5
+1014 band_vein_adjacent indeterminate indeterminate 0.4
+1015 band indeterminate indeterminate 0.3
+1016 vein indeterminate blob-like 0.2
+1017 paired_veins indeterminate indeterminate 1.2
+1018 vein_on_band indeterminate not resolvable 0.6
+1019 band_vein_adjacent indeterminate not resolvable 0.8
+1020 band indeterminate indeterminate 0.3
+1021 vein indeterminate tube-compatible 0.3
+1022 paired_veins not resolvable not resolvable 0.5
+1023 vein_on_band indeterminate blob-like 1.1
+1024 band_vein_adjacent indeterminate indeterminate 0.5
+1025 band indeterminate indeterminate 0.3
+1026 vein not resolvable blob-like 0.3
+1027 paired_veins blob-like blob-like 0.4
+1028 vein_on_band indeterminate indeterminate 0.4
+1029 band_vein_adjacent indeterminate indeterminate 0.4
+1030 band tube-compatible tube-compatible 0.4
+1031 vein tube-compatible not resolvable 0.8
+1032 paired_veins indeterminate indeterminate 2.4
+1033 vein_on_band indeterminate indeterminate 0.4
+1034 band_vein_adjacent indeterminate indeterminate 0.6
+1035 band indeterminate indeterminate 0.4
+1036 vein indeterminate indeterminate 0.6
+1037 paired_veins indeterminate indeterminate 0.9
+1038 vein_on_band blob-like indeterminate 1.2
+1039 band_vein_adjacent indeterminate indeterminate 0.6
+1040 band indeterminate indeterminate 0.6
+1041 vein tube-compatible not resolvable 1.0
+1042 paired_veins indeterminate not resolvable 0.5
+1043 vein_on_band indeterminate indeterminate 0.6
+1044 band_vein_adjacent indeterminate indeterminate 1.3
+1045 band indeterminate blob-like 0.3
+1046 vein indeterminate tube-compatible 0.4
+1047 paired_veins indeterminate tube-compatible 2.0
+1048 vein_on_band indeterminate indeterminate 0.4
+1049 band_vein_adjacent indeterminate indeterminate 0.6
+1050 band indeterminate indeterminate 0.5
+1051 vein indeterminate tube-compatible 1.0
+1053 vein_on_band indeterminate indeterminate 1.2
+1054 band_vein_adjacent tube-compatible tube-compatible 0.9
+1055 band indeterminate not resolvable 0.5
+1056 vein indeterminate indeterminate 0.9
+1057 paired_veins tube-compatible tube-compatible 0.4
+1059 band_vein_adjacent indeterminate indeterminate 0.4
+1060 band indeterminate indeterminate 0.5
+1061 vein tube-compatible tube-compatible 0.8
+1062 paired_veins not resolvable not resolvable 1.3
+1063 vein_on_band tube-compatible tube-compatible 0.7
+1064 band_vein_adjacent indeterminate not resolvable 0.4
+1065 band indeterminate tube-compatible 0.4
+1066 vein not resolvable not resolvable 0.3
+1067 paired_veins indeterminate indeterminate 1.4
+1068 vein_on_band indeterminate indeterminate 0.5
+1069 band_vein_adjacent indeterminate blob-like 0.4
+1070 band indeterminate indeterminate 0.7
+1071 vein indeterminate tube-compatible 0.3
+1072 paired_veins indeterminate not resolvable 1.3
+1073 vein_on_band blob-like not resolvable 0.6
+1074 band_vein_adjacent indeterminate indeterminate 0.4
+1075 band indeterminate not resolvable 0.4
+1076 vein tube-compatible tube-compatible 0.4
+1077 paired_veins blob-like blob-like 1.3
+1078 vein_on_band indeterminate indeterminate 0.3
+1079 band_vein_adjacent indeterminate indeterminate 0.7
+1080 band blob-like blob-like 0.2
+1082 paired_veins indeterminate tube-compatible 1.3
+1083 vein_on_band indeterminate blob-like 0.4
+1084 band_vein_adjacent indeterminate tube-compatible 0.5
+1085 band indeterminate indeterminate 0.3
+1086 vein indeterminate indeterminate 0.7
+1087 paired_veins blob-like not resolvable 0.8
+1088 vein_on_band indeterminate indeterminate 0.8
+1089 band_vein_adjacent indeterminate indeterminate 0.6
+1090 band indeterminate indeterminate 0.7
+1091 vein blob-like blob-like 0.3
+1092 paired_veins tube-compatible not resolvable 0.5
+1093 vein_on_band indeterminate indeterminate 0.4
+1094 band_vein_adjacent indeterminate indeterminate 0.4
+1095 band indeterminate indeterminate 0.6
+1096 vein indeterminate blob-like 0.9
+1097 paired_veins indeterminate indeterminate 0.6
+1098 vein_on_band indeterminate indeterminate 0.4
+1099 band_vein_adjacent blob-like blob-like 0.5
+1100 band indeterminate indeterminate 0.4
+1101 vein indeterminate tube-compatible 1.0
+1102 paired_veins tube-compatible tube-compatible 2.5
+1103 vein_on_band indeterminate indeterminate 1.5
+1104 band_vein_adjacent indeterminate not resolvable 0.6
+1106 vein tube-compatible tube-compatible 1.2
+1107 paired_veins tube-compatible tube-compatible 1.3
+1108 vein_on_band indeterminate tube-compatible 0.4
+1109 band_vein_adjacent indeterminate indeterminate 0.5
+1110 band indeterminate indeterminate 0.5
+1112 paired_veins indeterminate tube-compatible 1.2
+1113 vein_on_band indeterminate not resolvable 0.4
+1114 band_vein_adjacent indeterminate indeterminate 0.6
+1115 band indeterminate indeterminate 0.4
+1116 vein indeterminate blob-like 0.9
+1117 paired_veins tube-compatible tube-compatible 1.5
+1118 vein_on_band indeterminate indeterminate 0.4
+1119 band_vein_adjacent tube-compatible tube-compatible 0.6
+1120 band indeterminate indeterminate 0.4
+1121 vein indeterminate blob-like 0.3
+1122 paired_veins indeterminate indeterminate 1.7
+1123 vein_on_band indeterminate indeterminate 0.9
+1124 band_vein_adjacent indeterminate not resolvable 0.6
+1125 band indeterminate indeterminate 0.3
+1126 vein indeterminate indeterminate 0.3
+1127 paired_veins indeterminate indeterminate 1.3
+1128 vein_on_band indeterminate blob-like 0.3
+1129 band_vein_adjacent tube-compatible tube-compatible 0.5
+1130 band indeterminate indeterminate 0.2
+1131 vein blob-like indeterminate 1.3
+1132 paired_veins indeterminate not resolvable 0.4
+1133 vein_on_band indeterminate indeterminate 0.4
+1134 band_vein_adjacent indeterminate indeterminate 0.5
+1136 vein indeterminate tube-compatible 1.3
+1137 paired_veins indeterminate indeterminate 0.4
+1138 vein_on_band indeterminate indeterminate 1.0
+1139 band_vein_adjacent indeterminate indeterminate 1.8
+1140 band indeterminate indeterminate 0.4
+1141 vein indeterminate tube-compatible 0.3
+1142 paired_veins indeterminate indeterminate 0.6
+1143 vein_on_band indeterminate indeterminate 0.9
+1144 band_vein_adjacent indeterminate tube-compatible 0.7
+1145 band indeterminate indeterminate 0.4
+1146 vein indeterminate indeterminate 0.3
+1147 paired_veins not resolvable tube-compatible 1.8
+1148 vein_on_band indeterminate indeterminate 0.5
+1149 band_vein_adjacent indeterminate indeterminate 0.4
+1150 band indeterminate not resolvable 0.4
+1152 paired_veins indeterminate tube-compatible 0.4
+1153 vein_on_band indeterminate indeterminate 0.6
+1154 band_vein_adjacent indeterminate indeterminate 0.7
+1155 band indeterminate sheet-compatible 0.8
+1156 vein tube-compatible tube-compatible 1.5
+1157 paired_veins tube-compatible tube-compatible 2.6
+1158 vein_on_band indeterminate indeterminate 0.4
+1159 band_vein_adjacent indeterminate indeterminate 0.9
+1160 band indeterminate indeterminate 0.7
+1161 vein tube-compatible tube-compatible 1.2
+1162 paired_veins tube-compatible tube-compatible 0.3
+1163 vein_on_band indeterminate indeterminate 0.6
+1164 band_vein_adjacent indeterminate indeterminate 0.7
+1165 band indeterminate indeterminate 0.2
+1166 vein blob-like blob-like 0.7
+1167 paired_veins not resolvable not resolvable 2.1
+1168 vein_on_band indeterminate indeterminate 0.9
+1169 band_vein_adjacent not resolvable not resolvable 0.5
+1170 band indeterminate indeterminate 0.4
+1171 vein tube-compatible tube-compatible 0.8
+1172 paired_veins not resolvable not resolvable 1.4
+1173 vein_on_band indeterminate indeterminate 0.6
+1174 band_vein_adjacent indeterminate indeterminate 0.4
+1175 band indeterminate indeterminate 0.5
+1176 vein tube-compatible tube-compatible 1.4
+1177 paired_veins indeterminate indeterminate 0.4
+1178 vein_on_band indeterminate indeterminate 0.9
+1179 band_vein_adjacent indeterminate blob-like 0.8
+1180 band indeterminate indeterminate 1.1
+1181 vein indeterminate not resolvable 0.3
+1182 paired_veins not resolvable tube-compatible 2.6
+1183 vein_on_band indeterminate indeterminate 0.6
+1184 band_vein_adjacent indeterminate indeterminate 0.8
+1185 band indeterminate indeterminate 0.4
+1186 vein not resolvable not resolvable 0.9
+1187 paired_veins indeterminate indeterminate 1.9
+1188 vein_on_band indeterminate indeterminate 0.9
+1189 band_vein_adjacent indeterminate indeterminate 0.8
+1190 band indeterminate blob-like 0.3
+1191 vein indeterminate indeterminate 0.4
+1192 paired_veins indeterminate tube-compatible 2.2
+1193 vein_on_band indeterminate not resolvable 0.6
+1194 band_vein_adjacent indeterminate indeterminate 0.7
+1195 band indeterminate indeterminate 0.4
+1196 vein indeterminate tube-compatible 0.3
+1197 paired_veins indeterminate indeterminate 2.0
+1198 vein_on_band indeterminate indeterminate 0.4
+1199 band_vein_adjacent indeterminate indeterminate 0.5
+written 200

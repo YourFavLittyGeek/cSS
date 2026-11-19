@@ -1,0 +1,11 @@
+{
+ "frozen_at": "2026-11-19T07:43:50",
+ "note": "frozen before the held-out set (seeds 1000-1199) was generated or run",
+ "sha256": {
+  "scripts/css_morph3d_v2.py": "128d5ae18ae17fb97508d3f251743f10e6cd94e5bba294e51383912449b6bfe7",
+  "scripts/css_morph3d.py": "c51bc25c25788b18404e6ab26b92bfa6743a2dbb056cf2a40fa5ac90037476a8",
+  "morph_v513/bloom_phantoms.py": "6f7956ef00589b2974e58dcd2ad3bac934cf3a60eb4582cd9fb7228fbc0ccedd",
+  "morph_v513/evaluate_bloom.py": "29f46ff8d88aa37070a5168351ec9ea0804f869cd045ab023f0f279288738e9b",
+  "tests/morph_phantoms.py": "0ab775e1b82306a43304000f2dd1bbc7cc3f82600ef0805d03a54dd07984244b"
+ }
+}

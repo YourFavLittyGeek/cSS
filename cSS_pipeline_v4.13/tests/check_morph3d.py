@@ -81,7 +81,7 @@ for nm in mp.NAMES:
     check(ch is not None and abs(ch) <= 12, f"{nm}: display smoothing changes the mesh volume by {ch} % (<= 12 %)")
 # anisotropy / orientation: same cylinder along x and along z, and at three voxel sizes
 for vox in ((0.5, 0.5, 2.0), (0.8, 0.8, 1.2), (1.0, 1.0, 1.0)):
-    g_, n_ = mp._grid(mp.BOX); x, y, z = g_; c = 12.0
+    g_, n_ = mp._grid(mp.BOX, vox); x, y, z = g_; c = 12.0
     for axis, pts in (("x", [(3, c, c), (21, c, c)]), ("z", [(c, c, 3), (c, c, 21)])):
         m = mp._down(mp._tube(g_, pts, 1.2), n_, vox); r, _ = cm.analyse(m, vox)
         true_v = np.pi * 1.2 ** 2 * 18 + 4 / 3 * np.pi * 1.2 ** 3

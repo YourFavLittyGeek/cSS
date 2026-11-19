@@ -6,9 +6,17 @@ import numpy as np
 FINE = 0.2
 
 
-def _grid(shape_mm):
-    n = [int(round(s / FINE)) for s in shape_mm]
-    return np.stack(np.meshgrid(*[(np.arange(k) + 0.5) * FINE for k in n], indexing="ij")), n
+def _steps(vox):
+    """v5.13 (B1 fix): fine step per axis that divides the voxel EXACTLY (vox / ceil(vox / 0.2)); v5.12 used 0.2 mm for
+    every axis and averaged round(vox / 0.2) samples, so a '0.5 mm' voxel really spanned 0.4 mm"""
+    return [float(v) / max(1, int(np.ceil(float(v) / FINE - 1e-9))) for v in vox]
+
+
+def _grid(shape_mm, vox=None):
+    st = _steps(vox) if vox is not None else [FINE] * 3
+    n = [int(round(s / d)) for s, d in zip(shape_mm, st)]
+    g = np.stack(np.meshgrid(*[(np.arange(k) + 0.5) * d for k, d in zip(n, st)], indexing="ij"))
+    return g, (n, st)
 
 
 def _tube(g, pts, r):
@@ -23,8 +31,11 @@ def _tube(g, pts, r):
 
 
 def _down(m, n, vox):
-    """average the 0.2 mm mask into vox-sized voxels (partial volume) and keep voxels >= 50 % filled"""
-    f = [max(1, int(round(v / FINE))) for v in vox]
+    """average the fine mask into vox-sized voxels (partial volume) and keep voxels >= 50 % filled"""
+    n, st = n if isinstance(n, tuple) else (n, [FINE] * 3)
+    f = [max(1, int(round(v / d))) for v, d in zip(vox, st)]
+    bad = [v for v, d, k in zip(vox, st, f) if abs(k * d - v) > 1e-6]
+    if bad: raise ValueError(f"voxel size {vox} is not a whole number of fine steps {st} - build the grid with _grid(shape, vox)")
     k = [ni // fi for ni, fi in zip(n, f)]
     m = m[:k[0] * f[0], :k[1] * f[1], :k[2] * f[2]].astype(np.float32)
     return m.reshape(k[0], f[0], k[1], f[1], k[2], f[2]).mean((1, 3, 5)) >= 0.5
@@ -34,7 +45,8 @@ BOX = (24.0, 24.0, 24.0)
 
 
 def make(name, vox=(0.8, 0.8, 1.2), seed=0):
-    g, n = _grid(BOX); x, y, z = g; c = 12.0; rng = np.random.default_rng(seed)
+    if name == "thin_aniso": vox = (0.5, 0.5, 3.0)
+    g, n = _grid(BOX, vox); x, y, z = g; c = 12.0; rng = np.random.default_rng(seed)
     if name == "cylinder":
         m = _tube(g, [(3, c, c), (21, c, c)], 1.0); t = dict(expect="tube", radius_mm=1.0)
     elif name == "curved_cylinder":

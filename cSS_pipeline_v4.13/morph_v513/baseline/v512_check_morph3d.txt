@@ -1,0 +1,76 @@
+ok    cylinder: the input mask is not modified
+ok    curved_cylinder: the input mask is not modified
+ok    branching_tube: the input mask is not modified
+ok    sheet: the input mask is not modified
+ok    curved_sheet: the input mask is not modified
+ok    irregular_patch: the input mask is not modified
+ok    blob: the input mask is not modified
+ok    sheet_plus_tube: the input mask is not modified
+ok    two_pieces: the input mask is not modified
+ok    fragmented_sheet: the input mask is not modified
+ok    thin_aniso: the input mask is not modified
+ok    cylinder: tube-like share 1.0 >= 0.8
+ok    cylinder: skeleton shown (curve-like object)
+ok    cylinder: thickness 1.6 mm ~ diameter 2.0 mm (+-1 voxel)
+ok    curved_cylinder: tube-like share 1.0 >= 0.8
+ok    curved_cylinder: skeleton shown (curve-like object)
+ok    curved_cylinder: thickness 1.6 mm ~ diameter 2.0 mm (+-1 voxel)
+ok    cylinder: skeleton length 19.2 mm ~ 18 mm
+ok    cylinder: cross-section diameter CV 0.08 <= 0.35 (stable radius)
+ok    curved cylinder: skeleton length follows the curve (>= 0.9 x first principal extent)
+ok    branching tube: tube-like share 0.672 >= 0.6
+ok    sheet: sheet-like share 1.0 >= 0.8
+ok    sheet: edges not called tube (0.0 <= 0.1)
+ok    sheet: no curve skeleton forced on a sheet
+ok    curved_sheet: sheet-like share 1.0 >= 0.8
+ok    curved_sheet: edges not called tube (0.0 <= 0.1)
+ok    curved_sheet: no curve skeleton forced on a sheet
+ok    irregular_patch: sheet-like share 1.0 >= 0.8
+ok    irregular_patch: edges not called tube (0.0 <= 0.1)
+ok    irregular_patch: no curve skeleton forced on a sheet
+ok    sheet: thickness 2.4 mm <= 2 voxels (1.2 mm sheet straddling two slices)
+ok    curved sheet: thickness 1.2 mm ~ 1 slice
+ok    blob: blob-like 1.0, not tube
+ok    blob: sphericity 0.97 >= 0.6 (sheet 0.6, tube 0.63)
+ok    sphericity orders blob > sheet, tube
+ok    sheet + tube: voxels of the tube part (x > 15 mm) called tube-like (1.00)
+ok    sheet + tube: voxels of the sheet part (x < 9 mm) called sheet-like (1.00)
+ok    sheet + tube: the tube part is reported
+ok    two pieces: 2 components
+ok    two pieces: one piece tube-like, the other sheet-like ({2: [0, 252, 0, 0], 1: [96, 0, 0, 0]})
+ok    fragmented sheet: 6 pieces kept (none discarded)
+ok    fragmented sheet: sheet-like share 1.0
+ok    thin anisotropic sheet: reliability 'moderate' with the anisotropy note
+ok    thin anisotropic sheet: still sheet-like (1.0)
+ok    Hessian: cylinder tube-like share 1.0 >= 0.5
+ok    Hessian: curved sheet sheet-like share 0.987 >= 0.5
+ok    cylinder: display smoothing changes the mesh volume by -7.2 % (<= 12 %)
+ok    curved_cylinder: display smoothing changes the mesh volume by -5.0 % (<= 12 %)
+ok    branching_tube: display smoothing changes the mesh volume by -8.7 % (<= 12 %)
+ok    sheet: display smoothing changes the mesh volume by 0.1 % (<= 12 %)
+ok    curved_sheet: display smoothing changes the mesh volume by -1.2 % (<= 12 %)
+ok    irregular_patch: display smoothing changes the mesh volume by -1.5 % (<= 12 %)
+ok    blob: display smoothing changes the mesh volume by 1.3 % (<= 12 %)
+ok    sheet_plus_tube: display smoothing changes the mesh volume by -0.8 % (<= 12 %)
+ok    two_pieces: display smoothing changes the mesh volume by -1.8 % (<= 12 %)
+ok    fragmented_sheet: display smoothing changes the mesh volume by -0.9 % (<= 12 %)
+ok    thin_aniso: display smoothing changes the mesh volume by -0.7 % (<= 12 %)
+ok    cylinder r 1.2 along x, voxels (0.5, 0.5, 2.0): tube-like 0.894
+ok       volume 188.0 mm3 vs true 89 (partial volume, <= 130 %)
+ok       length (first principal extent) 24.0 mm vs true 20.4 mm (+- 1.5 mm + 2 voxels)
+ok    cylinder r 1.2 along z, voxels (0.5, 0.5, 2.0): tube-like 1.0
+ok       volume 152.0 mm3 vs true 89 (partial volume, <= 130 %)
+ok       length (first principal extent) 20.0 mm vs true 20.4 mm (+- 1.5 mm + 2 voxels)
+ok    cylinder r 1.2 along x, voxels (0.8, 0.8, 1.2): tube-like 1.0
+ok       volume 73.7 mm3 vs true 89 (partial volume, <= 45 %)
+ok       length (first principal extent) 19.2 mm vs true 20.4 mm (+- 1.5 mm + 2 voxels)
+ok    cylinder r 1.2 along z, voxels (0.8, 0.8, 1.2): tube-like 1.0
+ok       volume 49.2 mm3 vs true 89 (partial volume, <= 45 %)
+ok       length (first principal extent) 19.2 mm vs true 20.4 mm (+- 1.5 mm + 2 voxels)
+ok    cylinder r 1.2 along x, voxels (1.0, 1.0, 1.0): tube-like 1.0
+ok       volume 80.0 mm3 vs true 89 (partial volume, <= 45 %)
+ok       length (first principal extent) 20.0 mm vs true 20.4 mm (+- 1.5 mm + 2 voxels)
+ok    cylinder r 1.2 along z, voxels (1.0, 1.0, 1.0): tube-like 1.0
+ok       volume 80.0 mm3 vs true 89 (partial volume, <= 45 %)
+ok       length (first principal extent) 20.0 mm vs true 20.4 mm (+- 1.5 mm + 2 voxels)
+RESULT morph3d OK

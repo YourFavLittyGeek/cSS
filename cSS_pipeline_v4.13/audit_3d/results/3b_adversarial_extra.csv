@@ -1,0 +1,10 @@
+case,vox,n_vox,components,expected_components,summary,note,tube_vox,tube_correct,tube_tube/sheet/blob/unc,pass_0.7,sheet_vox,sheet_correct,sheet_tube/sheet/blob/unc
+04b_compressed_vein_3.2x1.8mm,0.8x0.8x1.2,176,1,1,"predominantly tube-like geometry. Measurement reliability: good. Descriptive, not a diagnosis.",flattened vessel,176,1.0,1.0/0.0/0.0/0.0,True,,,
+10c_tube_r0.8_beside_sheet_gap1mm,0.8x0.8x1.2,576,2,2,"predominantly sheet-like geometry. Measurement reliability: moderate. Descriptive, not a diagnosis.",,48,0.0,0.0/1.0/0.0/0.0,False,528,1.0,0.0/1.0/0.0/0.0
+10d_tube_r0.8_touching_sheet,0.8x0.8x1.2,576,2,1,"predominantly sheet-like geometry. Measurement reliability: moderate. Descriptive, not a diagnosis.",,48,0.0,0.0/1.0/0.0/0.0,False,528,1.0,0.0/1.0/0.0/0.0
+03b_vein_r1.2_parallel_to_surface,0.8x0.8x1.2,118,1,1,"predominantly tube-like geometry. Measurement reliability: good. Descriptive, not a diagnosis.",,118,1.0,1.0/0.0/0.0/0.0,True,,,
+ribbon_width_2mm,0.8x0.8x1.2,88,1,1,"predominantly tube-like geometry. Measurement reliability: moderate. Descriptive, not a diagnosis.",,,,,False,88,0.0,1.0/0.0/0.0/0.0
+ribbon_width_3mm,0.8x0.8x1.2,176,1,1,"predominantly tube-like geometry. Measurement reliability: good. Descriptive, not a diagnosis.",,,,,False,176,0.0,1.0/0.0/0.0/0.0
+ribbon_width_4mm,0.8x0.8x1.2,176,1,1,"predominantly tube-like geometry. Measurement reliability: good. Descriptive, not a diagnosis.",,,,,False,176,0.0,1.0/0.0/0.0/0.0
+ribbon_width_6mm,0.8x0.8x1.2,264,1,1,"predominantly sheet-like geometry. Measurement reliability: good. Descriptive, not a diagnosis.",,,,,True,264,1.0,0.0/1.0/0.0/0.0
+ribbon_width_8mm,0.8x0.8x1.2,440,1,1,"predominantly sheet-like geometry. Measurement reliability: good. Descriptive, not a diagnosis.",,,,,True,440,1.0,0.0/1.0/0.0/0.0

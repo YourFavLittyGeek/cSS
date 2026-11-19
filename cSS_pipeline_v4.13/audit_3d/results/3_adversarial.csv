@@ -1,0 +1,12 @@
+case,vox,n_vox,components,expected_components,summary,note,sheet_vox,sheet_correct,sheet_tube/sheet/blob/unc,pass_0.7,tube_vox,tube_correct,tube_tube/sheet/blob/unc,error,tube_a_vox,tube_a_correct,tube_a_tube/sheet/blob/unc,tube_b_vox,tube_b_correct,tube_b_tube/sheet/blob/unc
+01_variable_thickness_curved_sheet,0.8x0.8x1.2,288,3,1,"predominantly sheet-like geometry. Measurement reliability: moderate. Descriptive, not a diagnosis.",,288,0.95,0.03/0.95/0.0/0.01,False,,,,,,,,,,
+02_interrupted_sheet,0.8x0.8x1.2,576,5,,"predominantly tube-like geometry. Measurement reliability: moderate. Descriptive, not a diagnosis.",,576,0.0,1.0/0.0/0.0/0.0,False,,,,,,,,,,
+03_vein_parallel_to_surface,0.8x0.8x1.2,50,1,1,"predominantly sheet-like geometry with a tube-like part (48 %) - mixed. Measurement reliability: moderate. Descriptive, not a diagnosis.",,,,,False,50,0.48,0.48/0.52/0.0/0.0,,,,,,,
+04_compressed_vein_elliptic,,,,,,,,,,,,,,empty mask,,,,,,
+05_vein_merged_with_sheet,0.8x0.8x1.2,419,1,1,"predominantly sheet-like geometry. Measurement reliability: good. Descriptive, not a diagnosis.",,392,1.0,0.0/1.0/0.0/0.0,False,27,0.52,0.52/0.48/0.0/0.0,,,,,,,
+06_two_adjacent_veins,0.8x0.8x1.2,96,2,,"predominantly sheet-like geometry. Measurement reliability: moderate. Descriptive, not a diagnosis.",may merge into one ribbon,,,,False,,,,,48,0.0,0.0/1.0/0.0/0.0,48,0.0,0.0/1.0/0.0/0.0
+07_sheet_with_branching_vessel,0.8x0.8x1.2,382,1,1,"predominantly sheet-like geometry. Measurement reliability: good. Descriptive, not a diagnosis.",,336,1.0,0.0/1.0/0.0/0.0,False,46,0.3,0.3/0.7/0.0/0.0,,,,,,,
+08_sharp_U_fold_sheet,0.8x0.8x1.2,392,1,1,"predominantly sheet-like geometry. Measurement reliability: moderate. Descriptive, not a diagnosis.",,392,1.0,0.0/1.0/0.0/0.0,True,,,,,,,,,,
+09_oblique_sheet_thick_slices,0.4x0.4x3.0,660,4,,"predominantly sheet-like geometry. Measurement reliability: low. Descriptive, not a diagnosis.",,660,0.82,0.18/0.82/0.0/0.0,True,,,,,,,,,,
+10a_thin_tube_beside_sheet_gap,0.8x0.8x1.2,528,1,,"predominantly sheet-like geometry. Measurement reliability: good. Descriptive, not a diagnosis.",gap 0.6 mm,528,1.0,0.0/1.0/0.0/0.0,True,0,,,,,,,,,
+10b_thin_tube_touching_sheet,0.8x0.8x1.2,528,1,1,"predominantly sheet-like geometry. Measurement reliability: good. Descriptive, not a diagnosis.",touching,528,1.0,0.0/1.0/0.0/0.0,True,0,,,,,,,,,

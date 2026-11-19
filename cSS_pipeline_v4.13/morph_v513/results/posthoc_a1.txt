@@ -1,0 +1,8 @@
+cand_width   AUC(band > vein) 0.57   band median 1.22  vein median 1.00  (n 38 / 36)
+core_width   AUC(band > vein) 0.53   band median 1.00  vein median 0.82  (n 38 / 36)
+cand_wl      AUC(band > vein) 0.33   band median 0.07  vein median 0.17  (n 38 / 36)
+core_wl      AUC(band > vein) 0.25   band median 0.06  vein median 0.16  (n 38 / 36)
+cand_thick   AUC(band > vein) 0.62   band median 2.07  vein median 1.59  (n 38 / 36)
+core_thick   AUC(band > vein) 0.59   band median 1.43  vein median 1.31  (n 38 / 36)
+cand_slices  AUC(band > vein) 0.61   band median 11.00  vein median 9.00  (n 38 / 36)
+core_slices  AUC(band > vein) 0.61   band median 11.00  vein median 8.50  (n 38 / 36)

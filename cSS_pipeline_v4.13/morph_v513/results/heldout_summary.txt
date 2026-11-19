@@ -1,0 +1,41 @@
+cases 200 not detectable 8
+
+== thickness |error| (mm) vs true thickness, median [IQR]
+  v512_thick       0.99 [0.52-1.41]  signed median +0.97
+  candidate_thick  0.79 [0.40-1.35]  signed median +0.77
+  core_thick       0.34 [0.17-0.61]  signed median +0.07
+  cand_dice        median 0.46 [0.38-0.54]
+  core_dice        median 0.66 [0.49-0.78]
+  cand_vol_ratio   median 3.23 [2.57-4.14]
+  core_vol_ratio   median 1.83 [1.40-2.63]
+  core_unstable    median 0.33 [0.26-0.45]
+  bloom_in_core    median 0.35 [0.23-0.57]
+  core thickness closer to truth than v5.12 in 149/192; core Dice > candidate Dice in 162/192
+
+== structure-level label by true kind (candidate | core); v5.12 = majority class of the candidate
+  candidate
+    band {'indeterminate': 36, 'tube-compatible': 1, 'blob-like': 1}
+    paired_veins {'indeterminate': 22, 'blob-like': 4, 'not resolvable': 6, 'tube-compatible': 7}
+    vein_on_band {'indeterminate': 35, 'tube-compatible': 2, 'blob-like': 2}
+    band_vein_adjacent {'indeterminate': 34, 'blob-like': 2, 'tube-compatible': 3, 'not resolvable': 1}
+    vein {'blob-like': 4, 'tube-compatible': 10, 'indeterminate': 19, 'not resolvable': 3}
+  core
+    band {'indeterminate': 29, 'tube-compatible': 2, 'blob-like': 3, 'not resolvable': 3, 'sheet-compatible': 1}
+    paired_veins {'indeterminate': 14, 'blob-like': 3, 'not resolvable': 9, 'tube-compatible': 13}
+    vein_on_band {'indeterminate': 29, 'tube-compatible': 3, 'not resolvable': 4, 'blob-like': 3}
+    band_vein_adjacent {'indeterminate': 26, 'blob-like': 4, 'not resolvable': 5, 'tube-compatible': 5}
+    vein {'blob-like': 8, 'tube-compatible': 16, 'not resolvable': 5, 'indeterminate': 7}
+
+== per-voxel correctness of each TRUE structure (share of its voxels with the correct class)
+  sheet v512      correct median 1.00 mean 0.89 (n 115)
+  sheet candidate correct median 0.00 mean 0.03 (n 115)  not-resolvable mean 0.08
+  sheet core      correct median 0.00 mean 0.06 (n 115)  not-resolvable mean 0.19
+  tube  v512      correct median 0.00 mean 0.35 (n 184)
+  tube  candidate correct median 0.00 mean 0.16 (n 184)  not-resolvable mean 0.23
+  tube  core      correct median 0.00 mean 0.24 (n 185)  not-resolvable mean 0.34
+
+== 'not resolvable' (candidate level) by true min dimension / slice thickness
+  ratio 0-0.5: n 38  not resolvable 8  partially 27  resolved 3
+  ratio 0.5-1: n 75  not resolvable 2  partially 69  resolved 4
+  ratio 1-2: n 74  not resolvable 0  partially 68  resolved 6
+  ratio 2-9: n 5  not resolvable 0  partially 5  resolved 0
