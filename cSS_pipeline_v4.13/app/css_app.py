@@ -26,7 +26,7 @@ def jload(name, default):
     except Exception: return default
 def jsave(name, obj):
     p = f"{AD}/{name}"; json.dump(obj, open(p + ".tmp", "w"), indent=1, default=str); os.replace(p + ".tmp", p)
-SET = dict(dict(awake=True, theme="dark", backup_dir="", freesurfer_home=os.environ.get("FREESURFER_HOME", ""), threads=4, parallel=1, auto_path=True, auto_retry=True,
+SET = dict(dict(awake=True, theme="dark", backup_dir="", freesurfer_home=os.environ.get("FREESURFER_HOME", ""), threads=4, parallel=1, auto_path=True, auto_retry=True, rerun_mode="choose",
                 features=dict(duplicate_check=True, preflight=True, qc_snapshot=True, notify=True, version_stamp=True, share=True, backup=True,
                               name_warning=False)), **jload("settings.json", {}))
 PAT = jload("patients.json", [])
@@ -786,6 +786,8 @@ class H(BaseHTTPRequestHandler):
         try:
             if u.path == "/": return self.send(open(f"{HERE}/css_app.html", "rb").read(), ctype="text/html; charset=utf-8")
             if u.path == "/api/state": return self.send(state())
+            if u.path == "/api/vset":
+                f = f"{B}/review/viewer_settings.json"; return self.send(json.load(open(f)) if os.path.exists(f) else {})
             if u.path in ("/icon_dark.png", "/icon_light.png"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="image/png")
             if u.path == "/api/preflight": return self.send(preflight())
             if u.path == "/api/log":
@@ -852,7 +854,9 @@ class H(BaseHTTPRequestHandler):
                 elif a == "stop" and p["status"] in ("running", "paused"):
                     p.update(status="stopped", error="stopped by you")
                     if pr: os.killpg(pr.pid, signal.SIGCONT); os.killpg(pr.pid, signal.SIGTERM)
-                elif a in ("retry", "rerun") and p["status"] in ("failed", "stopped", "done"): p.update(status="waiting", error="", steps_done={}); CUR["hold"] = ""
+                elif a in ("retry", "rerun") and p["status"] in ("failed", "stopped", "done"):
+                    if d.get("pathway") in PATHWAYS and d["pathway"] != p.get("pathway"): apply_pathway(p, d["pathway"])
+                    p.update(status="waiting", error="", steps_done={}); CUR["hold"] = ""
                 elif a in ("swi_only", "recon", "coreg_masked", "synthmorph") and p["status"] in ("failed", "stopped", "done"):
                     if "do not line up" in p.get("error", ""): move_bad_registration(p)
                     apply_pathway(p, a); p["note"] = f"retried with {PATHWAYS[a]}"
@@ -934,6 +938,10 @@ class H(BaseHTTPRequestHandler):
                     return self.send(dict(open=False))
                 return self.send(dict(open=True))
             if u.path == "/api/share": return self.send(dict(ok=True, path=share_package(d["codes"])))
+            if u.path == "/api/vset":                  # reviewer settings (same file the reviewer reads at start)
+                f = f"{B}/review/viewer_settings.json"; os.makedirs(os.path.dirname(f), exist_ok=True)
+                cur = json.load(open(f)) if os.path.exists(f) else {}; cur.update(d)
+                json.dump(cur, open(f + ".tmp", "w"), indent=1); os.replace(f + ".tmp", f); return self.send(dict(ok=True))
             if u.path == "/api/export":
                 out = export_as(d.get("fmt", "xlsx"), d.get("cohort", ""))
                 if mac(): subprocess.run(["open", out])
