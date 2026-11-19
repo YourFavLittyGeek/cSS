@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Blind Read</title>
+<style>
+:root{--bg:#111418;--panel:#1a1e24;--line:#2c323b;--ink:#e6e8eb;--mut:#9aa3ad;--acc:#3987e5;--warn:#d9a21b;--bad:#e05252;--ok:#3aa655}
+*{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:13px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+#top{display:flex;gap:8px;align-items:center;padding:6px 10px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+#top b{font-size:15px}select,input,textarea,button{background:#0d1014;color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:4px 6px;font:inherit}
+button{cursor:pointer}button.on{background:var(--acc);border-color:var(--acc)}button.pri{background:var(--acc);border-color:var(--acc)}
+.sp{flex:1}.mut{color:var(--mut)}#main{display:flex;height:calc(100% - 46px)}
+#vw{flex:1;position:relative;min-width:0}canvas{display:block;width:100%;height:100%;cursor:crosshair}
+#ov{position:absolute;left:10px;top:8px;font:12px ui-monospace,Menlo,monospace;color:#f2c94c;pointer-events:none;white-space:pre}
+#ovr{position:absolute;right:12px;top:8px;font:12px ui-monospace,Menlo,monospace;color:#f2c94c;pointer-events:none;text-align:right;white-space:pre}
+#side{width:390px;border-left:1px solid var(--line);background:var(--panel);overflow:auto;padding:10px}
+h3{margin:12px 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)}
+.les{border:1px solid var(--line);border-radius:6px;padding:5px 7px;margin:4px 0;cursor:pointer;display:flex;gap:6px;align-items:center}
+.les.sel{border-color:var(--acc);background:#16263a}.dot{width:10px;height:10px;border-radius:50%}
+.grid{display:grid;grid-template-columns:128px 1fr;gap:4px 6px;align-items:center}.grid label{color:var(--mut)}
+.grid input,.grid select,.grid textarea{width:100%}.err{color:var(--bad);margin:4px 0}.okm{color:var(--ok)}
+#help{position:absolute;inset:40px;background:#0d1014ee;border:1px solid var(--line);border-radius:10px;padding:18px;display:none;overflow:auto}
+kbd{background:#2c323b;border-radius:4px;padding:0 4px;font:11px ui-monospace,Menlo,monospace}
+</style></head><body>
+<div id="top"><b>Blind read</b><span class="mut" id="who"></span>
+ <select id="case"></select><span id="prog" class="mut"></span>
+ <select id="seq" title="sequence (S)"></select>
+ <button data-p="ax" class="pl on" title="1">Axial</button><button data-p="co" class="pl" title="2">Coronal</button><button data-p="sa" class="pl" title="3">Sagittal</button>
+ <button id="mip" title="I">minIP</button><select id="mipmm"><option>4</option><option selected>8</option><option>16</option></select><span class="mut">mm</span>
+ <button id="reset" title="R">Reset view</button><span class="sp"></span>
+ <span class="mut">no detector output is shown in this tool</span><button id="hbtn">? Help</button></div>
+<div id="main"><div id="vw"><canvas id="cv"></canvas><div id="ov"></div><div id="ovr"></div>
+ <div id="help"><h2>Blind read - keys</h2><p>
+ <kbd>wheel</kbd> / <kbd>&uarr;</kbd><kbd>&darr;</kbd> slices · <kbd>Ctrl</kbd>/<kbd>&#8984;</kbd>+wheel zoom · left-drag pan · right-drag contrast / brightness ·
+ click = move the cursor (other planes follow) · <kbd>Y</kbd> definite / <kbd>U</kbd> probable / <kbd>X</kbd> unsure at the cursor (double-click = definite) · <kbd>A</kbd> = add with the full form · <kbd>Shift</kbd>+drag = ruler ·
+ <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> planes · <kbd>I</kbd> minIP · <kbd>S</kbd> next sequence · <kbd>R</kbd> reset · <kbd>Del</kbd> delete the selected lesion ·
+ <kbd>N</kbd> / <kbd>P</kbd> next / previous case.</p>
+ <p>Annotate every finding you call definite or probable cSS, every mimic you seriously considered (non_cSS + its type) and every
+ indeterminate finding. Fill the case form at the end. Everything is saved immediately. Display: radiological (patient right on screen left).</p>
+ <button id="hclose" class="pri">Close</button></div></div>
+ <div id="side">
+  <h3>Lesions in this case</h3><div id="list"></div>
+  <div class="mut" style="margin:6px 0">Click a focus, then <kbd>Y</kbd> definite · <kbd>U</kbd> probable · <kbd>X</kbd> unsure (or double-click = definite). No form needed.</div>
+  <button id="add">+ Add with full form (A)</button> <span id="rul" class="mut"></span>
+  <div id="form"></div>
+  <h3>Case form (fill when the case is finished)</h3><div id="pform"></div><div id="saved" class="mut"></div>
+ </div></div>
+<script>
+const $=s=>document.querySelector(s);let S,CASE=null,SEQ="SWI",P="ax",V=null,M=null,cur=[0,0,0],L=[],sel=-1,pat=null;
+let showDetails=false,zoom=1,pan=[0,0],win=255,lev=128,mip=false,drag=null,ruler=null,t0=Date.now();
+const api=async(u,b)=>{const r=await fetch(u,b?{method:"POST",headers:{"Content-Type":"application/json","X-Blind":"1"},body:JSON.stringify(b)}:{});
+  if(!r.ok)throw new Error((await r.json()).error);return u.startsWith("/api/vol")?r.arrayBuffer():r.json()};
+const CAT_COL={definite_cSS:"#e05252",probable_cSS:"#e8963a",non_cSS:"#3987e5",indeterminate:"#9aa3ad","":"#f2c94c"};
+async function init(){S=await api("/api/session");$("#who").textContent=`packet ${S.packet} · reader ${S.reader}`;
+  $("#case").innerHTML=S.cases.map((c,i)=>`<option value="${c.code}">${i+1}. ${c.code}${c.patient_done?" ✓":""}</option>`).join("");
+  prog();const first=S.cases.find(c=>!c.patient_done)||S.cases[0];$("#case").value=first.code;await openCase(first.code)}
+function prog(){const d=S.cases.filter(c=>c.patient_done).length;$("#prog").textContent=`${d} of ${S.cases.length} cases finished`}
+async function openCase(c){CASE=c;const d=await api("/api/case?case="+c);L=d.lesions||[];pat=d.patient||{};sel=-1;t0=Date.now();
+  $("#seq").innerHTML=d.seqs.map(s=>`<option>${s}</option>`).join("");SEQ=d.seqs[0];await loadVol();renderList();renderForm();renderPatient()}
+async function loadVol(){M=await api(`/api/meta?case=${CASE}&seq=${SEQ}`);V=new Uint8Array(await api(`/api/vol?case=${CASE}&seq=${SEQ}`));
+  cur=M.shape.map(n=>Math.floor(n/2));zoom=1;pan=[0,0];draw()}
+const at=(i,j,k)=>V[(k*M.shape[1]+j)*M.shape[0]+i];
+// plane geometry: screen u (left->right), v (top->bottom) -> voxel; radiological: patient right on screen left
+function geo(){const [ni,nj,nk]=M.shape,[vi,vj,vk]=M.vox,fl=M.i_to_right;
+  if(P==="ax")return{W:ni,H:nj,sx:vi,sy:vj,vox:(u,v)=>[fl?ni-1-u:u,nj-1-v,cur[2]],uv:p=>[fl?ni-1-p[0]:p[0],nj-1-p[1]],d:2,n:nk,depth:p=>p[2],L:fl?"R":"L",Rr:fl?"L":"R"};
+  if(P==="co")return{W:ni,H:nk,sx:vi,sy:vk,vox:(u,v)=>[fl?ni-1-u:u,cur[1],nk-1-v],uv:p=>[fl?ni-1-p[0]:p[0],nk-1-p[2]],d:1,n:nj,depth:p=>p[1],L:fl?"R":"L",Rr:fl?"L":"R"};
+  return{W:nj,H:nk,sx:vj,sy:vk,vox:(u,v)=>[cur[0],nj-1-u,nk-1-v],uv:p=>[nj-1-p[1],nk-1-p[2]],d:0,n:ni,depth:p=>p[0],L:"A",Rr:"P"}}
+function draw(){if(!V)return;const cv=$("#cv"),r=cv.getBoundingClientRect();cv.width=r.width*devicePixelRatio;cv.height=r.height*devicePixelRatio;
+  const g=cv.getContext("2d"),G=geo(),img=new ImageData(G.W,G.H),half=mip?Math.max(0,Math.round(+$("#mipmm").value/2/M.vox[G.d])):0;
+  const lo=lev-win/2,sc=255/Math.max(win,1);
+  for(let v=0;v<G.H;v++)for(let u=0;u<G.W;u++){const p=G.vox(u,v);let val=255;
+    for(let t=-half;t<=half;t++){const q=p.slice();q[G.d]=Math.min(G.n-1,Math.max(0,p[G.d]+t));val=Math.min(val,at(q[0],q[1],q[2]))}
+    const o=Math.max(0,Math.min(255,(val-lo)*sc)),x=(v*G.W+u)*4;img.data[x]=img.data[x+1]=img.data[x+2]=o;img.data[x+3]=255}
+  const off=new OffscreenCanvas(G.W,G.H);off.getContext("2d").putImageData(img,0,0);
+  const fit=Math.min(cv.width/(G.W*G.sx),cv.height/(G.H*G.sy))*zoom,dw=G.W*G.sx*fit,dh=G.H*G.sy*fit,ox=(cv.width-dw)/2+pan[0],oy=(cv.height-dh)/2+pan[1];
+  g.fillStyle="#000";g.fillRect(0,0,cv.width,cv.height);g.imageSmoothingEnabled=false;g.drawImage(off,ox,oy,dw,dh);
+  window._T={ox,oy,px:dw/G.W,py:dh/G.H,G};const S2=([u,v])=>[ox+(u+.5)*dw/G.W,oy+(v+.5)*dh/G.H];
+  const c=S2(G.uv(cur));g.strokeStyle="#3987e566";g.lineWidth=1;g.beginPath();g.moveTo(c[0],0);g.lineTo(c[0],cv.height);g.moveTo(0,c[1]);g.lineTo(cv.width,c[1]);g.stroke();
+  L.forEach((l,i)=>{if(l.vox_i===""||l.vox_i===undefined)return;const p=[+l.vox_i,+l.vox_j,+l.vox_k];if(Math.abs(G.depth(p)-G.depth(cur))>2)return;
+    const s=S2(G.uv(p));g.strokeStyle=CAT_COL[l.final_category||""];g.lineWidth=i===sel?3:1.6;g.beginPath();g.arc(s[0],s[1],10*devicePixelRatio,0,7);g.stroke();
+    g.fillStyle=g.strokeStyle;g.font=`${12*devicePixelRatio}px sans-serif`;g.fillText(l.lesion_id,s[0]+12*devicePixelRatio,s[1]-8*devicePixelRatio)});
+  if(ruler){const a=S2(ruler.a),b=S2(ruler.b);g.strokeStyle="#f2c94c";g.lineWidth=2;g.beginPath();g.moveTo(a[0],a[1]);g.lineTo(b[0],b[1]);g.stroke()}
+  $("#ov").textContent=($("#ov").dataset.f?`✓ ${$("#ov").dataset.f}\n`:"")+`${CASE} · ${SEQ}${mip?` · minIP ${$("#mipmm").value} mm`:""}\n${{ax:"Axial",co:"Coronal",sa:"Sagittal"}[P]} ${G.depth(cur)+1} / ${G.n}\nvoxel ${cur.join(", ")}`;
+  $("#ovr").textContent=`${G.L} ←   → ${G.Rr}\nzoom ${zoom.toFixed(1)}×\nW ${Math.round(win)} L ${Math.round(lev)}`}
+function toVox(e){const cv=$("#cv"),r=cv.getBoundingClientRect(),T=window._T,x=(e.clientX-r.left)*devicePixelRatio,y=(e.clientY-r.top)*devicePixelRatio;
+  const u=Math.floor((x-T.ox)/T.px),v=Math.floor((y-T.oy)/T.py);if(u<0||v<0||u>=T.G.W||v>=T.G.H)return null;return T.G.vox(u,v)}
+const cv=$("#cv");cv.addEventListener("contextmenu",e=>e.preventDefault());
+cv.addEventListener("mousedown",e=>{drag={b:e.button,x:e.clientX,y:e.clientY,moved:false,shift:e.shiftKey,w:win,l:lev,p:pan.slice()};
+  if(e.shiftKey&&e.button===0){const p=toVox(e);if(p)ruler={a:window._T.G.uv(p),b:window._T.G.uv(p),pa:p,pb:p}}});
+addEventListener("mousemove",e=>{if(!drag)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(Math.abs(dx)+Math.abs(dy)>3)drag.moved=true;
+  if(drag.shift&&ruler){const p=toVox(e);if(p){ruler.b=window._T.G.uv(p);ruler.pb=p;const mm=Math.hypot(...[0,1,2].map(a=>(ruler.pa[a]-ruler.pb[a])*M.vox[a]));
+    $("#rul").innerHTML=`ruler ${mm.toFixed(1)} mm ${sel>=0?`<button onclick="useRuler('length_mm',${mm.toFixed(1)})">→ length</button><button onclick="useRuler('thickness_mm',${mm.toFixed(1)})">→ thickness</button>`:"(select a lesion to use it)"}`;draw()}}
+  else if(drag.b===2){win=Math.max(5,drag.w+dx);lev=drag.l-dy;draw()}else if(drag.b===0&&drag.moved){pan=[drag.p[0]+dx*devicePixelRatio,drag.p[1]+dy*devicePixelRatio];draw()}});
+addEventListener("mouseup",e=>{if(drag&&drag.b===0&&!drag.moved&&!drag.shift&&e.target===cv){const p=toVox(e);if(p){cur=p;
+  const hit=L.findIndex(l=>l.vox_i!==""&&Math.hypot(...[0,1,2].map(a=>(+[l.vox_i,l.vox_j,l.vox_k][a]-p[a])*M.vox[a]))<4);if(hit>=0){sel=hit;renderList();renderForm()}draw()}}drag=null});
+cv.addEventListener("dblclick",e=>{const p=toVox(e);if(p){cur=p;quick("y")}});
+cv.addEventListener("wheel",e=>{e.preventDefault();if(e.ctrlKey||e.metaKey){zoom=Math.max(.5,Math.min(12,zoom*(e.deltaY<0?1.15:.87)))}else step(e.deltaY>0?1:-1);draw()},{passive:false});
+function step(s){const G=geo();cur[G.d]=Math.max(0,Math.min(G.n-1,cur[G.d]+s));draw()}
+window.useRuler=(f,v)=>{if(sel<0)return;L[sel][f]=String(v);renderForm();save()};
+// ---------- lesions
+const sel_=(f,opts,v)=>`<select data-f="${f}">${opts.map(o=>`<option ${o===(v||"")?"selected":""} value="${o}">${o||"—"}</option>`).join("")}</select>`;
+function nextId(){return String(L.reduce((m,l)=>Math.max(m,+l.lesion_id||0),0)+1)}
+function hemiAt(p){const [ni,nj]=M.shape;let lo=ni,hi=-1;               // midline = centre of the brain extent in this axial slice row band
+  for(let i=0;i<ni;i++){let any=false;for(let j=0;j<nj;j+=2)if(at(i,j,p[2])>8){any=true;break}if(any){lo=Math.min(lo,i);hi=Math.max(hi,i)}}
+  if(hi<0)return"";const mid=(lo+hi)/2;return (p[0]>mid)===M.i_to_right?"R":"L"}
+const QUICK={y:["definite_cSS","4","",""],u:["probable_cSS","3","",""],x:["indeterminate","2","","quick mark: possible cSS vs mimic"]};
+function quick(k){const [cat,conf,typ,why]=QUICK[k],A=M.affine,mm=[0,1,2].map(r=>A[r][0]*cur[0]+A[r][1]*cur[1]+A[r][2]*cur[2]+A[r][3]);
+  L.push({lesion_id:nextId(),vox_i:String(cur[0]),vox_j:String(cur[1]),vox_k:String(cur[2]),x_mm:mm[0].toFixed(1),y_mm:mm[1].toFixed(1),z_mm:mm[2].toFixed(1),
+          final_category:cat,confidence_1to5:conf,hemisphere:hemiAt(cur)||"L",noncss_type:typ,uncertainty_reason:why,comment:"quick mark"});
+  sel=-1;renderList();renderForm();renderPatient();save();draw();flash(`#${L[L.length-1].lesion_id} ${cat.replace("_cSS","")} saved`)}
+function flash(t){const o=$("#ov");o.dataset.f=t;draw();setTimeout(()=>{o.dataset.f="";draw()},1200)}
+function addLesion(){const A=M.affine,mm=[0,1,2].map(r=>A[r][0]*cur[0]+A[r][1]*cur[1]+A[r][2]*cur[2]+A[r][3]);
+  L.push({lesion_id:nextId(),vox_i:String(cur[0]),vox_j:String(cur[1]),vox_k:String(cur[2]),x_mm:mm[0].toFixed(1),y_mm:mm[1].toFixed(1),z_mm:mm[2].toFixed(1),final_category:""});
+  sel=L.length-1;showDetails=true;renderList();renderForm();save();draw()}
+$("#add").onclick=addLesion;
+function problems(l){const p=[];if(l.comment==="quick mark"&&l.final_category)return p;if(!l.final_category)p.push("final category");if(l.final_category==="non_cSS"&&!l.noncss_type)p.push("non-cSS type");
+  if((l.final_category==="indeterminate"||(+l.confidence_1to5>0&&+l.confidence_1to5<=2))&&!l.uncertainty_reason)p.push("reason for uncertainty");
+  if(!l.confidence_1to5)p.push("confidence");if(!l.hemisphere)p.push("hemisphere");return p}
+function renderList(){$("#list").innerHTML=L.length?L.map((l,i)=>`<div class="les ${i===sel?"sel":""}" data-i="${i}"><span class="dot" style="background:${CAT_COL[l.final_category||""]}"></span>
+  <b>#${l.lesion_id}</b> ${l.final_category||"<span class=err>no category</span>"} ${l.confidence_1to5?`· conf ${l.confidence_1to5}`:""} <span class="mut">${l.hemisphere||""} ${l.cortical_region||""}</span>
+  ${problems(l).length?`<span class="err" title="${problems(l).join(", ")}">⚠</span>`:""}</div>`).join(""):'<div class="mut">none yet - click to place the cursor, then A or double-click</div>';
+  document.querySelectorAll(".les").forEach(d=>d.onclick=()=>{sel=+d.dataset.i;showDetails=false;const l=L[sel];if(l.vox_i!=="")cur=[+l.vox_i,+l.vox_j,+l.vox_k];renderList();renderForm();draw()})}
+function renderForm(){if(sel<0){$("#form").innerHTML="";return}if(!showDetails){const l=L[sel];
+  $("#form").innerHTML=`<p class="mut">#${l.lesion_id} ${l.final_category} · ${l.hemisphere} · voxel ${l.vox_i}, ${l.vox_j}, ${l.vox_k}</p>
+  <button id="cy">definite</button> <button id="cu">probable</button> <button id="cx">unsure</button> <button id="det">details…</button> <button id="del">delete</button>`;
+  const setc=k=>{const [c,cf,,w]=QUICK[k];Object.assign(L[sel],{final_category:c,confidence_1to5:cf,uncertainty_reason:w});renderList();renderForm();renderPatient();save();draw()};
+  $("#cy").onclick=()=>setc("y");$("#cu").onclick=()=>setc("u");$("#cx").onclick=()=>setc("x");$("#det").onclick=()=>{showDetails=true;renderForm()};$("#del").onclick=delSel;return}const l=L[sel],A=S.allowed;
+  const row=(lab,html)=>`<label>${lab}</label><div>${html}</div>`,txt=(f,ph="")=>`<input data-f="${f}" value="${(l[f]||"").replace(/"/g,"&quot;")}" placeholder="${ph}">`;
+  $("#form").innerHTML=`<h3>Lesion #${l.lesion_id}</h3><div class="grid">
+  ${row("Final category",sel_("final_category",[""].concat(A.final_category),l.final_category))}
+  ${row("Non-cSS type",sel_("noncss_type",A.noncss_type,l.noncss_type))}
+  ${row("Confidence 1-5",sel_("confidence_1to5",[""].concat(A.confidence_1to5),l.confidence_1to5))}
+  ${row("Hemisphere",sel_("hemisphere",[""].concat(A.hemisphere),l.hemisphere))}
+  ${row("Lobe",sel_("lobe",["","frontal","parietal","temporal","occipital","insula","cingulate","cerebellar","other"],l.lobe))}
+  ${row("Cortical region",txt("cortical_region","e.g. superior parietal"))}${row("Sulcal location",txt("sulcal_location","sulcus / crown / both banks"))}
+  ${row("Length mm",txt("length_mm","Shift+drag ruler"))}${row("Thickness mm",txt("thickness_mm"))}${row("Slices",txt("n_slices"))}
+  ${row("Morphology",sel_("morphology",A.morphology,l.morphology))}${row("Continuity",sel_("continuity",A.continuity,l.continuity))}
+  ${row("SWI appearance",sel_("swi_appearance",A.swi_appearance,l.swi_appearance))}${row("GRE appearance",sel_("gre_appearance",A.gre_appearance,l.gre_appearance))}
+  ${row("FLAIR appearance",sel_("flair_appearance",A.flair_appearance,l.flair_appearance))}${row("Vascular structure",sel_("associated_vascular_structure",A.associated_vascular_structure,l.associated_vascular_structure))}
+  ${row("Uncertainty reason",txt("uncertainty_reason","required if indeterminate or confidence ≤ 2"))}${row("Comment",txt("comment"))}
+  ${row("Position",`<span class="mut">voxel ${l.vox_i}, ${l.vox_j}, ${l.vox_k}</span> <button id="mv">move here</button> <button id="del">delete</button>`)}</div>
+  <div class="err">${problems(l).length?"missing: "+problems(l).join(", "):""}</div>`;
+  document.querySelectorAll("#form [data-f]").forEach(el=>el.onchange=()=>{L[sel][el.dataset.f]=el.value;renderList();renderForm();save();draw()});
+  $("#mv").onclick=()=>{const A=M.affine,mm=[0,1,2].map(r=>A[r][0]*cur[0]+A[r][1]*cur[1]+A[r][2]*cur[2]+A[r][3]);
+    Object.assign(L[sel],{vox_i:String(cur[0]),vox_j:String(cur[1]),vox_k:String(cur[2]),x_mm:mm[0].toFixed(1),y_mm:mm[1].toFixed(1),z_mm:mm[2].toFixed(1)});renderForm();save();draw()};
+  $("#del").onclick=delSel}
+function delSel(){if(sel<0||!confirm(`Delete lesion #${L[sel].lesion_id}?`))return;L.splice(sel,1);sel=-1;renderList();renderForm();save();draw()}
+let st=null;function save(){clearTimeout(st);st=setTimeout(async()=>{try{await api("/api/lesions",{case:CASE,lesions:L});
+  $("#saved").innerHTML=`<span class="okm">saved ${new Date().toLocaleTimeString()}</span>`;const c=S.cases.find(x=>x.code===CASE);c.n_lesions=L.length}catch(e){$("#saved").innerHTML=`<span class="err">NOT SAVED: ${e.message}</span>`}},250)}
+// ---------- case form
+function renderPatient(){const p=pat||{},yn=["","yes","no","indeterminate"];
+  const nd=L.filter(l=>l.final_category==="definite_cSS").length,np=L.filter(l=>l.final_category==="probable_cSS").length,ni=L.filter(l=>l.final_category==="indeterminate").length;
+  $("#pform").innerHTML=`<div class="grid">
+  <label>cSS present L</label>${sel_("css_present_L",yn,p.css_present_L)}<label>cSS present R</label>${sel_("css_present_R",yn,p.css_present_R)}
+  <label>Multifocality L 0-2</label>${sel_("multifocality_L_0to2",["","0","1","2"],p.multifocality_L_0to2)}<label>Multifocality R 0-2</label>${sel_("multifocality_R_0to2",["","0","1","2"],p.multifocality_R_0to2)}
+  <label>Image quality 1-3</label>${sel_("image_quality_1to3",["","1","2","3"],p.image_quality_1to3)}<label>Comment</label><input data-pf="comment" value="${(p.comment||"").replace(/"/g,"&quot;")}"></div>
+  <p class="mut">lesions: ${nd} definite · ${np} probable · ${ni} indeterminate (filled automatically)</p>
+  <button id="fin" class="pri">Save case form${p.css_present_L?" (update)":""}</button> <button id="nx">Next case ▸</button>`;
+  $("#pform").querySelectorAll("select").forEach(el=>el.dataset.pf=el.dataset.f);
+  $("#fin").onclick=async()=>{const q={};$("#pform").querySelectorAll("[data-pf]").forEach(el=>q[el.dataset.pf]=el.value);
+    if(!q.css_present_L||!q.css_present_R)return alert("Please set cSS present for both hemispheres.");
+    const bad=L.filter(l=>problems(l).length);if(bad.length&&!confirm(`${bad.length} lesion(s) still have missing fields. Save the case anyway?`))return;
+    const cnt=c=>String(L.filter(l=>l.final_category===c).length);
+    Object.assign(q,{n_definite:cnt("definite_cSS"),n_probable:cnt("probable_cSS"),n_indeterminate:cnt("indeterminate"),sequences_available:[...$("#seq").options].map(o=>o.value).join(";"),
+      read_minutes:String(Math.round((Date.now()-t0)/60000))});
+    await api("/api/patient",{case:CASE,patient:q});pat=q;S.cases.find(c=>c.code===CASE).patient_done=true;
+    $("#case").selectedOptions[0].textContent=$("#case").selectedOptions[0].textContent.replace(" ✓","")+" ✓";prog();renderPatient();$("#saved").innerHTML='<span class="okm">case form saved</span>'};
+  $("#nx").onclick=()=>go(1)}
+function go(d){const i=$("#case").selectedIndex+d;if(i<0||i>=S.cases.length)return;$("#case").selectedIndex=i;openCase($("#case").value)}
+// ---------- controls
+$("#case").onchange=()=>openCase($("#case").value);$("#seq").onchange=async()=>{const c=cur.slice();SEQ=$("#seq").value;await loadVol();cur=c.map((v,a)=>Math.min(v,M.shape[a]-1));draw()};
+document.querySelectorAll(".pl").forEach(b=>b.onclick=()=>{P=b.dataset.p;document.querySelectorAll(".pl").forEach(x=>x.classList.toggle("on",x===b));zoom=1;pan=[0,0];draw()});
+$("#mip").onclick=()=>{mip=!mip;$("#mip").classList.toggle("on",mip);draw()};$("#mipmm").onchange=draw;
+$("#reset").onclick=()=>{zoom=1;pan=[0,0];win=255;lev=128;draw()};$("#hbtn").onclick=()=>$("#help").style.display="block";$("#hclose").onclick=()=>$("#help").style.display="none";
+addEventListener("keydown",e=>{if(["INPUT","SELECT","TEXTAREA"].includes(document.activeElement.tagName))return;const k=e.key.toLowerCase();
+  if(k==="arrowup")step(-1);else if(k==="arrowdown")step(1);else if(k==="1"||k==="2"||k==="3")document.querySelectorAll(".pl")[+k-1].click();
+  else if(k==="i")$("#mip").click();else if(k==="r")$("#reset").click();else if(k==="y"||k==="u"||k==="x")quick(k);else if(k==="a")addLesion();else if(k==="delete"||k==="backspace")delSel();
+  else if(k==="s"){const o=$("#seq");o.selectedIndex=(o.selectedIndex+1)%o.options.length;o.onchange()}else if(k==="n")go(1);else if(k==="p")go(-1);else if(k==="?")$("#hbtn").click();else return;e.preventDefault()});
+addEventListener("resize",draw);init().catch(e=>document.body.insertAdjacentHTML("afterbegin",`<div class="err">${e.message}</div>`));
+</script></body></html>

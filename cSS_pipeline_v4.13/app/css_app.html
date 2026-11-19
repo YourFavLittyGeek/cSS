@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>cSS Pipeline</title>
+<style>
+:root{--bg:#111418;--panel:#1a1e24;--line:#2c323b;--ink:#e6e8eb;--mut:#9aa3ad;--in:#0d1014;--acc:#3987e5;--ok:#3aa655;--warn:#d9a21b;--bad:#e05252}
+:root[data-theme=light]{--bg:#f4f5f7;--panel:#ffffff;--line:#d9dde3;--ink:#16181b;--mut:#5d6570;--in:#ffffff;--acc:#2a78d6;--ok:#2e8b46;--warn:#a87400;--bad:#c93a3a}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.top{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg);z-index:5;flex-wrap:wrap}
+.top b{font-size:17px}.sp{flex:1}.mut{color:var(--mut)}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+nav button{background:none;border:0;color:var(--mut);font:inherit;padding:6px 10px;border-radius:7px;cursor:pointer}nav button.on{color:var(--ink);background:var(--panel)}
+.seg{display:inline-flex;background:var(--in);border:1px solid var(--line);border-radius:999px;padding:3px}.seg button{background:none;border:0;color:var(--ink);font:inherit;padding:4px 12px;border-radius:999px;cursor:pointer}
+.seg button.on{background:var(--acc);color:#fff}
+.wrap{padding:16px 20px;max-width:1500px}.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:12px}
+h2{margin:0 0 10px;font-size:16px}.row{display:flex;align-items:center;gap:10px;margin:7px 0;flex-wrap:wrap}.lab{width:190px;color:var(--mut)}
+input,select{background:var(--in);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:inherit}input.wide{min-width:380px}
+button.b{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:6px 12px;font:inherit;cursor:pointer}
+button.pri{background:var(--acc);border-color:var(--acc);color:#fff}button:disabled{opacity:.45;cursor:not-allowed}
+table{width:100%;border-collapse:collapse}td,th{border-bottom:1px solid var(--line);padding:6px 7px;text-align:left;font-size:13px;vertical-align:middle}th{color:var(--mut);font-weight:500}
+td input{padding:3px 6px;min-width:80px;max-width:150px}td select{padding:3px 5px;max-width:190px}#tbl{overflow-x:auto}a.b{color:var(--ink);text-decoration:none}td.note{min-width:180px}.note{font-size:12px;color:var(--mut)}
+.bar{height:9px;background:var(--in);border:1px solid var(--line);border-radius:6px;overflow:hidden;min-width:160px}.bar i{display:block;height:100%;background:var(--acc)}
+.tag{font-size:11px;background:#16263a;color:#86b6ef;border-radius:4px;padding:1px 6px}.tag.ai{background:#3a2a10;color:#f2c94c}
+#log{position:fixed;left:0;right:0;bottom:0;height:34%;background:#07090b;color:#b7c0c9;border-top:1px solid var(--line);display:none;z-index:9;font:12px ui-monospace,Menlo,monospace}
+#log pre{margin:0;padding:8px 12px;height:calc(100% - 34px);overflow:auto;white-space:pre-wrap}#log .h{display:flex;gap:8px;align-items:center;padding:4px 10px;background:#11161b}
+.err{color:var(--bad)}.steps span{margin-right:12px;font-size:12px}.hide{display:none}#toast{position:fixed;right:16px;bottom:16px;background:var(--panel);border:1px solid var(--line);padding:10px 14px;border-radius:8px;display:none;z-index:10;max-width:520px}
+</style></head><body>
+<div class="top"><b>cSS Pipeline</b><span class="mut" id="ver"></span>
+ <nav><button data-v="home" class="on">Home</button><button data-v="add">Add patients</button><button data-v="pts">Patients</button><button data-v="res">Results</button><button data-v="read">Review / Blind read</button><button data-v="set">Settings</button></nav>
+ <span class="sp"></span><span class="seg" id="awake"><button data-a="1">☀ Awake</button><button data-a="0">☾ Sleep allowed</button></span>
+ <span class="seg" id="theme"><button data-t="light">☀ Light</button><button data-t="dark">☾ Dark</button></span><button class="b" id="logbtn">⌨ Show log</button></div>
+<div class="wrap" id="view"></div>
+<div id="log"><div class="h"><b>Log</b><select id="logcode"></select><span class="sp"></span><button class="b" id="logcopy">Copy log</button><button class="b" id="logclose">Close</button></div><pre id="logtext"></pre></div>
+<div id="toast"></div>
+<script>
+const $=s=>document.querySelector(s),esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let S=null,V="home",ADD={mode:"single",folder_is:"code",rule:"whole",store:false,pts:[],grades:null,cohort:"",anatomy:"synthseg",rmode:"semi",results:"",summary:false};
+const api=async(u,b)=>{const r=await fetch(u,b?{method:"POST",headers:{"Content-Type":"application/json","X-CSS-App":"1"},body:JSON.stringify(b)}:{});const j=await r.json();if(j&&j.error&&r.status>=400)throw new Error(j.error);return j};
+const toast=(t,bad)=>{const e=$("#toast");e.innerHTML=t;e.style.borderColor=bad?"var(--bad)":"var(--line)";e.style.display="block";clearTimeout(e._t);e._t=setTimeout(()=>e.style.display="none",6000)};
+const hms=s=>{s=Math.max(0,Math.round(s||0));const h=Math.floor(s/3600),m=Math.floor(s%3600/60);return h?`${h} h ${String(m).padStart(2,"0")} min`:m?`${m} min`:`${s % 60} s`};
+const seg=(id,opts,cur,cb)=>`<span class="seg" data-seg="${id}">${opts.map(([v,l])=>`<button data-v="${v}" class="${v===cur?"on":""}">${l}</button>`).join("")}</span>`;
+function bindSeg(id,cb){document.querySelectorAll(`[data-seg="${id}"] button`).forEach(b=>b.onclick=()=>cb(b.dataset.v))}
+async function pick(kind,prompt){const r=await api("/api/pick",{kind,prompt});if(!r.path){if(r.error&&r.error!=="cancelled")toast(esc(r.error),1);return null}return r.path}
+async function refresh(){S=await api("/api/state");$("#ver").textContent=`pipeline ${S.version}`;
+  document.querySelectorAll("#awake button").forEach(b=>b.classList.toggle("on",(b.dataset.a==="1")===!!S.settings.awake));
+  document.documentElement.dataset.theme=S.settings.theme||"dark";document.querySelectorAll("#theme button").forEach(b=>b.classList.toggle("on",b.dataset.t===(S.settings.theme||"dark")));
+  const lc=$("#logcode"),cur=lc.value;lc.innerHTML=S.patients.map(p=>`<option>${p.code}</option>`).join("");if(cur)lc.value=cur;else if(S.queue.running)lc.value=S.queue.running}
+document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{V=b.dataset.v;document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on",x===b));render()});
+document.querySelectorAll("#awake button").forEach(b=>b.onclick=async()=>{await api("/api/settings",{awake:b.dataset.a==="1"});await refresh()});
+document.querySelectorAll("#theme button").forEach(b=>b.onclick=async()=>{await api("/api/settings",{theme:b.dataset.t});await refresh()});
+$("#logbtn").onclick=()=>{$("#log").style.display="block";loadLog()};$("#logclose").onclick=()=>$("#log").style.display="none";$("#logcode").onchange=loadLog;
+$("#logcopy").onclick=()=>{navigator.clipboard.writeText($("#logtext").textContent);toast("log copied")};
+async function loadLog(){const c=$("#logcode").value;if(!c){$("#logtext").textContent="(no patient yet)";return}const r=await api("/api/log?code="+encodeURIComponent(c));const t=$("#logtext"),bot=t.scrollTop+t.clientHeight>=t.scrollHeight-20;t.textContent=r.text;if(bot)t.scrollTop=t.scrollHeight}
+// ---------------- views
+async function render(){await refresh();const v=$("#view");
+  if(V==="home")return homeView(v);if(V==="add")return addView(v);if(V==="pts")return ptsView(v);if(V==="res")return resView(v);if(V==="read")return readView(v);if(V==="set")return setView(v)}
+async function homeView(v){const pf=await api("/api/preflight");const q=S.queue;
+  v.innerHTML=`<div class="card"><h2>Setup check</h2><table>${pf.map(x=>`<tr><td style="width:30px" class="${x.ok?"ok":"bad"}">${x.ok?"✓":"✗"}</td><td style="width:220px">${esc(x.item)}</td><td class="mut">${esc(x.detail)}</td></tr>`).join("")}</table>
+   ${pf.some(x=>!x.ok)?'<p class="note">Fix ✗ items in <b>Settings</b> (FreeSurfer folder, licence) before processing.</p>':""}</div>
+  <div class="card"><h2>Pipeline version</h2><div class="row"><span>Installed: <b>${esc(S.version)}</b></span><button class="b" id="inst">Install / update from zip…</button><button class="b" id="rb">Roll back to the previous version</button></div>
+   <div class="note">Installing keeps a backup of the current code; your patients, calls and results are never touched.</div></div>
+  <div class="card"><h2>Queue</h2><div class="row">${q.n?`${q.n} patient(s) waiting or running · remaining ≈ ${hms(q.remaining)} · finish ≈ ${new Date(Date.now()+q.remaining*1000).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}`:"empty"}</div>
+   <div class="row"><button class="b pri" onclick="go('add')">+ Add patients</button><button class="b" onclick="go('pts')">Patients (${S.patients.length})</button><button class="b" onclick="go('res')">Results</button><button class="b" onclick="go('read')">Review / Blind read</button></div></div>`;
+  $("#inst").onclick=async()=>{const p=await pick("file","Choose the cSS pipeline zip");if(!p)return;const r=await api("/api/install",{path:p});toast(r.ok?`installed ${esc(r.version)} (${r.files} files; backup kept)`:esc(r.error),!r.ok);render()};
+  $("#rb").onclick=async()=>{if(!confirm("Restore the previous pipeline version?"))return;const r=await api("/api/rollback",{});toast(r.ok?`restored ${esc(r.version)}`:esc(r.error),!r.ok);render()}}
+window.go=x=>document.querySelector(`nav button[data-v="${x}"]`).click();
+// ---------------- add patients
+const TYPES=["SWI","T1","FLAIR","PHASE"];
+function addView(v){if(ADD.summary)return summaryView(v);const A=ADD,coh=S.cohorts;
+  v.innerHTML=`<div class="card"><div class="row"><span class="lab">Add</span>${seg("mode",[["single","Single patient"],["batch","Batch (many)"]],A.mode)}
+    <span class="note">${A.mode==="single"?"choose the patient's folder - its sub-folders / files are sorted into SWI, T1, FLAIR, phase automatically":"choose one folder holding one sub-folder per patient"}</span></div>
+   <div class="row"><span class="lab">${A.mode==="single"?"Patient folder":"Folder with patients"}</span><input class="wide" id="fold" value="${esc(A.folder||"")}" placeholder="/Volumes/MRI/..."><button class="b pri" id="choose">Choose folder…</button><button class="b" id="rescan">Scan</button></div>
+   <div class="row"><span class="lab">Folder name is the</span>${seg("fis",[["code","Study code"],["name","Patient name"],["neither","Neither"]],A.folder_is)}
+    ${A.folder_is==="code"?`<select id="rule"><option value="whole" ${A.rule==="whole"?"selected":""}>whole folder name</option><option value="before_underscore" ${A.rule==="before_underscore"?"selected":""}>text before "_" or space</option><option value="digits" ${A.rule==="digits"?"selected":""}>digits only</option></select>`:""}
+    <span class="note">Code → folder name is the code · Name → folder name is the name, a code is assigned · Neither → type both</span></div>
+   <div class="row"><span class="lab">Patient names</span><label><input type="checkbox" id="store" ${A.store?"checked":""}> Store names</label><span class="note">🔒 kept only on this Mac (private/names.csv), never in results · unticked = codes only</span></div>
+   <div class="row"><span class="lab">Grades (optional)</span><input class="wide" id="gfile" value="${esc(A.gfile||"")}" placeholder="grades.xlsx or .csv"><button class="b" id="gimp">Import from Excel…</button><a class="b" href="/api/grades_template.xlsx" style="text-decoration:none">Download template (.xlsx)</a><span class="note" id="gmsg">${A.gmsg||""}</span></div></div>
+  <div class="card" id="tbl">${A.pts.length?tableHTML():'<div class="mut">Choose a folder to start.</div>'}</div>
+  <div class="card"><div class="row"><span class="lab">Cohort</span><select id="coh">${coh.map(c=>`<option ${c===A.cohort?"selected":""}>${esc(c)}</option>`).join("")}<option value="__new" ${!coh.includes(A.cohort)&&A.cohort?"selected":""}>+ New cohort…</option></select>
+    <input id="newcoh" placeholder="new cohort name" value="${!coh.includes(A.cohort)?esc(A.cohort):""}" class="${!coh.includes(A.cohort)||!coh.length?"":"hide"}">
+    <span class="lab" style="width:auto">Anatomy</span>${seg("anat",[["synthseg","SynthSeg · fast"],["recon","recon-all · full"]],A.anatomy)}
+    <span class="lab" style="width:auto">Mode</span>${seg("rm",[["semi","Semi-automatic"],["auto","Automatic"]],A.rmode)}</div>
+   <div class="note">${A.rmode==="semi"?"Semi-automatic: a radiologist reviews the AI candidates; the score is the reader's.":"Automatic: the AI result is scored with no review - labelled \"AI only, not validated\" everywhere."}</div>
+   <div class="row"><span class="lab">Save results in</span><input class="wide" id="resdir" value="${esc(A.results||"")}" placeholder="~/css_project/results/COHORT"><button class="b" id="rchoose">Choose folder…</button></div></div>
+  <div class="row"><span class="sp"></span><span class="err" id="adderr"></span><button class="b" id="cancel">Cancel</button><button class="b pri" id="tosum">Review summary ▸</button></div>`;
+  bindSeg("mode",x=>{A.mode=x;A.pts=[];addView(v)});bindSeg("fis",x=>{A.folder_is=x;rescan()});bindSeg("anat",x=>{A.anatomy=x;addView(v)});bindSeg("rm",x=>{A.rmode=x;addView(v)});
+  $("#rule")&&($("#rule").onchange=e=>{A.rule=e.target.value;rescan()});$("#store").onchange=e=>{A.store=e.target.checked;addView(v)};
+  $("#choose").onclick=async()=>{const p=await pick("folder",A.mode==="single"?"Choose the patient folder":"Choose the folder with patients");if(p){A.folder=p;rescan()}};
+  $("#rescan").onclick=()=>{A.folder=$("#fold").value.trim();rescan()};
+  $("#gimp").onclick=async()=>{let p=$("#gfile").value.trim();if(!p)p=await pick("file","Choose the grades Excel / CSV");if(!p)return;A.gfile=p;const r=await api("/api/grades",{path:p});if(r.error)return toast(esc(r.error),1);A.grades=r.rows;applyGrades();addView(v)};
+  $("#coh").onchange=e=>{if(e.target.value==="__new"){$("#newcoh").classList.remove("hide");A.cohort=$("#newcoh").value}else{A.cohort=e.target.value;$("#newcoh").classList.add("hide")}};
+  $("#newcoh").oninput=e=>A.cohort=e.target.value.trim();if(!A.cohort&&coh.length)A.cohort=coh[0];
+  $("#rchoose").onclick=async()=>{const p=await pick("save","Choose where to save results");if(p){A.results=p;$("#resdir").value=p}};$("#resdir").oninput=e=>A.results=e.target.value;
+  $("#cancel").onclick=()=>{ADD.pts=[];go("home")};$("#tosum").onclick=()=>{const e=validate();$("#adderr").textContent=e[0]||"";if(!e.length){A.summary=true;addView(v)}};bindTable()}
+async function rescan(){const A=ADD;if(!A.folder)return;$("#tbl").innerHTML='<span class="mut">scanning…</span>';
+  try{const r=await api("/api/scan",{path:A.folder,mode:A.mode,folder_is:A.folder_is,rule:A.rule});if(r.error)throw new Error(r.error);
+    A.pts=r.patients.map(p=>Object.assign(p,{include:!!p.chosen.SWI,radiologist:"",grade_R:"",grade_L:"",src:{code:p.code?"from folder":"",name:p.name?"from folder":""}}));applyGrades()}catch(e){toast(esc(e.message),1)}addView($("#view"))}
+function applyGrades(){const A=ADD;if(!A.grades)return;let m=0;
+  A.pts.forEach(p=>{const g=A.grades.find(g=>(g.code&&p.code&&g.code.toLowerCase()===p.code.toLowerCase())||(g.name&&p.name&&g.name.toLowerCase()===p.name.toLowerCase()));
+    if(g){m++;p.radiologist=g.radiologist||p.radiologist;p.grade_R=g.R??"";p.grade_L=g.L??"";p.gsrc="excel"}});A.gmsg=`✓ ${m} of ${A.pts.length} matched`}
+function tableHTML(){const A=ADD;const opt=(p,t)=>{const s=p.series.filter(x=>x.ok);return `<select data-t="${t}"><option value="">—</option>${s.map(x=>`<option value="${esc(x.path)}" title="${esc(x.relpath||x.name)}" ${p.chosen[t]===x.path?"selected":""}>${esc(x.name)}${x.voxel&&x.voxel.filter(Boolean).length?` · ${x.voxel.filter(Boolean).map(v=>(+v).toFixed(1)).join("×")} mm`:""}${x.description&&x.description!==x.name?` · ${esc(x.description)}`:""}</option>`).join("")}</select>`};
+  return `<table><tr><th>Folder</th><th>Study code ✎</th>${A.store?"<th>Patient name ✎</th>":""}${TYPES.map(t=>`<th>${t==="PHASE"?"Phase":t}</th>`).join("")}<th>Radiologist ✎</th><th>R</th><th>L</th><th>Notes</th><th>Include</th></tr>
+   ${A.pts.map((p,i)=>{const id=p.code||p.name,bad=!id;return `<tr data-i="${i}"><td>${esc(p.folder_name)}</td>
+    <td><input data-f="code" value="${esc(p.code)}" placeholder="${p.name?"auto":"type code…"}" style="${bad?"border-color:var(--bad)":""}"> <span class="note">${esc(p.src.code||"")}</span></td>
+    ${A.store?`<td><input data-f="name" value="${esc(p.name)}" placeholder="type name…" style="${bad?"border-color:var(--bad)":""}"></td>`:""}
+    ${TYPES.map(t=>`<td>${opt(p,t)}</td>`).join("")}
+    <td><input data-f="radiologist" value="${esc(p.radiologist)}" placeholder="Dr. …" style="min-width:110px"></td>
+    ${["grade_R","grade_L"].map(f=>`<td><select data-f="${f}">${["","0","1","2"].map(x=>`<option ${p[f]===x?"selected":""} value="${x}">${x||"–"}</option>`).join("")}</select></td>`).join("")}
+    <td class="note">${bad?'<span class="err">needs a code or a name</span> ':""}${p.warnings.map(w=>`<span class="warn">⚠ ${esc(w)}</span>`).join("<br>")}${p.gsrc?' <span class="tag">excel</span>':""}</td>
+    <td><input type="checkbox" data-f="include" ${p.include?"checked":""}></td></tr>`}).join("")}</table>
+   <div class="note" style="margin-top:6px">Every series found is in the drop-downs (minIP and localizers are left out automatically). Codes must be unique; a patient with only a name gets a code automatically.</div>`}
+function bindTable(){document.querySelectorAll("#tbl tr[data-i]").forEach(tr=>{const p=ADD.pts[+tr.dataset.i];
+  tr.querySelectorAll("[data-f]").forEach(el=>el.onchange=()=>{const f=el.dataset.f;p[f]=el.type==="checkbox"?el.checked:el.value.trim();if(f==="code"||f==="name")p.src[f]="typed";$("#tbl").innerHTML=tableHTML();bindTable()});
+  tr.querySelectorAll("[data-t]").forEach(el=>el.onchange=()=>{if(el.value)p.chosen[el.dataset.t]=el.value;else delete p.chosen[el.dataset.t]})})}
+function validate(){const A=ADD,inc=A.pts.filter(p=>p.include),e=[],seen=new Set(S.patients.map(p=>p.code));
+  if(!inc.length)e.push("no patient included");if(!A.cohort)e.push("choose or name a cohort");
+  inc.forEach(p=>{const id=p.code||p.name;if(!id)e.push(`${p.folder_name}: needs a code or a name`);if(!p.chosen.SWI)e.push(`${id||p.folder_name}: no SWI chosen`);
+    if(p.code){if(seen.has(p.code))e.push(`${p.code}: duplicate code`);seen.add(p.code)}if(!A.store&&!p.code)e.push(`${p.folder_name}: names are off - type a code`)});return e}
+function summaryView(v){const A=ADD,inc=A.pts.filter(p=>p.include),out=A.pts.filter(p=>!p.include),mins=(A.anatomy==="recon"?160:22)*inc.length;
+  const nm=s=>s?esc(s.split("/").slice(-1)[0]):"—";
+  v.innerHTML=`<div class="card"><h2>Summary — confirm before starting</h2><table>
+   <tr><td class="mut" style="width:200px">Cohort</td><td>${esc(A.cohort)}</td><td class="mut" style="width:200px">Anatomy</td><td>${A.anatomy==="recon"?"recon-all (full)":"SynthSeg (fast)"}</td></tr>
+   <tr><td class="mut">Mode</td><td>${A.rmode==="semi"?"Semi-automatic - radiologist reviews":"Automatic - AI only, not validated"}</td><td class="mut">Names</td><td>${A.store?"stored on this Mac only":"not stored (codes only)"}</td></tr>
+   <tr><td class="mut">Results folder</td><td>${esc(A.results||"(not copied - stays in the project)")}</td><td class="mut">Grades</td><td>${esc(A.gfile||"typed / none")}</td></tr>
+   <tr><td class="mut">Pipeline</td><td>${esc(S.version)}</td><td class="mut">Estimated time</td><td>≈ ${hms(mins*60)} (${inc.length} patient(s), one at a time)</td></tr></table></div>
+  <div class="card"><h2>Patients: ${inc.length} included${out.length?`, ${out.length} left out`:""}</h2><table><tr><th>Code</th>${A.store?"<th>Name</th>":""}<th>SWI</th><th>T1</th><th>FLAIR</th><th>Phase</th><th>Radiologist</th><th>R / L</th><th>Notes</th></tr>
+   ${inc.map(p=>`<tr><td>${esc(p.code||"(auto)")}</td>${A.store?`<td>${esc(p.name)}</td>`:""}${TYPES.map(t=>`<td>${nm(p.chosen[t])}</td>`).join("")}<td>${esc(p.radiologist||"—")}</td><td>${p.grade_R||"–"} / ${p.grade_L||"–"}</td><td class="warn">${p.warnings.map(esc).join("; ")}</td></tr>`).join("")}
+   ${out.map(p=>`<tr class="mut"><td>${esc(p.code||p.folder_name)}</td><td colspan="${A.store?8:7}">left out</td></tr>`).join("")}</table></div>
+  <div class="row"><button class="b" id="back">◂ Back to edit</button><span class="sp"></span><button class="b" id="print">Save summary (PDF)</button><button class="b pri" id="start">Start processing ▶</button></div>`;
+  $("#back").onclick=()=>{A.summary=false;addView(v)};$("#print").onclick=()=>window.print();
+  $("#start").onclick=async()=>{const items=inc.map(p=>({folder_name:p.folder_name,folder:p.folder,code:p.code,name:A.store?p.name:"",chosen:p.chosen,fingerprint:p.fingerprint,radiologist:p.radiologist,grade_R:p.grade_R,grade_L:p.grade_L}));
+    const r=await api("/api/queue",{patients:items,settings:{cohort:A.cohort,anatomy:A.anatomy,mode:A.rmode,results_dir:A.results,store_names:A.store}});
+    if(!r.ok)return toast(r.errors.map(esc).join("<br>"),1);toast(`${r.added.length} patient(s) queued: ${r.added.join(", ")}`);Object.assign(ADD,{pts:[],summary:false});go("pts")}}
+// ---------------- patients
+function ptsView(v){const q=S.queue,coh=["all"].concat(S.cohorts);v._f=v._f||"all";const P=S.patients.filter(p=>v._f==="all"||p.cohort===v._f);const hide=!!v._hide;
+  const st=p=>{if(p.status==="running"||p.status==="paused"){const tot=p.elapsed+p.remaining,pc=tot?Math.round(100*p.elapsed/tot):0;
+     return `<div class="row" style="margin:0"><div class="bar" style="flex:1"><i style="width:${pc}%"></i></div><span class="note">${p.status==="paused"?"paused · ":""}step ${S.steps.indexOf(p.step)+1}/5 ${esc(p.step)} · elapsed ${hms(p.elapsed)} · remaining ≈ ${hms(p.remaining)}</span></div>
+     <div class="steps">${S.steps.map(s=>p.steps_done.includes(s)?`<span class="ok">✓ ${s} ${hms(p.step_times[s])}</span>`:s===p.step?`<span>● ${s}…</span>`:`<span class="mut">○ ${s}</span>`).join("")}</div>`}
+    if(p.status==="waiting")return `waiting · est. ${hms(p.remaining)}`;if(p.status==="done")return `<span class="ok">✓ done in ${hms(p.elapsed)}</span>`;
+    return `<span class="${p.status==="failed"?"bad":"warn"}">✗ ${esc(p.status)}${p.error?": "+esc(p.error):""}</span>`};
+  const acts=p=>({running:["Pause","Stop"],paused:["Resume","Stop"],waiting:["Remove"],failed:["Retry","Remove"],stopped:["Retry","Remove"],done:["Re-run"]}[p.status]||[]);
+  v.innerHTML=`<div class="card"><div class="row"><b>Queue</b><span class="mut">${q.n?`${q.n} waiting or running · remaining ≈ ${hms(q.remaining)} · finish ≈ ${new Date(Date.now()+q.remaining*1000).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}`:"nothing waiting"}</span><span class="sp"></span>
+   <select id="cf">${coh.map(c=>`<option ${c===v._f?"selected":""}>${esc(c)}</option>`).join("")}</select><label><input type="checkbox" id="hn" ${hide?"checked":""}> Hide names</label><button class="b pri" onclick="go('add')">+ Add patients</button></div>
+   ${q.n?`<div class="bar"><i style="width:${Math.round(100*S.patients.filter(p=>p.status==="done").length/Math.max(1,S.patients.length))}%"></i></div>`:""}</div>
+  <div class="card"><table><tr><th>Study code ✎</th><th>Patient name ✎</th><th>Cohort</th><th>Mode</th><th>Status</th><th>Actions</th></tr>
+   ${P.map(p=>`<tr><td><input data-code="${esc(p.code)}" data-f="new_code" value="${esc(p.code)}" ${p.status!=="waiting"?"disabled title='locked once processing has started'":""}></td>
+    <td>${hide?"•••":`<input data-code="${esc(p.code)}" data-f="name" value="${esc(p.name)}" placeholder="—">`}</td><td>${esc(p.cohort)}</td>
+    <td>${p.mode==="auto"?'<span class="tag ai">Auto · AI only, not validated</span>':"Semi"} · ${p.anatomy==="recon"?"recon-all":"SynthSeg"}</td><td style="min-width:420px">${st(p)}</td>
+    <td>${acts(p).map(a=>`<button class="b" data-act="${a}" data-code="${esc(p.code)}">${a}</button>`).join(" ")} <button class="b" data-lg="${esc(p.code)}">Log</button>${p.has_qc?` <button class="b" data-qc="${esc(p.code)}">QC</button>`:""}${p.status==="done"?` <button class="b pri" data-rv="${esc(p.code)}">Review</button>`:""}</td></tr>`).join("")||'<tr><td colspan="6" class="mut">No patients yet.</td></tr>'}</table>
+   <div class="note" style="margin-top:6px">One patient runs at a time. You can close this window; processing continues and resumes after a restart. A code can be changed until processing starts; names any time.</div></div><div id="qcimg"></div>`;
+  $("#cf").onchange=e=>{v._f=e.target.value;ptsView(v)};$("#hn").onchange=e=>{v._hide=e.target.checked;ptsView(v)};
+  v.querySelectorAll("[data-act]").forEach(b=>b.onclick=async()=>{const a=b.dataset.act.toLowerCase().replace("re-run","rerun");if(a==="stop"&&!confirm("Stop this patient?"))return;
+    const r=await api("/api/control",{code:b.dataset.code,action:a});if(r.error)toast(esc(r.error),1);render()});
+  v.querySelectorAll("input[data-code]").forEach(el=>el.onchange=async()=>{const r=await api("/api/edit",{code:el.dataset.code,[el.dataset.f]:el.value.trim()});if(r.error)toast(esc(r.error),1);render()});
+  v.querySelectorAll("[data-lg]").forEach(b=>b.onclick=()=>{$("#logcode").value=b.dataset.lg;$("#log").style.display="block";loadLog()});
+  v.querySelectorAll("[data-qc]").forEach(b=>b.onclick=()=>{$("#qcimg").innerHTML=`<div class="card"><h2>QC snapshot ${esc(b.dataset.qc)}</h2><img src="/api/qc?code=${encodeURIComponent(b.dataset.qc)}&t=${Date.now()}" style="max-width:100%"></div>`});
+  v.querySelectorAll("[data-rv]").forEach(b=>b.onclick=()=>review([b.dataset.rv]))}
+async function review(codes){toast("starting the reviewer…");const r=await api("/api/review",{codes,reviewer:localStorage.getItem("cssapp_reviewer")||""});if(!r.ok)return toast(esc(r.error),1);window.open(r.url,"_blank")}
+// ---------------- results
+async function resView(v){const R=await api("/api/results");const hide=!!v._hide;
+  v.innerHTML=`<div class="card"><div class="row"><b>Results</b><span class="sp"></span><label><input type="checkbox" id="hn" ${hide?"checked":""}> Hide names</label><a class="b" href="/api/export.xlsx" style="text-decoration:none">Export Excel (codes only)</a><button class="b" id="share">Share package (codes only)…</button></div>
+   <table><tr><th>Code</th><th>Name</th><th>Cohort</th><th>Status</th><th>Candidates</th><th>Reviewed / cSS called</th><th>Reader score L / R = total</th><th>AI score L / R = total</th><th>Radiologist R / L</th><th>Version</th></tr>
+   ${R.map(r=>`<tr><td>${esc(r.code)}</td><td>${hide?"•••":esc(r.name||"—")}</td><td>${esc(r.cohort)}</td><td>${esc(r.status)}</td><td>${r.candidates??"—"}</td><td>${r.reviewed!=null?`${r.reviewed} / ${r.css_called}`:"not read"}</td>
+     <td>${r.score_total!=null?`${r.score_L} / ${r.score_R} = <b>${r.score_total}</b>`:"—"}</td><td>${r.ai_total!=null?`${r.ai_L} / ${r.ai_R} = ${r.ai_total} <span class="tag ai">AI only, not validated</span>`:"—"}</td>
+     <td>${r.rad_R!==""?`${r.rad_R} / ${r.rad_L}`:"—"}${r.radiologist?` <span class="note">${esc(r.radiologist)}</span>`:""}</td><td class="note">${esc(r.version)}</td></tr>`).join("")}</table>
+   <div class="note" style="margin-top:6px">${agreement(R)}</div></div>`;
+  $("#hn").onchange=e=>{v._hide=e.target.checked;resView(v)};$("#share").onclick=async()=>{const codes=R.filter(r=>r.candidates!=null).map(r=>r.code);const r=await api("/api/share",{codes});toast(r.ok?`saved ${esc(r.path)}`:esc(r.error),!r.ok)}}
+function agreement(R){let n=0,a=0;R.forEach(r=>{if(r.score_total==null||r.rad_R==="")return;[["score_R","rad_R"],["score_L","rad_L"]].forEach(([s,g])=>{n++;if(String(r[s])===String(r[g]))a++})});
+  return n?`Reader score vs radiologist: ${a} of ${n} hemispheres agree.`:"Agreement with the radiologist appears here once patients are read and graded."}
+// ---------------- review / blind read
+async function readView(v){const pk=await api("/api/packets"),done=S.patients.filter(p=>p.status==="done");
+  v.innerHTML=`<div class="card"><h2>Review (AI support visible)</h2><div class="row"><span class="lab">Reviewer name</span><input id="rvn" value="${esc(localStorage.getItem("cssapp_reviewer")||"")}" placeholder="e.g. Selim_v1"></div>
+   <div class="row" style="flex-wrap:wrap">${done.map(p=>`<label style="margin-right:10px"><input type="checkbox" class="rc" value="${esc(p.code)}"> ${esc(p.code)}</label>`).join("")||'<span class="mut">no processed patients yet</span>'}</div>
+   <div class="row"><button class="b pri" id="rv">Open the reviewer ▸</button><span class="note">opens the usual reviewer with the AI meter, AI score and 3-D view visible</span></div></div>
+  <div class="card"><h2>Blind read (no detector output)</h2><div class="row"><span class="lab">Reader code</span><input id="brd" value="${esc(localStorage.getItem("cssapp_reader")||"READER1")}"></div>
+   <div class="row"><span class="lab">Existing packet</span><select id="pk">${pk.map(x=>`<option>${esc(x)}</option>`).join("")}</select><button class="b pri" id="bopen">Open blind read ▸</button></div>
+   <div class="row"><span class="lab">or new packet from</span><span class="note">the patients ticked above</span><input id="npk" placeholder="packet name, e.g. W2"><button class="b" id="bnew">Create and open ▸</button></div></div>`;
+  const sel=()=>[...document.querySelectorAll(".rc:checked")].map(x=>x.value);
+  $("#rv").onclick=()=>{const c=sel();if(!c.length)return toast("tick at least one patient",1);localStorage.setItem("cssapp_reviewer",$("#rvn").value.trim());review(c)};
+  const blind=async(body)=>{localStorage.setItem("cssapp_reader",$("#brd").value.trim());toast("starting the blind viewer…");const r=await api("/api/blind",Object.assign({reader:$("#brd").value.trim()},body));if(!r.ok)return toast(esc(r.error),1);window.open(r.url,"_blank")};
+  $("#bopen").onclick=()=>{if(!$("#pk").value)return toast("no packet yet",1);blind({packet:$("#pk").value})};
+  $("#bnew").onclick=()=>{const c=sel(),n=$("#npk").value.trim();if(!c.length||!n)return toast("tick patients and name the packet",1);blind({packet:n,codes:c,new_packet:true})}}
+// ---------------- settings
+function setView(v){const s=S.settings,F=s.features;const L={duplicate_check:"Duplicate-scan check",preflight:"Pre-flight check before processing",qc_snapshot:"QC snapshot per patient",notify:"Notification when a patient finishes / fails",
+   version_stamp:"Version stamp on every result",share:"Share package (codes only)",backup:"Automatic daily backup (calls, grades, results - no images)",name_warning:"Warn when a folder name looks like a person's name"};
+  v.innerHTML=`<div class="card"><h2>FreeSurfer</h2><div class="row"><span class="lab">FreeSurfer folder</span><input class="wide" id="fs" value="${esc(s.freesurfer_home||"")}" placeholder="/Applications/freesurfer/8.2.0"><button class="b" id="fsc">Choose…</button></div>
+   <div class="row"><span class="lab">Threads</span><input id="thr" type="number" min="1" max="12" value="${s.threads||4}" style="width:80px"><span class="note">CPU threads for SynthSeg / recon-all (4 is safe on a 36 GB Mac)</span></div></div>
+  <div class="card"><h2>Backup</h2><div class="row"><span class="lab">Backup folder</span><input class="wide" id="bk" value="${esc(s.backup_dir||"")}" placeholder="e.g. an external drive"><button class="b" id="bkc">Choose…</button></div></div>
+  <div class="card"><h2>Features</h2>${Object.keys(L).map(k=>`<div class="row"><label><input type="checkbox" data-ft="${k}" ${F[k]?"checked":""}> ${L[k]}</label></div>`).join("")}</div>
+  <div class="row"><button class="b" id="quit">Quit the app</button><span class="note">closing the window does not stop processing; Quit does</span><span class="sp"></span><button class="b pri" id="save">Save settings</button></div>`;
+  $("#quit").onclick=async()=>{if(!confirm("Quit cSS Pipeline?"))return;let r=await api("/api/quit",{});if(!r.ok&&confirm(r.error+"\n\nQuit anyway?"))r=await api("/api/quit",{force:true});if(r.ok)document.body.innerHTML='<p style="padding:40px">cSS Pipeline has stopped. Open it again from Applications.</p>'};
+  $("#fsc").onclick=async()=>{const p=await pick("folder","Choose the FreeSurfer folder");if(p)$("#fs").value=p.replace(/\/$/,"")};$("#bkc").onclick=async()=>{const p=await pick("folder","Choose the backup folder");if(p)$("#bk").value=p};
+  $("#save").onclick=async()=>{const f={};document.querySelectorAll("[data-ft]").forEach(x=>f[x.dataset.ft]=x.checked);
+    await api("/api/settings",{freesurfer_home:$("#fs").value.trim(),threads:+$("#thr").value,backup_dir:$("#bk").value.trim(),features:f});toast("settings saved");render()}}
+render();setInterval(async()=>{if(V==="pts"&&!document.activeElement.matches("input,select"))await render();else if(V==="home")await refresh();if($("#log").style.display==="block")loadLog()},3000);
+</script></body></html>

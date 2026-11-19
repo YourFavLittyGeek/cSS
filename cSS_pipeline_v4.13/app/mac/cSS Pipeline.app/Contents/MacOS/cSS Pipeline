@@ -1,0 +1,25 @@
+#!/bin/bash
+# cSS Pipeline launcher: finds conda (env "css") and FreeSurfer, copies the app code from this bundle into the project
+# (~/css_project/app) when the bundle is newer, starts the app server in the background and opens its window.
+# No Terminal window is shown. Problems are shown as a dialog.
+CSS_BASE="${CSS_BASE:-$HOME/css_project}"; export CSS_BASE
+RES="$(cd "$(dirname "$0")/../Resources" && pwd)"
+say_err() { /usr/bin/osascript -e "display dialog \"$1\" with title \"cSS Pipeline\" buttons {\"OK\"} default button 1 with icon caution" >/dev/null 2>&1; }
+mkdir -p "$CSS_BASE/app" "$CSS_BASE/app_data/logs"
+LOG="$CSS_BASE/app_data/logs/launcher.log"; echo "=== $(date)" >> "$LOG"
+# app code shipped inside the bundle -> project (newer files only; the pipeline itself is installed from the app's Home screen)
+if [ -d "$RES/app" ]; then rsync -a --update "$RES/app/" "$CSS_BASE/app/" >> "$LOG" 2>&1; fi
+# conda environment "css"
+for c in "$HOME/miniforge3" "$HOME/mambaforge" "$HOME/miniconda3" "$HOME/anaconda3" "/opt/homebrew/Caskroom/miniforge/base" "/opt/miniconda3" "/opt/anaconda3"; do
+  if [ -f "$c/etc/profile.d/conda.sh" ]; then source "$c/etc/profile.d/conda.sh"; break; fi
+done
+if ! command -v conda >/dev/null 2>&1; then say_err "Conda (Miniforge) was not found. Install Miniforge once, then open cSS Pipeline again."; exit 1; fi
+conda activate css >> "$LOG" 2>&1 || { say_err "The conda environment 'css' was not found."; exit 1; }
+# FreeSurfer: the app's Settings value wins; otherwise the newest /Applications/freesurfer/* folder
+FSH=$(python -c "import json,sys;print(json.load(open('$CSS_BASE/app_data/settings.json')).get('freesurfer_home',''))" 2>/dev/null)
+[ -z "$FSH" ] && FSH=$(ls -d /Applications/freesurfer/*/ /Applications/freesurfer 2>/dev/null | sort | tail -1)
+FSH="${FSH%/}"
+if [ -n "$FSH" ] && [ -f "$FSH/SetUpFreeSurfer.sh" ]; then export FREESURFER_HOME="$FSH"; source "$FSH/SetUpFreeSurfer.sh" >> "$LOG" 2>&1; fi
+if [ ! -f "$CSS_BASE/app/css_app.py" ]; then say_err "App files missing in $CSS_BASE/app."; exit 1; fi
+nohup python "$CSS_BASE/app/css_app.py" >> "$LOG" 2>&1 &
+exit 0

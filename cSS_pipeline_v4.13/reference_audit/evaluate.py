@@ -13,7 +13,15 @@ import ra_common as R
 a = sys.argv[1:]
 if not a or a[0].startswith("-"): sys.exit(__doc__)
 arg = lambda k, d=None: a[a.index(k) + 1] if k in a else d
-NAME, PK = a[0], arg("--packet"); RAD = float(arg("--radius-mm", 3)); NB = 2000; rng = np.random.default_rng(20261119)
+NAME, PK = a[0], arg("--packet"); RAD = float(arg("--inplane-mm", arg("--radius-mm", 3))); NSL = int(arg("--slices", 2)); NB = 2000; rng = np.random.default_rng(20261119)
+# A reader marks ONE point of a lesion on ONE slice; the detector object may lie a slice or two above / below (2-3 mm slices) or along
+# another part of the same band. Matching window = disc of RAD mm in-plane x +-NSL slices (array axis 2 = slice axis; detect_css
+# requires axial arrays). Sensitivity is also reported at a ladder of tolerances (TOL) so the effect of the window is visible.
+TOL = [(3.0, 0), (3.0, 1), (3.0, 2), (5.0, 2), (8.0, 3)]
+def window(vox, rad, nsl):
+    ri = [int(np.ceil(rad / vox[0])), int(np.ceil(rad / vox[1]))]
+    oo = np.stack(np.meshgrid(np.arange(-ri[0], ri[0] + 1), np.arange(-ri[1], ri[1] + 1), np.arange(-nsl, nsl + 1), indexing="ij"), -1).reshape(-1, 3)
+    return oo[((oo[:, :2] * vox[:2]) ** 2).sum(1) <= rad ** 2]
 out = os.path.join(R.OUT, "results", NAME); os.makedirs(out, exist_ok=True)
 POS2 = {"definite_cSS", "probable_cSS"}
 def boot_prop(df, num, den, by="study_id"):
@@ -44,11 +52,18 @@ fates = []
 for sid, g in CL.groupby("study_id"):
     con = pd.read_csv(f"{R.OUT}/inventory/{sid}_objects_concealed.csv").set_index("label_value")
     img = nib.load(f"{R.OUT}/inventory/{sid}_audit_objects.nii.gz"); Lm = np.asarray(img.dataobj).astype(np.int32); A = np.linalg.inv(img.affine)
-    vox = np.array(img.header.get_zooms()[:3], float); r_ = np.ceil(RAD / vox).astype(int)
-    oo = np.stack(np.meshgrid(*[np.arange(-k, k + 1) for k in r_], indexing="ij"), -1).reshape(-1, 3); oo = oo[((oo * vox) ** 2).sum(1) <= RAD ** 2]
+    vox = np.array(img.header.get_zooms()[:3], float); oo = window(vox, RAD, NSL); W_ = {t: window(vox, *t) for t in TOL}
+    shown_pts = np.argwhere((Lm // 100000) == 1)
+    def labs_at(c, o):
+        pts = np.clip(c + o, 0, np.array(Lm.shape) - 1); return set(Lm[pts[:, 0], pts[:, 1], pts[:, 2]]) - {0}
     for _, r in g.iterrows():
-        c = np.round(A @ np.r_[r.x_mm, r.y_mm, r.z_mm, 1])[:3].astype(int); pts = np.clip(c + oo, 0, np.array(Lm.shape) - 1)
-        labs = set(Lm[pts[:, 0], pts[:, 1], pts[:, 2]]) - {0}
+        c = np.round(A @ np.r_[r.x_mm, r.y_mm, r.z_mm, 1])[:3].astype(int)
+        labs = labs_at(c, oo)
+        tol = {f"shown_within_{t[0]:g}mm_{t[1]}sl": any(v // 100000 == 1 for v in labs_at(c, o)) for t, o in W_.items()}
+        if len(shown_pts):
+            dd = np.sqrt((((shown_pts - c) * vox) ** 2).sum(1)); k_ = dd.argmin()
+            tol.update(nearest_shown_mm=round(float(dd[k_]), 1), nearest_shown_slice_offset=int(shown_pts[k_][2] - c[2]),
+                       nearest_shown_rank=int(Lm[tuple(shown_pts[k_])] % 100000))
         best = min(labs, key=lambda v: v // 100000) if labs else None
         if best is None: f = dict(fate="never generated", mechanism="not generated", production_id=np.nan, rank=np.nan)
         else:
@@ -56,22 +71,27 @@ for sid, g in CL.groupby("study_id"):
             f = dict(fate={"shown": "retained (shown)", "excluded": "generated, excluded by a rule", "dropped": "generated, dropped by a generation gate"}[st],
                      mechanism=k.mechanism, production_id=int(k.production_id), rank=int(k.production_id) if st == "shown" else np.nan,
                      reason=k.reason, matched_labels=len(labs))
-        fates.append(dict(cluster_id=r.cluster_id, **f))
+        fates.append(dict(cluster_id=r.cluster_id, **f, **tol))
 CL = CL.merge(pd.DataFrame(fates), on="cluster_id", how="left")
 CL.to_csv(f"{out}/reference_lesions_with_production_fate.csv", index=False)
 # ---------------- lesion-level sensitivity, per reference definition
-res = []
+res = [dict(measure=f"matching window: {RAD:g} mm in-plane x +-{NSL} slices (primary)", value=np.nan)]
 for nm, pos in (("definite only", {"definite_cSS"}), ("definite + probable", POS2)):
     R_ = CL[CL.reference_category.isin(pos)].copy(); R_["hit"] = R_.fate == "retained (shown)"
     if not len(R_): continue
     ci = boot_prop(R_, lambda d: d.hit.sum(), len)
     res.append(dict(measure=f"lesion-level sensitivity ({nm})", value=R_.hit.mean(), ci_low=ci[0], ci_high=ci[1], n=len(R_), patients=R_.study_id.nunique()))
     for f, n in R_.fate.value_counts().items(): res.append(dict(measure=f"  fate of reference lesions ({nm}): {f}", value=n / len(R_), n=n))
+    for t in TOL:
+        cn = f"shown_within_{t[0]:g}mm_{t[1]}sl"
+        if cn in R_:
+            R_["h2"] = R_[cn].astype(bool); ci2 = boot_prop(R_, lambda d: d.h2.sum(), len)
+            res.append(dict(measure=f"  sensitivity ({nm}) if matched within {t[0]:g} mm in-plane, +-{t[1]} slices", value=R_.h2.mean(), ci_low=ci2[0], ci_high=ci2[1], n=len(R_)))
     res.append(dict(measure=f"false negatives per scan ({nm})", value=(~R_.hit).sum() / CL.study_id.nunique(), n=int((~R_.hit).sum())))
     for by in ("mechanism",):
         for k, gg in R_.groupby(by): res.append(dict(measure=f"  missed by {by}: {k} ({nm})", value=(~gg.hit).sum(), n=len(gg)))
 # strata from reader fields (majority value across readers' marks is in the annotation files; joined here)
-marks = pd.concat([pd.read_csv(f, dtype=str).assign(reader=os.path.basename(f)[len("lesion_annotations_"):-4]) for f in glob.glob(f"{wd}/lesion_annotations_*.csv")], ignore_index=True).fillna("")
+marks = pd.concat([pd.read_csv(f, dtype=str).assign(reader=os.path.basename(f)[len("lesion_annotations_"):-4]) for f in glob.glob(f"{wd}/lesion_annotations_*.csv") if "_backup_" not in f], ignore_index=True).fillna("")
 first = {}
 for _, r in CL.iterrows():
     ids = []
@@ -138,7 +158,7 @@ if bnames:
     STR = cfgs[0]["strata"]; Ks = []
     for b in bnames:
         bd = os.path.join(R.OUT, "batches", b); k = pd.read_csv(f"{bd}/key_CONCEALED.csv")
-        ann = sorted(glob.glob(f"{bd}/review/annotations_*.csv"))
+        ann = sorted(f for f in glob.glob(f"{bd}/review/annotations_*.csv") if "_backup_" not in f)
         A_ = pd.concat([pd.read_csv(f, dtype=str) for f in ann]).fillna("") if ann else pd.DataFrame(columns=["case_id", "final_category"])
         adjp = f"{bd}/review/adjudication.csv"; adj_b = pd.read_csv(adjp, dtype=str).fillna("").set_index("case_id").adjudicated_category.to_dict() if os.path.exists(adjp) else {}
         fin = {}

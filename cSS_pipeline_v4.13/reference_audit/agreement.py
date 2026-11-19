@@ -70,7 +70,7 @@ def pairwise(df, item, rater, col, label):
     return rows
 
 def objects(batch):
-    rv = os.path.join(R.OUT, "batches", batch, "review"); files = sorted(glob.glob(f"{rv}/annotations_*.csv"))
+    rv = os.path.join(R.OUT, "batches", batch, "review"); files = sorted(f for f in glob.glob(f"{rv}/annotations_*.csv") if "_backup_" not in f)
     if len(files) < 2: sys.exit(f"need >= 2 reader files {rv}/annotations_<reader>.csv")
     D = pd.concat([pd.read_csv(f, dtype=str).assign(reader=re.sub(r"^annotations_|\.csv$", "", os.path.basename(f))) for f in files], ignore_index=True).fillna("")
     D["css_yes"] = D.final_category.isin(POS).map({True: "cSS", False: "not"})
@@ -92,7 +92,7 @@ def objects(batch):
 
 def whole_scan(packet):
     d = os.path.join(R.OUT, "whole_scan", packet); key = pd.read_csv(f"{d}/key_CONCEALED.csv")
-    files = sorted(glob.glob(f"{d}/lesion_annotations_*.csv"))
+    files = sorted(f for f in glob.glob(f"{d}/lesion_annotations_*.csv") if "_backup_" not in f)
     L = pd.concat([pd.read_csv(f, dtype=str).assign(reader=re.sub(r"^lesion_annotations_|\.csv$", "", os.path.basename(f))) for f in files], ignore_index=True).fillna("")
     aff = {}
     for r in key.itertuples():
@@ -142,7 +142,7 @@ def whole_scan(packet):
             lo, hi = boot_ci(AB, lambda x: 2 * (x.a & x.b).sum() / max(int(x.a.sum()) + int(x.b.sum()), 1), PATIENT_OF)
             srows.append(dict(measure=f"lesion detection overlap (matched within {MATCH_MM:g} mm)", reader_1=r1, reader_2=r2, agreement_ci_low=lo, agreement_ci_high=hi,
                                                         n_items=len(pos_cl), agreement=round(2 * both / max(int(a.sum()) + int(b.sum()), 1), 3), note=f"Dice-like 2M/(n1+n2); both {both}, only {r1} {int((a & ~b).sum())}, only {r2} {int((~a & b).sum())}"))
-    pf = sorted(glob.glob(f"{d}/patient_annotations_*.csv"))
+    pf = sorted(f for f in glob.glob(f"{d}/patient_annotations_*.csv") if "_backup_" not in f)
     if pf:
         PA = pd.concat([pd.read_csv(f, dtype=str).assign(reader=re.sub(r"^patient_annotations_|\.csv$", "", os.path.basename(f))) for f in pf]).fillna("")
         PL = pd.concat([PA.assign(item=PA.patient_id + "|L", v=PA.css_present_L), PA.assign(item=PA.patient_id + "|R", v=PA.css_present_R)])
