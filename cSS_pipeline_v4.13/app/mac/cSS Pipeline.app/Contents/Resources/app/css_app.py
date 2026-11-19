@@ -27,7 +27,7 @@ def jload(name, default):
 def jsave(name, obj):
     p = f"{AD}/{name}"; json.dump(obj, open(p + ".tmp", "w"), indent=1, default=str); os.replace(p + ".tmp", p)
 SET = dict(dict(awake=True, theme="dark", backup_dir="", freesurfer_home=os.environ.get("FREESURFER_HOME", ""), threads=4, parallel=1, auto_path=True, auto_retry=True, rerun_mode="choose",
-                features=dict(duplicate_check=True, preflight=True, qc_snapshot=True, notify=True, version_stamp=True, share=True, backup=True,
+                features=dict(unified_score=True, duplicate_check=True, preflight=True, qc_snapshot=True, notify=True, version_stamp=True, share=True, backup=True,
                               name_warning=False)), **jload("settings.json", {}))
 PAT = jload("patients.json", [])
 for p in PAT:                                            # resume after a restart: interrupted runs go back to the queue
@@ -449,6 +449,7 @@ def process(p):
     step_begin(p, "qc")
     if SET["features"].get("qc_snapshot"): qc_snapshot(code)
     p["ai_note"] = ai_score(code, env)              # AI score computed for every patient (labelled "AI only, not validated")
+    if SET["features"].get("unified_score", True): p["uscore"] = unified_score(code, env)   # v5.14 experimental unified score (display only)
     copy_results(p); step_end(p, "qc")
     p.update(status="done", finished=time.time(), step=""); save_pat(); notify("cSS Pipeline", f"{code} finished")
     try: write_results_file()
@@ -502,11 +503,26 @@ def ai_score(code, env=None):
     """AI score (green-band candidates, not validated) -> review/ID_score_ai.json; never touches the reader's files"""
     r = subprocess.run([sys.executable, f"{HERE}/ai_score_cli.py", code], capture_output=True, text=True, env=env or fs_env())
     return "" if r.returncode == 0 else (r.stderr or r.stdout)[-300:]
+def unified_score(code, env=None):
+    """v5.14 EXPERIMENTAL unified candidate score for one finished patient -> $CSS_BASE/uscore/reports/ID.json (categories, reasons,
+    feature reliability). Uses the frozen model only if one was trained on the development studies; never reads reader labels,
+    never suppresses or hides a candidate, never changes the detector's files. Failure only leaves a note."""
+    cli = f"{B}/unified_score/run_unified.py"
+    if not os.path.exists(cli): return dict(error="unified score not installed (run install.sh)")
+    try:
+        r = subprocess.run([sys.executable, cli, "app", code], capture_output=True, text=True, env=env or fs_env(), timeout=3600)
+        if r.returncode != 0: return dict(error=(r.stderr or r.stdout)[-300:])
+        return json.loads(r.stdout.strip().splitlines()[-1])
+    except Exception as e:
+        return dict(error=str(e)[:300])
 def ai_backfill():
     """finished patients without an AI score get one (in the background, at start and after each finished patient)"""
     for p in list(PAT):
         if p["status"] == "done" and os.path.exists(f"{B}/review/{p['code']}_candidates.csv") and not os.path.exists(f"{B}/review/{p['code']}_score_ai.json"):
             p["ai_note"] = ai_score(p["code"])
+        if p["status"] == "done" and SET["features"].get("unified_score", True) and os.path.exists(f"{B}/review/{p['code']}_candidates.csv") \
+                and not os.path.exists(f"{B}/uscore/reports/{p['code']}.json"):
+            p["uscore"] = unified_score(p["code"])
     try: write_results_file()
     except Exception as e: print("results file not written:", e, flush=True)
 def results_file():
@@ -629,6 +645,11 @@ def results():
             if os.path.exists(f):
                 j = json.load(open(f)); r[f"{tag}_L"] = j.get("L_score"); r[f"{tag}_R"] = j.get("R_score"); r[f"{tag}_total"] = j.get("multifocality_0_4")
         r["qc_grade"], r["qc_tip"] = qc_grade(p); r["ai_err"] = p.get("ai_note", "")
+        u = p.get("uscore") or {}                   # v5.14 experimental unified score (counts of candidates per category; none hidden)
+        if u and not u.get("error"):
+            r.update(unified_css_compatible=u.get("css_compatible"), unified_uncertain=u.get("uncertain"),
+                     unified_alternative=u.get("alternative_high_confidence"), unified_model="fitted" if u.get("model") else "no model yet (detectors only)")
+        elif u: r["unified_note"] = u.get("error", "")[:200]
         r["label"] = "reviewed" if r.get("score_total") is not None else ("AI only, not validated" if r.get("ai_total") is not None else "")
         rows.append(r)
     return rows

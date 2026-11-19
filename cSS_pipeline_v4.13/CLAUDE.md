@@ -558,3 +558,12 @@ Reviewer viewer rebuilt (docs/CHANGELOG_v5.6.md): single un-zoomed image, layout
   review_web /api/morph3d + morph3d_view.js (WebGL, no libs): isolated / context, surface / voxels, layers, cross-section strip,
   click -> MRI slices, cursor -> 3-D. tests/morph_phantoms.py + check_morph3d.py (11 shapes) + check_morph3d_api.py (PH6):
   cSS #1-5 sheet, vein #6 tube, flat CSF vein #9 = ribbon (separated only by position). Detector untouched; phantoms only.
+- v5.14 (release/v5.14 = production 115721f + app9-14 + v5.12 3-D viewer + v5.13 morphology + unified score; unified_score/
+  IMPLEMENTATION_CHECKPOINT.md, CHANGES_DURING_DEVELOPMENT.md): EXPERIMENTAL unified candidate score (unified_score/uscore): five
+  predictors with reliable / unreliable / unavailable states (unreliable = zero contribution), isolated v5.13 decompose() (verbatim,
+  hashed; masked zeros filled before it - the verbatim function on masked SWI recovered 3 % of a deposit), surface-vein /
+  extracranial / skull-interface detectors, 16 perturbations, ridge LR with nested LOPO + inner-fold Platt, three categories,
+  suppression implemented but DISABLED (SUPPRESSION_ENABLED = False). Cohort M-only (unified_score/cohort_manifest_RECONCILED.csv,
+  108 ids: dev M02-M11, held-out M01, M12-M26); held-out labels only via run_unified.py heldout HASH (logged). App: after every
+  finished patient `run_unified.py app ID` -> $CSS_BASE/uscore/reports/ID.json + results columns unified_*; no model is fitted
+  until `run_unified.py train` on the Mac. Detector, rules and score_css unchanged. tests/run_uscore_tests.sh.

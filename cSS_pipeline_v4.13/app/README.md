@@ -40,3 +40,8 @@ changes detector thresholds or rules. Names (optional) only in $CSS_BASE/private
   Blind read also in File. Screenshot (File, Tools, camera in the left tool strip): macOS screencapture of the reviewer window,
   or an area chosen with the mouse (Settings). Theme stays in the top bar. App: Re-run asks for the pathway (default; Settings:
   automatic = same pathway as last run).
+- v5.14: after each finished patient the app also runs the EXPERIMENTAL unified candidate score (Settings feature
+  `unified_score`, default on): `$CSS_BASE/unified_score/run_unified.py app ID` -> `$CSS_BASE/uscore/reports/ID.json`; results
+  workbook columns unified_css_compatible / unified_uncertain / unified_alternative / unified_model. Without a trained model
+  ("no model yet") only the alternative-explanation detectors and feature reliability are reported. Nothing is hidden or
+  suppressed; reader files are never touched. install.sh copies unified_score/ to $CSS_BASE. No screen layout changed.

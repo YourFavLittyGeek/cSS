@@ -11,5 +11,7 @@ fi
 for f in $SRC/*.py $SRC/*.sh $SRC/BUILD; do   # BUILD: commit id, filled in by git archive (v5.1)
   t=$B/scripts/.$(basename $f).new; cp $f $t && chmod +x $t && mv -f $t $B/scripts/$(basename $f) || { echo "install FAILED at $f"; exit 1; }
 done
+# v5.14: experimental unified candidate score (package + CLI + manifest) -> $B/unified_score (test outputs not copied)
+( cd "$SRC/.." && tar cf - --exclude output --exclude __pycache__ unified_score ) | ( cd $B && tar xf - ) || { echo "install FAILED at unified_score"; exit 1; }
 grep -q 'css_project/scripts' ~/.zshrc || echo 'export PATH="$HOME/css_project/scripts:$PATH"' >> ~/.zshrc
 echo "installed to $B/scripts  - open a new Terminal window"
