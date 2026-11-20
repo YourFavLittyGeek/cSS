@@ -2,7 +2,7 @@
 import glob, hashlib, json, os, shutil, tempfile, unittest
 import numpy as np, pandas as pd
 import _common
-from uengine import registry, shadow, demo_base, provenance as pv
+from uengine import registry, shadow, demo_base
 from uengine.prototype.fusion import UnifiedScorer
 
 def _w(p, obj):

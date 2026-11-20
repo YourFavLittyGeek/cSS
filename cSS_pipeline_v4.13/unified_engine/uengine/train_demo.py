@@ -2,7 +2,6 @@
 The model card records the patient-grouped CV results of the SAME procedure on the training cohort (synthetic; not a clinical estimate)
 and the decision-rule caveat (incremental value needs the permutation test, not the bootstrap CI)."""
 import datetime
-import numpy as np
 from . import ENGINE_VERSION, ablation as ab, experiment as ex, synthetic as sy, registry
 from .prototype.fusion import UnifiedScorer
 

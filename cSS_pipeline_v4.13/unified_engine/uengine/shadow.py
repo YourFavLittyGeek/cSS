@@ -14,7 +14,7 @@ never applied to a real study), or any exception in the ML path. The determinist
 import datetime, hashlib, json, os, traceback
 import numpy as np
 import pandas as pd
-from . import ENGINE_VERSION, __version__, SYNTHETIC_STAMP, registry, feature_schema as fs, math_component as mc, provenance as pv
+from . import ENGINE_VERSION, __version__, SYNTHETIC_STAMP, registry, math_component as mc, provenance as pv
 from .prototype.inputs import sanitize
 from .prototype.components import MathComponent, CharacteristicsComponent
 from .prototype.fusion import UnifiedScorer
