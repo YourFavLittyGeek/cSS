@@ -33,7 +33,7 @@ def jload(name, default):
 def jsave(name, obj):
     p = f"{AD}/{name}"; json.dump(obj, open(p + ".tmp", "w"), indent=1, default=str); os.replace(p + ".tmp", p)
 SET = dict(dict(awake=True, theme="dark", backup_dir="", freesurfer_home=os.environ.get("FREESURFER_HOME", ""), threads=4, parallel=1, auto_path=True, auto_retry=True, rerun_mode="choose",
-                features=dict(unified_score=False, duplicate_check=True, preflight=True, qc_snapshot=True, notify=True, version_stamp=True, share=True, backup=True,
+                features=dict(unified_score=False, shadow_engine=False, duplicate_check=True, preflight=True, qc_snapshot=True, notify=True, version_stamp=True, share=True, backup=True,
                               name_warning=False)), **jload("settings.json", {}))
 import notify_centre as NC, study_split as SS      # v5.14.2-rc4: notification centre + user study selection / training gate
 SET.setdefault("notif", dict(NC.DEFAULTS)); [SET["notif"].setdefault(k, v) for k, v in NC.DEFAULTS.items()]
@@ -757,6 +757,9 @@ def process(p):
     try: write_results_file()
     except Exception as e: open(logf, "a").write(f"\nresults file not updated: {e}\n")
     queue_unified(p)                                # v5.14-gui: AFTER results are saved and the patient is done; background; opt-in
+    try:                                            # Unified Score engine, SHADOW MODE: opt-in, subprocess, never changes this patient
+        import shadow_engine_gui as SEG; SEG.after_done(p["code"], SET)
+    except Exception as e: open(logf, "a").write(f"\nshadow engine not started: {e}\n")
 def _cohort_status(code):
     import pandas as pd
     p = f"{B}/review/cohort_run.csv"
@@ -844,6 +847,32 @@ def unified_post(op, d):
         return dict(ok=False, error=f"unknown {op}")
     except Exception as e:
         return dict(ok=False, error=str(e)[-400:])
+# ------------------------------------------------------------------ Unified Score engine (SHADOW MODE) - app/shadow_engine_gui.py
+def shadow_get(op, q):
+    try:
+        import shadow_engine_gui as SEG
+        if op == "state": return SEG.state(PAT, SET)
+        if op == "result": return SEG.result(q["study"])
+        if op == "models": return SEG.models(force=q.get("force") == "1")
+        return dict(error=f"unknown {op}")
+    except Exception as e:
+        return dict(error=f"shadow engine screen unavailable: {type(e).__name__}: {e}"[-400:], shadow_mode=True)
+def shadow_post(op, d):
+    try:
+        import shadow_engine_gui as SEG
+        if op == "enable":
+            SET["features"]["shadow_engine"] = bool(d.get("on")); jsave("settings.json", SET); return dict(ok=True, enabled=SET["features"]["shadow_engine"])
+        if op == "run":
+            p = next((x for x in PAT if x["code"] == d.get("code")), None)
+            if p is None or p.get("status") != "done": return dict(ok=False, error="study not finished")
+            return SEG.run(p["code"])
+        if op == "run_all":
+            done = [x["code"] for x in PAT if x.get("status") == "done"]
+            for c in done: SEG.run(c)
+            return dict(ok=True, started=len(done))
+        return dict(ok=False, error=f"unknown {op}")
+    except Exception as e:
+        return dict(ok=False, error=f"{type(e).__name__}: {e}"[-400:])
 def last_activity(code):
     m = [os.path.getmtime(f) for f in (f"{AD}/logs/{code}.log", f"{B}/logs/{code}_run.log") if os.path.exists(f)]
     return max(m) if m else 0
@@ -1195,6 +1224,7 @@ class H(BaseHTTPRequestHandler):
                 f = f"{B}/review/viewer_settings.json"; return self.send(json.load(open(f)) if os.path.exists(f) else {})
             if u.path in ("/icon_dark.png", "/icon_light.png"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="image/png")
             if u.path == "/unified_view.js": return self.send(open(f"{HERE}/unified_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
+            if u.path == "/shadow_view.js": return self.send(open(f"{HERE}/shadow_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/api/preflight": return self.send(preflight())
             if u.path == "/api/log":
                 f = f"{AD}/logs/{q['code']}.log"; t = open(f).read()[-30000:] if os.path.exists(f) else "(no log yet)"
@@ -1227,6 +1257,7 @@ class H(BaseHTTPRequestHandler):
             if u.path.startswith("/api/notif/"): return self.send(notif_get(u.path[11:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/proc/"): return self.send(proc_get(u.path[10:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/u/"): return self.send(unified_get(u.path[7:], {k: v[0] for k, v in parse_qs(u.query).items()}))
+            if u.path.startswith("/api/se/"): return self.send(shadow_get(u.path[8:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path == "/api/results": return self.send(results())
             if u.path == "/api/export.xlsx": return self.send(export_xlsx(), ctype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fname="cSS_results.xlsx")
             if u.path == "/api/grades_template.xlsx": return self.send(grades_template(), ctype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fname="grades_template.xlsx")
@@ -1357,6 +1388,7 @@ class H(BaseHTTPRequestHandler):
             if u.path.startswith("/api/notif/"): return self.send(notif_post(u.path[11:], d))
             if u.path.startswith("/api/proc/"): return self.send(proc_post(u.path[10:], d))
             if u.path.startswith("/api/u/"): return self.send(unified_post(u.path[7:], d))
+            if u.path.startswith("/api/se/"): return self.send(shadow_post(u.path[8:], d))
             if u.path in ("/api/share", "/api/export"):           # explicit warning + confirmation, verified local folder only
                 if d.get("confirm_clinical") is not True: return self.send(dict(ok=False, needs_confirm=True, warning=EXPORT_WARNING,
                                                                      error="export needs your confirmation of the clinical-data warning (dialog pending design approval)"))
