@@ -22,7 +22,7 @@ Estimated effort (engineering, synthetic phases P1-P8): roughly 4-6 working sess
 
 ## Decision status (2026-11-20)
 D1-D5 approved as proposed; D5 = PyTorch for P9 only, not installed. D6 had no single proposal and is still open
-(needed before P10). P1 done (P1_REPORT.md). P2 done (P2_REPORT.md).
+(needed before P10). P1 done (P1_REPORT.md). P2 done (P2_REPORT.md). P3 done (P3_REPORT.md); Image ML prototype (option A model, local inference, GUI screen) built on synthetic data at the user's request (IMAGE_ML_PROTOTYPE.md); P4 label converter and P9 CNN not built.
 
 ## Decisions needed from you (D1-D6)
 - **D1** Approve option A first, option B gated, 3D CNN and joint hybrid rejected.

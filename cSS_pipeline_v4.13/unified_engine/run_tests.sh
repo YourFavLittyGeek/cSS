@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # All tests of the Unified Score engine (SYNTHETIC data only). Each stage runs once; full output in $LOG.
 #   1 pinned production sources   2 static check   3 engine unit / integration tests (unittest)   4 app + browser integration (shadow mode)
-#   5-6 Stage 2 imaging: P1 image index + geometry gate, P2 css-patch/2.0 patches (pinned sources, unit tests)
+#   5-6 Stage 2 imaging: P1 index + geometry gate, P2 patches, P3 synthetic cohort, Image ML model + inference (pinned sources, unit tests)
+#   7 Image ML screen through the real app + headless browser (synthetic)
 # usage: bash unified_engine/run_tests.sh [LOG]      exit code = number of failing stages
 set -u
 E="$(cd "$(dirname "$0")" && pwd)"; R="$(dirname "$E")"; PY="${PY:-python3}"; LOG="${1:-$(mktemp -t uengine_tests)}"; : > "$LOG"; bad=0
@@ -14,5 +15,7 @@ stage "3 engine tests" "$PY" -W error::ResourceWarning -m unittest -v test_engin
   test_prototype_components test_prototype_fusion test_prototype_scenarios test_registry_shadow test_ablation test_port_fidelity
 stage "4 app + browser integration (shadow mode)" "$PY" "$R/tests/check_app_shadow_engine.py"
 stage "5 Stage 2 imaging: pinned sources" "$PY" "$E/run_imaging.py" verify
-stage "6 Stage 2 P1-P2 imaging tests (synthetic)" "$PY" -W error::ResourceWarning -m unittest -v test_imaging_geometry test_imaging_registration test_imaging_index test_imaging_patches
+stage "6 Stage 2 imaging + Image ML tests (synthetic)" "$PY" -W error::ResourceWarning -m unittest -v test_imaging_geometry test_imaging_registration test_imaging_index test_imaging_patches \
+  test_synthetic_cohort test_image_ml
+stage "7 Image ML app + browser integration (synthetic)" "$PY" "$R/tests/check_app_image_ml.py"
 echo "=== SUMMARY: $bad failing stage(s); log $LOG"; exit $bad

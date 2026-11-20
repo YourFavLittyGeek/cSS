@@ -873,6 +873,23 @@ def shadow_post(op, d):
         return dict(ok=False, error=f"unknown {op}")
     except Exception as e:
         return dict(ok=False, error=f"{type(e).__name__}: {e}"[-400:])
+# ------------------------------------------------------------------ Image ML prototype (SYNTHETIC ONLY) - app/image_ml_gui.py
+def image_get(op, q):
+    try:
+        import image_ml_gui as IMG
+        if op == "state": return IMG.state()
+        if op == "result": return IMG.result(q.get("study", ""))
+        if op == "models": return IMG.models(force=q.get("force") == "1")
+        return dict(error=f"unknown {op}")
+    except Exception as e:
+        return dict(error=f"Image ML screen unavailable: {type(e).__name__}: {e}"[-400:], synthetic_only=True)
+def image_post(op, d):
+    try:
+        import image_ml_gui as IMG
+        if op == "run": return IMG.run(str(d.get("code", "")))
+        return dict(ok=False, error=f"unknown {op}")
+    except Exception as e:
+        return dict(ok=False, error=f"{type(e).__name__}: {e}"[-400:])
 def last_activity(code):
     m = [os.path.getmtime(f) for f in (f"{AD}/logs/{code}.log", f"{B}/logs/{code}_run.log") if os.path.exists(f)]
     return max(m) if m else 0
@@ -1225,6 +1242,7 @@ class H(BaseHTTPRequestHandler):
             if u.path in ("/icon_dark.png", "/icon_light.png"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="image/png")
             if u.path == "/unified_view.js": return self.send(open(f"{HERE}/unified_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/shadow_view.js": return self.send(open(f"{HERE}/shadow_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
+            if u.path == "/image_ml_view.js": return self.send(open(f"{HERE}/image_ml_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/api/preflight": return self.send(preflight())
             if u.path == "/api/log":
                 f = f"{AD}/logs/{q['code']}.log"; t = open(f).read()[-30000:] if os.path.exists(f) else "(no log yet)"
@@ -1258,6 +1276,7 @@ class H(BaseHTTPRequestHandler):
             if u.path.startswith("/api/proc/"): return self.send(proc_get(u.path[10:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/u/"): return self.send(unified_get(u.path[7:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/se/"): return self.send(shadow_get(u.path[8:], {k: v[0] for k, v in parse_qs(u.query).items()}))
+            if u.path.startswith("/api/im/"): return self.send(image_get(u.path[8:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path == "/api/results": return self.send(results())
             if u.path == "/api/export.xlsx": return self.send(export_xlsx(), ctype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fname="cSS_results.xlsx")
             if u.path == "/api/grades_template.xlsx": return self.send(grades_template(), ctype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fname="grades_template.xlsx")
@@ -1389,6 +1408,7 @@ class H(BaseHTTPRequestHandler):
             if u.path.startswith("/api/proc/"): return self.send(proc_post(u.path[10:], d))
             if u.path.startswith("/api/u/"): return self.send(unified_post(u.path[7:], d))
             if u.path.startswith("/api/se/"): return self.send(shadow_post(u.path[8:], d))
+            if u.path.startswith("/api/im/"): return self.send(image_post(u.path[8:], d))
             if u.path in ("/api/share", "/api/export"):           # explicit warning + confirmation, verified local folder only
                 if d.get("confirm_clinical") is not True: return self.send(dict(ok=False, needs_confirm=True, warning=EXPORT_WARNING,
                                                                      error="export needs your confirmation of the clinical-data warning (dialog pending design approval)"))
