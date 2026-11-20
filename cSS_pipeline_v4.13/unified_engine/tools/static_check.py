@@ -8,7 +8,7 @@ Exit code = number of findings."""
 import ast, builtins, importlib, os, py_compile, sys, warnings
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DIRS = ("uengine", "uengine/prototype", "tests", "tools", ".", "../app")
+DIRS = ("uengine", "uengine/prototype", "uengine/imaging", "tests", "tools", ".", "../app")
 
 
 APP_FILES = ("shadow_engine_gui.py",)          # only the app files this work added (the rest of the app is not ours to lint)

@@ -20,6 +20,10 @@ regression gate for every phase).
 
 Estimated effort (engineering, synthetic phases P1-P8): roughly 4-6 working sessions of the size of Stage 1.
 
+## Decision status (2026-11-20)
+D1-D5 approved as proposed; D5 = PyTorch for P9 only, not installed. D6 had no single proposal and is still open
+(needed before P10). P1 done (P1_REPORT.md).
+
 ## Decisions needed from you (D1-D6)
 - **D1** Approve option A first, option B gated, 3D CNN and joint hybrid rejected.
 - **D2** Approve the label classes and the css-labels/1.0 -> 2.0 conversion thresholds (confidence >= 4 = definite).
