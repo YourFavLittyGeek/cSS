@@ -22,9 +22,12 @@ for base, m in ((f"{P}/exp", "production subfolder"), (f"{H}/prod_link/exp", "sy
     r = subprocess.run([sys.executable, f"{ROOT}/app/css_app.py", "--port", "1", "--no-window"], env=dict(ENV, CSS_BASE=base), capture_output=True, text=True, timeout=60)
     ok(r.returncode != 0 and "refused to start" in (r.stderr + r.stdout), f"app refuses project folder = {m}")
 L = open(f"{ROOT}/app/mac_experimental/launcher.sh").read(); head = L[:L.index('export CSS_BASE="$BASE_C" CSS_EXPERIMENTAL=1')] + 'export CSS_BASE="$BASE_C"\necho LAUNCH_OK\n'
+# the launcher reports a refusal with a modal osascript dialog; in a logged-in macOS session it waits for a click (test timeout).
+# Replace ONLY that notification with a stderr echo; the refusal logic and exit codes are unchanged and still asserted below.
+assert head.count("/usr/bin/osascript") == 1; head = head.replace('/usr/bin/osascript -e', 'echo DIALOG >&2; : ', 1)
 for base, m in ((f"{P}/sub", "CSS_EXP_BASE = production subdirectory"), (f"{H}/prod_link/x", "CSS_EXP_BASE through a symlink into production"), (H, "CSS_EXP_BASE containing production")):
     r = subprocess.run(["bash", "-c", head], env=dict(ENV, CSS_EXP_BASE=base, PATH="/usr/bin:/bin"), capture_output=True, text=True, timeout=60)
-    ok("LAUNCH_OK" not in r.stdout and r.returncode != 0, f"launcher refuses {m}")
+    ok("LAUNCH_OK" not in r.stdout and r.returncode != 0 and "DIALOG" in r.stderr, f"launcher refuses {m} (and shows its refusal notice)")
 # --- 2 the running app (experimental project X)
 s_ = socket.socket(); s_.bind(("127.0.0.1", 0)); port = s_.getsockname()[1]; s_.close()
 os.makedirs(f"{X}/scripts"); open(f"{X}/scripts/detect_css.py", "w").write(

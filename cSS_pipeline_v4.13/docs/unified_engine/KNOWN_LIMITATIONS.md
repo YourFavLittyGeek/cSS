@@ -24,7 +24,8 @@
 14. The unchanged app re-serialises app_data/patients.json at start-up (formatting only); tests therefore compare that file by content.
 15. `run_uscore_tests.sh` (existing suite) rewrites 3 tracked `unified_score/output/` files (verified); they were restored after the run and
     never committed.
-16. Existing-suite issues on this Mac, all pre-existing / environmental and NOT fixed here (outside scope): `check_write_guard` opens a modal
-    osascript dialog and times out; `check_export_safety` fails 2 assertions on the unmodified base too; `check_ui_poll` needs Node / npm.
+16. Existing-suite issues on this Mac (diagnosed 2026-11-20, HANDOVER.md section 3): `check_export_safety` (2 FAIL) and `check_write_guard`
+    (hang) were TEST-HARNESS problems - fixed in the tests only, no app / guard / launcher code changed, no assertion weakened.
+    `check_ui_poll` needs Node / npm + Playwright (environment; not installed) and remains not run.
 17. GUI checks use the DOM of a headless Chrome render and screenshots; no click-through automation (Playwright for Python / Node is not
     installed). Interactive behaviour (buttons, switch) is tested through the same HTTP API the buttons call.

@@ -2,7 +2,7 @@
 import os, sys, json, glob, socket, tempfile, subprocess, time, urllib.request
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..")); F = []
 def ok(c, m): print(("PASS " if c else "FAIL ") + m); c or F.append(m)
-HOME = tempfile.mkdtemp(); B = tempfile.mkdtemp()
+HOME = os.path.realpath(tempfile.mkdtemp()); B = os.path.realpath(tempfile.mkdtemp())   # canonical: macOS /var -> /private/var (the app reports real paths)
 for d in ("Desktop", "Documents", "Library/Mobile Documents/com~apple~CloudDocs", "Library/CloudStorage/Dropbox", "lab_exports"): os.makedirs(f"{HOME}/{d}")
 os.makedirs(f"{B}/app_data"); os.makedirs(f"{B}/review")
 sys.path.insert(0, f"{ROOT}/app/guard"); import css_writeguard as WG      # the app's verify_local_dest is css_writeguard.check_dest (rc2)

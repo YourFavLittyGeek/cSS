@@ -47,16 +47,20 @@ unchanged after all runs incl. the crash · no write into the real project folde
 version, the three outputs shown separately.
 
 ## 3. Regression: the EXISTING test suite of the experimental app (`tests/run_uscore_tests.sh`) on this branch
-`run_uscore_tests.sh` stops at the first failing script (`set -e`). It ran 9:09 min and stopped in `check_write_guard.py`; the scripts after it
-were then run one by one with the same interpreter.
+Final run 2026-11-20 17:20-17:32 EST (after the two test-harness fixes below). `run_uscore_tests.sh` stops at the first failing script
+(`set -e`); it ran 14 scripts with **357 PASS, 0 FAIL** and stopped at `check_ui_poll` (npm missing); the two scripts after it were run
+separately with the same interpreter.
 
-| existing test | result on this branch | note |
+| existing test | result on this branch | classification |
 |---|---|---|
-| check_core_decompose, check_uscore_features, check_uscore_adversarial, check_uscore_seeds (5), check_uscore_pipeline, check_heldout_protection, check_processing_manager, check_link_study | **pass** (260 PASS lines up to the stop, 0 FAIL) | includes the end-to-end unified pipeline and held-out protection |
-| check_write_guard | **aborted (not a regression)** - 4 / 4 app-refusal checks PASS, then `TimeoutExpired` | the launcher head it runs calls `/usr/bin/osascript ... display dialog` on refusal; in a logged-in macOS session that is a MODAL dialog waiting for a click, so the 60 s timeout fires (in a headless sandbox it fails at once). `launcher.sh`, `app/guard` and the test are byte-identical to 6f0ca44. The dialog this left on screen was closed (its own process). The later sections of this test did not run. |
-| check_production_models, check_pm_full_pipeline, check_audit_local, check_local_only, check_selection_notifications, **check_app_unified** | **pass** (exit 0; 126 PASS lines incl. the two below) | check_app_unified = the existing Unified tab through the app's API, on the modified app: passes |
-| check_export_safety | **2 FAIL, pre-existing**: "confirmed share / export written to the verified folder only" | the UNMODIFIED base commit 6f0ca44 (temporary detached worktree, removed afterwards) fails the same 2 assertions on this Mac. Hypothesis (not verified): macOS canonicalises the temp HOME `/var/...` to `/private/var/...`, so `path.startswith(HOME)` is false |
-| check_ui_poll | **not run** (environment) | needs `npm` / Node (Playwright); not installed on this Mac - FileNotFoundError before any check |
+| check_core_decompose, check_uscore_features, check_uscore_adversarial, check_uscore_seeds (5), check_uscore_pipeline, check_heldout_protection, check_processing_manager, check_link_study, check_production_models, check_pm_full_pipeline, check_audit_local, check_local_only | **pass** | - |
+| check_write_guard | **pass, 28 / 28** (was: aborted by a timeout) | **test-harness problem.** The test runs the real launcher head; on refusal it calls `/usr/bin/osascript display dialog`, a modal dialog that waits for a click in a logged-in macOS session -> 60 s timeout. Fix (test only): that one notification call is replaced by `echo DIALOG >&2`; the launcher's refusal logic and exit codes are unchanged, and the check is now STRICTER (it also requires the refusal notice). |
+| check_export_safety | **pass, all** (was: 2 FAIL, also on the unmodified base 6f0ca44) | **test-harness problem, not a safety defect.** Diagnostic run: the app returned `/private/var/folders/.../lab_exports/cSS_share_....zip` while the test's HOME was `/var/folders/...` (macOS `/var` is a symlink to `/private/var`). The app correctly reports the canonical real path (the guard resolves symlinks by design); the test compared against the non-canonical spelling. Fix (test only): HOME and base are canonicalised with `os.path.realpath`; the assertion `path.startswith(HOME + "/lab_exports/")` is unchanged. |
+| check_ui_poll | **not run** | **environment.** Needs Node / npm + Playwright (FileNotFoundError: npm). Not installed on this Mac. |
+| check_selection_notifications | **pass, 24 / 24** | - |
+| check_app_unified | **pass, 31 / 31** | the existing Unified tab, through the API of the modified app |
+
+No genuine application defect was found in the existing suite. Total: 412 PASS, 0 FAIL, 1 script not runnable (environment).
 
 Side effect of the existing suite: it rewrites 3 tracked files in `unified_score/output/` (COHORT_REPORT_SYNTHETIC_TEST.md, adversarial_seeds.json,
 example_candidate_reports_SYNTHETIC.json); they were restored with `git checkout --` and are not part of any commit.
@@ -71,4 +75,5 @@ example_candidate_reports_SYNTHETIC.json); they were restored with `git checkout
 | 5 | integration: "existing files byte-identical" FAIL on `app_data/patients.json` | **not the engine**: the unchanged app re-serialises patients.json (indentation) at start-up; control runs without any shadow action show the same byte change and no field change | review/ compared by bytes, patients.json by every field of every study record (both pass); documented |
 | 6 | static check: 3 unused imports; runner ran each stage twice | my code | removed; runner rewritten (each stage once) |
 | 7 | label "Main evidence" misleading (showed the learned correction, not total evidence) | UI wording | "Largest learned corrections to MATH (log-odds)" + tooltip |
-| 8 | existing suite: `check_write_guard` hang, `check_export_safety` 2 FAIL, `check_ui_poll` not runnable | pre-existing / environment (section 3) | documented; not changed (outside this work's scope: launcher, export code) |
+| 8 | existing suite: `check_write_guard` hang, `check_export_safety` 2 FAIL | test-harness problems (section 3) | fixed in the two tests only; app, guard and launcher unchanged; no assertion weakened (write-guard check made stricter) |
+| 9 | existing suite: `check_ui_poll` not runnable | environment (no Node / npm) | not changed |
