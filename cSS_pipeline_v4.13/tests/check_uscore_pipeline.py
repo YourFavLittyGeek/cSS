@@ -15,13 +15,13 @@ def raises(fn, exc):
 
 # ---------- 1 cohort guards on the REAL reconciled manifest
 C = cm.Cohort()
-check("1 real manifest: 26 included, only M", len(C.studies("development")) == 10 and len(C.studies("held-out")) == 16
+check("1 real manifest (2026-11-20 split): 26 development M01-M26, 10 held-out M27-M36, only M", len(C.studies("development")) == 26 and len(C.studies("held-out")) == 10
       and all(s.startswith("M") for s in C.studies("development") + C.studies("held-out")))
 check("1 P006 refused", raises(lambda: C.role("P006"), cm.CohortError))
 check("1 PH6 refused", raises(lambda: C.role("PH6"), cm.CohortError))
 check("1 T05 refused", raises(lambda: C.role("T05"), cm.CohortError))
-check("1 M18 / M23 / M25 listed as held-out", all(C.role(s) == "held-out" for s in ("M18", "M23", "M25")))
-check("1 fitting on a held-out study refused", raises(lambda: C.check_fit_set(["M02", "M12"]), cm.CohortError))
+check("1 M27 / M31 / M36 listed as held-out; M18 / M23 now development (2026-11-20 split)", all(C.role(s) == "held-out" for s in ("M27", "M31", "M36")) and all(C.role(s) == "development" for s in ("M18", "M23")))
+check("1 fitting on a held-out study refused", raises(lambda: C.check_fit_set(["M02", "M27"]), cm.CohortError))
 check("1 non-M prefix refused outside synthetic test mode", raises(lambda: cm.Cohort(eligible_prefix="SYN"), cm.CohortError))
 check("1 synthetic mode may not use M", raises(lambda: cm.Cohort(eligible_prefix="M", synthetic_test=True), cm.CohortError))
 tmp = tempfile.mkdtemp(); bad = os.path.join(tmp, "bad.csv")
@@ -30,9 +30,9 @@ check("1 manifest including a non-M study refused", raises(lambda: cm.Cohort(bad
 
 # ---------- 2 label access
 LA = cm.LabelAccess(C, tmp, mode="development", log_dir=tmp)
-check("2 held-out labels refused in development mode", raises(lambda: LA.labels("M12", None), cm.HeldOutAccessError))
+check("2 held-out labels refused in development mode", raises(lambda: LA.labels("M27", None), cm.HeldOutAccessError))
 log = open(os.path.join(tmp, "label_access_log.csv")).read()
-check("2 refused access is logged", "M12" in log and log.strip().endswith(",0"))
+check("2 refused access is logged", "M27" in log and log.strip().endswith(",0"))
 check("2 held-out mode without frozen model refused", raises(lambda: cm.LabelAccess(C, tmp, mode="heldout_evaluation"), cm.HeldOutAccessError))
 
 # ---------- 3 model mechanics

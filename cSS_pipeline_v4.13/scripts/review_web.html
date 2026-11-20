@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>cSS Reviewer</title>
+<html lang="en"><head><meta charset="utf-8"><title>Percival reviewer</title>
 <style>
 :root{--bg:#14161a;--panel:#1e2127;--line:#30353d;--text:#e6e8eb;--mut:#9aa1ab;--acc:#4c9aff;--vp:#000}
 :root[data-theme=light]{--bg:#f3f4f6;--panel:#fff;--line:#d5d9df;--text:#1c2026;--mut:#5d6672;--acc:#1f6feb;--vp:#000}
@@ -7,7 +7,9 @@
 *{box-sizing:border-box}html,body{height:100%;margin:0}
 body{background:var(--bg);color:var(--text);font:14px/1.35 -apple-system,"Segoe UI",Helvetica,Arial,sans-serif;display:flex;flex-direction:column;overflow:hidden;user-select:none}
 button,select,input{font:inherit;color:var(--text)}
-.top{display:flex;align-items:center;gap:12px;padding:7px 14px;background:var(--panel);border-bottom:1px solid var(--line)}
+.top{display:flex;align-items:center;gap:10px;padding:7px 14px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap;row-gap:6px;min-width:0}
+.top>*{flex-shrink:0}.top .sp{flex:1 1 0;min-width:0}#candinfo{flex:0 1 auto;min-width:0;max-width:26vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.top .prog{flex:0 1 110px;min-width:50px}#progtxt{white-space:nowrap}.top .rv{display:inline-flex;align-items:center;gap:6px}.top .rgrp{display:flex;align-items:center;gap:10px;margin-left:auto;flex-wrap:wrap;justify-content:flex-end;row-gap:6px}#reviewer{width:130px;min-width:90px}
 .top b{font-size:17px;white-space:nowrap}.mut{color:var(--mut)}.sm{font-size:12px}.sp{flex:1}
 select,input[type=text]{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:5px 8px;user-select:text}
 .prog{width:140px;height:6px;background:var(--line);border-radius:3px;flex:none}.prog div{height:100%;background:var(--acc);border-radius:3px;width:0}
@@ -103,14 +105,14 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
 .nsw{display:inline-flex;align-items:center;width:34px;height:19px;border-radius:999px;padding:2px;background:#5a626e;cursor:pointer;flex:none}.nsw i{width:15px;height:15px;border-radius:50%;background:#fff;display:block}.nsw.on{background:#3aa655;justify-content:flex-end}#nextcard .pri{background:var(--acc);border-color:var(--acc);color:#fff}#prevStudy,#nextStudy{padding:3px 9px;color:var(--text)}
 .toast.err{background:#8a2b2b}.toast u{cursor:pointer;margin-left:8px}
 </style></head><body>
-<div class="top"><b>cSS Reviewer</b>
+<div class="top"><b>Percival</b><span class="mut" style="margin-left:-4px">reviewer</span>
  <select id="cohort" title="Cohort" class="hide"></select><select id="study" title="Patient"></select><button class="b" id="prevStudy" title="Previous patient">◂</button><button class="b" id="nextStudy" title="Next patient">▸</button>
  <span class="mut" id="candinfo"></span><div class="prog"><div id="progbar"></div></div><span class="mut" id="progtxt"></span><span class="sp"></span>
- <span id="vsym" class="vsym" title="Validation read: AI meter hidden and locked, candidates shuffled, some excluded objects mixed in (click: Settings)"><svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7c2 0 3.8.8 5.3 1.8M22 12s-4 7-10 7c-2 0-3.8-.8-5.3-1.8"/><path d="M3 21L21 3"/><rect x="15" y="13" width="7" height="6" rx="1" fill="currentColor"/><path d="M16.5 13v-1.5a2 2 0 0 1 4 0V13"/></svg></span>
+ <div class="rgrp"><span id="vsym" class="vsym" title="Validation read: AI meter hidden and locked, candidates shuffled, some excluded objects mixed in (click: Settings)"><svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7c2 0 3.8.8 5.3 1.8M22 12s-4 7-10 7c-2 0-3.8-.8-5.3-1.8"/><path d="M3 21L21 3"/><rect x="15" y="13" width="7" height="6" rx="1" fill="currentColor"/><path d="M16.5 13v-1.5a2 2 0 0 1 4 0V13"/></svg></span>
  <button class="btn" id="bSaveFinal" title="Save final (⌘↩): AI comparison if switched on, then the final save">💾 Save final</button><button class="btn" id="bGear" title="Settings">⚙</button>
  <span id="scorechip" class="chipbox" title="cSS score 0-4: reviewer (after Q) and AI (rule-based, not validated)"></span>
  <div class="tsw" id="themes" title="Theme: click a symbol or drag the knob - moon dark, drop eye-preserving blue, sun light (T)"><div class="knob"></div><span data-t="dark" title="Dark"><svg viewBox="0 0 24 24"><path d="M20 14a8 8 0 1 1-9-11 6.5 6.5 0 0 0 9 11z"/></svg></span><span data-t="blue" title="Eye-preserving blue"><svg viewBox="0 0 24 24"><path d="M12 3c3 4 6 7.5 6 11a6 6 0 0 1-12 0c0-3.5 3-7 6-11z"/></svg></span><span data-t="light" title="Light"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg></span></div>
- <span class="mut">Reviewer</span><input type="text" id="reviewer" list="revlist" placeholder="your name" style="width:150px" autocomplete="off"><datalist id="revlist"></datalist>
+ <span class="rv"><span class="mut">Reviewer</span><input type="text" id="reviewer" list="revlist" placeholder="your name" autocomplete="off" title=""></span><datalist id="revlist"></datalist></div>
 </div>
 <div class="mbar" id="mbar"><span data-m="file">File</span><span data-m="cand">Candidate</span><span data-m="view">View</span><span data-m="tools">Tools</span><span data-m="help">Help</span></div>
 <div class="banner" id="banner"></div>

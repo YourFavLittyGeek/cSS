@@ -1,6 +1,6 @@
 # Unified cSS score: cohort report — SYNTHETIC TEST (not a result)
 
-Model `uscore-model/1.0` hash `eca8f132ad94d871` (FROZEN 2026-11-19T23:17:11); predictors x1_vessel_continuity_mm, x2_core_contrast_nu, x3_pial_distance_mm; ridge lambda 0.01; effective df 3.13. Probability output: **yes**. EXPERIMENTAL research output; not a diagnosis.
+Model `uscore-model/1.0` hash `93cb3ea6c6f0ac73` (FROZEN 2026-11-20T14:18:04); predictors x1_vessel_continuity_mm, x2_core_contrast_nu, x3_pial_distance_mm; ridge lambda 0.01; effective df 3.13. Probability output: **yes**. EXPERIMENTAL research output; not a diagnosis.
 
 ## 1. Development estimates (nested leave-one-patient-out, out-of-fold; SYN01, SYN02, SYN03, SYN04, SYN05, SYN06)
 

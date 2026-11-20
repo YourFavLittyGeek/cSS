@@ -3,7 +3,7 @@
 # The production app (cSS Pipeline.app) and ~/css_project are never touched.
 set -u
 pkill -f "cSS_experimental/app/css_app.py" 2>/dev/null && echo "stopped the experimental app"
-for a in "/Applications/cSS Experimental.app" "$HOME/Applications/cSS Experimental.app"; do [ -d "$a" ] && rm -rf "$a" && echo "removed $a"; done
+for a in "/Applications/Percival.app" "$HOME/Applications/Percival.app" "/Applications/cSS Experimental.app" "$HOME/Applications/cSS Experimental.app"; do [ -d "$a" ] && rm -rf "$a" && echo "removed $a"; done
 P="${CSS_EXP_BASE:-$HOME/cSS_experimental}"
 if [ "${1:-}" = "--remove-project" ] && [ -d "$P" ]; then
   echo "The experimental project folder $P holds your experimental runs, linked studies and copies of images."

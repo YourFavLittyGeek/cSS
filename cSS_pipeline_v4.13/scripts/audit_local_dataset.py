@@ -29,7 +29,7 @@ def _guard(self, addr):
 socket.socket.connect = _guard
 
 VOCAB = {"css", "vessel", "vein", "normal", "artifact", "artefact", "microbleed", "unsure", "uncertain", "near ich", "other", "not css", "mimic"}
-HELDOUT_FIXED = {"M01", "M12", "M13", "M14", "M15"}     # protected held-out studies named in CLAUDE.md
+HELDOUT_FIXED = {f"M{i}" for i in range(27, 37)}    # protected held-out test set M27-M36 (user decision 2026-11-20; was M01, M12-M15)
 
 a = sys.argv[1:]
 out_dir = a[a.index("--out") + 1] if "--out" in a else None

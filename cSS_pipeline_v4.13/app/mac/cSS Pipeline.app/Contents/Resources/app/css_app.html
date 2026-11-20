@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>cSS Pipeline</title><link rel="icon" id="fav" href="/icon_dark.png">
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Percival</title><link rel="icon" id="fav" href="/icon_dark.png">
 <style>
 :root{color-scheme:dark;--bg:#111418;--panel:#1a1e24;--line:#2c323b;--ink:#e6e8eb;--mut:#9aa3ad;--in:#0d1014;--acc:#3987e5;--ok:#3aa655;--warn:#d9a21b;--bad:#e05252}
 :root[data-theme=light]{color-scheme:light;--bg:#f4f5f7;--panel:#ffffff;--line:#d9dde3;--ink:#16181b;--mut:#5d6570;--in:#ffffff;--acc:#2a78d6;--ok:#2e8b46;--warn:#a87400;--bad:#c93a3a}
@@ -43,13 +43,20 @@ td input{padding:3px 6px;min-width:80px;max-width:150px}td select{padding:3px 26
 .cat.unknown,.cat.missing,.cat.upstream_rerun,.cat.reused,.cat.not_applicable{background:color-mix(in srgb,var(--mut) 22%,transparent);color:var(--mut)}
 .opt{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:6px 0;cursor:pointer;display:block}.opt.on{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 10%,transparent)}.opt.dis{opacity:.45;cursor:not-allowed}
 tr.sel td{background:color-mix(in srgb,var(--acc) 10%,transparent)}.mono{font:12px ui-monospace,Menlo,monospace;color:var(--mut)}
+#bell{position:relative;cursor:pointer;font-size:18px;padding:3px 8px;border-radius:8px;border:1px solid var(--line);background:var(--panel)}#bell b{position:absolute;top:-6px;right:-7px;background:var(--bad);color:#fff;border-radius:9px;font-size:10px;padding:1px 5px;min-width:16px;text-align:center}#bell b:empty{display:none}#bell.urg{border-color:var(--bad)}
+#drawer{position:fixed;top:0;right:0;bottom:0;width:420px;max-width:92vw;background:var(--panel);border-left:1px solid var(--line);box-shadow:-12px 0 40px #0007;z-index:15;transform:translateX(105%);transition:transform .18s ease;display:flex;flex-direction:column}
+#drawer.open{transform:none}#drawer .dh{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line)}#drawer .db{overflow:auto;padding:4px 14px 20px}
+.nsec{font-size:11px;letter-spacing:.4px;color:var(--mut);margin:12px 0 4px;text-transform:uppercase}.nit{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:6px 0;font-size:12.5px;position:relative;background:var(--in)}
+.nit.urgent{border-color:var(--bad)}.nit.action{border-color:var(--warn)}.nit .nt{font-weight:600;padding-right:56px}.nit .nx{position:absolute;right:8px;top:6px;font-size:11px;color:var(--mut);cursor:pointer}.nit .nx:hover{color:var(--ink)}
+.nit .na{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}.nit .na button,.nit .na select{font-size:11px;padding:2px 8px}.nbar{height:6px;background:var(--line);border-radius:3px;margin-top:5px}.nbar i{display:block;height:6px;background:var(--acc);border-radius:3px}
 </style></head><body>
-<div class="top"><img id="logo" src="/icon_dark.png" alt=""><b>cSS Pipeline</b><span class="mut" id="ver"></span>
+<div class="top"><img id="logo" src="/icon_dark.png" alt=""><b style="letter-spacing:.3px">Percival</b><span class="mut" id="ver" style="display:none"></span>
  <nav><button data-v="home" class="on">Home</button><button data-v="add">Add patients</button><button data-v="pts">Patients</button><button data-v="proc">Processing</button><button data-v="res">Results</button><button data-v="read">Review / Blind read</button><button data-v="uni">Unified (experimental)</button><button data-v="set">Settings</button></nav>
- <span class="sp"></span><span class="seg ico" id="awake"><button data-a="1" title="Keep the Mac awake while patients are processing">☕</button><button data-a="0" title="Sleep allowed">🛏</button></span>
+ <span class="sp"></span><span id="bell" title="Notifications (hover = preview, click = keep open)">🔔<b id="bb"></b></span><span class="seg ico" id="awake"><button data-a="1" title="Keep the Mac awake while patients are processing">☕</button><button data-a="0" title="Sleep allowed">🛏</button></span>
  <span class="seg ico" id="theme"><button data-t="light" title="Light theme">☀</button><button data-t="dark" title="Dark theme">☾</button></span><button class="b" id="logbtn">⌨ Show log</button></div>
 <div class="wrap" id="view"></div>
 <div id="log"><div class="h"><b>Log</b><select id="logcode"></select><span class="sp"></span><button class="b" id="logcopy">Copy log</button><button class="b" id="logclose">Close</button></div><pre id="logtext"></pre></div>
+<div id="drawer"><div class="dh"><b style="font-size:15px">Notifications</b><span class="sp"></span><button class="b" id="nread" style="font-size:11px;padding:3px 8px">mark all read</button><button class="b" id="nclose" style="font-size:11px;padding:3px 8px">✕</button></div><div class="db" id="nbody"></div></div>
 <div id="toast"></div><div id="shade"><div class="card" id="dlg"></div></div>
 <script>
 const $=s=>document.querySelector(s),esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -380,7 +387,8 @@ async function procView(v){clearTimeout(PMS.timer);const L=await api("/api/proc/
       toast((x.models&&!x.models.error?Object.entries(x.models).map(([n,m])=>`${esc(n)}: ${esc(m.status)}`).join("<br>")+"<br>":"")+x.results.map(y=>y.ok?`${esc(y.code)}: ${y.copied} files copied + verified${y.freesurfer?`, FreeSurfer ${y.fs_method==="apfs_clone"?"cloned":"copied"} (${y.fs_files} files, verified)`:""}`:`${esc(y.code)}: ${esc(y.error)}`).join("<br>"),!x.ok);PMS.code=codes[0];PMS.opt=null;procView(v)}};
   $("#lscan").onclick=listSrc;
   if(PMS.code)procDetail($("#pmd"))}
-async function procDetail(el){const c=PMS.code,a=await api("/api/proc/audit?code="+encodeURIComponent(c));if(V!=="proc"||c!==PMS.code)return;
+async function procDetail(el,keep){const y=window.scrollY,openR=[...document.querySelectorAll('#pmh tr[id^="d_"]:not(.hide)')].map(r=>r.id);
+  const c=PMS.code,a=await api("/api/proc/audit?code="+encodeURIComponent(c));if(V!=="proc"||c!==PMS.code)return;
   if(!a.ok){el.innerHTML=`<div class="card bad">${esc(a.error)}</div>`;return}
   const I=a.identity||{},im=x=>x?`<span class="mono">${esc((x.sha256||"").slice(0,4))}…${esc((x.sha256||"").slice(-3))} · ${(x.dims||[]).join("×")} · ${(x.voxel_mm||[]).join("×")} mm · ${esc(x.orientation||"?")}</span>${x.header_error?` <span class="bad">header unreadable</span>`:""}`:'<span class="mut">not present</span>';
   const RU=["compatible","compatible_with_limitations","unknown","not_applicable"],st=a.stages,first=["anatomy","registration","align","detect","unified"].find(s=>!RU.includes(st[s].status));
@@ -416,7 +424,10 @@ async function procDetail(el){const c=PMS.code,a=await api("/api/proc/audit?code
     const ok=await ask("Start a new run?",`${esc(c)}: re-run <b>${esc(SN[from])}</b> and every later stage. Reused: ${["anatomy","registration","align","detect"].filter(s=>["anatomy","registration","align","detect","unified"].indexOf(s)<["anatomy","registration","align","detect","unified"].indexOf(from)).map(s=>esc(SN[s])).join(", ")}. The current outputs stay archived.`,[["no","Cancel"],["yes","Start","pri"]]);
     if(ok!=="yes")return;const r=await api("/api/proc/start",{code:c,choice:"selective",rerun_from:from});toast(r.ok?`run ${esc(r.run_id)} started: ${esc(r.run.join(" → "))}`:esc(r.error),!r.ok);procDetail(el)};
   procHistory($("#pmh"),c,a);
-  if(busy)PMS.timer=setTimeout(()=>{if(V==="proc"&&PMS.code===c)procDetail(el)},2500)}
+  if(keep){for(const id of openR){const r=document.getElementById(id);if(!r)continue;r.classList.remove("hide");
+      api(`/api/proc/log?code=${encodeURIComponent(c)}&run_id=${encodeURIComponent(id.slice(2))}`).then(g=>{const p=document.getElementById("lg_"+id.slice(2));if(p)p.textContent=g.log||"(no log: nothing was run in this record)"})}
+    window.scrollTo(0,y)}
+  if(busy)PMS.timer=setTimeout(()=>{if(V==="proc"&&PMS.code===c)procDetail(el,true)},2500)}
 function procHistory(el,c,a){const R=(a.runs||[]).slice().reverse();
   el.innerHTML=R.length?`<table><tr><th>Run</th><th>Started – ended</th><th>Run · reused</th><th>Status</th><th>Software</th><th></th></tr>
   ${R.map(m=>`<tr><td class="mono"><b>${esc(m.run_id)}</b>${m.run_id===a.active_run?' <b style="color:var(--acc)">★ active</b>':""}</td><td>${tstamp(m.created)}${m.finished?" – "+tstamp(m.finished):m.status==="interrupted"?" – (app closed)":""}</td>
@@ -434,10 +445,55 @@ function procHistory(el,c,a){const R=(a.runs||[]).slice().reverse();
   el.querySelectorAll("[data-res]").forEach(b=>b.onclick=async()=>{const r=b.dataset.res;
     if(await ask("Resume this run?",`A new run starts from the first unfinished stage of <b>${esc(r)}</b>. The record of ${esc(r)} is kept as it is.`,[["no","Cancel"],["yes","Resume","pri"]])!=="yes")return;
     const x=await api("/api/proc/resume",{code:c,run_id:r});toast(x.ok?`run ${esc(x.run_id)} started`:esc(x.error),!x.ok);procDetail($("#pmd"))})}
+
+// ---------------- notification centre (v5.14.2-rc4): bell + side curtain; hover = preview, click = keep open
+const NS={open:false,pinned:false,data:null,hoverT:null};
+const NACT={open_selection:["Open study selection",()=>{U.step="selection";go("uni")}],open_train:["Review results",()=>{U.step="train";go("uni")}],open_processing:["Open processing",()=>go("proc")],open_unified:["Open Unified",()=>go("uni")]};
+async function nLoad(){try{const r=await api("/api/notif/list");NS.data=r;$("#bb").textContent=r.badge?String(r.badge):"";$("#bell").classList.toggle("urg",!!r.urgent);if(NS.open)nRender()}catch(e){}}
+function nRender(){const r=NS.data;if(!r)return;const snz=r.settings.snooze_min||5;
+  const item=i=>`<div class="nit ${i.level}"><span class="nx" data-nx="${i.id}" title="remove from the centre (kept in the log)">✕ remove</span><div class="nt">${esc(i.title)}</div>${i.text?`<div class="note">${esc(i.text)}</div>`:""}
+   <div class="na">${(i.actions||[]).filter(a=>NACT[a]).map(a=>`<button class="b" data-na="${a}">${NACT[a][0]}</button>`).join("")}<button class="b" data-sz="${i.id}" data-m="${snz}">⏰ Snooze ${snz} min</button><select data-szs="${i.id}"><option value="">more…</option><option value="15">15 min</option><option value="60">1 h</option><option value="960">until tomorrow</option></select></div>
+   <div class="note" style="margin-top:3px">${new Date(i.t*1000).toLocaleString([], {dateStyle:"short",timeStyle:"short"})}${i.study?" · "+esc(i.study):""}</div></div>`;
+  const sec=(t,arr)=>arr.length?`<div class="nsec">${t} (${arr.length})</div>${arr.map(item).join("")}`:"";
+  const U_=r.items.filter(i=>i.level==="urgent"),A=r.items.filter(i=>i.level==="action"),D=r.items.filter(i=>i.level==="done");
+  $("#nbody").innerHTML=sec("⚠ Action required · urgent",U_)+sec("● Action required",A)+(r.running.length?`<div class="nsec">↻ Running (${r.running.length})</div>${r.running.map(x=>`<div class="nit"><div class="nt">${esc(x.title)}</div><div class="note">${esc(x.text||"")}</div>${x.progress!=null?`<div class="nbar"><i style="width:${Math.round(100*x.progress)}%"></i></div>`:""}</div>`).join("")}`:"")+sec("✓ Finished & changes",D)
+    ||'<p class="mut" style="margin-top:20px">Nothing here. Finished work, changes and things that need you will appear here.</p>';
+  $("#nbody").querySelectorAll("[data-nx]").forEach(b=>b.onclick=async()=>{await api("/api/notif/act",{id:b.dataset.nx,op:"remove"});nLoad()});
+  $("#nbody").querySelectorAll("[data-sz]").forEach(b=>b.onclick=async()=>{await api("/api/notif/act",{id:b.dataset.sz,op:"snooze",minutes:+b.dataset.m});toast(`snoozed ${b.dataset.m} min`);nLoad()});
+  $("#nbody").querySelectorAll("[data-szs]").forEach(e=>e.onchange=async()=>{if(!e.value)return;await api("/api/notif/act",{id:e.dataset.szs,op:"snooze",minutes:+e.value});toast("snoozed");nLoad()});
+  $("#nbody").querySelectorAll("[data-na]").forEach(b=>b.onclick=()=>{nShow(false);NACT[b.dataset.na][1]()})}
+function nShow(on,pin){NS.open=on;if(pin!==undefined)NS.pinned=pin;$("#drawer").classList.toggle("open",on);if(on)nRender()}
+$("#bell").onclick=()=>{if(NS.open&&NS.pinned)nShow(false,false);else nShow(true,true)};
+$("#bell").onmouseenter=()=>{if(!(NS.data&&NS.data.settings.hover))return;clearTimeout(NS.hoverT);NS.hoverT=setTimeout(()=>{if(!NS.open)nShow(true,false)},250)};
+$("#bell").onmouseleave=()=>clearTimeout(NS.hoverT);
+$("#drawer").onmouseleave=()=>{if(NS.open&&!NS.pinned)nShow(false)};
+$("#nclose").onclick=()=>nShow(false,false);$("#nread").onclick=async()=>{await api("/api/notif/act",{id:"*",op:"read"});nLoad()};
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&NS.open)nShow(false,false)});
+nLoad();setInterval(nLoad,5000);
+
+function notifSettingsCard(){const N=S.settings.notif||{};const sec=N.sections||{},src=N.sources||{};
+  const cb=(grp,k,l,on)=>`<label style="margin-right:12px"><input type="checkbox" data-ng="${grp}" data-nk="${k}" ${on!==false?"checked":""}> ${l}</label>`;
+  return `<div class="card"><h2>Notification centre</h2>
+   <div class="row"><span class="lab">Default snooze time</span>${seg("nsz",[["5","5 min"],["15","15 min"],["60","1 h"]],String(N.snooze_min||5))}<input id="nszc" type="number" min="1" max="1440" value="${N.snooze_min||5}" style="width:80px"> <span class="note">minutes (custom)</span></div>
+   <div class="row"><span class="lab">Show in the centre</span>${cb("sections","urgent","action required · urgent",sec.urgent)}${cb("sections","action","action required",sec.action)}${cb("sections","running","running",sec.running)}${cb("sections","done","finished &amp; changes",sec.done)}</div>
+   <div class="row"><span class="lab">Sources</span>${cb("sources","processing","processing runs",src.processing)}${cb("sources","imports","imports",src.imports)}${cb("sources","training","training / models",src.training)}${cb("sources","exports","exports / backups",src.exports)}${cb("sources","reviews","reviews",src.reviews)}</div>
+   <div class="row"><span class="lab">Badge counts</span>${seg("nbd",[["action","action required only"],["all","everything unread"]],N.badge||"action")}</div>
+   <div class="row"><span class="lab">macOS banner</span>${seg("nbn",[["off","off"],["urgent","urgent only"],["all","all"]],N.banner||"urgent")}<span class="note">local notifier only; nothing leaves the Mac</span></div>
+   <div class="row"><span class="lab">Clear finished items after</span>${seg("ncl",[["1","1 day"],["7","7 days"],["never","never"]],String(N.clear_days??7))}</div>
+   <div class="row"><span class="lab">Open the curtain</span>${seg("nhv",[["1","preview on hover"],["0","click only"]],N.hover===false?"0":"1")}</div>
+   <div class="row"><span class="lab">History</span><button class="b" id="nlog">Open full log…</button><button class="b" id="nclr">Clear removed items</button></div></div>`}
+function bindNotifSettings(){const save=async o=>{await api("/api/notif/settings",o);await refresh();nLoad();toast("notification settings saved")};const N=()=>S.settings.notif||{};
+  bindSeg("nsz",x=>save({snooze_min:+x}).then(render));$("#nszc").onchange=e=>save({snooze_min:Math.max(1,+e.target.value||5)}).then(render);
+  bindSeg("nbd",x=>save({badge:x}).then(render));bindSeg("nbn",x=>save({banner:x}).then(render));bindSeg("ncl",x=>save({clear_days:x==="never"?"never":+x}).then(render));bindSeg("nhv",x=>save({hover:x==="1"}).then(render));
+  document.querySelectorAll("[data-ng]").forEach(e=>e.onchange=()=>{const g=e.dataset.ng,o={...(N()[g]||{})};o[e.dataset.nk]=e.checked;save({[g]:o})});
+  $("#nclr").onclick=async()=>{await api("/api/notif/clear_removed",{});toast("removed items cleared")};
+  $("#nlog").onclick=async()=>{const r=await api("/api/notif/log");$("#dlg").innerHTML=`<h2>Notification log</h2><div style="max-height:55vh;overflow:auto"><table>${r.log.map(i=>`<tr><td class="note" style="white-space:nowrap">${new Date(i.t*1000).toLocaleString([], {dateStyle:"short",timeStyle:"short"})}</td><td>${esc(i.level)}</td><td>${esc(i.title)}<div class="note">${esc(i.text||"")}</div></td><td class="note">${i.removed?"removed":""}${i.resolved?" resolved":""}</td></tr>`).join("")||'<tr><td class="mut">empty</td></tr>'}</table></div><div class="acts"><button class="b pri">Close</button></div>`;
+    $("#shade").style.display="flex";$("#dlg").querySelector("button").onclick=()=>$("#shade").style.display="none"}}
 // ---------------- settings
 function setView(v){const s=S.settings,F=s.features;const L={duplicate_check:"Duplicate-scan check",preflight:"Pre-flight check before processing",qc_snapshot:"QC snapshot per patient",notify:"Notification when a patient finishes / fails",
    version_stamp:"Version stamp on every result",share:"Share package (codes only)",backup:"Automatic daily backup (calls, grades, results - no images)",name_warning:"Warn when a folder name looks like a person's name"};
-  v.innerHTML=`<div class="card"><h2>FreeSurfer</h2><div class="row"><span class="lab">FreeSurfer folder</span><input class="wide" id="fs" value="${esc(s.freesurfer_home||"")}" placeholder="/Applications/freesurfer/8.2.0"><button class="b" id="fsc">Choose…</button></div>
+  v.innerHTML=`<div class="card"><h2>Version</h2><div class="row"><span class="lab">Active version</span><span class="mono">${esc(S.version)}</span></div><div class="note">Percival (experimental cSS application) · research software, not a diagnostic device</div></div>
+  <div class="card"><h2>FreeSurfer</h2><div class="row"><span class="lab">FreeSurfer folder</span><input class="wide" id="fs" value="${esc(s.freesurfer_home||"")}" placeholder="/Applications/freesurfer/8.2.0"><button class="b" id="fsc">Choose…</button></div>
    <div class="row"><span class="lab">Licence file</span><input class="wide" id="lic" value="${esc(s.fs_license||"")}" placeholder="found automatically if readable"><button class="b" id="licc">Choose…</button></div>
    <div class="row"><span class="lab">Threads</span><input id="thr" type="number" min="1" max="12" value="${s.threads||4}" style="width:80px"><span class="note">CPU threads for SynthSeg / recon-all (4 is safe on a 36 GB Mac); shared between patients running at the same time</span></div></div>
   <div class="card"><h2>When SynthSeg cannot run for a patient</h2><div class="row">${seg("ap",[["1","Switch automatically + tell me"],["0","Ask me first"]],s.auto_path===false?"0":"1")}</div>
@@ -449,12 +505,14 @@ function setView(v){const s=S.settings,F=s.features;const L={duplicate_check:"Du
   <div class="card"><h2>Backup and export folders (this Mac only)</h2><div class="row"><span class="lab">Backup folder</span><input class="wide" id="bk" value="${esc(s.backup_dir||"")}" placeholder="e.g. /Volumes/LabDisk/cSS_backup"><button class="b" id="bkc">Choose…</button></div>
    <div class="row"><span class="lab">Export / share folder</span><input class="wide" id="xd" value="${esc(s.export_dir||"")}" placeholder="e.g. /Volumes/LabDisk/cSS_exports"><button class="b" id="xdc">Choose…</button></div>
    <div class="note">Both must be existing local folders. Refused: ~/Desktop and ~/Documents (iCloud "Desktop &amp; Documents" can sync them silently), iCloud Drive, Dropbox, Google Drive, OneDrive and other cloud folders. Nothing is ever uploaded.</div></div>
+  ${notifSettingsCard()}
   <div class="card"><h2>Features</h2>${Object.keys(L).map(k=>`<div class="row"><label><input type="checkbox" data-ft="${k}" ${F[k]?"checked":""}> ${L[k]}</label></div>`).join("")}</div>
   <div class="row"><button class="b" id="quit">Quit the app</button><span class="note">closing the window does not stop processing; Quit does</span><span class="sp"></span><button class="b pri" id="save">Save settings</button></div>`;
+  bindNotifSettings();
   bindSeg("rr",async x=>{await api("/api/settings",{rerun_mode:x});render()});$("#vsetb").onclick=vsetDlg;
   bindSeg("ar",async x=>{await api("/api/settings",{auto_retry:x==="1"});render()});
   bindSeg("ap",async x=>{await api("/api/settings",{auto_path:x==="1"});render()});
-  $("#quit").onclick=async()=>{if(!confirm("Quit cSS Pipeline?"))return;let r=await api("/api/quit",{});if(!r.ok&&confirm(r.error+"\n\nQuit anyway?"))r=await api("/api/quit",{force:true});if(r.ok)document.body.innerHTML='<p style="padding:40px">cSS Pipeline has stopped. Open it again from Applications.</p>'};
+  $("#quit").onclick=async()=>{if(!confirm("Quit Percival?"))return;let r=await api("/api/quit",{});if(!r.ok&&confirm(r.error+"\n\nQuit anyway?"))r=await api("/api/quit",{force:true});if(r.ok)document.body.innerHTML='<p style="padding:40px">cSS Pipeline has stopped. Open it again from Applications.</p>'};
   $("#licc").onclick=async()=>{const p=await pick("file","Choose your FreeSurfer license.txt");if(p)$("#lic").value=p};
   $("#fsc").onclick=async()=>{const p=await pick("folder","Choose the FreeSurfer folder");if(p)$("#fs").value=p.replace(/\/$/,"")};$("#bkc").onclick=async()=>{const p=await pick("folder","Choose the backup folder");if(p)$("#bk").value=p};$("#xdc").onclick=async()=>{const p=await pick("folder","Choose the export folder");if(p)$("#xd").value=p};
   $("#save").onclick=async()=>{const f={};document.querySelectorAll("[data-ft]").forEach(x=>f[x.dataset.ft]=x.checked);

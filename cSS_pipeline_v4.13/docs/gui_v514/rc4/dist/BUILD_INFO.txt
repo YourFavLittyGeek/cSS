@@ -1,0 +1,5 @@
+app:      Percival.app  (v5.14.2-rc4 Percival (experimental/unified-gui: study selection + training gate, notification centre, UI fixes, write guard, production models))
+source:   ead498f3bc61a318c5904aea3deb64556ca6fe89  branch experimental/unified-gui +uncommitted changes
+built:    2026-11-20 14:29 UTC on Linux x86_64
+zip sha256: 222c9feef9ef79fd1969daf71688b409265fc8d8272d091a292c65803bbbe4df
+files:    124

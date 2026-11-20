@@ -17,5 +17,7 @@ python3 tests/check_pm_full_pipeline.py
 python3 tests/check_export_safety.py
 python3 tests/check_audit_local.py
 python3 tests/check_local_only.py
+python3 tests/check_ui_poll.py
+python3 tests/check_selection_notifications.py
 python3 tests/check_app_unified.py
 echo "unified-score tests: all passed"

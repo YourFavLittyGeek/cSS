@@ -118,8 +118,28 @@ def load_records(out, sids):
     return R
 
 
+def _jl_gate(base):
+    p = os.path.join(base, "app_data", "split", "gate.json")
+    if not os.path.exists(p): return None                        # no gate configured yet: legacy behaviour (open)
+    try: return json.load(open(p))
+    except Exception: return dict(open=False, by="unreadable gate file")
+
+
+def _label_fingerprints(base, studies):
+    """sha256 of each training study's shared calls file at training time (the app compares it later: 'calls changed after training')"""
+    import hashlib
+    out = {}
+    for s in studies:
+        p = os.path.join(base, "review", f"{s}_calls.csv")
+        out[s] = hashlib.sha256(open(p, "rb").read()).hexdigest() if os.path.exists(p) else None
+    return out
+
+
 def train(base, cohort, out, labels_access=None):
     """development only. Returns the model dict (frozen) and the development report dict."""
+    gate = _jl_gate(base)                                       # v5.14.2-rc4: the user's training gate (app_data/split/gate.json)
+    if gate is not None and not gate.get("open"):
+        raise CohortError(f"training gate is CLOSED (closed {gate.get('at', '')} by {gate.get('by', '?')}) - open it in the app (Unified > Study selection)")
     dev = cohort.studies("development"); cohort.check_fit_set(dev)
     LA = labels_access or LabelAccess(cohort, base, mode="development", log_dir=out)
     if LA.mode != "development": raise CohortError("training accepts only a development-mode label boundary")
@@ -153,12 +173,13 @@ def train(base, cohort, out, labels_access=None):
                calibration_slope=slope, calibration_intercept=inter, reliability_bins=_bins(y[ok], p_cal[ok]),
                coefficient_stability=stab, folds=folds, probability_output=prob_ok, ordering_cut=cut,
                v510_auc_same_candidates=md.auc(y[vok], v510[vok]) if vok.sum() else None,
-               v510_note="v5.10 was fitted on these same M02-M11 calls: its AUC here is IN-SAMPLE (optimistic), the unified score's is out-of-fold",
+               v510_note="v5.10 was fitted on the M02-M11 calls (part of the development set): its AUC here is IN-SAMPLE (optimistic), the unified score's is out-of-fold",
                penalty_at_grid_boundary=bool(any(f['lam'] in (md.LAMBDAS[0], md.LAMBDAS[-1]) for f in folds)),
                label_warnings=warn, feature_missingness=_missing(rows), estimate_type="CROSS-VALIDATION (nested leave-one-patient-out on the development patients; every prediction out-of-fold)")
     rep.update(_operating(y[ok], (p_cal if prob_ok else p_raw)[ok], pid[ok], cut))
     M = final.to_json(train_studies=dev, ordering_cut=cut, probability_output=prob_ok, cohort_manifest_sha=cohort.manifest_sha,
-                      synthetic_test=cohort.synthetic, development_report_summary=dict(auc=a_cal, slope=slope))
+                      synthetic_test=cohort.synthetic, development_report_summary=dict(auc=a_cal, slope=slope),
+                      split_version=getattr(cohort, "split_version", None), label_fingerprints=_label_fingerprints(base, dev))
     M["frozen"] = False                    # v5.14-gui: training never freezes; freeze() is a separate, confirmed step
     os.makedirs(out, exist_ok=True)
     json.dump(M, open(f"{out}/model_trained.json", "w"), indent=1)
@@ -308,4 +329,11 @@ cohort, base, mode="heldout_evaluation", frozen_model=f"{out}/model_frozen.json"
     if len(y) > 5: rep["calibration_slope"], rep["calibration_intercept"] = md.calib_slope(y, p)
     rep.update(_operating(y, p, pid, M["ordering_cut"]))
     json.dump(rep, open(f"{out}/heldout_report.json", "w"), indent=1, default=_np)
+    try:                                                         # v5.14.2-rc4: these test studies are now "spent" for this model
+        import datetime as _dt
+        sp = os.path.join(base, "app_data", "split", "spent.json"); os.makedirs(os.path.dirname(sp), exist_ok=True)
+        d = json.load(open(sp)) if os.path.exists(sp) else {}
+        for s_ in cohort.studies("held-out"): d.setdefault(s_, []).append(dict(model_hash=frozen_hash, at=_dt.datetime.now().isoformat(timespec="seconds")))
+        json.dump(d, open(sp, "w"), indent=1)
+    except Exception: pass
     return rep

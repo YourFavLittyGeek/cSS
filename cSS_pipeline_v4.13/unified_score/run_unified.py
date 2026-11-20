@@ -2,7 +2,7 @@
 Reads production outputs read-only from $CSS_BASE; writes only to $CSS_BASE/uscore (or --out).
 
   python unified_score/run_unified.py extract [ID ...]   features + decomposition + detectors + perturbations (no labels)
-  python unified_score/run_unified.py train              development (M02-M11) only: nested LOPO -> model_trained.json (NOT frozen)
+  python unified_score/run_unified.py train              development studies only (manifest: M01-M26 since 2026-11-20): nested LOPO -> model_trained.json (NOT frozen)
   python unified_score/run_unified.py freeze FREEZE      freeze the trained model -> model_frozen.json
   python unified_score/run_unified.py score              frozen model -> categories + per-candidate reports (no labels)
   python unified_score/run_unified.py report             cohort report (development and held-out kept separate)

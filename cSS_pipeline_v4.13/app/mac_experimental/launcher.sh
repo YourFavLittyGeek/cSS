@@ -1,12 +1,12 @@
 #!/bin/bash
-# cSS Experimental launcher (test release candidate). Kept SEPARATE from the production app:
+# Percival (experimental cSS app) launcher (test release candidate). Kept SEPARATE from the production app:
 #   project folder  ~/cSS_experimental  (CSS_EXP_BASE overrides; the production ~/css_project is refused)
 #   port 8810 (production uses 8800), bundle id research.css.pipeline.experimental
 # On start it installs the pipeline shipped in this bundle into the project when the bundle's build differs (old scripts backed up),
 # copies the app code, finds conda env "css" + FreeSurfer, starts the app server and opens its window. No network access is needed.
 CSS_BASE="${CSS_EXP_BASE:-$HOME/cSS_experimental}"; export CSS_BASE
 RES="$(cd "$(dirname "$0")/../Resources" && pwd)"
-say_err() { /usr/bin/osascript -e "display dialog \"$1\" with title \"cSS Experimental\" buttons {\"OK\"} default button 1 with icon caution" >/dev/null 2>&1; }
+say_err() { /usr/bin/osascript -e "display dialog \"$1\" with title \"Percival\" buttons {\"OK\"} default button 1 with icon caution" >/dev/null 2>&1; }
 # v5.14.2-rc2: canonical path of a folder that may not exist yet (deepest existing ancestor resolved with pwd -P, symlinks included)
 canon() { local p="$1" rest=""; case "$p" in "~"*) p="$HOME${p#\~}";; /*) ;; *) p="$PWD/$p";; esac
   while [ ! -d "$p" ]; do rest="/$(basename "$p")$rest"; p="$(dirname "$p")"; done; echo "$(cd "$p" && pwd -P)$rest"; }

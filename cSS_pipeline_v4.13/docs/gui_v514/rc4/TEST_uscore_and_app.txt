@@ -1,0 +1,630 @@
+PASS  0 verbatim copy matches recorded function sha256  
+PASS  0 module imports only numpy / scipy  
+PASS  1 band: status ok and labelled experimental  
+PASS  1 band: core smaller than bloomed candidate  core 1028 cand 1601
+PASS  1 band: core recalls the deposit  recall 0.94
+PASS  1 band: support = candidate minus core  
+PASS  1 band: core within 1 voxel of candidate  outside candidate 2
+PASS  1 band: some blooming moved to support  bloom kept in core 0.00
+PASS  2 thin: core found  core 54 vox
+PASS  2 thin: core recalls the thin deposit  recall 0.95
+PASS  2 thin: core stays near the deposit (median <= 1 mm)  median 0.00 mm
+PASS  3 curved: core recalls the arc  recall 0.92
+INFO  3 curved: core in 5 pieces, largest holds 0.99 of core voxels
+KNOWN-LIMIT  3 core fragments (per-voxel threshold on noisy contrast)  5 pieces; core connectivity / piece counts are not reliable
+PASS  4a equal bands: both bands in the core  recall 0.94 / 0.96
+PASS  4b strong+weak: strong band kept  strong 1.00
+PASS  4b strong+weak: candidate mask returned unchanged (weak band never lost from the record)  
+PASS  4b strong+weak: weak band not in core is kept as support  
+INFO  4b weak band core recall 0.16
+KNOWN-LIMIT  4b weak band next to a strong one is lost from the core  weak recall 0.16 (v5.13 PH6 #1 behaviour)
+INFO  4b gap voxels between bands in core: 10 of 67
+PASS  5 unstable: fraction reported in [0, 1]  
+PASS  5 unstable: shallow profile at least as unstable as sharp  sharp 0.22 shallow 0.85
+PASS  5 unstable voxels lie inside the 1-voxel zone  
+INFO  6 pure noise: share of candidate called core 0.01 (5 seeds)
+PASS  6 pure noise: core share reported (measured)  
+PASS  7 shell too small: status unavailable  background shell too small
+PASS  8 inputs not modified  
+PASS  8 deterministic  
+PASS  8 separate dark blob reported as adjacent, not core  adjacent 15 core 0
+PASS  8 anisotropic 0.5x0.5x2 mm: core recalls the band  recall 0.95
+INFO  10 verbatim on masked input: 623 masked voxels in core, deposit recall 0.03
+PASS  10 masked edge: no masked-out voxel in the core  filled 48600
+PASS  10 masked edge: deposit recall kept  recall 0.93
+KNOWN-LIMIT  10 verbatim decompose() treats masked zeros as maximal darkness (fixed by input preparation in the wrapper)  623 voxels
+REGIME  band 1 mm blur 0.4 mm k1: deposit median c   2.4  core recall 0.49  pieces 6  unstable 0.67
+REGIME  band 1 mm blur 0.4 mm k2: deposit median c   4.9  core recall 0.83  pieces 5  unstable 0.37
+REGIME  band 1 mm blur 0.4 mm k3: deposit median c   7.2  core recall 0.93  pieces 1  unstable 0.21
+REGIME  band 1 mm blur 0.4 mm k5: deposit median c  12.0  core recall 0.98  pieces 6  unstable 0.06
+REGIME  band 1 mm blur 0.8 mm k1: deposit median c   1.7  core recall 0.35  pieces 4  unstable 0.78
+REGIME  band 1 mm blur 0.8 mm k2: deposit median c   3.4  core recall 0.68  pieces 16  unstable 0.58
+REGIME  band 1 mm blur 0.8 mm k3: deposit median c   5.1  core recall 0.81  pieces 21  unstable 0.43
+REGIME  band 1 mm blur 0.8 mm k5: deposit median c   8.5  core recall 0.94  pieces 17  unstable 0.26
+REGIME  tube 0.5 mm blur 0.4 mm k1: deposit median c   1.4  core recall 0.10  pieces 3  unstable 0.79
+REGIME  tube 0.5 mm blur 0.4 mm k2: deposit median c   3.0  core recall 0.73  pieces 7  unstable 0.67
+REGIME  tube 0.5 mm blur 0.4 mm k3: deposit median c   4.5  core recall 1.00  pieces 2  unstable 0.48
+REGIME  tube 0.5 mm blur 0.4 mm k5: deposit median c   7.2  core recall 1.00  pieces 1  unstable 0.18
+REGIME  tube 0.5 mm blur 0.8 mm k1: deposit median c   0.4  core recall 0.00  pieces 0  unstable None
+REGIME  tube 0.5 mm blur 0.8 mm k2: deposit median c   0.9  core recall 0.07  pieces 3  unstable 0.71
+REGIME  tube 0.5 mm blur 0.8 mm k3: deposit median c   1.5  core recall 0.22  pieces 5  unstable 0.75
+REGIME  tube 0.5 mm blur 0.8 mm k5: deposit median c   2.1  core recall 0.59  pieces 2  unstable 0.78
+
+core_decompose: 0 FAIL, 3 known limits reported (experimental, not ground truth)
+PASS  x2 reliable on a clear plate, several noise units  5.253004723878635
+PASS  x2 no deposit -> not reliable (never 'reliable low')  ['core unstable (> 50 % of core voxels unstable)']
+PASS  x2 shell too small -> unavailable  
+PASS  x3 = known depth (-1.0 mm) within half a voxel  -1.0
+PASS  x3 / x4 unavailable without anatomy  
+PASS  x3 unreliable under bad registration (value kept)  
+PASS  x3 reliable / x4 unreliable at marginal registration (sulcal direction is stricter)  
+PASS  x4 sheet lying in the surface ~ 1  (0.99994221393979, 'sheet')
+PASS  x4 tube crossing the surface ~ 0  (0.0020842343466829227, 'reliable')
+PASS  x4 ball: direction undefined -> unreliable  ['direction undefined (axis ratios 1.07, 1.05 < 2.25)']
+PASS  x1 vessel entering and exiting: traverse, ~ sum of the two reaches (12 + 12 mm, minus zone)  (23.5, [12.0, 11.5])
+PASS  x1 censored at the crop border is a NOTE, status stays reliable  
+PASS  x1 vessel on one side only: contact without traverse -> 0  
+PASS  x1 no vessel map -> unavailable (not 0)  
+PASS  x1 no vessel near -> 0, no contact  
+PASS  x5 band continuing 5.5 mm beyond the brain mask: measured 5.5 .. 7.5 mm (blooming adds length)  7.0
+KNOWN-BIAS  x5 overestimates by +1.5 mm here (blur / noise attached to the band end; first run: +1.5 mm). Documented in FEATURE_SPEC.
+PASS  x5 signal void beyond the mask is not 'continuation'  0.5
+PASS  x5 without unmasked SWI -> unavailable  
+PASS  x5 confined plate -> 0  
+PASS  x4 audit: line-mode x4 cannot tell along-sulcus from across-sulcus (both ~1: it measures surface tangency)  1.00 vs 1.00
+PASS  x4b (exploratory): along the sulcus ~1  1.0
+PASS  x4b (exploratory): across the sulcus ~0  0.0
+PASS  x4b (exploratory): flat convexity -> unavailable (no sulcal axis), never a value  
+PASS  x4b is NOT a model predictor  
+PASS  every feature has a status in the three states  
+PASS  candidate never modified  
+PASS  spec documents units, inputs, reliability, missing data, failure modes for all five  
+
+uscore features: 0 FAIL
+
+== css_sulcal_bank: category uncertain  detectors {'surface_vein': 'not_confirmed', 'extracranial_continuation': 'not_confirmed', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (0.0, 'reliable')
+     x2_core_contrast_nu        (2.91, 'unreliable')
+     x3_pial_distance_mm        (-0.6, 'reliable')
+     x4_sulcal_alignment        (0.99, 'reliable')
+     x5_extracranial_mm         (0.0, 'reliable')
+     protective: ['dark-core decomposition unstable']
+PASS  css_sulcal_bank: original candidate preserved  
+PASS  css_sulcal_bank: CRITICAL genuine cSS not called a high-confidence alternative  
+PASS  css_sulcal_bank: CRITICAL no suppression proposal for genuine cSS  
+
+== css_convexity: category uncertain  detectors {'surface_vein': 'not_confirmed', 'extracranial_continuation': 'not_confirmed', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (0.0, 'reliable')
+     x2_core_contrast_nu        (3.74, 'reliable')
+     x3_pial_distance_mm        (-1.2, 'reliable')
+     x4_sulcal_alignment        (1.0, 'reliable')
+     x5_extracranial_mm         (0.0, 'reliable')
+     protective: []
+PASS  css_convexity: original candidate preserved  
+PASS  css_convexity: CRITICAL genuine cSS not called a high-confidence alternative  
+PASS  css_convexity: CRITICAL no suppression proposal for genuine cSS  
+
+== surface_vein: category alternative_high_confidence  detectors {'surface_vein': 'confirmed', 'extracranial_continuation': 'not_confirmed', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (22.2, 'reliable')
+     x2_core_contrast_nu        (4.49, 'reliable')
+     x3_pial_distance_mm        (1.8, 'reliable')
+     x4_sulcal_alignment        (0.99, 'reliable')
+     x5_extracranial_mm         (0.0, 'reliable')
+     protective: []
+PASS  surface_vein: original candidate preserved  
+PASS  surface_vein: suppression record says not applied  
+DETECTOR  surface_vein: surface_vein -> confirmed  (category alternative_high_confidence)
+
+== vein_parallel_to_sulcus: category uncertain  detectors {'surface_vein': 'confirmed', 'extracranial_continuation': 'not_confirmed', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (22.2, 'reliable')
+     x2_core_contrast_nu        (3.1, 'unreliable')
+     x3_pial_distance_mm        (0.6, 'reliable')
+     x4_sulcal_alignment        (0.99, 'unreliable')
+     x5_extracranial_mm         (0.0, 'reliable')
+     protective: ['dark-core decomposition unstable']
+PASS  vein_parallel_to_sulcus: original candidate preserved  
+
+== vein_overlapping_css: category uncertain  detectors {'surface_vein': 'not_confirmed', 'extracranial_continuation': 'not_confirmed', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (23.4, 'reliable')
+     x2_core_contrast_nu        (4.42, 'reliable')
+     x3_pial_distance_mm        (-0.6, 'reliable')
+     x4_sulcal_alignment        (1.0, 'reliable')
+     x5_extracranial_mm         (0.0, 'reliable')
+     protective: ['mixed vessel / sheet object']
+PASS  vein_overlapping_css: original candidate preserved  
+PASS  vein_overlapping_css: CRITICAL genuine cSS not called a high-confidence alternative  
+PASS  vein_overlapping_css: CRITICAL no suppression proposal for genuine cSS  
+
+== thin_curved_css: category uncertain  detectors {'surface_vein': 'not_confirmed', 'extracranial_continuation': 'not_confirmed', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (0.0, 'reliable')
+     x2_core_contrast_nu        (2.57, 'unreliable')
+     x3_pial_distance_mm        (-1.2, 'reliable')
+     x4_sulcal_alignment        (1.0, 'reliable')
+     x5_extracranial_mm         (0.0, 'reliable')
+     protective: ['dark-core decomposition unstable']
+PASS  thin_curved_css: original candidate preserved  
+PASS  thin_curved_css: CRITICAL genuine cSS not called a high-confidence alternative  
+PASS  thin_curved_css: CRITICAL no suppression proposal for genuine cSS  
+
+== fragmented_css: category uncertain  detectors {'surface_vein': 'not_confirmed', 'extracranial_continuation': 'not_confirmed', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (0.0, 'reliable')
+     x2_core_contrast_nu        (3.37, 'unreliable')
+     x3_pial_distance_mm        (-1.2, 'reliable')
+     x4_sulcal_alignment        (0.99, 'reliable')
+     x5_extracranial_mm         (0.0, 'reliable')
+     protective: ['dark-core decomposition unstable']
+PASS  fragmented_css: original candidate preserved  
+PASS  fragmented_css: CRITICAL genuine cSS not called a high-confidence alternative  
+PASS  fragmented_css: CRITICAL no suppression proposal for genuine cSS  
+
+== adjacent_css_bands: category uncertain  detectors {'surface_vein': 'not_confirmed', 'extracranial_continuation': 'not_confirmed', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (0.0, 'reliable')
+     x2_core_contrast_nu        (2.9, 'unreliable')
+     x3_pial_distance_mm        (-0.6, 'reliable')
+     x4_sulcal_alignment        (0.97, 'unreliable')
+     x5_extracranial_mm         (0.0, 'reliable')
+     protective: ['dark-core decomposition unstable']
+PASS  adjacent_css_bands: original candidate preserved  
+PASS  adjacent_css_bands: CRITICAL genuine cSS not called a high-confidence alternative  
+PASS  adjacent_css_bands: CRITICAL no suppression proposal for genuine cSS  
+
+== mixed_vein_and_sheet: category uncertain  detectors {'surface_vein': 'not_confirmed', 'extracranial_continuation': 'not_confirmed', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (0.0, 'reliable')
+     x2_core_contrast_nu        (4.2, 'reliable')
+     x3_pial_distance_mm        (-0.6, 'reliable')
+     x4_sulcal_alignment        (1.0, 'reliable')
+     x5_extracranial_mm         (0.0, 'reliable')
+     protective: []
+PASS  mixed_vein_and_sheet: original candidate preserved  
+PASS  mixed_vein_and_sheet: CRITICAL genuine cSS not called a high-confidence alternative  
+PASS  mixed_vein_and_sheet: CRITICAL no suppression proposal for genuine cSS  
+
+== extracranial_artifact: category alternative_high_confidence  detectors {'surface_vein': 'not_confirmed', 'extracranial_continuation': 'confirmed', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (0.0, 'reliable')
+     x2_core_contrast_nu        (5.06, 'reliable')
+     x3_pial_distance_mm        (-0.6, 'reliable')
+     x4_sulcal_alignment        (0.0, 'reliable')
+     x5_extracranial_mm         (9.0, 'reliable')
+     protective: []
+PASS  extracranial_artifact: original candidate preserved  
+PASS  extracranial_artifact: suppression record says not applied  
+DETECTOR  extracranial_artifact: extracranial_continuation -> confirmed  (category alternative_high_confidence)
+
+== skull_interface_artifact: category alternative_high_confidence  detectors {'surface_vein': 'not_confirmed', 'extracranial_continuation': 'not_confirmed', 'skull_interface': 'confirmed'}
+     x1_vessel_continuity_mm    (0.0, 'reliable')
+     x2_core_contrast_nu        (16750503.54, 'reliable')
+     x3_pial_distance_mm        (4.8, 'reliable')
+     x4_sulcal_alignment        (1.0, 'reliable')
+     x5_extracranial_mm         (0.0, 'reliable')
+     protective: []
+PASS  skull_interface_artifact: original candidate preserved  
+PASS  skull_interface_artifact: suppression record says not applied  
+DETECTOR  skull_interface_artifact: skull_interface -> confirmed  (category alternative_high_confidence)
+
+== css_subarachnoid_near_skull: category uncertain  detectors {'surface_vein': 'not_confirmed', 'extracranial_continuation': 'not_confirmed', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (0.0, 'reliable')
+     x2_core_contrast_nu        (2.31, 'unreliable')
+     x3_pial_distance_mm        (1.8, 'reliable')
+     x4_sulcal_alignment        (1.0, 'reliable')
+     x5_extracranial_mm         (0.0, 'reliable')
+     protective: ['dark-core decomposition unstable']
+PASS  css_subarachnoid_near_skull: original candidate preserved  
+PASS  css_subarachnoid_near_skull: CRITICAL genuine cSS not called a high-confidence alternative  
+PASS  css_subarachnoid_near_skull: CRITICAL no suppression proposal for genuine cSS  
+
+== css_in_thick_csf_2.4mm: category uncertain  detectors {'surface_vein': 'not_confirmed', 'extracranial_continuation': 'not_confirmed', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (0.0, 'reliable')
+     x2_core_contrast_nu        (6.63, 'reliable')
+     x3_pial_distance_mm        (2.4, 'reliable')
+     x4_sulcal_alignment        (1.0, 'reliable')
+     x5_extracranial_mm         (0.0, 'reliable')
+     protective: []
+PASS  css_in_thick_csf_2.4mm: original candidate preserved  
+PASS  css_in_thick_csf_2.4mm: CRITICAL genuine cSS not called a high-confidence alternative  
+PASS  css_in_thick_csf_2.4mm: CRITICAL no suppression proposal for genuine cSS  
+
+== css_directly_under_skull: category uncertain  detectors {'surface_vein': 'not_confirmed', 'extracranial_continuation': 'not_confirmed', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (0.0, 'reliable')
+     x2_core_contrast_nu        (2.67, 'unreliable')
+     x3_pial_distance_mm        (-0.6, 'reliable')
+     x4_sulcal_alignment        (1.0, 'reliable')
+     x5_extracranial_mm         (0.0, 'reliable')
+     protective: ['dark-core decomposition unstable']
+PASS  css_directly_under_skull: original candidate preserved  
+PASS  css_directly_under_skull: CRITICAL genuine cSS not called a high-confidence alternative  
+PASS  css_directly_under_skull: CRITICAL no suppression proposal for genuine cSS  
+
+== css_touching_sulcal_vein: category uncertain  detectors {'surface_vein': 'not_confirmed', 'extracranial_continuation': 'not_confirmed', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (17.58, 'reliable')
+     x2_core_contrast_nu        (3.37, 'unreliable')
+     x3_pial_distance_mm        (-0.6, 'reliable')
+     x4_sulcal_alignment        (0.99, 'reliable')
+     x5_extracranial_mm         (0.0, 'reliable')
+     protective: ['mixed vessel / sheet object', 'dark-core decomposition unstable']
+PASS  css_touching_sulcal_vein: original candidate preserved  
+PASS  css_touching_sulcal_vein: CRITICAL genuine cSS not called a high-confidence alternative  
+PASS  css_touching_sulcal_vein: CRITICAL no suppression proposal for genuine cSS  
+
+== missing_vessel_map: category uncertain  detectors {'surface_vein': 'unresolved', 'extracranial_continuation': 'not_confirmed', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (None, 'unavailable')
+     x2_core_contrast_nu        (3.85, 'reliable')
+     x3_pial_distance_mm        (-1.2, 'reliable')
+     x4_sulcal_alignment        (1.0, 'reliable')
+     x5_extracranial_mm         (0.0, 'reliable')
+     protective: ['surface_vein: inputs unavailable or unresolved']
+PASS  missing_vessel_map: original candidate preserved  
+PASS  missing_vessel_map: CRITICAL genuine cSS not called a high-confidence alternative  
+PASS  missing_vessel_map: CRITICAL no suppression proposal for genuine cSS  
+PASS  missing vessel map: x1 unavailable  
+PASS  missing vessel map: vein detector unresolved  
+
+== misregistration: category uncertain  detectors {'surface_vein': 'not_confirmed', 'extracranial_continuation': 'unresolved', 'skull_interface': 'not_confirmed'}
+     x1_vessel_continuity_mm    (0.0, 'unreliable')
+     x2_core_contrast_nu        (2.94, 'unreliable')
+     x3_pial_distance_mm        (-0.6, 'unreliable')
+     x4_sulcal_alignment        (0.99, 'unreliable')
+     x5_extracranial_mm         (0.0, 'unreliable')
+     protective: ['registration not adequate (unreliable)', 'dark-core decomposition unstable', 'extracranial_continuation: inputs unavailable or unresolved']
+PASS  misregistration: original candidate preserved  
+PASS  misregistration: CRITICAL genuine cSS not called a high-confidence alternative  
+PASS  misregistration: CRITICAL no suppression proposal for genuine cSS  
+PASS  misregistration: x3 and x4 unreliable  
+PASS  misregistration: protective registration flag  
+PASS  suppression disabled (constant)  
+
+adversarial: 0 FAIL over 17 scenes
+css_sulcal_bank                cSS     {'uncertain': 5}
+css_convexity                  cSS     {'uncertain': 5}
+surface_vein                   non-cSS {'alternative_high_confidence': 4, 'uncertain': 1}
+vein_parallel_to_sulcus        non-cSS {'uncertain': 5}
+vein_overlapping_css           cSS     {'uncertain': 5}
+thin_curved_css                cSS     {'uncertain': 5}
+fragmented_css                 cSS     {'uncertain': 5}
+adjacent_css_bands             cSS     {'uncertain': 5}
+mixed_vein_and_sheet           cSS     {'uncertain': 5}
+extracranial_artifact          non-cSS {'alternative_high_confidence': 5}
+skull_interface_artifact       non-cSS {'alternative_high_confidence': 5}
+css_subarachnoid_near_skull    cSS     {'uncertain': 5}
+css_in_thick_csf_2.4mm         cSS     {'uncertain': 5}
+css_directly_under_skull       cSS     {'uncertain': 5}
+css_touching_sulcal_vein       cSS     {'uncertain': 5}
+missing_vessel_map             cSS     {'uncertain': 5}
+misregistration                cSS     {'uncertain': 5}
+
+seeds: 5 per scene; CRITICAL failures 0 []
+PASS  1 real manifest (2026-11-20 split): 26 development M01-M26, 10 held-out M27-M36, only M  
+PASS  1 P006 refused  
+PASS  1 PH6 refused  
+PASS  1 T05 refused  
+PASS  1 M27 / M31 / M36 listed as held-out; M18 / M23 now development (2026-11-20 split)  
+PASS  1 fitting on a held-out study refused  
+PASS  1 non-M prefix refused outside synthetic test mode  
+PASS  1 synthetic mode may not use M  
+PASS  1 manifest including a non-M study refused  
+PASS  2 held-out labels refused in development mode  
+PASS  2 refused access is logged  
+PASS  2 held-out mode without frozen model refused  
+PASS  3 effective df <= 6 and decreases with the penalty  edf 6.00 -> 2.99
+PASS  3 coefficient directions recovered  beta [ 0.02  2.14 -1.64  0.29  0.08  0.04]
+PASS  3 unavailable predictor contributes exactly 0 (never evidence)  
+PASS  3 unreliable predictor value ignored (same score as unavailable)  
+PASS  3 AUC of a perfect score = 1, inverted = 0  
+PASS  3 fallback: 30 events -> x4 dropped (30/4 < 10 -> x5 too)  ['x1_vessel_continuity_mm', 'x2_core_contrast_nu', 'x3_pial_distance_mm'] ['fallback: 30 events / 5 slopes < 10 -> dropped x4_sulcal_alignment', 'fallback: 30 events / 4 slopes < 10 -> dropped x5_extracranial_mm']
+PASS  3 fallback: 61 events keeps all five  
+PASS  4 no leakage: flipping patient P3's labels leaves P3's calibrated predictions unchanged  
+PASS  4 ...and changes other patients' predictions (labels are used for training)  
+PASS  4 penalty chosen per outer fold from training patients  
+PASS  5 refuses an excluded / real study id  
+PASS  5 training does NOT freeze  
+PASS  5 freeze refused without the confirmation text  
+PASS  5 model trained on development studies only  
+PASS  5 development training read no held-out label  
+PASS  5 model frozen with a hash  
+PASS  5 every candidate has a report (none dropped)  36 / 36
+PASS  5 every report is stamped synthetic  
+INFO  5 categories: {'alternative_high_confidence': 4, 'css_compatible': 7, 'uncertain': 25}
+PASS  5 report fields complete  
+PASS  5 probability withheld when not justified  
+PASS  5 suppression never applied  4 audit records
+PASS  5 audit records carry model hash, input hash, reliability  
+PASS  5 production-layout inputs unchanged (review/ data/ work/ raw/)  
+PASS  5 held-out evaluation refused with a wrong hash  
+PASS  5 held-out refused with the right hash but NO written authorization  
+PASS  5 held-out refused with an altered authorization statement  
+PASS  5 held-out evaluation runs with the frozen hash and is labelled independent  n 12
+PASS  5 held-out access logged as granted only in held-out mode  
+PASS  5 reproducible: same model hash on a second run  
+PASS  5 synthetic model refused for real scoring  
+PASS  5 CRITICAL: no reader-cSS candidate is a high-confidence alternative  []
+PASS  5 cohort report written, marked synthetic, development and held-out sections separate  
+PASS  6 app step: patient outside the study cohort scored for display  {'study': 'SYN01', 'n': 4, 'model': False, 'css_compatible': 0, 'uncertain': 3, 'alternative_high_confidence': 1}
+PASS  6 app step: a synthetic model is never used to score a real cohort  
+PASS  6 app step: no label read  
+PASS  6 app step: report file written  
+PASS  6 app step: training still refuses non-cohort studies  
+
+uscore pipeline: 0 FAIL
+PASS  static: no code outside uscore/common.py references the label reader (_read_calls / load_calls / match_calls)  []
+PASS  static: _read_calls is called only inside LabelAccess.labels  2 occurrences (def + one call)
+PASS  development boundary refuses held-out SYN06  
+PASS  development boundary refuses held-out SYN07  
+PASS  development boundary refuses held-out SYN08  
+PASS  refusals are logged with granted=0  
+PASS  training: labels read for development studies only  read ['SYN01', 'SYN02', 'SYN03', 'SYN04', 'SYN05']
+PASS  training refuses a held-out-mode boundary  
+PASS  flipping every held-out label leaves the trained model identical (same hash)  
+PASS  recomputed hash of the frozen model equals the stored hash  
+PASS  held-out mode without the authorization file is refused (hash alone is not enough)  
+PASS  altered authorization statement is refused  
+PASS  authorization for another model is refused  
+PASS  authorization without a name is refused  
+PASS  wrong hash given by the caller is refused  
+PASS  edited model file with its old stored hash is refused (hash recomputed from content)  
+PASS  unfrozen model is refused  
+PASS  model trained on a held-out study is refused (even with a consistent hash)  
+PASS  model swapped after authorization: the next label read is refused  
+PASS  with every condition met (synthetic), the boundary grants the read and logs it  
+PASS  feature files contain no reader-call field  
+PASS  candidate reports contain no reader-call field  
+PASS  development report OOF table holds development studies only  
+PASS  app: no held-out operation in the Unified routes  
+
+held-out protection: 0 FAIL
+PASS study found on disk without any app record (terminal-era layout)
+PASS MRI identity: hash, dimensions, voxel size, orientation
+PASS FreeSurfer version and -no-v8 recorded
+PASS previous detection version recorded
+PASS complete FreeSurfer with no T1 record: 'unknown' (not silently compatible)
+PASS detection outputs found, manifest input hashes match
+PASS no run can start before the user confirms (adopts) the earlier outputs
+PASS after adoption the present stages are compatible
+PASS missing unified output reported as missing
+PASS FreeSurfer not re-run when complete and compatible (needs confirmation)
+PASS selective plan reuses FreeSurfer, runs only the missing stage
+PASS fresh detection: detect re-run includes unified (dependency)
+PASS FreeSurfer without surfaces: compatible with limitations
+PASS low-confidence QC: detection compatible with limitations
+PASS truncated candidate mask: corrupted
+PASS a different SWI: detection incompatible, later stages not reusable
+PASS full reuse refused after the MRI changed
+PASS FreeSurfer from another T1: incompatible
+PASS same T1 content: compatible again
+PASS unfinished FreeSurfer: incomplete
+PASS previous candidates preserved in their run archive
+PASS FreeSurfer directory untouched by a new detection run
+PASS the new run becomes active
+PASS switching back restores the old outputs
+PASS and forward again (nothing lost)
+PASS failed run: previous outputs restored, files it created moved aside
+PASS failed run's own outputs kept for inspection, not deleted
+PASS active run unchanged after a failure
+PASS a failed run can be resumed from its first unfinished stage
+PASS new reconstruction: old FreeSurfer renamed aside, not deleted
+PASS interrupted run found at restart
+PASS status interrupted, never left running
+PASS interrupted run cannot become active
+PASS reader file unchanged throughout
+PASS studies route lists the on-disk study with its FreeSurfer
+PASS audit route: stages + identity
+PASS new detection run started (FreeSurfer, registration, alignment reused)
+PASS run finished
+PASS unified failure (injected) reported honestly as a failed run
+PASS failed run: previous candidates restored
+PASS registration re-run refused here (needs raw series): honest message
+PASS detector exit 5: failed with the reason and the log tail
+PASS partial candidate file replaced by the previous one
+PASS run log readable from the app
+PASS second run refused while one is working
+PASS make-active refused while a run is working
+PASS app restart: the cut-off run is marked interrupted
+PASS interrupted run: previous candidates restored
+PASS interrupted run resumed as a new run
+PASS resumed run: fresh detection done (stub)
+PASS make-active needs explicit confirmation
+PASS make-active with confirmation
+PASS path-like codes refused
+PASS POST without the app header refused
+PASS reader file unchanged after the app tests
+PASS FreeSurfer files never rewritten
+ALL PASS
+PASS FreeSurfer folder COPIED into the experimental project (not a symlink)
+PASS FreeSurfer copy verified file by file (copy, 7 files)
+PASS FreeSurfer-internal relative symlinks kept relative (point inside the copy)
+PASS a symlink leading outside the subject folder is replaced by a real copy (no path back into the source)
+PASS writing into the experimental FreeSurfer copy does not change the original
+PASS images, labels, earlier detector outputs copied
+PASS every copied file verified by sha256; source confirmed unchanged after the import
+PASS no reader file in the experimental review folder
+PASS reader files kept in historical/ for comparison (historical outputs preserved)
+PASS historical copies identical to the source files
+PASS temporary robustness copies not brought in
+PASS import record written last; staging removed
+PASS importing twice refused
+PASS source = destination refused
+PASS interrupted import reported as failed and rolled back
+PASS nothing of the interrupted import left in the experimental project
+PASS crash during placement: rolled back at the next start and reported
+PASS a source that changes during the import is refused (nothing imported)
+PASS after the refused import nothing was placed
+PASS the same study imports cleanly afterwards
+PASS source project unchanged throughout (every file: content and modification time)
+PASS imported FreeSurfer recognised by the Processing Manager
+ALL PASS
+PASS app refuses project folder = production subfolder
+PASS app refuses project folder = symlink into production
+PASS app refuses project folder = production itself
+PASS app refuses project folder = folder containing production
+PASS launcher refuses CSS_EXP_BASE = production subdirectory
+PASS launcher refuses CSS_EXP_BASE through a symlink into production
+PASS launcher refuses CSS_EXP_BASE containing production
+PASS settings: export_dir inside production refused
+PASS settings: export_dir symlink to a production folder refused
+PASS settings: export_dir production itself refused
+PASS settings: backup_dir inside production refused
+PASS settings: backup_dir symlink to a production folder refused
+PASS settings: backup_dir production itself refused
+PASS Add patients: results folder inside production refused
+PASS Add patients: results folder = symlink into production refused
+PASS import: FreeSurfer copied (isolated), not linked
+PASS experimental subjects/M02 is a real folder
+PASS processing run started
+PASS pipeline child process: write into production refused by the guard (logged)
+PASS the pipeline's own outputs went to the experimental project
+PASS temporary file with TMPDIR inside production: isolated (not written into production)
+PASS export with a tampered export folder inside production: refused
+PASS backup with a tampered backup folder inside production: refused
+PASS creating a symlink into production: refused
+PASS writing through a symlink into production: refused
+PASS starting a program aimed at production: refused
+PASS results copy into production refused (nothing copied)
+PASS production project unchanged: 18 entries, content + modification times identical
+ALL PASS
+PASS before import: no model in the experimental project (reported as not present)
+PASS import: both models copied and verified ({'confidence_model.json': {'status': 'copied, verified', 'parity': True}, 'ranker_model.json': {'status': 'copied, verified', 'parity': True}})
+PASS confidence_model.json: byte-for-byte identical, source and destination sha256 recorded and equal
+PASS ranker_model.json: byte-for-byte identical, source and destination sha256 recorded and equal
+PASS both models: compatible + verified copy of production
+PASS production split recorded at import (SYN01 dev, SYN02 test)
+PASS SYN01: new detection run completed
+PASS SYN01: run log names the production models in force
+PASS SYN01: confidence_pct computed for every candidate
+PASS SYN01: PARITY - candidate list identical to the production-way run (1 candidates, 159 columns)
+PASS SYN01: PARITY - excluded objects and their rules identical (2; E30: 1)
+PASS SYN01: PARITY - exclusion rule ids identical
+PASS SYN01 (dev): ranking model applied, as in production
+PASS SYN02: new detection run completed
+PASS SYN02: run log names the production models in force
+PASS SYN02: confidence_pct computed for every candidate
+PASS SYN02: PARITY - candidate list identical to the production-way run (1 candidates, 157 columns)
+PASS SYN02: PARITY - excluded objects and their rules identical (2; E30: 1)
+PASS SYN02: PARITY - exclusion rule ids identical
+PASS SYN02 (test): ranking model NOT applied, as in production
+PASS E30 exercised in BOTH runs (production way and RC2): a low-confidence object is excluded
+PASS production project untouched (models, labels, every file: content + modification time)
+PASS models missing in the source: reported, parity False
+PASS missing models shown as not present
+PASS confidence model with a different feature list: INCOMPATIBLE, parity False
+PASS ranking model with inconsistent weights: INCOMPATIBLE, parity False
+PASS a changed production model is not overwritten silently: CONFLICT reported
+ALL PASS
+PASS full pipeline run recorded at start
+PASS failed pipeline: recorded as failed, previous candidates restored
+PASS successful pipeline: completed and active
+PASS history: earlier outputs (adopted), failed attempt, completed run
+PASS FreeSurfer folder never renamed by the full pipeline
+PASS reader file untouched
+PASS new patient: one completed run, no empty 'adopted' record
+ALL PASS
+PASS destination empty: refused (no destination chosen)
+PASS destination ~/Desktop: refused (~/Desktop is refused: iCloud 'Desktop & Documents' can sync it without any sign in the path)
+PASS destination inside ~/Documents: refused (~/Documents is refused: iCloud 'Desktop & Documents' can sync it without any sign in the path)
+PASS destination iCloud Drive: refused (the destination is inside a cloud-synced folder (iCloud / Dropbox / Google Drive / OneDrive))
+PASS destination CloudStorage: refused (the destination is inside a cloud-synced folder (iCloud / Dropbox / Google Drive / OneDrive))
+PASS destination missing folder: refused (the folder does not exist)
+PASS destination local folder: accepted (local folder)
+PASS a symlink to ~/Desktop is refused (real path checked)
+PASS share without confirmation: refused, warning returned
+PASS share with no export folder chosen: refused (no Desktop fallback)
+PASS settings: Desktop refused as export folder
+PASS settings: iCloud refused as backup folder
+PASS settings: local folder accepted
+PASS confirmed share written to the verified folder only
+PASS confirmed export written to the verified folder only
+PASS nothing written to ~/Desktop
+ALL PASS
+PASS audit runs: 
+PASS nothing created, changed or removed inside the dataset folder
+PASS exactly two report files, outside the dataset
+PASS held-out study's calls were not opened
+PASS no study code in the report
+PASS free-text call values are bucketed, never copied
+PASS no file names in the report
+PASS no file path in the report
+PASS report folder inside the dataset refused
+PASS report folder ~/Desktop refused
+PASS report folder iCloud refused
+PASS no bytecode cache written
+PASS held-out calls file counted as present only
+PASS identical SWI exports found as a duplicate group
+PASS duplicate spanning dev and held-out flagged
+PASS missing patient key reported, not invented
+PASS non-loopback network connection blocked
+ALL PASS
+PASS static scan: no network code or external host
+PASS servers bind to 127.0.0.1 only
+PASS check_processing_manager.py passes with the network blocked
+PASS check_app_unified.py passes with the network blocked
+PASS no process attempted a non-loopback connection
+PASS backup refused in cloud-synced folders, allowed on a local disk
+ALL PASS
+PASS a background job is running during the check
+PASS reliability: page scrolled down (688px)
+PASS reliability: scroll position kept while the job runs (688 -> 688)
+PASS reliability: opened sections stay open
+PASS train: page scrolled down (411px)
+PASS train: scroll position kept while the job runs (411 -> 411)
+PASS train: opened sections stay open
+PASS job boxes present (updated in place)
+PASS no page errors
+ 
+ALL PASS
+PASS status lists the studies with manifest roles ({'SYN01': 'train', 'SYN02': 'train', 'SYN03': 'train', 'SYN04': 'train', 'SYN05': 'train', 'SYN06': 'test', 'SYN07': 'test'})
+PASS gate not configured yet: shown as open (legacy), not silently closed
+PASS gate closed
+PASS training refused while the gate is closed
+PASS exclude without a reason refused
+PASS same patient on Train and Test refused
+PASS refused applies write nothing
+PASS valid selection applied as version 1
+PASS second change = version 2 (v1 kept)
+PASS every version kept on disk
+PASS restore v1 creates v3 with v1's roles
+PASS gate open: training ran on selection v3 (completed, split 3)
+PASS held study left out of training; fingerprints recorded for every training study
+PASS notification: trained model ready (with AUC, not active)
+PASS calls changed after training: study labelled
+PASS urgent notification: calls changed after training
+PASS snoozed item hidden
+PASS snoozed item returns after its time
+PASS putting the study on hold resolves the urgent notification
+PASS registration rejected: Exclude recommended, NOT applied by itself
+PASS removed item leaves the centre
+PASS removed item kept in the log
+PASS notification settings saved (snooze 15 min)
+PASS auto-train starts when a train study's calls change (gate open, threshold 1)
+ALL PASS
+PASS  unified score is OFF by default (opt-in)  
+PASS  demo mode is stamped synthetic  
+PASS  suppression disabled  
+PASS  cohort audit: all checks pass, 6 studies  
+PASS  feature extraction completes for every study  
+PASS  reliability table per study  
+PASS  training completes  
+PASS  training does NOT freeze  
+PASS  validation labelled CROSS-VALIDATION, gate shown, no held-out read  
+PASS  freeze refused without the typed word FREEZE  
+PASS  freeze with FREEZE  
+PASS  score all extracted studies  
+PASS  candidate list for a study (4 candidates, valid categories)  
+PASS  per-patient background step: status completed, patient still done  
+PASS  results table shows unified status and counts  
+PASS  unified Excel export written  
+PASS  test protocol: every automatic check passes (T12 needs a robustness run)  {}
+PASS  test protocol: fail-safe T9 and data integrity T11 pass  
+PASS  test protocol: held-out protection T13 passes  
+PASS  test protocol: manual items (T5, T14, T15) stay 'not run' after the automatic run  {'T5': 'not run', 'T14': 'not run', 'T15': 'not run'}
+PASS  test protocol: an automatic result cannot be overwritten by hand  
+PASS  test protocol: T5a is the automatic install check and T5 the separate manual viewer check  
+PASS  test record saved  
+PASS  no held-out evaluation route in the GUI  
+PASS  original inputs and detector / reader files unchanged (review/ data/ work/ raw/; only the existing AI-score files *_score_ai.json may appear)  other changes: []; AI-score files written by the existing backfill: 6
+PASS  reviewer serves the unified report read-only  
+PASS  reviewer: unified card is hidden in a validation read (code path present)  
+PASS  background failure: unified status 'failed', patient still 'done', results workbook present  injected failure (test)
+PASS  timeout: hung unified step stopped at the limit -> 'failed' with the timeout reason; patient still 'done'  no result after 4 s (step stopped; original results unaffected) (8 s)
+PASS  restart while a unified step is queued / running: marked 'interrupted' (never left pending / running), patient still 'done'  before kill: running; after restart: interrupted - the app was closed during the unified step - press 'Score patient' to run it again
+PASS  after failure / timeout / restart: original inputs and reader files still unchanged  []
+
+app unified: 0 FAIL
+unified-score tests: all passed
+EXIT 0

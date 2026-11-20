@@ -1,0 +1,40 @@
+PASS bundle built: app:      Percival.app  (v5.14.2-rc4 Percival (experimental/unified-gui: study selection + training gate, notification centre, UI fixes, write guard, production models))
+PASS app unzipped into Applications
+PASS launcher started the app on port 8810 (separate from production 8800)
+PASS running app has the production write guard active (CSS_EXPERIMENTAL=1, guard on PYTHONPATH)
+PASS launcher installed the bundled pipeline into ~/cSS_experimental with its build stamp
+PASS production project folder not used by the experimental app
+PASS launcher refuses the production project folder as its project
+PASS Processing tab present
+PASS empty experimental project: no study yet
+PASS 4 studies listed in the source project (4)
+PASS SYN01: linked FreeSurfer shown with version; status unknown until confirmed
+PASS SYN01 confirmed: compatibility per stage + first run recorded
+PASS SYN02 (no T1): registration not applicable, not blocking
+PASS SYN02: new run completed and active; history shows both runs
+PASS run log visible in the history
+PASS linked studies listed in Results
+PASS export shows the clinical-data warning first
+PASS Desktop refused as export folder
+PASS reviewer started from the app
+PASS 3-D button present for the new candidate
+PASS 3-D panel rendered with morphology measures
+PASS SYN04 (2.4 mm slices): new detection run started
+PASS 3-D panel explains an acquisition-limited candidate and states that unresolved does not mean absent
+PASS no page errors
+ 
+PASS GUI walkthrough finished
+PASS SYN02: completed new detection run recorded
+PASS old and new candidate lists both archived
+PASS AI score of the new candidates written without error
+PASS unified report regenerated after the new detection
+PASS SYN03 run started for the restart test
+PASS app restarted after being closed mid-run
+PASS cut-off run marked interrupted (never left running)
+PASS previous SYN03 candidates restored after the interruption
+PASS production project unchanged: every file (content and modification time), FreeSurfer included
+PASS FreeSurfer imported as an isolated copy (rc2), nothing written into the original
+PASS import verified (sha256, source unchanged)
+PASS no process attempted a non-loopback network connection
+ALL PASS
+EXIT 0

@@ -173,7 +173,7 @@
   },
   "registration": "ok",
   "model_version": "uscore-model/1.0",
-  "model_hash": "eca8f132ad94d87184e83699ce6b08e42b1853a014a33552d44cc7064a9ae12a",
+  "model_hash": "93cb3ea6c6f0ac737c78f249e61f335759acf2ce057db70bd79137784ccd2f82",
   "feature_version": "uscore-features/1.0",
   "synthetic_test": true,
   "disclaimer": "EXPERIMENTAL research output; not a diagnosis; the dark core is an experimental representation, not ground truth"
@@ -356,7 +356,7 @@
   },
   "registration": "ok",
   "model_version": "uscore-model/1.0",
-  "model_hash": "eca8f132ad94d87184e83699ce6b08e42b1853a014a33552d44cc7064a9ae12a",
+  "model_hash": "93cb3ea6c6f0ac737c78f249e61f335759acf2ce057db70bd79137784ccd2f82",
   "feature_version": "uscore-features/1.0",
   "synthetic_test": true,
   "disclaimer": "EXPERIMENTAL research output; not a diagnosis; the dark core is an experimental representation, not ground truth"
@@ -540,7 +540,7 @@
   },
   "registration": "ok",
   "model_version": "uscore-model/1.0",
-  "model_hash": "eca8f132ad94d87184e83699ce6b08e42b1853a014a33552d44cc7064a9ae12a",
+  "model_hash": "93cb3ea6c6f0ac737c78f249e61f335759acf2ce057db70bd79137784ccd2f82",
   "feature_version": "uscore-features/1.0",
   "synthetic_test": true,
   "disclaimer": "EXPERIMENTAL research output; not a diagnosis; the dark core is an experimental representation, not ground truth"

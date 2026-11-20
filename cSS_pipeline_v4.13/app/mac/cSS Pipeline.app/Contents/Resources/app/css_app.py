@@ -35,6 +35,9 @@ def jsave(name, obj):
 SET = dict(dict(awake=True, theme="dark", backup_dir="", freesurfer_home=os.environ.get("FREESURFER_HOME", ""), threads=4, parallel=1, auto_path=True, auto_retry=True, rerun_mode="choose",
                 features=dict(unified_score=False, duplicate_check=True, preflight=True, qc_snapshot=True, notify=True, version_stamp=True, share=True, backup=True,
                               name_warning=False)), **jload("settings.json", {}))
+import notify_centre as NC, study_split as SS      # v5.14.2-rc4: notification centre + user study selection / training gate
+SET.setdefault("notif", dict(NC.DEFAULTS)); [SET["notif"].setdefault(k, v) for k, v in NC.DEFAULTS.items()]
+SET.setdefault("autotrain", dict(on=False, threshold=3))
 PAT = jload("patients.json", [])
 for p in PAT:                                            # resume after a restart: interrupted runs go back to the queue
     if p.get("status") in ("running", "paused"): p.update(status="waiting", step="", note="restarted after the app was closed")
@@ -116,6 +119,8 @@ def pm_execute(code, plan, note):
         try:
             if not ok: msg += "\nlog tail:\n" + (open(logf, errors="replace").read()[-1500:] if os.path.exists(logf) else "")
             st.finish_run(rid, ok, msg)
+            notify_c("done" if ok else "action", "processing", f"Processing run {'finished' if ok else 'FAILED'} · {code}",
+                     f"run {rid}: {', '.join(plan['run'])}" + ("" if ok else f" - {msg.splitlines()[0][:200]}; previous outputs restored"), actions=["open_processing"], study=code)
             p = pget(code)
             if ok and p and "detect" in plan["run"]:
                 if SET["features"].get("qc_snapshot"): qc_snapshot(code)
@@ -174,6 +179,116 @@ def pm_rank_like_production(code, env, logf):
     open(logf, "a").write("[3c] trained ranking model (rank_candidates.py; dev split)\n")
     if run_logged([sys.executable, f"{SC}/rank_candidates.py", code], logf, env, code="pm:" + code) != 0:
         open(logf, "a").write(f"      WARNING: rank_candidates.py did not rank {code} - the score_v4 order stands (as in production)\n")
+# ------------------------------------------------------------------ v5.14.2-rc4 study selection, training gate, notifications
+def notify_c(level, source, title, text="", actions=None, key=None, study=None):
+    """one entry point: the local notification centre + (by setting) a macOS banner. Never raises."""
+    try:
+        NC.add(B, level, source, title, text, actions, key, study)
+        bm = SET["notif"].get("banner", "urgent")
+        if SET["features"].get("notify") and (bm == "all" or (bm == "urgent" and level == "urgent")): notify("Percival", f"{title} {text}"[:180])
+    except Exception as e: print("notification not stored:", e, flush=True)
+SEL_PREFIX = "SYN" if os.environ.get("CSS_USCORE_DEMO") == "1" else "M"     # synthetic demo / tests use SYN studies only
+def sel_studies():
+    ids = set(k for k in SS.manifest_rows(B) if k.startswith(SEL_PREFIX)) | set((SS.current(B) or {}).get("roles", {}).keys())
+    ids |= set(c for c in PM.studies_on_disk(B) if c.startswith(SEL_PREFIX))
+    return sorted(ids, key=lambda x: (len(x), x))
+def sel_get(op, q):
+    if op == "status":
+        st = SS.status(B, sel_studies(), {p["code"]: p.get("cohort", "") for p in PAT})
+        return dict(ok=True, autotrain=SET["autotrain"], pending=SS.pending_training(B, sel_studies()), **st)
+    if op == "versions": return dict(ok=True, versions=SS.versions(B), current=(SS.current(B) or {}).get("version"))
+    return dict(ok=False, error="unknown")
+def sel_post(op, d):
+    by = d.get("by") or "user"
+    if op == "apply":
+        r = SS.apply(B, sel_studies(), d.get("changes") or {}, by, d.get("note", ""), bool(d.get("confirm_spent")))
+        if r.get("ok"): notify_c("done", "training", f"Study selection v{r['version']} applied", "; ".join(f"{k} {v}" for k, v in r["changes"].items())[:300])
+        return r
+    if op == "restore":
+        r = SS.restore(B, d.get("version"), by)
+        if r.get("ok"): notify_c("done", "training", f"Study selection v{r['version']} (restored from v{d.get('version')})")
+        return r
+    if op == "gate":
+        if any(j.get("status") == "running" for j in [UG_job("train")]) and not d.get("open"):
+            return dict(ok=False, error="a training run is in progress; close the gate after it finishes (or stop it in step 4)")
+        g = SS.set_gate(B, d.get("open"), by); notify_c("done", "training", f"Training gate {'opened' if g['open'] else 'closed'}", f"by {g['by']}")
+        return dict(ok=True, gate=g)
+    if op == "autotrain":
+        SET["autotrain"] = dict(on=bool(d.get("on")), threshold=max(1, int(d.get("threshold") or 3))); jsave("settings.json", SET)
+        return dict(ok=True, autotrain=SET["autotrain"])
+    return dict(ok=False, error="unknown")
+def UG_job(name):
+    try:
+        import unified_gui as UG; return UG.job(name)
+    except Exception: return dict(status="idle")
+def notif_running():
+    out = []
+    for c, j in list(PM_JOBS.items()): out.append(dict(title=f"Processing run · {c}", text=f"stage {j.get('stage') or 'starting'}", progress=None))
+    for p in PAT:
+        if p.get("status") == "running": out.append(dict(title=f"Pipeline · {p['code']}", text=f"step {p.get('step', '')}", progress=None))
+    try:
+        import unified_gui as UG
+        for n, j in list(UG.JOBS.items()):
+            if j.get("status") == "running": out.append(dict(title=f"Unified · {n}", text=(j.get("log") or [""])[-1][:120], progress=j.get("progress")))
+    except Exception: pass
+    return out
+def notif_get(op, q):
+    if op == "list":
+        it = NC.visible(B, SET["notif"]); run = notif_running() if SET["notif"]["sections"].get("running", True) else []
+        badge = sum(1 for i in it if i["level"] in ("urgent", "action")) if SET["notif"].get("badge") == "action" else sum(1 for i in it if not i.get("read")) + len(run)
+        return dict(ok=True, items=it, running=run, badge=badge, urgent=any(i["level"] == "urgent" for i in it), settings=SET["notif"])
+    if op == "log": return dict(ok=True, log=NC.log(B)[:500])
+    return dict(ok=False, error="unknown")
+def notif_post(op, d):
+    if op == "act": NC.act(B, d.get("id", ""), d.get("op", "read"), d.get("minutes") or SET["notif"].get("snooze_min", 5)); return dict(ok=True)
+    if op == "clear_removed": NC.clear_removed(B); return dict(ok=True)
+    if op == "settings":
+        for k in NC.DEFAULTS:
+            if k in d: SET["notif"][k] = d[k]
+        jsave("settings.json", SET); return dict(ok=True, settings=SET["notif"])
+    return dict(ok=False, error="unknown")
+WATCH = dict(jobs={}, autotrain_last=0)
+def watcher():
+    """every 30 s: calls-changed / same-patient conditions -> urgent notifications (resolved when they stop holding); unified job ends ->
+    notifications; auto-train when switched on, the gate is open and enough train studies have new / changed reads."""
+    while True:
+        try:
+            st = SS.status(B, sel_studies()); live = set()
+            for r in st["rows"]:
+                for lb in r["labels"]:
+                    if lb["kind"] in ("stale", "conflict"):
+                        k = f"{lb['kind']}:{r['study']}"; live.add(k)
+                        notify_c("urgent", "training", ("Calls changed after training" if lb["kind"] == "stale" else "Same patient on both sides") + f" · {r['study']}",
+                                 lb["text"] + (" - Retrain, Hold, Keep, or move to Test / Exclude" if lb["kind"] == "stale" else " - Apply is blocked until fixed"),
+                                 actions=["open_selection"], key=k, study=r["study"])
+            for it in NC.log(B):
+                if it.get("key") and it["key"].split(":")[0] in ("stale", "conflict") and it["key"] not in live and not it.get("resolved"): NC.resolve(B, it["key"])
+            try:
+                import unified_gui as UG
+                for n, j in list(UG.JOBS.items()):
+                    cur = j.get("status"); tag = j.get("started")
+                    if cur in ("completed", "failed", "stopped") and WATCH["jobs"].get(n) != tag:   # every finished run, however short
+                        WATCH["jobs"][n] = tag
+                        if n == "train" and cur == "completed":
+                            v = UG.validation() if hasattr(UG, "validation") else {}
+                            ci = v.get("outer_auc_ci"); au = v.get("outer_auc_calibrated")
+                            txt = f"AUC {au:.2f}" if isinstance(au, (int, float)) else "AUC n/a"
+                            txt += (f" ({ci[0]:.2f}–{ci[1]:.2f})" if ci else "") + f" · {v.get('n_patients', '?')} patients, {v.get('n_cSS', '?')} cSS · probability {'allowed' if v.get('probability_output') else 'withheld'} · trained, NOT active"
+                            notify_c("action", "training", "Trained model ready", txt, actions=["open_train"])
+                        elif cur == "failed":
+                            err = [l.strip() for l in (j.get("error") or "").splitlines() if l.strip()]
+                            notify_c("action", "training", f"Unified {n} failed", (err[-1] if err else "see the job log")[:240], actions=["open_unified"])
+                        else: notify_c("done", "training", f"Unified {n} {cur}")
+            except Exception: pass
+            A = SET["autotrain"]
+            if A.get("on") and SS.gate(B).get("open") and UG_job("train").get("status") != "running" and time.time() - WATCH["autotrain_last"] > float(os.environ.get("CSS_AUTOTRAIN_GAP_S", "300")):
+                pend = SS.pending_training(B, sel_studies())
+                if len(pend) >= int(A.get("threshold", 3)):
+                    import unified_gui as UG
+                    WATCH["autotrain_last"] = time.time(); UG.train()
+                    notify_c("done", "training", "Auto-train started", f"{len(pend)} train studies with new or changed reads: {', '.join(pend[:8])}")
+        except Exception as e: print("watcher:", e, flush=True)
+        time.sleep(float(os.environ.get("CSS_WATCH_S", "30")))        # tests use a shorter interval
 def proc_post(op, d):
     if op == "link":
         src = os.path.expanduser(d.get("source", "")); out = []
@@ -192,6 +307,8 @@ def proc_post(op, d):
                                         note="imported from another project (verified copy, FreeSurfer included); new runs: Processing tab (raw series not copied)"))
                         save_pat()
             except Exception as e: out.append(dict(code=c, ok=False, error=str(e)[:200]))
+        notify_c("done" if all(x["ok"] for x in out) else "action", "imports", f"Import: {sum(x['ok'] for x in out)} of {len(out)} studies brought in",
+                 "; ".join(f"{x['code']}: {'ok' if x['ok'] else x.get('error', '')[:80]}" for x in out)[:300])
         return dict(ok=all(x["ok"] for x in out), results=out, models={k: dict(status=v.get("status"), parity=v.get("parity")) for k, v in models.items()} if isinstance(models, dict) and "error" not in models else models)
     code = _pm_code(d.get("code"))
     if not code: return dict(ok=False, error="bad code")
@@ -634,7 +751,9 @@ def process(p):
     p["ai_note"] = ai_score(code, env)              # AI score computed for every patient (labelled "AI only, not validated")
     copy_results(p); step_end(p, "qc")
     pm_end_full(p, True)
-    p.update(status="done", finished=time.time(), step=""); save_pat(); notify("cSS Pipeline", f"{code} finished")
+    p.update(status="done", finished=time.time(), step=""); save_pat(); notify("Percival", f"{code} finished")
+    try: NC.add(B, "done", "processing", f"Patient {code} finished", "pipeline complete")
+    except Exception: pass
     try: write_results_file()
     except Exception as e: open(logf, "a").write(f"\nresults file not updated: {e}\n")
     queue_unified(p)                                # v5.14-gui: AFTER results are saved and the patient is done; background; opt-in
@@ -785,11 +904,13 @@ def fail(p, msg):
                 apply_pathway(p, nxt)
                 p.update(status="waiting", error="", steps_done={}, path_ack=False,
                          path_note=f"{msg.split(' - ')[0]} -> retrying automatically with {PATHWAYS[nxt]} ({PW_TIME[nxt]})")
-                save_pat(); notify("cSS Pipeline", f"{p['code']}: registration retried with {PATHWAYS[nxt]}"); return
+                save_pat(); notify("Percival", f"{p['code']}: registration retried with {PATHWAYS[nxt]}"); return
         pm_end_full(p, False, msg)                       # previous outputs put back; this attempt stays in the history as failed
         p.update(status="failed", error=msg, finished=time.time()); save_pat()
         if any(k in msg for k in SETUP_ERR): CUR["hold"] = msg
-    notify("cSS Pipeline", f"{p['code']} failed: {msg[:60]}")
+    notify("Percival", f"{p['code']} failed: {msg[:60]}")
+    try: NC.add(B, "action", "processing", f"Patient {p['code']} failed", msg[:300])
+    except Exception: pass
 def copy_results(p):
     """codes-only copy of the patient's result files into the chosen results folder"""
     d = p.get("results_dir")
@@ -1102,6 +1223,8 @@ class H(BaseHTTPRequestHandler):
                 return self.send(html.encode(), ctype="text/html; charset=utf-8")
             if u.path == "/api/qc":
                 f = f"{AD}/qc/{q['code']}.png"; return self.send(open(f, "rb").read(), ctype="image/png")
+            if u.path.startswith("/api/sel/"): return self.send(sel_get(u.path[9:], {k: v[0] for k, v in parse_qs(u.query).items()}))
+            if u.path.startswith("/api/notif/"): return self.send(notif_get(u.path[11:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/proc/"): return self.send(proc_get(u.path[10:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/u/"): return self.send(unified_get(u.path[7:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path == "/api/results": return self.send(results())
@@ -1217,7 +1340,7 @@ class H(BaseHTTPRequestHandler):
                 json.dump(groups, open(f"{AD}/review_groups.json", "w")); d["start"] = start
                 r = launch_child("review", d, 8765)
                 if r.get("ok") and WIN["webview"]:
-                    import webview; webview.create_window("cSS reviewer", r["url"], width=1500, height=950); r["opened"] = True
+                    import webview; webview.create_window("Percival reviewer", r["url"], width=1500, height=950); r["opened"] = True
                 return self.send(r)
             if u.path == "/api/blind":
                 if d.get("new_packet"):
@@ -1230,6 +1353,8 @@ class H(BaseHTTPRequestHandler):
                     import webview; webview.create_window(d.get("title", "cSS"), f"http://127.0.0.1:{WIN['port']}{d['url']}", width=1150, height=560)
                     return self.send(dict(open=False))
                 return self.send(dict(open=True))
+            if u.path.startswith("/api/sel/"): return self.send(sel_post(u.path[9:], d))
+            if u.path.startswith("/api/notif/"): return self.send(notif_post(u.path[11:], d))
             if u.path.startswith("/api/proc/"): return self.send(proc_post(u.path[10:], d))
             if u.path.startswith("/api/u/"): return self.send(unified_post(u.path[7:], d))
             if u.path in ("/api/share", "/api/export"):           # explicit warning + confirmation, verified local folder only
@@ -1237,7 +1362,8 @@ class H(BaseHTTPRequestHandler):
                                                                      error="export needs your confirmation of the clinical-data warning (dialog pending design approval)"))
                 try: export_dest()
                 except ExportRefused as e: return self.send(dict(ok=False, error=str(e)))
-            if u.path == "/api/share": return self.send(dict(ok=True, path=share_package(d["codes"])))
+            if u.path == "/api/share":
+                out_ = share_package(d["codes"]); notify_c("done", "exports", "Share package written", out_); return self.send(dict(ok=True, path=out_))
             if u.path == "/api/vset":                  # reviewer settings (same file the reviewer reads at start)
                 f = f"{B}/review/viewer_settings.json"; os.makedirs(os.path.dirname(f), exist_ok=True)
                 cur = json.load(open(f)) if os.path.exists(f) else {}; cur.update(d)
@@ -1300,17 +1426,18 @@ if __name__ == "__main__":
     reread_failures()
     threading.Thread(target=ai_backfill, daemon=True).start()
     threading.Thread(target=worker, daemon=True).start()
+    threading.Thread(target=watcher, daemon=True).start()          # v5.14.2-rc4: notifications + auto-train
     def _caff_watch():
         while True: caffeinate(bool(RUNNING)); time.sleep(5)
     threading.Thread(target=_caff_watch, daemon=True).start()
     srv = ThreadingHTTPServer(("127.0.0.1", port), H); url = f"http://127.0.0.1:{port}/"
-    print(f"cSS Pipeline app: {url}  (CSS_BASE={B})", flush=True)
+    print(f"Percival app: {url}  (CSS_BASE={B})", flush=True)
     how = None if "--no-window" in a else open_window(url)
     WIN["port"] = port
     if how == "webview":
         import webview; WIN["webview"] = True
         threading.Thread(target=srv.serve_forever, daemon=True).start()
-        webview.create_window("cSS Pipeline", url, width=1400, height=900); webview.start(dock_icon_follow_theme)
+        webview.create_window("Percival", url, width=1400, height=900); webview.start(dock_icon_follow_theme)
     else:
         try: srv.serve_forever()
         except KeyboardInterrupt: pass

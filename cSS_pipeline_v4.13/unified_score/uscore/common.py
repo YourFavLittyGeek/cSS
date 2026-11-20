@@ -34,7 +34,7 @@ def versions():
 class Cohort:
     """Manifest-backed cohort. eligible_prefix is 'M' for real use. The synthetic test mode (prefix 'SYN') exists only so the
     automated tests can exercise the pipeline; every output it produces is stamped SYNTHETIC TEST."""
-    def __init__(self, manifest=DEFAULT_MANIFEST, eligible_prefix="M", synthetic_test=False):
+    def __init__(self, manifest=DEFAULT_MANIFEST, eligible_prefix="M", synthetic_test=False, split=None):
         if eligible_prefix != "M" and not synthetic_test:
             raise CohortError("only M studies are eligible; another prefix needs synthetic_test=True (tests only)")
         if synthetic_test and eligible_prefix == "M":
@@ -42,6 +42,20 @@ class Cohort:
         self.prefix, self.synthetic = eligible_prefix, synthetic_test
         self.rows = {r["study_id"]: r for r in csv.DictReader(open(manifest))}
         self.manifest, self.manifest_sha = manifest, sha256_file(manifest)
+        # v5.14.2-rc4: the USER's study selection (app_data/split/current.json in the project, written by the app's Study selection step)
+        # overrides the manifest roles: train -> development, test -> held-out, hold / exclude -> not included. Without the file the
+        # manifest roles apply unchanged. The split content is part of manifest_sha, so every model records which selection it used.
+        sp = split if split is not None else os.path.join(os.environ.get("CSS_BASE", os.path.expanduser("~/css_project")), "app_data", "split", "current.json")
+        self.split_version = None
+        if sp and os.path.exists(sp):
+            S = json.load(open(sp)); self.split_version = S.get("version")
+            for sid, role in (S.get("roles") or {}).items():
+                if not sid.startswith(self.prefix): continue
+                r = dict(self.rows.get(sid) or dict(study_id=sid, exclusion_reason="", note="added by the user's study selection"))
+                if role in ("train", "test"): r.update(decision="include", role="development" if role == "train" else "held-out")
+                else: r.update(decision="exclude", role="", exclusion_reason=f"{role} in the user's study selection v{S.get('version')}: {(S.get('reasons') or {}).get(sid, '')}")
+                self.rows[sid] = r
+            self.manifest_sha = hashlib.sha256((self.manifest_sha + json.dumps(S, sort_keys=True)).encode()).hexdigest()
         for i, r in self.rows.items():
             if r["decision"] == "include" and not i.startswith(self.prefix):
                 raise CohortError(f"manifest includes non-eligible study {i}")

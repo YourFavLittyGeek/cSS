@@ -18,9 +18,9 @@ H = tempfile.mkdtemp(prefix="rc1home_"); DIST = os.path.join(H, "dist"); PROD = 
 # 1 build + "install" (unzip into Applications)
 r = subprocess.run(["bash", os.path.join(ROOT, "tools", "build_experimental_app.sh"), DIST], capture_output=True, text=True)
 ok(r.returncode == 0, "bundle built: " + r.stdout.strip().splitlines()[0] if r.stdout else r.stderr[-300:])
-zp = glob.glob(f"{DIST}/cSS_Experimental_*.zip")[0]; os.makedirs(f"{H}/Applications")
+zp = glob.glob(f"{DIST}/Percival_*.zip")[0]; os.makedirs(f"{H}/Applications")
 with zipfile.ZipFile(zp) as z: z.extractall(f"{H}/Applications")
-L = f"{H}/Applications/cSS Experimental.app/Contents/MacOS/cSS Experimental"; os.chmod(L, 0o755)
+L = f"{H}/Applications/Percival.app/Contents/MacOS/Percival"; os.chmod(L, 0o755)
 ok(os.path.exists(L), "app unzipped into Applications")
 # 2 fake production project
 import uscore_synthbase as sb
