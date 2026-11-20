@@ -1,0 +1,49 @@
+PASS  0 verbatim copy matches recorded function sha256  
+PASS  0 module imports only numpy / scipy  
+PASS  1 band: status ok and labelled experimental  
+PASS  1 band: core smaller than bloomed candidate  core 1028 cand 1601
+PASS  1 band: core recalls the deposit  recall 0.94
+PASS  1 band: support = candidate minus core  
+PASS  1 band: core within 1 voxel of candidate  outside candidate 2
+PASS  1 band: some blooming moved to support  bloom kept in core 0.00
+PASS  2 thin: core found  core 54 vox
+PASS  2 thin: core recalls the thin deposit  recall 0.95
+PASS  2 thin: core stays near the deposit (median <= 1 mm)  median 0.00 mm
+PASS  3 curved: core recalls the arc  recall 0.92
+INFO  3 curved: core in 5 pieces, largest holds 0.99 of core voxels
+KNOWN-LIMIT  3 core fragments (per-voxel threshold on noisy contrast)  5 pieces; core connectivity / piece counts are not reliable
+PASS  4a equal bands: both bands in the core  recall 0.94 / 0.96
+PASS  4b strong+weak: strong band kept  strong 1.00
+PASS  4b strong+weak: candidate mask returned unchanged (weak band never lost from the record)  
+PASS  4b strong+weak: weak band not in core is kept as support  
+INFO  4b weak band core recall 0.16
+KNOWN-LIMIT  4b weak band next to a strong one is lost from the core  weak recall 0.16 (v5.13 PH6 #1 behaviour)
+INFO  4b gap voxels between bands in core: 10 of 67
+PASS  5 unstable: fraction reported in [0, 1]  
+PASS  5 unstable: shallow profile at least as unstable as sharp  sharp 0.22 shallow 0.85
+PASS  5 unstable voxels lie inside the 1-voxel zone  
+INFO  6 pure noise: share of candidate called core 0.01 (5 seeds)
+PASS  6 pure noise: core share reported (measured)  
+PASS  7 shell too small: status unavailable  background shell too small
+PASS  8 inputs not modified  
+PASS  8 deterministic  
+PASS  8 separate dark blob reported as adjacent, not core  adjacent 15 core 0
+PASS  8 anisotropic 0.5x0.5x2 mm: core recalls the band  recall 0.95
+REGIME  band 1 mm blur 0.4 mm k1: deposit median c   2.4  core recall 0.49  pieces 6  unstable 0.67
+REGIME  band 1 mm blur 0.4 mm k2: deposit median c   4.9  core recall 0.83  pieces 5  unstable 0.37
+REGIME  band 1 mm blur 0.4 mm k3: deposit median c   7.2  core recall 0.93  pieces 1  unstable 0.21
+REGIME  band 1 mm blur 0.4 mm k5: deposit median c  12.0  core recall 0.98  pieces 6  unstable 0.06
+REGIME  band 1 mm blur 0.8 mm k1: deposit median c   1.7  core recall 0.35  pieces 4  unstable 0.78
+REGIME  band 1 mm blur 0.8 mm k2: deposit median c   3.4  core recall 0.68  pieces 16  unstable 0.58
+REGIME  band 1 mm blur 0.8 mm k3: deposit median c   5.1  core recall 0.81  pieces 21  unstable 0.43
+REGIME  band 1 mm blur 0.8 mm k5: deposit median c   8.5  core recall 0.94  pieces 17  unstable 0.26
+REGIME  tube 0.5 mm blur 0.4 mm k1: deposit median c   1.4  core recall 0.10  pieces 3  unstable 0.79
+REGIME  tube 0.5 mm blur 0.4 mm k2: deposit median c   3.0  core recall 0.73  pieces 7  unstable 0.67
+REGIME  tube 0.5 mm blur 0.4 mm k3: deposit median c   4.5  core recall 1.00  pieces 2  unstable 0.48
+REGIME  tube 0.5 mm blur 0.4 mm k5: deposit median c   7.2  core recall 1.00  pieces 1  unstable 0.18
+REGIME  tube 0.5 mm blur 0.8 mm k1: deposit median c   0.4  core recall 0.00  pieces 0  unstable None
+REGIME  tube 0.5 mm blur 0.8 mm k2: deposit median c   0.9  core recall 0.07  pieces 3  unstable 0.71
+REGIME  tube 0.5 mm blur 0.8 mm k3: deposit median c   1.5  core recall 0.22  pieces 5  unstable 0.75
+REGIME  tube 0.5 mm blur 0.8 mm k5: deposit median c   2.1  core recall 0.59  pieces 2  unstable 0.78
+
+core_decompose: 0 FAIL, 2 known limits reported (experimental, not ground truth)

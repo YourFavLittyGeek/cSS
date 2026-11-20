@@ -1,0 +1,5 @@
+app:      cSS Experimental.app  (v5.14.2-rc3 (experimental/unified-gui, local test release candidate, production write guard, production models restored))
+source:   3bbfa14035df634c3c93251bd3efc3866ffff593  branch experimental/unified-gui +uncommitted changes
+built:    2026-11-19 23:24 UTC on Linux x86_64
+zip sha256: 4467622d777d79e78077548379d6bd975472682b95bb009e95c1f6d33aa49114
+files:    121

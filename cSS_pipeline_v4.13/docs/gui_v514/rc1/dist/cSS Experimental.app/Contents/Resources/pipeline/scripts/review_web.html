@@ -1,0 +1,985 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>cSS Reviewer</title>
+<style>
+:root{--bg:#14161a;--panel:#1e2127;--line:#30353d;--text:#e6e8eb;--mut:#9aa1ab;--acc:#4c9aff;--vp:#000}
+:root[data-theme=light]{--bg:#f3f4f6;--panel:#fff;--line:#d5d9df;--text:#1c2026;--mut:#5d6672;--acc:#1f6feb;--vp:#000}
+:root[data-theme=blue]{--bg:#0f2233;--panel:#17324a;--line:#28506f;--text:#d7e6f2;--mut:#8fb0c8;--acc:#7cc4ff;--vp:#03101a}
+*{box-sizing:border-box}html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--text);font:14px/1.35 -apple-system,"Segoe UI",Helvetica,Arial,sans-serif;display:flex;flex-direction:column;overflow:hidden;user-select:none}
+button,select,input{font:inherit;color:var(--text)}
+.top{display:flex;align-items:center;gap:12px;padding:7px 14px;background:var(--panel);border-bottom:1px solid var(--line)}
+.top b{font-size:17px;white-space:nowrap}.mut{color:var(--mut)}.sm{font-size:12px}.sp{flex:1}
+select,input[type=text]{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:5px 8px;user-select:text}
+.prog{width:140px;height:6px;background:var(--line);border-radius:3px;flex:none}.prog div{height:100%;background:var(--acc);border-radius:3px;width:0}
+.tsw{position:relative;display:flex;align-items:center;width:106px;height:30px;border-radius:15px;background:var(--bg);border:1px solid var(--line);padding:0 3px;flex:none;cursor:grab;touch-action:none}
+.tsw .knob{position:absolute;top:2px;left:3px;width:33px;height:24px;border-radius:12px;background:var(--acc);box-shadow:0 1px 4px rgba(0,0,0,.5);transition:left .15s}
+.tsw.drag .knob{transition:none}.tsw span{position:relative;z-index:1;width:33px;display:flex;justify-content:center;color:var(--mut);cursor:pointer}.tsw span.on{color:#fff}
+.tsw svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.vsym{display:none;align-items:center;justify-content:center;width:32px;height:30px;border-radius:8px;background:#1f5f8b;color:#fff;flex:none;cursor:pointer}.vsym svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}.seg button{border:0;background:none;padding:5px 11px;color:var(--mut);cursor:pointer}.seg button.on{background:var(--acc);color:#fff}
+.btn{border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:5px 11px;cursor:pointer;white-space:nowrap}.btn:hover{border-color:var(--acc)}.btn.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+.mbar{display:flex;gap:2px;padding:2px 10px;background:var(--panel);border-bottom:1px solid var(--line);font-size:13.5px}
+.mbar span{padding:4px 10px;border-radius:6px;cursor:default}.mbar span:hover,.mbar span.on{background:var(--acc);color:#fff}
+.menu{position:fixed;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px;box-shadow:0 12px 34px rgba(0,0,0,.55);font-size:13.5px;z-index:50;min-width:290px}
+.menu div{padding:7px 12px 7px 8px;border-radius:7px;display:flex;align-items:center;cursor:default;white-space:nowrap}
+.menu div:hover,.menu div.hi{background:var(--acc);color:#fff}.menu div.dis{opacity:.45;pointer-events:none}.menu hr{border:0;border-top:1px solid var(--line);margin:5px 4px}
+.menu .ck{width:16px;text-align:center;flex:none;font-size:12px}
+.menu .ic{width:22px;height:22px;flex:none;display:flex;align-items:center;justify-content:center;margin:0 14px 0 6px;color:var(--mut)}
+.menu .ic svg,.ico svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.menu div:hover .ic,.menu div.hi .ic{color:#fff}
+.menu .k{margin-left:auto;padding-left:26px;color:var(--mut);font:12px Menlo,Consolas,monospace}.menu div:hover .k,.menu .hi .k{color:#fff}
+.main{flex:1;display:flex;gap:10px;padding:10px;min-height:0;position:relative}
+.views{flex:1;min-width:0;position:relative}
+.vgrid{position:absolute;inset:0;display:grid;gap:6px}
+.vp{position:relative;background:var(--vp);border:1px solid var(--line);border-radius:6px;overflow:hidden;min-height:0;min-width:0}
+.vp.act2{border:2px solid #fff}.vp canvas.img{position:absolute;inset:0;width:100%;height:100%;display:block}
+.sb{position:absolute;right:8px;top:56px;bottom:34px;width:10px;z-index:5;background:rgba(255,255,255,.12);border-radius:6px;cursor:pointer}
+.sb b{position:absolute;left:-3px;right:-3px;height:16px;border-radius:6px;background:var(--acc);pointer-events:none}
+.lt{position:absolute;left:8px;top:54px;display:flex;flex-direction:column;gap:4px;z-index:8;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px}
+.lt{padding:4px;gap:2px;align-items:center}.lt div[data-tool],.lt div[data-a]{width:28px;height:28px;padding:0;display:flex;align-items:center;justify-content:center;border-radius:7px;color:var(--text);cursor:pointer}.lt .ico{margin:0}.lt .ico svg{width:17px;height:17px}.lt .ahb{width:100%;display:flex;gap:3px;align-items:center;justify-content:center;font-size:9.5px;color:var(--mut);border-top:1px solid var(--line);padding-top:4px;margin-top:2px;cursor:pointer}.lt .ahb input{margin:0;width:11px;height:11px}.lt .tabl{display:none;writing-mode:vertical-rl;font-size:10px;color:var(--mut);padding:30px 0;cursor:pointer}.lt.fold{padding:2px;border-radius:0 8px 8px 0;left:0;border-left:0}.lt.fold>*{display:none!important}.lt.fold>.tabl{display:block!important}
+.lt div:hover{background:var(--bg)}.lt div.on{background:var(--acc);color:#fff}.lt .ico{display:flex;justify-content:center;margin-bottom:2px}.lt hr{border:0;border-top:1px solid var(--line);margin:2px 0;width:100%}
+.pt{position:absolute;left:50%;top:8px;transform:translateX(-50%);display:flex;gap:2px;z-index:8;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:3px;font-size:12.5px;white-space:nowrap}
+.pt span{padding:5px 11px;border-radius:6px;color:var(--mut);cursor:pointer}.pt span:hover{color:var(--text)}.pt span.on{background:var(--acc);color:#fff}.pt i{font-style:normal;width:1px;background:var(--line);margin:3px 4px}
+#lens{position:fixed;width:200px;height:200px;border-radius:50%;border:2px solid #ffd866;box-shadow:0 4px 18px rgba(0,0,0,.7);pointer-events:none;display:none;z-index:30}
+.drawbar{position:absolute;left:84px;top:54px;display:none;gap:6px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px 8px;font-size:13px;align-items:center;z-index:9;box-shadow:0 6px 20px rgba(0,0,0,.4)}
+.drawbar.show{display:flex}.drawbar .btn{padding:4px 9px}.drawbar .btn.on{background:#35d0ff;color:#002;border-color:#35d0ff;font-weight:700}.drawbar .save{background:#2e9d4a;color:#fff;border-color:#2e9d4a}
+.drawbar input{width:170px;font-size:12.5px;border-radius:13px;padding:4px 10px}
+.panel{width:372px;display:flex;flex-direction:column;gap:8px;min-height:0;position:relative;flex:none}
+.panel.ovl{position:absolute;right:56px;top:10px;bottom:10px;z-index:30;box-shadow:-12px 0 30px rgba(0,0,0,.55);background:var(--bg);padding:8px;border-radius:12px;border:1px solid var(--line)}
+.grip{position:absolute;left:-8px;top:0;bottom:0;width:14px;cursor:ew-resize;z-index:5}
+.grip::after{content:"";position:absolute;left:5px;top:50%;height:56px;width:4px;margin-top:-28px;border-radius:2px;background:var(--line)}.grip:hover::after,.grip.drag::after{background:var(--acc)}
+.phdr{display:flex;align-items:center;gap:10px;padding:5px 10px;background:var(--panel);border:1px solid var(--line);border-radius:9px;font-size:13px;flex:none}
+.phdr label{display:flex;gap:6px;align-items:center;cursor:pointer}.phdr .hb{border:1px solid var(--line);border-radius:6px;padding:2px 9px;background:var(--bg);cursor:pointer}
+.rail{width:36px;flex:none;display:none;flex-direction:column;gap:6px;padding:4px 0;align-items:center;z-index:31}
+.rail div{writing-mode:vertical-rl;transform:rotate(180deg);padding:14px 7px;border-radius:8px;background:var(--panel);border:1px solid var(--line);font-size:13px;font-weight:600;color:var(--mut);white-space:nowrap;cursor:pointer}
+.rail div:hover{border-color:var(--acc);color:var(--text)}.rail div.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+.rail .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#3aa655;margin-top:6px}
+.rail .pinb{writing-mode:horizontal-tb;transform:none;padding:9px 6px;margin-top:auto;display:flex;align-items:center;justify-content:center}
+.rail .pinb svg{width:18px;height:18px;stroke:var(--text);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.tabs{display:flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;flex:none}.tabs button{flex:1;border:0;background:none;padding:6px 4px;color:var(--mut);font-weight:600;font-size:13px;cursor:pointer}.tabs button.on{background:var(--acc);color:#fff}
+.tab{display:none;flex-direction:column;gap:8px;overflow-y:auto;min-height:0;flex:1}.tab.on{display:flex}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 11px}.h{font-weight:700;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center}
+#gauge{display:block;width:176px;margin:0 auto}.panel .btn,.panel .b{font-size:13px;padding:6px 7px}
+.band{display:flex;justify-content:space-between;font-size:12px;font-weight:600;margin-top:-4px}
+.say{margin:8px 0 5px;padding:7px 9px;border-left:3px solid var(--mut);background:var(--bg);border-radius:4px;user-select:text}
+.dec{display:flex;flex-wrap:wrap;gap:6px}.dec .b{flex:1 1 auto;justify-content:center;text-align:center;white-space:nowrap;gap:6px;padding:6px 8px}.b{border:1px solid var(--line);border-radius:8px;display:flex;gap:8px;align-items:center;background:var(--bg);cursor:pointer;text-align:left}
+.b:hover{border-color:var(--acc)}.b.on{font-weight:700}
+kbd{font:600 12px Menlo,Consolas,monospace;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:1px 6px;background:var(--panel);color:var(--text);white-space:nowrap}
+#comment{width:100%;margin-top:8px;height:30px;border-radius:15px;padding:4px 14px;font-size:12.5px}#comment::placeholder{color:var(--mut);opacity:.8}
+.saved{margin-top:6px;font-size:13px;min-height:18px}.ok{color:#3aa655}.err{color:#e05555}
+.row{display:flex;align-items:center;gap:8px;margin:7px 0}.row>span:first-child{width:104px;flex:none;white-space:nowrap}.row input[type=range]{flex:1;min-width:0;accent-color:var(--acc)}
+.tools{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
+#readout{font:12.5px Menlo,Consolas,monospace;min-height:18px;white-space:pre-wrap;margin-top:6px}
+table.cmp{width:100%;border-collapse:collapse;font-size:13px}table.cmp td,table.cmp th{padding:5px 5px;border-bottom:1px solid var(--line);text-align:left}table.cmp th{color:var(--mut);font-weight:600}
+table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cmp tr.cur td{background:var(--bg)}
+.pill{padding:1px 8px;border-radius:9px;color:#fff;font-size:12px;font-weight:600;white-space:nowrap}
+.miss{display:flex;gap:6px;align-items:center;margin:5px 0}.miss input{flex:1;min-width:0;font-size:12.5px}
+.strip{display:flex;gap:5px;padding:6px 14px;background:var(--panel);border-top:1px solid var(--line);overflow-x:auto;flex:none}
+.chip{min-width:30px;text-align:center;padding:3px 6px;border-radius:6px;border:1px solid var(--line);cursor:pointer;font:600 12px Menlo,monospace;flex:none;background:var(--bg)}
+.chip.cur{outline:2px solid var(--acc);outline-offset:1px}
+.keys{display:flex;gap:16px;align-items:center;padding:6px 14px;background:var(--panel);border-top:1px solid var(--line);font-size:12.5px;white-space:nowrap;overflow:hidden;flex:none}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:40}.modal.show{display:flex}
+.dlg{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 22px;max-width:940px;max-height:88vh;overflow:auto;user-select:text}
+.dlg h2{margin:0 0 8px}.dlg h3{margin:14px 0 4px}.dlg td{padding:3px 14px 3px 0;vertical-align:top}.dlg pre{background:var(--bg);padding:10px;border-radius:8px;white-space:pre-wrap;font-size:12.5px}
+.dlg .r{display:flex;align-items:center;gap:10px;margin:8px 0;flex-wrap:wrap}.dlg .r>b{width:130px;font-weight:600;flex:none}.dlg label{display:inline-flex;gap:5px;align-items:center;margin-right:10px;cursor:pointer}
+.dlg input[type=text]{flex:1;min-width:200px;font:12.5px Menlo,Consolas,monospace}.dlg hr{border:0;border-top:1px solid var(--line);margin:10px 0}
+.chipbox{border:1px solid var(--line);border-radius:8px;padding:4px 10px;font-size:13px;white-space:nowrap;background:var(--bg)}
+.sc{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:8px 0}.sc .card{background:var(--bg)}.sc .big{font-size:30px;font-weight:800;line-height:1.1}
+.banner{background:#7a5b00;color:#fff;padding:5px 14px;font-size:13px;display:none}
+.toast{position:fixed;left:24px;bottom:66px;background:#1f6b36;color:#fff;border-radius:10px;padding:9px 14px;font-size:13px;z-index:60;box-shadow:0 6px 20px rgba(0,0,0,.5);display:none;user-select:text}
+.hide{display:none!important}
+#m3d .m3w{position:fixed;inset:18px;background:var(--panel);border:1px solid var(--line);border-radius:12px;display:grid;grid-template-columns:230px 1fr 360px;overflow:hidden;z-index:80}
+.m3l,.m3r{overflow:auto;padding:10px 12px;font-size:12.5px}.m3l{border-right:1px solid var(--line)}.m3r{border-left:1px solid var(--line)}
+.m3c{display:flex;flex-direction:column;min-width:0}.m3head{display:flex;gap:10px;align-items:center;padding:8px 10px;border-bottom:1px solid var(--line)}
+#m3cv{flex:1;width:100%;min-height:200px;cursor:grab;touch-action:none}.m3prof{height:128px;border-top:1px solid var(--line);display:flex;gap:8px;padding:6px 10px}#m3pf{flex:1;height:110px;cursor:pointer}#m3slab{width:230px}
+.m3l h5,.m3r h5{margin:10px 0 4px;font-size:10.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em}.m3l h5:first-child,.m3r h5:first-child{margin-top:0}
+.m3seg{display:flex;flex-wrap:wrap;gap:4px}.m3seg button{font-size:12px;padding:3px 8px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--text);cursor:pointer}.m3seg button.on{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 25%,transparent)}
+.m3l label{display:flex;gap:6px;align-items:center;padding:2px 0;cursor:pointer}.m3sw{width:10px;height:10px;border-radius:3px;display:inline-block}
+.m3r table{width:100%;border-collapse:collapse}.m3r td{padding:3px 4px;border-bottom:1px solid var(--line);font-size:12px}.m3r td:last-child{text-align:right;white-space:nowrap}
+.m3bar{display:flex;align-items:center;gap:6px;font-size:12px;margin:2px 0}.m3bar div{flex:1;height:8px;border-radius:4px;background:var(--line);overflow:hidden}.m3bar i{display:block;height:100%}
+.m3sum{border-left:3px solid var(--acc);padding:6px 8px;background:var(--bg);border-radius:4px;margin-top:6px;font-size:12.5px}.sgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.sbox{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.sbox h4{margin:0 0 6px;font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em}.sbox .it{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--line);font-size:13px}.sbox .it:last-child{border:0}
+#setdlg .pri,#bSaveFinal{font-weight:600}#setdlg .pri{background:var(--acc);border-color:var(--acc);color:#fff}#nextcard{position:fixed;right:18px;bottom:18px;width:360px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;z-index:70;display:none;box-shadow:0 10px 30px rgba(0,0,0,.5);font-size:13px}#nextcard.show{display:block}
+.nsw{display:inline-flex;align-items:center;width:34px;height:19px;border-radius:999px;padding:2px;background:#5a626e;cursor:pointer;flex:none}.nsw i{width:15px;height:15px;border-radius:50%;background:#fff;display:block}.nsw.on{background:#3aa655;justify-content:flex-end}#nextcard .pri{background:var(--acc);border-color:var(--acc);color:#fff}#prevStudy,#nextStudy{padding:3px 9px;color:var(--text)}
+.toast.err{background:#8a2b2b}.toast u{cursor:pointer;margin-left:8px}
+</style></head><body>
+<div class="top"><b>cSS Reviewer</b>
+ <select id="cohort" title="Cohort" class="hide"></select><select id="study" title="Patient"></select><button class="b" id="prevStudy" title="Previous patient">◂</button><button class="b" id="nextStudy" title="Next patient">▸</button>
+ <span class="mut" id="candinfo"></span><div class="prog"><div id="progbar"></div></div><span class="mut" id="progtxt"></span><span class="sp"></span>
+ <span id="vsym" class="vsym" title="Validation read: AI meter hidden and locked, candidates shuffled, some excluded objects mixed in (click: Settings)"><svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7c2 0 3.8.8 5.3 1.8M22 12s-4 7-10 7c-2 0-3.8-.8-5.3-1.8"/><path d="M3 21L21 3"/><rect x="15" y="13" width="7" height="6" rx="1" fill="currentColor"/><path d="M16.5 13v-1.5a2 2 0 0 1 4 0V13"/></svg></span>
+ <button class="btn" id="bSaveFinal" title="Save final (⌘↩): AI comparison if switched on, then the final save">💾 Save final</button><button class="btn" id="bGear" title="Settings">⚙</button>
+ <span id="scorechip" class="chipbox" title="cSS score 0-4: reviewer (after Q) and AI (rule-based, not validated)"></span>
+ <div class="tsw" id="themes" title="Theme: click a symbol or drag the knob - moon dark, drop eye-preserving blue, sun light (T)"><div class="knob"></div><span data-t="dark" title="Dark"><svg viewBox="0 0 24 24"><path d="M20 14a8 8 0 1 1-9-11 6.5 6.5 0 0 0 9 11z"/></svg></span><span data-t="blue" title="Eye-preserving blue"><svg viewBox="0 0 24 24"><path d="M12 3c3 4 6 7.5 6 11a6 6 0 0 1-12 0c0-3.5 3-7 6-11z"/></svg></span><span data-t="light" title="Light"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg></span></div>
+ <span class="mut">Reviewer</span><input type="text" id="reviewer" list="revlist" placeholder="your name" style="width:150px" autocomplete="off"><datalist id="revlist"></datalist>
+</div>
+<div class="mbar" id="mbar"><span data-m="file">File</span><span data-m="cand">Candidate</span><span data-m="view">View</span><span data-m="tools">Tools</span><span data-m="help">Help</span></div>
+<div class="banner" id="banner"></div>
+<div class="main" id="main">
+ <div class="views" id="views">
+  <div class="vgrid" id="vgrid"></div>
+  <div class="lt" id="lt"></div>
+  <div class="pt" id="pt"></div>
+  <div class="drawbar" id="drawbar"><b style="color:#35d0ff">Mark missed cSS</b><button class="btn" id="dRect" title="rectangle (W switches)">&#9645; Rectangle</button><button class="btn" id="dPen" title="free-hand pen (W switches)">&#9998; Pen</button>
+   <button class="btn" id="dUndo" title="remove the last stroke (Backspace)">Undo stroke</button><input type="text" id="dNote" placeholder="note (optional)" maxlength="300"><button class="btn save" id="dSave">Save <kbd>&crarr;</kbd></button><button class="btn" id="dCancel">Cancel <kbd>Esc</kbd></button></div>
+ </div>
+ <div class="panel" id="panel">
+  <div class="grip" id="grip" title="drag to resize the panel"></div>
+  <div class="phdr"><label><input type="checkbox" id="ahchk"> Auto-hide panel</label><span class="sp"></span><span class="hb" id="hideb" title="hide the panel (Space)">Hide &#9656;</span></div>
+  <div class="tabs" id="tabs"><button data-tab="viewer" title="F1">Viewer</button><button data-tab="cands" title="F2">Candidates</button><button data-tab="calls" title="F3">Calls summary</button></div>
+  <div class="tab" id="tab-viewer">
+   <div class="card" id="aicard"><div class="h"><span>AI evidence for cSS</span><span class="mut sm">hide <kbd>K</kbd></span></div>
+    <div id="aibody"><svg id="gauge" viewBox="0 0 220 122"></svg>
+    <div class="band"><span style="color:#d64545">not cSS</span><span style="color:#c99a1c">uncertain</span><span style="color:#3aa655">cSS likely</span></div>
+    <div class="say" id="aisay"></div><div class="mut sm" id="aisrc"></div><div class="mut sm" id="aiconf" style="margin-top:4px"></div></div></div>
+   <div class="card" id="s3card"><div class="h"><span>3-D shape of the dark structure</span><span class="mut sm"><a href="#" id="s3hide" style="color:inherit">hide <kbd>3</kbd></a></span></div>
+    <div id="s3body"><button class="btn" id="bM3" style="width:100%;margin-bottom:6px" title="Isolated 3-D analysis of this candidate: surface, voxels, local tube / sheet / blob, thickness, cross-sections, Hessian, vessels, pial surface">Open 3-D analysis ▸</button><canvas id="s3cv" width="300" height="200" style="width:100%;border-radius:8px;background:#0e1116;cursor:grab;touch-action:none"></canvas>
+    <div class="mut sm">drag = rotate · wheel = zoom · double-click = reset · <span style="color:#e04b4b">red</span> structure, <span style="color:#ffd25a">yellow</span> detector object, <span style="color:#7d8590">grey</span> cortex</div>
+    <div class="say" id="s3say"></div><div class="mut sm" id="s3meas"></div></div></div>
+   <div class="card" id="ucard"><div class="h"><span>Unified score (experimental)</span><span class="mut sm">research only</span></div><div id="ubody" class="sm"><span class="mut">—</span></div></div>
+   <div class="card" id="deccard"><div class="h"><span>Your decision</span><span class="mut sm" id="curcall"></span></div>
+    <div class="dec" id="dec"></div>
+    <input type="text" id="comment" placeholder="Add a comment…  (C)" maxlength="500" autocomplete="off">
+    <div class="saved" id="saved"></div></div>
+   <div class="card"><div class="h">Image</div>
+    <div class="row"><span>Sequence <kbd>S</kbd></span><select id="seq" style="flex:1"></select></div>
+    <div class="row"><span>Zoom <kbd>+</kbd> <kbd>-</kbd></span><input type="range" id="zoom" min="0" max="100" value="0"><span class="mut" id="zoomv" style="width:44px"></span></div>
+    <div class="row"><span>Contrast</span><input type="range" id="win" min="1" max="100"><span class="mut" id="winv" style="width:44px"></span></div>
+    <div class="row"><span>Brightness</span><input type="range" id="lev" min="0" max="100"><span class="mut" id="levv" style="width:44px"></span></div>
+    <div class="tools">
+     <button class="btn" id="tMark" title="show / hide the marking of this candidate">Marking <kbd>M</kbd></button><button class="btn" id="tOther" title="show / hide the other candidates' markings">Others <kbd>O</kbd></button>
+     <button class="btn" id="tMip" title="minimum-intensity slab, axial view">minIP <kbd>I</kbd></button><button class="btn" id="tAuto" title="open the next unread candidate after a decision">Auto-next <kbd>G</kbd></button>
+     <button class="btn" id="bReset">Reset <kbd>R</kbd></button><button class="btn" id="bCentre">Candidate <kbd>F</kbd></button></div>
+    <div class="mut sm" id="seqnote" style="margin-top:6px"></div>
+    <div id="readout" class="mut"></div></div>
+  </div>
+  <div class="tab" id="tab-cands"><div class="card"><div class="h"><span>Candidates</span><span class="mut sm">click to open</span></div><table class="cmp" id="candtable"></table></div>
+   <div class="card"><div class="h"><span>Missed cSS marks</span><span class="mut sm">add with <kbd>X</kbd></span></div><div id="misslist"></div></div></div>
+  <div class="tab" id="tab-calls"><div class="card"><div class="h"><span id="cmptitle">AI vs reviewer</span><button class="btn" id="bDiffer" title="show only the candidates where you and the meter differ">Only differ</button></div><table class="cmp" id="cmptable"></table></div>
+   <div class="card"><div class="h"><span>cSS score</span><span class="mut sm">reviewer score updates with <kbd>Q</kbd></span></div><div id="scorecard"></div></div>
+   <div class="card"><div class="h">Summary</div><div id="cmpsum"></div>
+    <div class="tools" style="margin-top:8px"><button class="btn" id="bScore">Score <kbd>Q</kbd></button><button class="btn" id="bExport">Export CSV <kbd>E</kbd></button><button class="btn" id="bUnread">Next unread <kbd>J</kbd></button></div>
+    <div class="mut sm" style="margin-top:6px">The meter is rule-based and not validated: "differ" shows where you and it disagree, not who is right.</div></div></div>
+ </div>
+ <div class="rail" id="rail"></div>
+</div>
+<div class="strip" id="strip"></div>
+<div class="keys"><span><kbd>wheel</kbd> <kbd>&uarr;</kbd> <kbd>&darr;</kbd> slices</span><span><kbd class="modk">Ctrl</kbd>+<kbd>wheel</kbd> / <kbd>+</kbd> <kbd>-</kbd> zoom</span><span><kbd>right-drag</kbd> contrast / brightness</span><span><kbd>right-click</kbd> menu</span><span><kbd>Tab</kbd> plane</span><span><kbd>&larr;</kbd> <kbd>&rarr;</kbd> candidate</span><span><kbd class="modk">Ctrl</kbd>+<kbd>S</kbd> snapshot</span><span><kbd>Space</kbd> panel</span><span><kbd>?</kbd> all keys</span><span class="sp"></span><span class="mut">Research software &middot; expert review required</span></div>
+<canvas id="lens"></canvas>
+<div class="toast" id="toast"></div>
+
+<div class="modal" id="help"><div class="dlg">
+ <h2>How to use the reviewer</h2>
+ <p><b>The reading.</b> Each candidate is a dark structure the detector found near the cortex. It is outlined in red on the whole slice and an arrow shows where it is (nothing is zoomed in for you: zoom and pan as you like). Compare with the other planes and sequences, then give one decision. The decision is saved at once; the next unread candidate opens (Auto-next, <kbd>G</kbd>). When all are read, press <kbd>Q</kbd> for the summary and the 0&ndash;4 score. Everything is also in the menu bar and in the right-click menu on the image.</p>
+ <table><tr><td><kbd>Y</kbd> cSS</td><td>curvilinear dark lining of the cortical surface / sulcus</td></tr>
+ <tr><td><kbd>V</kbd> Vessel</td><td>tube that continues beyond the candidate, branches, or runs into the white matter or a sinus</td></tr>
+ <tr><td><kbd>N</kbd> Normal cortex</td><td>naturally dark cortex or sulcus, nothing abnormal</td></tr>
+ <tr><td><kbd>A</kbd> Artifact</td><td>skull, air&ndash;bone interface, motion, mask edge</td></tr>
+ <tr><td><kbd>B</kbd> Microbleed</td><td>round / oval dark blob, not a line along the cortex; not cSS (counted separately)</td></tr>
+ <tr><td><kbd>U</kbd> Unsure</td><td>cannot decide; counted as <i>not</i> cSS in the score and listed for re-reading</td></tr>
+ <tr><td><kbd>H</kbd> Near ICH</td><td>siderosis connected to a lobar haemorrhage; reported but not scored</td></tr></table>
+ <h3>The AI meter</h3>
+ <p>The needle shows a number from 0 to 1: <span style="color:#d64545"><b>red</b> below 0.33</span> (the detector suspects a vessel, artifact or normal cortex), <span style="color:#c99a1c"><b>yellow</b> 0.33&ndash;0.66</span> (uncertain), <span style="color:#3aa655"><b>green</b> 0.66 and above</span> (suspects cSS). The line under it says what it suspects and why.<br>
+ <b>It is not a probability and has not been validated.</b> It is the detector's rule-based evidence (shape, position on the cortex, both banks, vessel continuation), lowered when its vessel / artifact rules fire. Use it as a second opinion only: the decision is yours. Seeing it before you decide can bias you &mdash; hide it with <kbd>K</kbd> for any reading that is used to test the detector. The <b>Calls summary</b> tab (<kbd>F3</kbd>) lists the meter next to your calls: "agree" = you called cSS and it is green, or you called something else and it is red; yellow counts as neither.</p>
+ <h3>Viewing</h3>
+ <table>
+ <tr><td><kbd>wheel</kbd> or <kbd>&uarr;</kbd> <kbd>&darr;</kbd></td><td>scroll slices in the view under the mouse (<kbd>PgUp</kbd> <kbd>PgDn</kbd> = 5 slices); the slice bar at the right edge can be dragged</td></tr>
+ <tr><td><kbd class="modk">Ctrl</kbd>+<kbd>wheel</kbd>, pinch, <kbd>+</kbd> <kbd>=</kbd> <kbd>-</kbd></td><td>zoom in / out (the same keys on Mac and Windows); the wheel zooms towards the mouse</td></tr>
+ <tr><td><kbd>0</kbd> &nbsp; <kbd>9</kbd></td><td>fit the whole slice &nbsp; actual size (1 voxel = 1 screen pixel)</td></tr>
+ <tr><td>left toolbar</td><td>the left mouse button does the selected tool: <b>Pan</b> (click = move the crosshair), <b>Zoom</b> (drag up / down), <b>Window</b> (drag: left&ndash;right contrast, up&ndash;down brightness), <b>Scroll</b> (drag up / down), Ruler, Probe, Lens, Missed</td></tr>
+ <tr><td><kbd>right-drag</kbd>, <kbd>Shift</kbd>+<kbd>drag</kbd></td><td>contrast / brightness at any time; a right-click without moving opens the menu (on a Mac, Ctrl+click also opens it)</td></tr>
+ <tr><td>middle button drag</td><td>pan at any time</td></tr>
+ <tr><td><kbd>Tab</kbd> / <kbd>Shift</kbd>+<kbd>Tab</kbd></td><td>next / previous plane (axial, coronal, sagittal) in the active image</td></tr>
+ <tr><td><kbd>\</kbd></td><td>layout: one image, two images, four images (each image has its own plane and sequence; all follow the same crosshair)</td></tr>
+ <tr><td><kbd>[</kbd> <kbd>]</kbd> &nbsp; <kbd>;</kbd> <kbd>'</kbd></td><td>brightness down / up &nbsp; contrast lower / higher</td></tr>
+ <tr><td><kbd>R</kbd> &nbsp; <kbd>F</kbd></td><td>reset zoom and window &nbsp; go to the candidate (centres and zooms in on it)</td></tr>
+ <tr><td><kbd>M</kbd> &nbsp; <kbd>O</kbd></td><td>show / hide this candidate's marking &nbsp; the other candidates' markings</td></tr>
+ <tr><td><kbd>P</kbd></td><td>corner text and scale bar on / off</td></tr>
+ <tr><td><kbd>W</kbd> &nbsp; <kbd>I</kbd></td><td>magnifier lens (2.5&times;) &nbsp; minIP slab (about 8 mm), axial view: vessels become continuous tubes</td></tr>
+ <tr><td><kbd>S</kbd>, <kbd>1</kbd>&ndash;<kbd>5</kbd></td><td>next sequence / choose a sequence for the active image</td></tr>
+ <tr><td><kbd>D</kbd> &nbsp; <kbd>L</kbd> &nbsp; <kbd>X</kbd></td><td>darkness probe (click) &nbsp; ruler (drag, mm) &nbsp; mark a missed cSS</td></tr>
+ </table>
+ <h3>Reading and keys</h3>
+ <table>
+ <tr><td><kbd>&larr;</kbd> <kbd>&rarr;</kbd> &nbsp; <kbd>J</kbd></td><td>previous / next candidate &nbsp; next unread (or unconfirmed) candidate</td></tr>
+ <tr><td><kbd>Z</kbd> &nbsp; <kbd>Backspace</kbd></td><td>undo the last decision &nbsp; clear this candidate's decision</td></tr>
+ <tr><td><kbd>C</kbd></td><td>write a comment (<kbd>Enter</kbd> saves, <kbd>Esc</kbd> leaves)</td></tr>
+ <tr><td><kbd>Q</kbd> &nbsp; <kbd>E</kbd></td><td>summary and score &nbsp; export the AI vs reviewer table (CSV)</td></tr>
+ <tr><td><kbd>K</kbd> &nbsp; <kbd>G</kbd> &nbsp; <kbd>T</kbd></td><td>AI meter on / off &nbsp; auto-next on / off &nbsp; next theme</td></tr>
+ <tr><td><kbd>F1</kbd> <kbd>F2</kbd> <kbd>F3</kbd></td><td>right panel: viewer / candidates / calls summary</td></tr>
+ <tr><td><kbd>Space</kbd></td><td>hide / show the right panel</td></tr>
+ <tr><td><kbd class="modk">Ctrl</kbd>+<kbd>S</kbd> &nbsp; <kbd>Shift</kbd>+<kbd class="modk">Ctrl</kbd>+<kbd>S</kbd></td><td>take a snapshot &nbsp; save a snapshot as&hellip;</td></tr>
+ <tr><td><kbd>?</kbd> &nbsp; <kbd>Esc</kbd></td><td>this help &nbsp; back to the pan tool / close a menu or window</td></tr></table>
+ <h3>The right panel</h3>
+ <p>Drag the thin handle on its left edge to resize it (the width is remembered). <b>Hide</b>, <kbd>Space</kbd> or a click on the active tab hides it; vertical buttons then appear at the right edge and a click on one opens the panel on that tab. Tick <b>Auto-hide panel</b> (also in the right-click and Settings menus) and the panel appears only while the pointer is over those buttons or the panel; the pin symbol on the buttons pins it again. The tab you used last is reopened next time.</p>
+ <h3>Snapshots</h3>
+ <p><b>Take snapshot</b> (<kbd class="modk">Ctrl</kbd>+<kbd>S</kbd>) saves the image you are looking at, with the overlays you chose, as a PNG or JPEG named with the study code, candidate number, the x y z voxel position of the lesion and the plane, for example <code>M04_cand12_x082_y162_z099_axial.png</code>. If a default folder is set it saves there at once; if not, the Save-as window opens. <b>Save snapshot as&hellip;</b> always asks. Settings &rarr; <b>Snapshot settings&hellip;</b> holds the folder, overlays, format, resolution and file name parts. The window itself (menus and panel) is not part of a snapshot. Names contain the study code only, never a patient name.</p>
+ <h3>The final score</h3>
+ <p><kbd>Q</kbd> scores your calls. Each hemisphere gets 0 (no cSS), 1 (one sulcus or up to 3 immediately adjacent sulci) or 2 (two or more non-adjacent sulci, or more than 3 adjacent sulci); the total is 0&ndash;4. Category: <b>focal</b> = 1&ndash;3 sulci, <b>disseminated (diffuse)</b> = more than 3 sulci. Several pieces of one continuous lining count as one line and never raise the score. Before the final save a window compares your calls and score with the AI's; from there you can re-review any disagreement, then <b>Save final</b>. The window can be switched off there or in the <b>Settings</b> menu. The final scores go to <code>review/css_report.xlsx</code>. The AI score is the same scoring applied to the candidates in the meter's green band; it is not validated.</p>
+ <h3>Marking a cSS the detector missed</h3>
+ <p>Press <kbd>X</kbd> (or right-click &rarr; <i>Mark a missed cSS here</i>). A small bar appears: draw a <b>rectangle</b> around the lesion (default) or trace it with the <b>pen</b> (<kbd>W</kbd> switches; several pen strokes are allowed, <kbd>Backspace</kbd> removes the last one). Type a note if you wish, then <b>Save</b> (<kbd>Enter</kbd>); <kbd>Esc</kbd> cancels. Mark the one slice where the lesion is clearest. Saved marks are listed in the <b>Candidates</b> tab with what the detector did at that place (shown, excluded by a rule, below a size gate, or not generated). They are reported next to the score but are <b>not counted</b> in the 0&ndash;4 score.</p>
+ <h3>Other tools</h3>
+ <p><b>Darkness probe</b>: mean signal of the 3 &times; 3 voxels under the click, as a percentage of the normal cortex and in standard deviations below it (candidates start at about &minus;2.5 SD). <b>Ruler</b>: drag a line, length in mm. <b>Magnifier</b>: a lens follows the mouse. Sequences that are not listed were not imported for this patient.</p>
+ <p class="mut">Everything is stored on this computer in the project's <code>review</code> folder, with the reviewer name and time. Close with <kbd>Esc</kbd>.</p>
+</div></div>
+<div class="modal" id="compare"><div class="dlg" style="min-width:640px;max-width:860px"><h2>Before saving: AI vs reviewer</h2><div id="cmpbody"></div>
+ <p class="mut sm">The AI calls and the AI score come from the detector's rule-based evidence. They are not validated: a difference shows where you and the rules disagree, not who is right. Calls you change after seeing this window are recorded as re-votes.</p>
+ <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn" id="cRe">Re-review disagreements</button><button class="btn on" id="cSave">Save final</button><button class="btn" id="cClose">Close <kbd>Esc</kbd></button>
+ <span class="sp"></span><label class="mut sm" style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="cNo"> Do not show this window again (Settings menu turns it back on)</label></div></div></div>
+<div class="modal" id="import"><div class="dlg" style="min-width:620px"><h2>Import earlier calls</h2>
+ <p class="mut">A new reviewer name starts empty. Copy calls from another file onto <b>your</b> list. Imported calls are dashed until you press the same key again; then they count as yours.</p>
+ <div class="r"><b>From</b><select id="imFrom" style="flex:1"></select></div>
+ <div class="r"><b></b><label class="mut sm"><input type="radio" name="imov" checked> only candidates I have not called</label><label class="mut sm"><input type="radio" name="imov" id="imAll"> replace my calls too</label></div>
+ <div class="mut sm">Switched off during a validation read (importing would unblind you).</div>
+ <div class="r" style="justify-content:flex-end;margin-top:10px"><button class="btn" id="imCancel">Cancel</button><button class="btn on" id="imGo">Import</button></div></div></div>
+<div id="nextcard"></div>
+<div class="modal" id="m3d"><div class="m3w">
+ <div class="m3l" id="m3left"></div>
+ <div class="m3c"><div class="m3head"><b id="m3title">3-D analysis</b><span class="mut sm" id="m3hint">drag rotate · wheel zoom · right-drag pan · click = MRI slices jump there · double-click = best view</span><span style="flex:1"></span><button class="btn" id="m3close">Close <kbd>Esc</kbd></button></div>
+  <canvas id="m3cv"></canvas><div class="m3prof"><canvas id="m3pf"></canvas><div id="m3slab" class="mut sm"></div></div></div>
+ <div class="m3r" id="m3right"></div></div></div><div class="modal" id="setdlg"><div class="dlg" style="min-width:880px;max-width:96vw"><h2>Settings</h2><div id="setbody"></div>
+ <div style="display:flex;gap:8px;align-items:center;margin-top:10px"><span class="mut sm">Changes apply at once and are kept in the project folder (shared by every reviewer window and the app). Theme: top bar.</span><span style="flex:1"></span><button class="btn" id="setReset">Reset to defaults</button><button class="btn pri" id="setDone">Done</button></div></div></div><div class="modal" id="summary"><div class="dlg" style="min-width:560px"><h2>Summary</h2><div id="sumbody"></div><p class="mut">Close with <kbd>Esc</kbd>.</p></div></div>
+<div class="modal" id="saveas"><div class="dlg" style="min-width:600px"><h2>Save snapshot as</h2>
+ <div class="r"><b>Folder</b><input type="text" id="saFolder" autocomplete="off"><button class="btn" id="saChoose" style="display:none">Choose&hellip;</button></div>
+ <div class="r"><b>File name</b><input type="text" id="saName" autocomplete="off"></div>
+ <div class="mut sm" id="saHint">Shown because no default folder is set (or "Always ask" is on). Chrome and Edge also offer their own Save dialog with Choose&hellip;.</div>
+ <div class="r" style="justify-content:flex-end;margin-top:12px"><label class="mut sm"><input type="checkbox" id="saDefault"> Use this folder as the default</label><button class="btn" id="saCancel">Cancel</button><button class="btn on" id="saSave">Save</button></div></div></div>
+<div class="modal" id="snapdlg"><div class="dlg" style="min-width:680px"><h2>Snapshot settings</h2>
+ <div class="r"><b>Capture</b><label><input type="radio" name="smode" value="view"> The image view (what you see, with overlays)</label><label><input type="radio" name="smode" value="all"> All images of the layout</label></div>
+ <div class="r"><b>Include</b><label><input type="checkbox" id="sText"> corner text</label><label><input type="checkbox" id="sScale"> scale bar</label><label><input type="checkbox" id="sOutline"> candidate outline</label><label><input type="checkbox" id="sCross"> crosshair</label><label><input type="checkbox" id="sArrow"> arrow</label></div>
+ <div class="r"><b>Format</b><label><input type="radio" name="sfmt" value="png"> PNG</label><label><input type="radio" name="sfmt" value="jpg"> JPEG</label><span class="mut">&nbsp;&nbsp;Resolution</span><label><input type="radio" name="sres" value="1"> 1&times;</label><label><input type="radio" name="sres" value="2"> 2&times;</label></div>
+ <hr>
+ <div class="r"><b>Default folder</b><input type="text" id="sFolder" autocomplete="off" placeholder=""><button class="btn" id="sOpen">Open</button></div>
+ <div class="r"><b></b><label class="mut sm"><input type="checkbox" id="sAsk"> Always ask where to save (Save as window)</label></div>
+ <div class="mut sm" style="margin-left:140px;margin-top:-4px">Empty = no default folder yet: the Save-as window opens. <code>{study}</code> in the path is replaced by the study code.</div>
+ <div class="r"><b>File name</b><label><input type="checkbox" id="pStudy"> study</label><label><input type="checkbox" id="pCand"> candidate</label><label><input type="checkbox" id="pXyz"> x y z</label><label><input type="checkbox" id="pPlane"> plane</label><label><input type="checkbox" id="pSlice"> slice</label><label><input type="checkbox" id="pTime"> date-time</label></div>
+ <div class="r"><b>Preview</b><input type="text" id="sPrev" readonly></div>
+ <div class="r"><b>Also</b><label><input type="checkbox" id="sSide"> small text file with study, candidate, region, x y z (voxel + mm), call, AI meter</label><label><input type="checkbox" id="sClip"> copy to clipboard</label></div>
+ <div class="mut sm">Names use the study code only, never a patient name. x y z = voxel position of the lesion centre in the SWI.</div>
+ <div class="r" style="justify-content:flex-end;margin-top:10px"><button class="btn" id="sCancel">Cancel</button><button class="btn on" id="sOk">Save settings</button></div></div></div>
+
+<script src="/morph3d.js"></script>
+<script>
+"use strict";
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const MAC=/Mac|iPhone|iPad/.test(navigator.platform||navigator.userAgent), MOD=MAC?"⌘":"Ctrl";
+$$(".modk").forEach(e=>e.textContent=MOD);
+const CALLKEYS={y:"cSS",v:"Vessel",n:"Normal",a:"Artifact",b:"Microbleed",u:"Unsure",h:"Near ICH"};
+const CALLLBL={cSS:"cSS",Vessel:"Vessel",Normal:"Normal cortex",Artifact:"Artifact",Microbleed:"Microbleed",Unsure:"Unsure","Near ICH":"Near ICH"};
+const CALLCOL={cSS:"#2e9d4a",Vessel:"#3b82e0",Normal:"#8a8f98",Artifact:"#e07a1f",Microbleed:"#b0306a",Unsure:"#c9a400","Near ICH":"#9b4fc0"};
+const did=c=>c.disp||c.id;      // number shown to the reader (shuffled 1..N in a validation read)
+let vmode=false;
+const BANDCOL={green:"#3aa655",yellow:"#c99a1c",red:"#d64545"};
+(function(){try{const x=new XMLHttpRequest();x.open("GET","/api/vset",false);x.send();if(x.status===200){const o=JSON.parse(x.responseText||"{}");for(const k in o)localStorage.setItem("css_"+k,JSON.stringify(o[k]))}}catch(e){}})();
+let vsetT=null;function vsetPush(k,v){if(String(k).startsWith("vmode_"))return;(vsetPush.q=vsetPush.q||{})[k]=v;clearTimeout(vsetT);vsetT=setTimeout(()=>{const q=vsetPush.q;vsetPush.q={};fetch("/api/vset",{method:"POST",headers:{"Content-Type":"application/json","X-CSS":"1"},body:JSON.stringify(q)}).catch(()=>{})},400)}
+const LS=(k,d)=>{try{const v=localStorage.getItem("css_"+k);return v===null?d:JSON.parse(v)}catch(e){return d}};
+const LSS=(k,v)=>{try{localStorage.setItem("css_"+k,JSON.stringify(v))}catch(e){}vsetPush(k,v)};
+const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const IC={lens:'<circle cx="10" cy="10" r="6"/><path d="M15 15l6 6"/>',zoomin:'<circle cx="10" cy="10" r="6"/><path d="M15 15l6 6M10 7v6M7 10h6"/>',eye:'<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',layers:'<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',slab:'<rect x="4" y="5" width="16" height="4" rx="1"/><rect x="4" y="11" width="16" height="4" rx="1"/><rect x="4" y="17" width="16" height="3" rx="1"/>',seq:'<rect x="3" y="4" width="12" height="12" rx="2"/><path d="M7 20h12a2 2 0 0 0 2-2V8"/>',plus:'<circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/>',dark:'<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/>',ruler:'<rect x="2" y="8" width="20" height="8" rx="1"/><path d="M6 8v4M10 8v3M14 8v4M18 8v3"/>',cam:'<path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.5"/>',disk:'<path d="M5 3h11l4 4v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M8 3v5h7V3"/><rect x="8" y="14" width="8" height="6"/>',target:'<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.5"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>',reset:'<path d="M4 12a8 8 0 1 0 3-6.2"/><path d="M4 4v5h5"/>',side:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>',pin:'<path d="M9 3h6l-1 6 4 4H6l4-4z"/><path d="M12 13v8"/>',gear:'<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/>',sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>',moon:'<path d="M20 14a8 8 0 1 1-9-11 6.5 6.5 0 0 0 9 11z"/>',hand:'<path d="M8 12V6a1.5 1.5 0 0 1 3 0v5M11 11V4.5a1.5 1.5 0 0 1 3 0V11M14 11V6a1.5 1.5 0 0 1 3 0v8a6 6 0 0 1-6 6h-1a5 5 0 0 1-4-2l-3-4a1.5 1.5 0 0 1 2.4-1.8L8 15"/>',gauge:'<path d="M3 17a9 9 0 0 1 18 0"/><path d="M12 17l4-5"/>',cmp:'<circle cx="12" cy="12" r="9"/><path d="M8.5 12.5l2.3 2.3 4.7-5"/>',next:'<path d="M5 12h14M13 6l6 6-6 6"/>',prev:'<path d="M19 12H5M11 6l-6 6 6 6"/>',text:'<path d="M5 6h14M12 6v13M9 19h6"/>',folder:'<path d="M3 6h6l2 2h10v11H3z"/>',sliders:'<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>',scroll:'<path d="M12 4v16M8 8l4-4 4 4M8 16l4 4 4-4"/>',l1:'<rect x="4" y="5" width="16" height="14" rx="2"/>',l2:'<rect x="3" y="6" width="8" height="12" rx="1"/><rect x="13" y="6" width="8" height="12" rx="1"/>',l4:'<rect x="3" y="4" width="8" height="7" rx="1"/><rect x="13" y="4" width="8" height="7" rx="1"/><rect x="3" y="13" width="8" height="7" rx="1"/><rect x="13" y="13" width="8" height="7" rx="1"/>',fit:'<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',actual:'<rect x="5" y="5" width="14" height="14" rx="1"/><path d="M10 9.5l2-1.5v8"/>',export:'<path d="M12 4v11M7 11l5 5 5-5M4 20h16"/>',undo:'<path d="M4 8h10a5 5 0 0 1 0 10H8"/><path d="M8 4L4 8l4 4"/>',clear:'<path d="M5 6h14M9 6V4h6v2M7 6l1 14h8l1-14"/>',comment:'<path d="M4 5h16v11H9l-5 4z"/>',help:'<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 1-1 1.7M12 17h.01"/>',summary:'<path d="M5 4h14v16H5z"/><path d="M8 9h8M8 13h8M8 17h5"/>',mirror:'<path d="M12 3v18"/><path d="M8 7L3 12l5 5z"/><path d="M16 7l5 5-5 5z" fill="currentColor"/>',flag:'<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',cube:'<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/>'};
+const svg=n=>`<svg viewBox="0 0 24 24">${IC[n]||""}</svg>`;
+const PLN=["Axial","Coronal","Sagittal"];
+// views: h = horizontal source axis, v = vertical, s = slice axis; displayed flipped (radiological: patient right on screen left)
+const VIEWS=[{h:0,v:1,s:2},{h:0,v:2,s:1},{h:1,v:2,s:0}];
+const ORI=[["R","L","A","P"],["R","L","S","I"],["A","P","S","I"]];
+const DEFPL=[0,1,2,0];
+let M=null, LAB=null, vols={}, seqmeta={}, WLs={}, luts={};
+let nx,ny,nz,vox, cur=[0,0,0], ctr=[0,0,0], zoom=1;
+let layout=LS("layout","1"), panes=[], act=0;
+let ci=0, calls={}, undo=[], tool=LS("tool","pan"), ruler=null, probe=null, missed=[], draft=null, shape="rect", onlyDiffer=false;
+let autoPt=LS("autopt",true),autoSec=LS("autosec",10),nxTimer=null;   // after the final save: next patient of the cohort
+let compareOn=LS("compare",true), revoteMode=false, readerScore=null, finalRec=null;
+let showMark=LS("mark",true), showOther=LS("other",true), autoNext=LS("auto",true), showAI=LS("ai",true), showText=LS("text",true), showCross=LS("cross2",false), mag=false, mouse=null;
+let mir=false, showRL=LS("rl",true), ltah=LS("ltah",false), ltopen=false, sideChk=null;
+let ph=LS("ph",false), ah=LS("ah",false), pw=LS("pw",372), peek=false, leaveT=0, resizing=false, lastTab=LS("tab","viewer");
+let snap=Object.assign({mode:"view",text:true,scale:true,outline:true,cross:false,arrow:false,fmt:"png",res:2,folder:"",ask:false,parts:{study:1,cand:1,xyz:1,plane:1,slice:0,time:0},side:true,clip:false},LS("snap",{}));
+const MAGF=2.5;
+
+const THEMES=["dark","blue","light"];
+function theme(t){document.documentElement.dataset.theme=t;LSS("theme",t);$$("#themes span").forEach(b=>b.classList.toggle("on",b.dataset.t===t));
+  const k=$("#themes .knob");if(k)k.style.left=(3+THEMES.indexOf(t)*33)+"px"}
+function status(t,err){const s=$("#saved");s.textContent=t||"";s.className="saved "+(err?"err":"ok")}
+let toastT=0;function toast(html,err,ms){const t=$("#toast");t.innerHTML=html;t.className="toast"+(err?" err":"");t.style.display="block";clearTimeout(toastT);toastT=setTimeout(()=>{t.style.display="none"},ms||7000)}
+const hasVol=()=>!!M&&!!vols.swi;
+const cand=()=>M&&M.cands.length?M.cands[ci]:null;
+
+// ---------- window / level per sequence ----------
+function getWL(seq){const w=WLs[seq]||(seqmeta[seq]&&seqmeta[seq].win)||[0,65535];return [(w[1]-w[0])/655.35,100-(w[0]+w[1])/2/655.35]}
+function setWLp(seq,w,l){w=Math.max(0.5,Math.min(100,w));l=Math.max(0,Math.min(100,l));const c=(100-l)*655.35;WLs[seq]=[c-w*655.35/2,c+w*655.35/2];delete luts[seq];draw()}
+function lutFor(seq){if(luts[seq])return luts[seq];const w=WLs[seq]||seqmeta[seq].win,lo=w[0],hi=Math.max(w[1],lo+1),L=new Uint8Array(65536);for(let i=0;i<65536;i++){const v=(i-lo)/(hi-lo);L[i]=v<=0?0:v>=1?255:(v*255)|0}return luts[seq]=L}
+
+// ---------- geometry ----------
+function geomWH(p,W,H,z,c){z=z===undefined?zoom:z;c=c||ctr;const V=VIEWS[p.plane],d=[nx,ny,nz];
+  const fit=Math.min(W/(d[V.h]*vox[V.h]),H/(d[V.v]*vox[V.v]))*z,sx=fit*vox[V.h],sy=fit*vox[V.v],dir=(mir&&V.h===0)?-1:1;
+  return {V,W,H,sx,sy,fit,dir,ox:W/2-(dir>0?d[V.h]-1-c[V.h]+0.5:c[V.h]+0.5)*sx,oy:H/2-(d[V.v]-1-c[V.v]+0.5)*sy,nh:d[V.h],nv:d[V.v]}}
+const geom=p=>geomWH(p,p.cv.clientWidth,p.cv.clientHeight);
+function toVoxF(p,mx,my){const g=geom(p),pt=cur.slice();pt[g.V.h]=g.dir>0?g.nh-0.5-(mx-g.ox)/g.sx:(mx-g.ox)/g.sx-0.5;pt[g.V.v]=g.nv-0.5-(my-g.oy)/g.sy;
+  const d=[nx,ny,nz];for(let a=0;a<3;a++)pt[a]=Math.max(0,Math.min(d[a]-1,pt[a]));return pt}
+const toVox=(p,mx,my)=>toVoxF(p,mx,my).map(Math.round);
+function toScrG(g,pt){return [g.ox+((g.dir>0?g.nh-1-pt[g.V.h]:pt[g.V.h])+0.5)*g.sx, g.oy+(g.nv-1-pt[g.V.v]+0.5)*g.sy]}
+const IDX=(i,j,k)=>i+nx*(j+ny*k);
+function zoomFrom(p,mx,my,z0,c0,z1){ // keep the voxel under (mx,my) fixed while changing zoom z0 -> z1 (view centre c0 at z0)
+  z1=Math.max(0.25,Math.min(24,z1)); const W=p.cv.clientWidth,H=p.cv.clientHeight,g0=geomWH(p,W,H,z0,c0),V=g0.V;
+  const ih=c0[V.h]-g0.dir*(mx-W/2)/g0.sx, iv=c0[V.v]-(my-H/2)/g0.sy, g1=geomWH(p,W,H,z1,c0);
+  zoom=z1; ctr=c0.slice(); ctr[V.h]=ih+g1.dir*(mx-W/2)/g1.sx; ctr[V.v]=iv+(my-H/2)/g1.sy; clampCtr(); draw()}
+function clampCtr(){const d=[nx,ny,nz];for(let a=0;a<3;a++)ctr[a]=Math.max(0,Math.min(d[a]-1,ctr[a]))}
+function zoomBy(f){const p=panes[act];zoomFrom(p,p.cv.clientWidth/2,p.cv.clientHeight/2,zoom,ctr.slice(),zoom*f)}
+function fitView(){zoom=1;ctr=[(nx-1)/2,(ny-1)/2,(nz-1)/2];draw()}
+function actualSize(){const p=panes[act],g=geom(p);zoomFrom(p,p.cv.clientWidth/2,p.cv.clientHeight/2,zoom,ctr.slice(),zoom/g.sx)}
+function gotoCandidate(){const c=cand();if(!c)return;cur=c.centre.slice();if(zoom<2)zoom=3;ctr=cur.slice();draw()}
+function resetView(){const p=panes[act];delete WLs[p.seq];delete luts[p.seq];fitView()}
+
+// ---------- drawing ----------
+function strokeEdges(x,g,E,scale){for(const [q,L] of E.entries()){if(!L.length)continue;x.strokeStyle=q?"rgba(255,200,60,.85)":"#ff4646";x.lineWidth=(q?1.2:1.8)/scale;x.lineJoin="round";x.beginPath();
+    for(let n=0;n<L.length;n+=4){x.moveTo(g.ox+L[n]*g.sx,g.oy+L[n+1]*g.sy);x.lineTo(g.ox+L[n+2]*g.sx,g.oy+L[n+3]*g.sy)}x.stroke()}}
+function drawShape(x,g,type,strokes,label,dash){x.strokeStyle="#35d0ff";x.fillStyle="rgba(53,208,255,.12)";x.lineWidth=2.2;x.setLineDash(dash?[7,4]:[]);
+  let lx=null,ly=0;
+  if(type==="rect"&&strokes[0]&&strokes[0].length===2){const [a,b]=toScrG(g,strokes[0][0]),[c,d]=toScrG(g,strokes[0][1]);x.fillRect(a,b,c-a,d-b);x.strokeRect(a,b,c-a,d-b);lx=Math.min(a,c);ly=Math.min(b,d)-6}
+  else for(const st of strokes){if(!st.length)continue;x.beginPath();st.forEach((q,i)=>{const [a,b]=toScrG(g,q);if(i)x.lineTo(a,b);else{x.moveTo(a,b);if(lx===null){lx=a+8;ly=b-8}}});if(st.length===1){const [a,b]=toScrG(g,st[0]);x.arc(a,b,8,0,6.3)}x.stroke()}
+  x.setLineDash([]);if(label&&lx!==null){x.fillStyle="#35d0ff";x.font="12px Menlo,monospace";x.fillText(label,lx,ly)}}
+function buildSlice(p){ // the slice image + outlines of the pane (offscreen), recomputed on every render
+  const VOL=vols[p.seq]; if(!VOL){p.ready=false;return} p.ready=true;
+  const V=VIEWS[p.plane],d=[nx,ny,nz],nh=d[V.h],nv=d[V.v],off=p.off; if(off.width!==nh||off.height!==nv){off.width=nh;off.height=nv}
+  const octx=off.getContext("2d"),img=octx.createImageData(nh,nv),D=new Uint32Array(img.data.buffer),E=[[],[]],lut=lutFor(p.seq);
+  const gd=(mir&&V.h===0)?-1:1,st=[1,nx,nx*ny],sh=st[V.h],sv=st[V.v],ss=st[V.s],s0=cur[V.s]*ss,c=cand(),curId=c?c.id:-1;
+  const slab=(p.mip&&p.plane===0&&p.seq!=="phase")?Math.max(1,Math.round(4/vox[2])):0; let x0=1e9,x1=-1,y0=1e9,y1=-1;
+  for(let y=0;y<nv;y++){const vv=(nv-1-y)*sv;for(let x=0;x<nh;x++){const b=(gd>0?nh-1-x:x)*sh+vv,q=b+s0;let val=VOL[q];
+      if(slab){for(let k=Math.max(0,cur[2]-slab);k<=Math.min(nz-1,cur[2]+slab);k++){const w=VOL[b+k*ss];if(w<val&&w>0)val=w}}
+      const gv=lut[val];D[y*nh+x]=0xff000000|(gv<<16)|(gv<<8)|gv;
+      if(LAB){const l=LAB[q];if(l){const mine=l===curId; if(mine){if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y}
+        if((mine&&showMark)||(!mine&&showOther)){const L=E[mine?0:1];
+          if(x===0||LAB[q+gd*sh]!==l)L.push(x,y,x,y+1);if(x===nh-1||LAB[q-gd*sh]!==l)L.push(x+1,y,x+1,y+1);
+          if(y===0||LAB[q+sv]!==l)L.push(x,y,x+1,y);if(y===nv-1||LAB[q-sv]!==l)L.push(x,y+1,x+1,y+1)}}}}}
+  octx.putImageData(img,0,0);p.E=E;p.box=x1>=0?{x0,x1,y0,y1}:null}
+function niceBar(pxPerMm,maxPx){for(const mm of [100,50,20,10,5,2]){if(mm*pxPerMm<=maxPx)return mm}return 2}
+function drawPane(p,x,W,H,o){
+  const g=geomWH(p,W,H);x.fillStyle="#000";x.fillRect(0,0,W,H);
+  if(!p.ready){x.fillStyle="#9aa1ab";x.font="13px sans-serif";x.fillText("loading "+p.seq+" …",o.lm,o.tm);return}
+  x.imageSmoothingEnabled=true;x.imageSmoothingQuality="high";x.drawImage(p.off,g.ox,g.oy,g.nh*g.sx,g.nv*g.sy);
+  const V=g.V,c=cand();
+  if(o.outline)strokeEdges(x,g,p.E,1);
+  if(o.cross){const [cx,cy]=toScrG(g,cur);x.strokeStyle="rgba(120,200,255,.16)";x.lineWidth=1;x.beginPath();x.moveTo(0,cy);x.lineTo(W,cy);x.moveTo(cx,0);x.lineTo(cx,H);x.stroke()}
+  if(o.outline)for(const m of missed){const pt=[m.can_i,m.can_j,m.can_k];
+    if(m.pts&&+m.plane===p.plane){if(+m.slice===cur[V.s])drawShape(x,g,m.shape,m.pts,"missed "+m.missed_id,false)}
+    else if(Math.abs(pt[V.s]-cur[V.s])*vox[V.s]<=2.5){const [a,b]=toScrG(g,pt);x.strokeStyle="#35d0ff";x.lineWidth=2;x.beginPath();x.arc(a,b,9,0,6.3);x.stroke();x.fillStyle="#35d0ff";x.font="12px Menlo,monospace";x.fillText("missed "+m.missed_id,a+12,b+4)}}
+  if(o.live){
+    if(draft&&draft.k===p.plane&&draft.s===cur[V.s])drawShape(x,g,draft.type,draft.strokes,"new mark · not saved",true);
+    if(ruler&&ruler.k===p.plane&&ruler.s===cur[V.s]){const [a,b]=toScrG(g,ruler.a),[e,f]=toScrG(g,ruler.b);x.strokeStyle="#7CFC9A";x.lineWidth=2;x.beginPath();x.moveTo(a,b);x.lineTo(e,f);x.stroke();x.fillStyle="#7CFC9A";x.font="13px Menlo,monospace";x.fillText(ruler.mm.toFixed(1)+" mm",e+8,f-6)}
+    if(probe&&probe.k===p.plane&&probe.p[V.s]===cur[V.s]){const [a,b]=toScrG(g,probe.p);x.strokeStyle="#ffb000";x.lineWidth=2;x.strokeRect(a-1.5*g.sx,b-1.5*g.sy,3*g.sx,3*g.sy)}}
+  if(o.arrow&&p.box&&c){const ax=g.ox+(p.box.x1+1)*g.sx,ay=g.oy+p.box.y0*g.sy,sx0=Math.min(W-90,ax+36),sy0=Math.max(40,ay-36);
+    x.strokeStyle="#ffd866";x.fillStyle="#ffd866";x.lineWidth=2.5;x.beginPath();x.moveTo(sx0,sy0);x.lineTo(ax+3,ay-3);x.stroke();
+    x.beginPath();x.moveTo(ax+2,ay-2);x.lineTo(ax+14,ay-5);x.lineTo(ax+5,ay-14);x.closePath();x.fill();
+    x.font="12px Menlo,monospace";const t="candidate #"+did(c),tw=x.measureText(t).width;x.fillStyle="rgba(0,0,0,.55)";x.fillRect(sx0-2,sy0-16,tw+8,18);x.fillStyle="#ffd866";x.fillText(t,sx0+2,sy0-3)}
+  if(o.text){
+    x.font="12px Menlo,Consolas,monospace";x.fillStyle="#ffd866";x.shadowColor="#000";x.shadowBlur=3;x.textBaseline="alphabetic";
+    const T=(t,xx,yy,al)=>{x.textAlign=al||"left";x.fillText(t,xx,yy)},sm=seqmeta[p.seq]||{},lab=(sm.label||p.seq)+(p.mip&&p.plane===0?" · minIP":"");
+    T(`${M.study} · ${PLN[p.plane]}`,o.lm,o.tm);T(lab,o.lm,o.tm+16);if(c)T(`Cand #${did(c)} of ${M.cands.length}`,o.lm,o.tm+32);
+    T(`Slice ${cur[V.s]+1} / ${[nx,ny,nz][V.s]}`,W-o.rm,o.tm,"right");T(`Zoom ${zoom.toFixed(1)}×${Math.abs(zoom-1)<0.001?" (fit)":""}`,W-o.rm,o.tm+16,"right");
+    const w=getWL(p.seq);T(`C ${Math.round(101-w[0])}  B ${Math.round(w[1])}`,o.lm,H-24);T(`${vox.map(v=>v.toFixed(1)).join("×")} mm`,o.lm,H-8);
+    T(`Reviewer ${(o.rev||"")}`,W-o.rm,H-24,"right");if(M.acq&&(M.acq.TE_ms||M.acq.field_T))T(`${M.acq.TE_ms?"TE "+M.acq.TE_ms+" ms":""}${M.acq.TE_ms&&M.acq.field_T?" · ":""}${M.acq.field_T?M.acq.field_T+" T":""}`,W-o.rm,H-8,"right");
+        if(o.scale){x.shadowBlur=0;const pm=g.sx/vox[V.h],mm=niceBar(pm,H*0.3),px=mm*pm,bx=W-o.rm-6,by=H*0.62;x.strokeStyle="#ffd866";x.lineWidth=2;x.beginPath();x.moveTo(bx,by);x.lineTo(bx,by+px);x.moveTo(bx-4,by);x.lineTo(bx+4,by);x.moveTo(bx-4,by+px);x.lineTo(bx+4,by+px);x.stroke();
+      x.shadowBlur=3;x.fillStyle="#ffd866";T(mm>=10?(mm/10)+" cm":mm+" mm",bx-8,by+px/2+4,"right")}
+    x.shadowBlur=0;x.textAlign="left"}
+  if(o.rl&&p.plane!==2){const left=!(mir),bx=left?o.bl:W-o.br,by=H/2;x.save();x.shadowBlur=0;x.fillStyle="rgba(0,0,0,.55)";x.strokeStyle="#ffd866";x.lineWidth=2;x.beginPath();x.arc(bx,by,15,0,6.3);x.fill();x.stroke();x.fillStyle="#ffd866";x.font="800 16px Georgia,serif";x.textAlign="center";x.textBaseline="middle";x.fillText("R",bx,by+1);x.font="600 9px sans-serif";x.textBaseline="alphabetic";x.fillText("RIGHT",bx,by+29);x.restore()}
+  if(o.rl&&mir&&p.plane!==2){x.save();x.font="600 11px sans-serif";const tw=x.measureText("Mirrored").width+16;x.fillStyle="#7a5b00";x.beginPath();x.roundRect(W/2-tw/2,o.tm-6,tw,18,9);x.fill();x.fillStyle="#fff";x.textAlign="center";x.fillText("Mirrored",W/2,o.tm+7);x.restore()}}
+const DISP={lm:58,rm:30,tm:56,bl:76,br:50};
+function render(p){buildSlice(p);const c=p.cv,dpr=window.devicePixelRatio||1,W=c.clientWidth,H=c.clientHeight;
+  if(c.width!==Math.round(W*dpr)||c.height!==Math.round(H*dpr)){c.width=Math.round(W*dpr);c.height=Math.round(H*dpr)}
+  const x=c.getContext("2d");x.setTransform(dpr,0,0,dpr,0,0);
+  drawPane(p,x,W,H,Object.assign({rl:showRL,text:showText,scale:showText,outline:true,cross:showCross,arrow:showMark,live:true,rev:reviewer()},DISP));
+  const V=VIEWS[p.plane],n=[nx,ny,nz][V.s],f=n>1?cur[V.s]/(n-1):0,th=p.el.querySelector(".sb b"),sb=p.el.querySelector(".sb");th.style.top=Math.max(0,(1-f)*(sb.clientHeight-16))+"px"}
+function drawLens(){const L=$("#lens");if(!mag||!mouse||!hasVol()||$(".menu")){L.style.display="none";return}
+  const p=mouse.p,g=geom(p),r=p.cv.getBoundingClientRect(),R=100,dpr=window.devicePixelRatio||1;if(!p.ready){L.style.display="none";return}
+  if(L.width!==2*R*dpr){L.width=L.height=2*R*dpr}
+  L.style.display="block";L.style.left=(r.left+mouse.x-R)+"px";L.style.top=(r.top+mouse.y-R)+"px";
+  const x=L.getContext("2d");x.setTransform(dpr,0,0,dpr,0,0);x.fillStyle="#000";x.fillRect(0,0,2*R,2*R);x.save();
+  x.translate(R-mouse.x*MAGF,R-mouse.y*MAGF);x.scale(MAGF,MAGF);x.imageSmoothingEnabled=true;x.imageSmoothingQuality="high";
+  x.drawImage(p.off,g.ox,g.oy,g.nh*g.sx,g.nv*g.sy);strokeEdges(x,g,p.E,MAGF);x.restore();
+  x.fillStyle="#ffd866";x.font="11px Menlo,monospace";x.fillText(MAGF+"×",R-10,2*R-10)}
+let raf=0;function draw(){if(raf)return;raf=requestAnimationFrame(()=>{raf=0;if(!hasVol())return;panes.forEach(render);syncSliders();paintToolbar();drawLens()})}
+function syncSliders(){const p=panes[act];if(!p)return;$("#zoom").value=100*Math.log(zoom/0.25)/Math.log(96);$("#zoomv").textContent=zoom.toFixed(1)+"×";
+  const w=getWL(p.seq);$("#win").value=101-Math.max(1,Math.min(100,w[0]));$("#winv").textContent=Math.round(101-w[0]);$("#lev").value=w[1];$("#levv").textContent=Math.round(w[1])}
+
+// ---------- panes / layout ----------
+function setAct(i){if(act===i&&panes[i]&&panes[i].el.classList.contains("act2")===(panes.length>1))return;act=i;panes.forEach((q,j)=>q.el.classList.toggle("act2",panes.length>1&&j===i));paintToolbar();if(M)$("#seq").value=panes[act].seq}
+function buildPanes(){const g=$("#vgrid"),old=panes,n=layout==="1"?1:layout==="2"?2:4;g.innerHTML="";panes=[];
+  g.style.gridTemplateColumns=n===1?"1fr":"1fr 1fr";g.style.gridTemplateRows=n===4?"1fr 1fr":"1fr";
+  for(let i=0;i<n;i++){const keep=old[i],el=document.createElement("div");el.className="vp";el.innerHTML='<canvas class="img"></canvas><div class="sb"><b></b></div>';g.appendChild(el);
+    const p={i,el,cv:el.querySelector("canvas"),plane:keep?keep.plane:DEFPL[i],seq:keep?keep.seq:(old[0]?old[0].seq:"swi"),mip:keep?keep.mip:false,off:document.createElement("canvas"),E:[[],[]],box:null,ready:false};
+    panes.push(p);attachPane(p)}
+  act=Math.min(act,n-1);setAct(act);draw()}
+function setLayout(l){layout=l;LSS("layout",l);buildPanes()}
+function cycleLayout(){setLayout(layout==="1"?"2":layout==="2"?"4":"1")}
+function setPlane(i){panes[act].plane=((i%3)+3)%3;draw()}
+function paintToolbar(){const p=panes[act];if(!p)return;
+  $("#pt").innerHTML=PLN.map((n,i)=>`<span data-pl="${i}" class="${p.plane===i?"on":""}">${n}</span>`).join("")+'<i></i>'+[["1","1×1"],["2","1×2"],["4","2×2"]].map(([k,t])=>`<span data-lay="${k}" class="${layout===k?"on":""}">${t}</span>`).join("")+'<i></i><span data-a="fit">Fit</span><span data-a="actual">1:1</span><span data-a="cand">Candidate</span>';
+  $$("#lt div[data-tool]").forEach(e=>e.classList.toggle("on",e.dataset.tool===tool));$("#lt div[data-a=lens]").classList.toggle("on",mag);
+  $("#tMark").classList.toggle("on",showMark);$("#tOther").classList.toggle("on",showOther);$("#tMip").classList.toggle("on",!!p.mip);$("#tAuto").classList.toggle("on",autoNext)}
+function applyPalette(){const l=$("#lt");l.classList.toggle("fold",ltah&&!ltopen);const c=$("#ltah");if(c)c.checked=ltah}
+function buildPalette(){const T=[["pan","hand","Pan"],["zoom","zoomin","Zoom"],["wl","sliders","Window"],["scroll","scroll","Scroll"],"-",["ruler","ruler","Ruler"],["dark","dark","Probe"],["lens","lens","Lens"],["miss","plus","Missed"],"-",["shot","cam","Screenshot (Settings: whole window or area)"]];
+  $("#lt").innerHTML=T.map(t=>t==="-"?"<hr>":t[0]==="lens"?`<div data-a="lens" title="magnifier (W)"><span class="ico">${svg(t[1])}</span></div>`:`<div data-tool="${t[0]}" title="${t[2]}"><span class="ico">${svg(t[1])}</span></div>`).join("")+'<label class="ahb" title="fold the tool strip into a thin tab; hover the tab to open it"><input type="checkbox" id="ltah">auto</label><span class="tabl">tools ▸</span>';applyPalette()}
+
+// ---------- data ----------
+async function api(path,body){const r=await fetch(path,body?{method:"POST",headers:{"Content-Type":"application/json","X-CSS":"1"},body:JSON.stringify(body)}:{});const j=await r.json();if(!r.ok||j.error)throw new Error(j.error||r.statusText);return j}
+async function loadVol(s){if(!vols[s]){status("loading "+s+" ...");const r=await fetch(`/api/vol?study=${M.study}&seq=${s}`);vols[s]=new Uint16Array(await r.arrayBuffer());
+    if(!seqmeta[s]||!seqmeta[s].win)seqmeta[s]=await api(`/api/seqmeta?study=${M.study}&seq=${s}`);status("")}return vols[s]}
+async function setSeq(s){if(!M.seqs.some(q=>q.key===s))return;await loadVol(s);panes[act].seq=s;$("#seq").value=s;draw()}
+function nextSeq(){const i=M.seqs.findIndex(s=>s.key===panes[act].seq);setSeq(M.seqs[(i+1)%M.seqs.length].key)}
+const reviewer=()=>$("#reviewer").value.trim();
+function setMissed(m){missed=(m||[]).map(r=>{let pts=null;try{pts=r.points?JSON.parse(r.points):null}catch(e){}return Object.assign({},r,{pts:(pts&&r.plane!==""&&r.shape!=="point")?pts:null})});renderMissed()}
+let loadSeq=0;
+async function loadStudy(sid){status("loading study ...");const my=++loadSeq,stale=()=>my!==loadSeq;   // a newer load wins
+  const M0=await api(`/api/meta?study=${sid||""}&reviewer=${encodeURIComponent(reviewer())}`);if(stale())return;M=M0;[nx,ny,nz]=M.shape;vox=M.vox;vols={};luts={};WLs={};seqmeta={};M.seqs.forEach(s=>seqmeta[s.key]=s);
+  {const G=M.groups||{},gs=Object.keys(G),cur=gs.find(g=>G[g].includes(M.study));$("#cohort").classList.toggle("hide",!gs.length);
+   if(gs.length)$("#cohort").innerHTML=gs.map(g=>`<option ${g===cur?"selected":""}>${esc(g)}</option>`).join("");
+   const list=cur?G[cur].filter(s=>M.studies.includes(s)):M.studies,i=list.indexOf(M.study);
+   $("#study").innerHTML=list.map((s,k)=>`<option value="${esc(s)}" ${s===M.study?"selected":""}>${esc(s)} (${k+1} / ${list.length})</option>`).join("");
+   $("#prevStudy").disabled=i<=0;$("#nextStudy").disabled=i<0||i>=list.length-1;$("#prevStudy").onclick=()=>loadStudy(list[i-1]);$("#nextStudy").onclick=()=>loadStudy(list[i+1])}
+  $("#seq").innerHTML=M.seqs.map((s,i)=>`<option value="${s.key}">${s.label}  (${i+1})</option>`).join("");
+  $("#revlist").innerHTML=M.reviewers.names.map(n=>`<option value="${esc(n)}">`).join("");
+  if(!reviewer()&&M.reviewers.last){$("#reviewer").value=M.reviewers.last;const Mr=await api(`/api/meta?study=${M.study}&reviewer=${encodeURIComponent(reviewer())}`);if(stale())return;M=Mr}
+  // v5.7 validation read: default ON when this reviewer has no final record for the study; an explicit choice is remembered
+  {const want=reviewer()?(LS("blind",false)?LS("vmode_"+M.study+"|"+reviewer(),!M.final):(!M.open_read&&LS("vmode_"+M.study+"|"+reviewer(),!M.final))):false;if(M.open_read&&typeof showAI!=="undefined"&&!showAI){showAI=true}
+   if(want){const M1=await api(`/api/meta?study=${M.study}&reviewer=${encodeURIComponent(reviewer())}&mode=validation`);if(stale())return;M=M1}vmode=want&&M.mode==="validation";
+   M.cands.forEach(c=>c.disp=c.id);
+   if(vmode){let h=0;for(const ch of M.study+"|"+reviewer())h=(h*31+ch.charCodeAt(0))>>>0;const rnd=()=>{h=(h*1664525+1013904223)>>>0;return h/4294967296};
+     for(let i=M.cands.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[M.cands[i],M.cands[j]]=[M.cands[j],M.cands[i]]}
+     M.cands.forEach((c,i)=>c.disp=i+1)}
+   paintMode()}
+  mir=LS("mir_"+M.study,false);sideChk=M.side_check||null;calls=M.calls||{};undo=[];draft=null;revoteMode=false;readerScore=M.reader_score||null;finalRec=M.final||null;
+  const b=$("#banner"),msg=[M.qc,M.note,sideChk&&sideChk.bad?sideMsg():""].filter(Boolean).join("  ·  ");$("#seqnote").textContent=M.missing_seqs.length?("Not imported for this patient: "+M.missing_seqs.join(", ")):"";b.textContent=msg;b.style.display=msg?"block":"none";
+  const lr=await fetch(`/api/labels?study=${M.study}&reviewer=${encodeURIComponent(reviewer())}&mode=${vmode?"validation":""}`);const LB=new Uint16Array(await lr.arrayBuffer());if(stale())return;LAB=LB;
+  await loadVol("swi");if(stale())return;panes.forEach(p=>{p.seq="swi";p.mip=false});fitView();
+  buildStrip();setMissed(M.missed);const first=M.cands.findIndex(c=>!isDone(c));go(first<0?0:first);status("");
+  if(!reviewer())status("Enter your name (upper right) before the first decision.",true)}
+
+// ---------- candidates ----------
+const callOf=c=>(calls[c.id]||{}).call||"";
+const isInh=c=>{const m=(calls[c.id]||{});return !!m.call&&/^\[(inherited|imported)/.test(String(m.comment||""))};
+const isDone=c=>!!callOf(c)&&!isInh(c);
+function verdict(c){const call=callOf(c),b=c.ai.band;if(!call)return "not read";if(call==="Unsure")return "you unsure";if(b==="yellow")return "AI unsure";
+  const css=call==="cSS";return (css&&b==="green")||(!css&&b==="red")?"agree":"differ"}
+const pill=(t,c)=>`<span class="pill" style="background:${c}">${esc(t)}</span>`;
+function buildStrip(){$("#strip").innerHTML=M.cands.map((c,i)=>`<div class="chip" data-i="${i}" title="${c.hemi} ${esc(c.region)}${c.audit&&c.rule?" - EXCLUDED by: "+esc(c.rule):""}" ${c.audit&&c.rule?'style="outline:2px dotted #e0a030;outline-offset:1px"':""}>${did(c)}</div>`).join("")||'<span class="mut">No candidates in this study.</span>';paintLists()}
+const CATLBL={absent:"No cSS",focal:"Focal (1–3 sulci)",disseminated:"Disseminated / diffuse (> 3 sulci)"};
+function scoreCard(title,sc,note){if(!sc||sc.multifocality_0_4===undefined)return `<div class="card"><div class="h">${title}</div><div class="mut">not scored yet</div></div>`;
+  return `<div class="card"><div class="h">${title}</div><div class="big">${sc.multifocality_0_4}<span class="mut" style="font-size:16px"> / 4</span></div><div>Right <b>${sc.R_score}</b> · Left <b>${sc.L_score}</b></div><div><b>${esc(CATLBL[sc.category]||sc.category)}</b></div>
+   <div class="mut sm">${sc.n_sulci_total!==undefined?sc.n_sulci_total+" sulci · ":""}${sc.n_lines_total!==undefined?sc.n_lines_total+" continuous cSS line(s)":""}${note?"<br>"+note:""}</div></div>`}
+function paintScores(){const ai=vmode?{}:(M.ai_score||{});
+  $("#scorechip").innerHTML=`Reviewer <b>${readerScore&&readerScore.multifocality_0_4!==undefined?readerScore.multifocality_0_4+"/4":"—"}</b> · AI <b>${vmode?"hidden":ai.multifocality_0_4!==undefined?ai.multifocality_0_4+"/4":"—"}</b>`+(M.primary?` · primary <b>${esc(M.primary)}</b>`:"")+(finalRec?` · <span class="ok">final saved</span>`:"");
+  $("#scorecard").innerHTML=`<div class="sc">${scoreCard("Reviewer",readerScore,finalRec?("final saved "+esc(finalRec.saved)):"press Q to score")}${vmode?'<div class="card"><div class="h">AI</div><div class="mut">hidden in a validation read</div></div>':scoreCard("AI (not validated)",ai,(ai.n_green||0)+" green-band candidate(s)")}</div>`}
+function paintLists(){let n=0;$$("#strip .chip").forEach((e,i)=>{const c=M.cands[i];if(!c)return;const call=callOf(c);if(call)n++;e.style.background=call?CALLCOL[call]:"";e.style.color=call?"#fff":"";e.style.border=isInh(c)?"2px dashed #fff":"";e.style.opacity=isInh(c)?".75":"";
+    e.title=(isInh(c)?"inherited from the earlier detection - press the same key to confirm  ·  ":"")+c.hemi+" "+c.region;e.classList.toggle("cur",i===ci)});
+  $("#progbar").style.width=(M.cands.length?100*n/M.cands.length:0)+"%";$("#progtxt").textContent=n+" of "+M.cands.length+" read";
+  const e=$("#strip .cur");if(e)e.scrollIntoView({block:"nearest",inline:"nearest"});
+  $("#candtable").innerHTML="<tr><th>#</th><th>Side · region</th><th>mm³</th><th>Your call</th></tr>"+M.cands.map((c,i)=>{const call=callOf(c),cm=(calls[c.id]||{}).comment;
+    return `<tr class="r ${i===ci?"cur":""}" data-i="${i}"><td><b>${did(c)}</b></td><td>${c.hemi} · ${esc(c.region)}${cm?` <span class="mut" title="${esc(cm)}">✎</span>`:""}</td><td>${Math.round(c.volume)}</td><td>${call?pill(CALLLBL[call],CALLCOL[call]):'<span class="mut">—</span>'}</td></tr>`}).join("");
+  const T={};["cSS","not cSS","unsure","not read"].forEach(r=>T[r]={green:0,yellow:0,red:0});let ag=0,df=0;
+  const rows=M.cands.map((c,i)=>{const call=callOf(c),v=verdict(c),row=!call?"not read":call==="cSS"?"cSS":call==="Unsure"?"unsure":"not cSS";T[row][c.ai.band]++;if(v==="agree")ag++;if(v==="differ")df++;
+    if(onlyDiffer&&v!=="differ")return "";const sus=c.ai.band==="green"?"cSS":c.ai.band==="yellow"?"uncertain":c.ai.suspect.replace(/^I suspect /,"").replace(/^Probably not cSS.*/,"not cSS");
+    return `<tr class="r ${i===ci?"cur":""}" data-i="${i}"><td><b>${did(c)}</b></td><td>${pill(c.ai.score.toFixed(2),BANDCOL[c.ai.band])}</td><td>${esc(sus)}</td><td>${call?pill(CALLLBL[call],CALLCOL[call]):'<span class="mut">—</span>'}</td><td class="${v==="differ"?"err":"mut"}">${v}</td></tr>`}).join("");
+  $("#cmptitle").textContent="AI vs reviewer · "+M.study+(onlyDiffer?" · only differ":"");
+  if(vmode){$("#cmptable").innerHTML='<tr><td class="mut">The AI comparison is hidden during a validation read.</td></tr>';$("#cmpsum").innerHTML=`Read <b>${n} of ${M.cands.length}</b> · missed cSS marked <b>${missed.length}</b>`;$("#bDiffer").classList.toggle("on",false);paintScores();renderRail();return}
+  $("#cmptable").innerHTML="<tr><th>#</th><th>AI meter</th><th>AI suspects</th><th>Your call</th><th></th></tr>"+(rows||'<tr><td colspan="5" class="mut">nothing to show</td></tr>');
+  $("#cmpsum").innerHTML=`<table class="cmp"><tr><th></th><th>AI green</th><th>AI yellow</th><th>AI red</th></tr>`+Object.entries(T).map(([r,t])=>`<tr><td>${r==="not read"?"Not read":"You: "+r}</td><td>${r==="not cSS"&&t.green?`<b class="err">${t.green}</b>`:t.green}</td><td>${t.yellow}</td><td>${r==="cSS"&&t.red?`<b class="err">${t.red}</b>`:t.red}</td></tr>`).join("")+`</table>
+   <div style="margin-top:8px">Read <b>${n} of ${M.cands.length}</b> · agree <b>${ag}</b> · differ <b>${df}</b> · missed cSS marked <b>${missed.length}</b></div>`;
+  $("#bDiffer").classList.toggle("on",onlyDiffer);paintScores();renderRail()}
+function gauge(a){const P=t=>[110-90*Math.cos(Math.PI*t),105-90*Math.sin(Math.PI*t)],arc=(a0,a1,c)=>{const [x0,y0]=P(a0),[x1,y1]=P(a1);return `<path d="M${x0},${y0} A90,90 0 0 1 ${x1},${y1}" stroke="${c}" stroke-width="16" fill="none"/>`};
+  const nxp=110-72*Math.cos(Math.PI*a.score),nyp=105-72*Math.sin(Math.PI*a.score);
+  $("#gauge").innerHTML=arc(0,.33,"#d64545")+arc(.335,.66,"#e0b030")+arc(.665,1,"#3aa655")+`<line x1="110" y1="105" x2="${nxp}" y2="${nyp}" stroke="var(--text)" stroke-width="4" stroke-linecap="round"/><circle cx="110" cy="105" r="7" fill="var(--text)"/>
+   <text x="14" y="120" font-size="10" fill="var(--mut)">0</text><text x="194" y="120" font-size="10" fill="var(--mut)">1.0</text><text x="110" y="78" text-anchor="middle" font-size="26" font-weight="700" fill="var(--text)">${a.score.toFixed(2)}</text>`;
+  const s=$("#aisay");s.style.borderLeftColor=BANDCOL[a.band];s.innerHTML=`<b>${esc(a.suspect)}</b>`+(a.reason?`: ${esc(a.reason)}.`:".");$("#aisrc").textContent=a.source+" · not validated"}
+// ---------- v5.9 3-D view of the dark structure (canvas, no libraries) ----------
+let showS3=LS("s3",true), s3={d:null,rx:-1.0,ry:0.6,z:1,key:""};
+const S3CLS={BALL:"ball",TUBE:"tube",RIBBON:"ribbon",OTHER:"no clear form",UNRESOLVED:"too thin to resolve"};
+function s3Proj(p,cx,cy,sc){const[x,y,z]=p,cY=Math.cos(s3.ry),sY=Math.sin(s3.ry),cX=Math.cos(s3.rx),sX=Math.sin(s3.rx);
+  const x1=x*cY+y*sY,y1=-x*sY+y*cY,z1=z;const y2=y1*cX-z1*sX,z2=y1*sX+z1*cX;return[cx+x1*sc,cy-z2*sc,y2]}
+function s3Draw(){const cv=$("#s3cv");if(!cv)return;const g=cv.getContext("2d"),W=cv.width,H=cv.height;g.clearRect(0,0,W,H);const d=s3.d;
+  if(!d||d.error){g.fillStyle="#8a8f98";g.font="12px sans-serif";g.fillText(d&&d.error?d.error.slice(0,48):"loading…",10,24);return}
+  let r=8;for(const set of [d.struct,d.core,d.cortex])for(const p of set)r=Math.max(r,Math.hypot(p[0],p[1],p[2]));
+  const sc=Math.min(W,H)/2/Math.min(r,26)*0.92*s3.z,cx=W/2,cy=H/2;
+  const lay=[[d.cortex,"rgba(125,133,144,.35)",1.4],[d.others,"rgba(70,160,255,.5)",1.8],[d.struct,"rgba(224,75,75,.85)",2.4],[d.core,"rgba(255,210,90,.95)",2.6]];
+  const all=[];for(const[set,col,sz]of lay)for(const p of set){const q=s3Proj(p,cx,cy,sc);all.push([q[2],q[0],q[1],col,sz])}
+  all.sort((a,b)=>a[0]-b[0]);for(const[,x,y,col,sz]of all){g.fillStyle=col;g.fillRect(x-sz/2,y-sz/2,sz,sz)}
+  // orientation triad: canonical axes x = patient right, y = anterior, z = superior
+  const ax=[[[1,0,0],"R"],[[0,1,0],"A"],[[0,0,1],"S"]];g.font="bold 11px sans-serif";for(const[v,l]of ax){const q=s3Proj([v[0]*9,v[1]*9,v[2]*9],34,H-30,3.2),o=s3Proj([0,0,0],34,H-30,3.2);
+    g.strokeStyle="#c9d1d9";g.beginPath();g.moveTo(o[0],o[1]);g.lineTo(q[0],q[1]);g.stroke();g.fillStyle="#c9d1d9";g.fillText(l,q[0]+3,q[1]+3)}}
+async function s3Load(){const body=$("#s3body"),card=$("#s3card");if(!card)return;body.style.display=showS3?"":"none";$("#s3hide").innerHTML=showS3?'hide <kbd>3</kbd>':'show <kbd>3</kbd>';
+  const c=M.cands[ci];if(!showS3||!c||c.audit){return}const key=M.study+"|"+c.id;if(s3.key===key)return;s3.key=key;s3.d=null;s3Draw();
+  try{const d=await api(`/api/struct3d?study=${M.study}&cand=${c.id}`);if(s3.key!==key)return;s3.d=d}catch(e){s3.d={error:String(e.message||e)}}
+  s3Draw();const m=s3.d&&s3.d.measures;
+  if(!m){$("#s3say").textContent="";$("#s3meas").textContent="";return}
+  if(vmode){$("#s3say").innerHTML="<span class='mut'>shape reading hidden in a validation read 🔒</span>";$("#s3meas").textContent="";return}
+  $("#s3say").style.borderLeftColor=m.cls==="RIBBON"?"#3aa655":(m.cls==="BALL"||m.cls==="TUBE")?"#d64545":"#8a8f98";
+  $("#s3say").innerHTML=`<b>${esc(S3CLS[m.cls]||m.cls)}</b>: ${esc(m.verdict)}`;
+  $("#s3meas").textContent=`length ${m.s1} mm · width ${m.s2} mm · thickness ${m.s3} mm · in cortex ${m.ctx===null?"?":Math.round(m.ctx*100)+" %"} · runs on ${m.cont}× beyond the object`+(m.cos===null?"":(m.cos<=.5?" · along the surface":" · leaves the surface"))+" · AI shape reading, not validated"}
+function s3Bind(){const cv=$("#s3cv");if(!cv||cv._b)return;cv._b=1;let dr=null;
+  cv.addEventListener("pointerdown",e=>{dr=[e.clientX,e.clientY];cv.setPointerCapture(e.pointerId);cv.style.cursor="grabbing"});
+  cv.addEventListener("pointerup",()=>{dr=null;cv.style.cursor="grab"});
+  cv.addEventListener("pointermove",e=>{if(!dr)return;s3.ry+=(e.clientX-dr[0])*0.012;s3.rx=Math.max(-3.1,Math.min(0.1,s3.rx+(e.clientY-dr[1])*0.012));dr=[e.clientX,e.clientY];s3Draw()});
+  cv.addEventListener("wheel",e=>{e.preventDefault();s3.z=Math.max(.4,Math.min(4,s3.z*(e.deltaY<0?1.12:.89)));s3Draw()},{passive:false});
+  cv.addEventListener("dblclick",()=>{s3.rx=-1.0;s3.ry=0.6;s3.z=1;s3Draw()});
+  $("#s3hide").addEventListener("click",e=>{e.preventDefault();s3Toggle()})}
+function s3Toggle(){showS3=!showS3;try{localStorage.setItem("css_s3",JSON.stringify(showS3))}catch(e){}s3.key="";s3Load()}
+function go(i,keepView){if(!M.cands.length){paintLists();draw();return}ci=Math.max(0,Math.min(M.cands.length-1,i));const c=M.cands[ci];cur=c.centre.slice();
+  if(!keepView&&zoom>1.001){ctr=cur.slice()}            // nothing is zoomed for you: an existing zoom is only re-centred on the candidate
+  ruler=null;probe=null;if(tool!=="miss")$("#readout").textContent="";
+  $("#candinfo").textContent=(c.audit&&c.rule?`EXCLUDED OBJECT (rule: ${c.rule}) · `:"")+`Candidate ${ci+1} of ${M.cands.length} · #${did(c)} · ${c.hemi==="L"?"left":"right"} ${c.region} · ${Math.round(c.volume)} mm³`;
+  gauge(c.ai);$("#aiconf").innerHTML=(c.conf===null||c.conf===undefined)?"":`<b>Confidence model: ${Math.round(c.conf)} %</b>${c.conf_why?" · "+esc(c.conf_why):""} · fitted on 10 patients, not a validated probability`;
+  paintDecision();paintLists();draw();s3Bind();s3Load()}
+function paintDecision(){const c=cand();if(!c)return;const st=calls[c.id]||{};$$("#dec .b").forEach(b=>{const on=b.dataset.call===st.call;b.classList.toggle("on",on);b.style.borderColor=on?CALLCOL[st.call]:"";b.style.background=on?CALLCOL[st.call]+"33":""});
+  $("#curcall").textContent=st.call?("saved: "+CALLLBL[st.call]):"not read yet";if(document.activeElement!==$("#comment"))$("#comment").value=st.comment||""}
+const firstUnread=from=>{const n=M.cands.findIndex((x,j)=>j>from&&!isDone(x));return n<0?M.cands.findIndex(x=>!isDone(x)):n};
+async function decide(call,isUndo){const c=cand();if(!c)return;if(!reviewer()){status("Enter your name (upper right) first.",true);$("#reviewer").focus();return}
+  const prev=callOf(c);if(!isUndo)undo.push({i:ci,prev});
+  try{const r=await api("/api/call",{study:M.study,reviewer:reviewer(),cand_id:c.id,mode:vmode?"validation":"",call,action:isUndo?"undo":(revoteMode&&call?"revote":(call?"call":"clear")),meter:showAI&&!vmode?c.ai.score:""});calls=r.calls;status("✓ Saved automatically · "+r.saved.slice(11));
+    paintDecision();paintLists();
+    if(call&&!isUndo&&autoNext){const m=firstUnread(ci);if(m>=0)setTimeout(()=>go(m),180);else if(!revoteMode)setTimeout(summary,250)}}
+  catch(e){status("NOT SAVED: "+e.message,true)}}
+async function saveComment(){const c=cand();if(!c)return;const t=$("#comment").value;if(((calls[c.id]||{}).comment||"")===t)return;if(!reviewer()){status("Enter your name first.",true);return}
+  try{const r=await api("/api/call",{study:M.study,reviewer:reviewer(),cand_id:c.id,mode:vmode?"validation":"",comment:t,action:"comment"});calls=r.calls;status("✓ Comment saved · "+r.saved.slice(11));paintLists()}catch(e){status("NOT SAVED: "+e.message,true)}}
+function doUndo(){const u=undo.pop();if(!u){status("Nothing to undo.");return}go(u.i,false);decide(u.prev,true)}
+function nextUnread(){const m=firstUnread(ci);if(m>=0)go(m);else status("All candidates are read.")}
+const differIdx=()=>M.cands.map((c,i)=>!c.audit&&verdict(c)==="differ"?i:-1).filter(i=>i>=0);
+function auditHtml(r){const A=(r.audit||[]);if(!A.length)return "";
+  const disp=id=>{const c=M.cands.find(x=>x.id===id);return c?did(c):"?"},cs=A.filter(a=>a.call==="cSS");
+  return `<h3>Excluded objects that were mixed into your read (${A.length})</h3>`+(cs.length?`<p class="err"><b>${cs.length} of them you called cSS</b>: a rule removed them. Open them with <i>Candidate &rarr; Excluded audit objects</i> and decide again.</p>`:'<p class="mut">You called none of them cSS.</p>')
+    +`<table class="cmp"><tr><th>#</th><th>Region</th><th>Excluded by rule</th><th>Your call</th></tr>`+A.map(a=>`<tr class="r" data-aud="${a.id}"><td><b>${disp(a.id)}</b></td><td>${esc(a.region)}</td><td>${esc(a.rule)}</td><td>${a.call?pill(CALLLBL[a.call]||a.call,CALLCOL[a.call]||"#888"):"-"}</td></tr>`).join("")+`</table>`}
+function summaryHtml(r){const rows=Object.entries(r.counts).map(([k,v])=>`<tr><td><span style="color:${CALLCOL[k]}">●</span> ${CALLLBL[k]}</td><td><b>${v}</b></td></tr>`).join("");
+  const ms=r.missed.length?`<h3>Missed cSS marked (not counted in the score)</h3><table>`+r.missed.map(m=>`<tr><td><b>${m.missed_id}</b></td><td>${esc(m.reviewer)}</td><td>${esc(m.comment)}</td><td class="mut">${esc(m.detector_fate)}</td></tr>`).join("")+"</table>":"";
+  return `<div class="sc">${scoreCard("Final cSS score · reviewer",r.reader_score,"")}${vmode?'<div class="card"><div class="h">AI score</div><div class="mut">hidden in a validation read</div></div>':scoreCard("AI score (not validated)",r.ai_score,(r.ai_score.n_green||0)+" green-band candidate(s)")}</div>`
+    +(r.unread?`<p class="err">${r.unread} candidate(s) not read: the reviewer score is a lower bound.</p>`:"")
+    +`<table>${rows}<tr><td>Not read</td><td><b>${r.unread}</b></td></tr><tr><td>Missed cSS marked</td><td><b>${r.missed.length}</b></td></tr></table>`+ms
+    +auditHtml(r)+`<details style="margin-top:8px"><summary class="mut">Scoring details</summary><pre>${esc(r.text||"")}</pre></details>`}
+async function summary(){if(!reviewer()){status("Enter your name first.",true);return}
+  const cmpOn=compareOn&&!vmode;
+  if(cmpOn){$("#cmpbody").innerHTML="<p>Saving and scoring ...</p>";$("#compare").classList.add("show")}else{$("#sumbody").innerHTML="<p>Saving and scoring ...</p>";$("#summary").classList.add("show")}
+  try{const r=await api("/api/finish",{study:M.study,reviewer:reviewer()});readerScore=r.reader_score;M.ai_score=r.ai_score;paintScores();
+    if(!cmpOn){await finalSave(false);return}
+    const dx=differIdx(),rowsd=dx.map(i=>{const c=M.cands[i],call=callOf(c);return `<tr class="r" data-i="${i}"><td><b>${did(c)}</b></td><td>${c.hemi} · ${esc(c.region)}</td><td>${pill(c.ai.score.toFixed(2),BANDCOL[c.ai.band])} ${esc(c.ai.band==="green"?"cSS":c.ai.suspect.replace(/^I suspect /,""))}</td><td>${pill(CALLLBL[call],CALLCOL[call])}</td><td class="mut">re-review →</td></tr>`}).join("");
+    revoteMode=true;
+    $("#cmpbody").innerHTML=`<p><b>${esc(M.study)}</b> · reviewer <b>${esc(reviewer())}</b></p><div class="sc">${scoreCard("Reviewer",r.reader_score,"")}${scoreCard("AI (not validated)",r.ai_score,(r.ai_score.n_green||0)+" green-band candidate(s)")}</div>`
+      +(r.unread?`<p class="err">${r.unread} candidate(s) not read: the reviewer score is a lower bound.</p>`:"")
+      +(M.cands.filter(isInh).length?`<p class="err">${M.cands.filter(isInh).length} inherited call(s) not re-confirmed (dashed in the strip): press the same key on them to confirm. <button class="btn" id="cInh">Go to the first one</button></p>`:"")
+      +`<h3>Calls that differ from the AI (${dx.length})</h3>`+(dx.length?`<table class="cmp" id="cmpdiff"><tr><th>#</th><th>Side · region</th><th>AI</th><th>Your call</th><th></th></tr>${rowsd}</table>`:'<p class="mut">None: every decided candidate agrees with the AI band (yellow counts as neither).</p>')}
+  catch(e){const b=cmpOn?$("#cmpbody"):$("#sumbody");b.innerHTML=`<p class="err">${esc(e.message)}</p>`}}
+async function finalSave(shown){$("#compare").classList.remove("show");$("#sumbody").innerHTML="<p>Saving the final review ...</p>";$("#summary").classList.add("show");
+  try{const r=await api("/api/finish",{study:M.study,reviewer:reviewer(),final:true,n_inherited_unconfirmed:M.cands.filter(isInh).length,n_differ:differIdx().length,meter_visible:showAI&&!vmode?1:0,comparison_shown:!!shown,read_mode:vmode?"validation":"second look"});
+    readerScore=r.reader_score;finalRec=r.final;revoteMode=false;paintScores();
+    const L=cohortList(),i=L.indexOf(M.study),nxt=i>=0&&i<L.length-1?L[i+1]:"";
+    $("#sumbody").innerHTML=`<p><b>${esc(M.study)}</b> · reviewer <b>${esc(reviewer())}</b> · <span class="ok">final saved ${esc(r.final.saved)}</span>${i>=0&&!nxt?` · <b class="ok">Cohort finished - ${L.length} / ${L.length} read</b>`:""}</p>`+summaryHtml(r)+`<p class="mut sm">Cohort report: ${esc(r.report||"")}</p>`;
+    if(nxt)nextCard(r,nxt,i,L.length)}
+  catch(e){$("#sumbody").innerHTML=`<p class="err">${esc(e.message)}</p>`}}
+function cohortList(){const G=M.groups||{},g=Object.keys(G).find(k=>G[k].includes(M.study));return g?G[g].filter(s=>M.studies.includes(s)):M.studies}
+function nextCard(r,nxt,i,n){clearInterval(nxTimer);const go2=()=>{clearInterval(nxTimer);$("#nextcard").classList.remove("show");$("#summary").classList.remove("show");loadStudy(nxt)};
+  if(autoPt&&autoSec===0){go2();return}
+  $("#summary").classList.remove("show");const sc=(x)=>x?`<b style="font-size:19px">${x.multifocality_0_4??"–"}</b> <span class="mut">L${x.L_score??"–"} R${x.R_score??"–"}</span>`:"–";
+  const paint=(left)=>{$("#nextcard").innerHTML=`<div style="display:flex;gap:8px;align-items:center"><b>${esc(M.study)} done</b><span class="mut">${i+1} / ${n}</span><span style="flex:1"></span><span class="mut sm" style="cursor:pointer" id="ncFull" title="Open the full summary">details</span></div>
+    <div style="display:flex;gap:6px;align-items:center;margin:6px 0"><span class="mut">You</span>${sc(r.reader_score)}<span style="flex:1"></span><span class="mut" title="AI only, not validated">${vmode?"":"AI*"}</span>${vmode?"":sc(r.ai_score)}</div>
+    <div style="display:flex;gap:8px;align-items:center;border-top:1px solid var(--line);padding-top:7px"><span class="nsw ${autoPt?"on":""}" id="ncSw" title="Next patient automatically (Settings: default and seconds)"><i></i></span>
+    ${autoPt?`<span>Next: ${esc(nxt)} in <b>${left} s</b></span>`:'<span class="mut">Auto next off</span>'}<span style="flex:1"></span>
+    <button class="btn" id="ncStay">${autoPt?"Stay":"Close"}</button><button class="btn pri" id="ncNext">Next ▸</button></div>`;
+    $("#ncSw").onclick=()=>{autoPt=!autoPt;LSS("autopt",autoPt);start()};$("#ncNext").onclick=go2;
+    $("#ncStay").onclick=()=>{clearInterval(nxTimer);$("#nextcard").classList.remove("show")};$("#ncFull").onclick=()=>{clearInterval(nxTimer);$("#nextcard").classList.remove("show");$("#summary").classList.add("show")}};
+  const start=()=>{clearInterval(nxTimer);let left=autoSec||10;paint(left);if(!autoPt)return;nxTimer=setInterval(()=>{left--;if(left<=0)go2();else paint(left)},1000)};
+  $("#nextcard").classList.add("show");start()}
+function reReview(){$("#compare").classList.remove("show");const dx=differIdx();if(!dx.length){status("No disagreements to re-review.");return}onlyDiffer=true;setTab("calls");go(dx[0]);status("Re-reviewing "+dx.length+" disagreement(s). Press Q when done.")}
+function setCompare(v){compareOn=v;LSS("compare",v);$("#cNo").checked=!v}
+function exportCsv(){if(vmode){status("Export is switched off during a validation read.",true);return}const q=s=>'"'+String(s==null?"":s).replace(/"/g,'""')+'"';
+  const lines=[["study","reviewer","cand_id","hemi","region","volume_mm3","ai_meter","ai_band","ai_suspects","reviewer_call","comment","agreement"].join(",")]
+    .concat(M.cands.map(c=>[M.study,reviewer(),c.id,c.hemi,c.region,c.volume,c.ai.score,c.ai.band,c.ai.suspect,callOf(c),(calls[c.id]||{}).comment||"",verdict(c)].map(q).join(",")));
+  const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([lines.join("\n")+"\n"],{type:"text/csv"}));a.download=`${M.study}_ai_vs_${reviewer().replace(/\W+/g,"_")||"reviewer"}.csv`;a.click();status("Exported "+a.download)}
+
+// ---------- v5.7 validation read, primary reviewer, import ----------
+function paintMode(){const b=$("#vsym");if(b)b.style.display=vmode?"flex":"none";
+  const h=$("#aicard .h span:last-child");if(h)h.innerHTML=vmode?"hidden in a validation read 🔒":'hide <kbd>K</kbd>';tog()}
+function nextAudit(){const L=M.cands.map((c,i)=>c.audit?i:-1).filter(i=>i>=0);
+  if(!L.length){status("No excluded objects in this read (validation read off, or none sampled).",true);return}
+  if(!M.cands.some(c=>c.audit&&c.rule)){status("The excluded objects are revealed after your final save (press Q).",true);return}
+  go(L.find(i=>i>ci)??L[0])}
+function setVmode(v){if(!M||!reviewer()){status("Enter your name first.",true);return}LSS("vmode_"+M.study+"|"+reviewer(),v);loadStudy(M.study)}
+async function showPrimary(){if(!M)return;const cur=M.primary||"(none yet: the first reviewer who saves)";
+  if(!reviewer()){status("Enter your name first.",true);return}
+  if(M.primary===reviewer()){toast(`You (${esc(reviewer())}) are the primary reviewer of ${esc(M.study)}: your calls are written to the shared files.`);return}
+  if(confirm(`Primary reviewer of ${M.study}: ${cur}.\n\nOnly the primary reviewer's calls go to the shared ${M.study}_calls.csv and ${M.study}_score.json; every other reviewer keeps an own score file.\n\nMake ${reviewer()} the primary reviewer?`)){
+    try{const r=await api("/api/primary",{study:M.study,reviewer:reviewer(),name:reviewer()});M.primary=r.primary;toast(`Primary reviewer of ${esc(M.study)}: ${esc(r.primary)}`)}catch(e){toast(esc(e.message),true)}}}
+function openImport(){if(vmode){status("Import is switched off during a validation read (it would unblind you).",true);return}
+  if(!reviewer()){status("Enter your name first.",true);return}const S=M.import_sources||[];
+  $("#imFrom").innerHTML=S.length?S.map(s=>`<option value="${esc(s.key)}">${esc(s.label)}</option>`).join(""):'<option value="">no earlier calls for this study</option>';
+  $("#imGo").disabled=!S.length;$("#import").classList.add("show")}
+async function doImport(){const src=$("#imFrom").value;if(!src)return;
+  try{const r=await api("/api/import",{study:M.study,reviewer:reviewer(),source:src,overwrite:$("#imAll").checked});calls=r.calls;$("#import").classList.remove("show");
+    paintDecision();paintLists();draw();toast(`Imported ${r.imported} call(s). They stay dashed until you press the same key on each.`)}catch(e){toast("Import failed: "+esc(e.message),true)}}
+
+// ---------- mirror / side check ----------
+function setMirror(v){mir=v;if(M)LSS("mir_"+M.study,v);status(v?"Mirrored: screen left = patient left (letters follow the anatomy)":"Normal view: screen left = patient right");draw()}
+function sideMsg(){const s=sideChk;if(!s||!s.n)return "Side check: not enough information.";return s.bad?`⚠ Side check: only ${s.agree} of ${s.n} candidates lie on the side their FreeSurfer hemisphere label says; the image header and the labels may disagree. Try Mirror (⇧H) and read the R badge.`:`✓ Side check: ${s.agree} of ${s.n} candidates lie on the side of their FreeSurfer hemisphere label (image header agrees).`}
+// ---------- right panel: tabs, rail, auto-hide, resize ----------
+const panelVisible=()=>(!ph&&!ah)||peek;
+function setTab(t){lastTab=t;LSS("tab",t);$$("#tabs button").forEach(b=>b.classList.toggle("on",b.dataset.tab===t));$$(".tab").forEach(e=>e.classList.toggle("on",e.id==="tab-"+t));renderRail()}
+function renderRail(){const r=$("#rail"),c=M&&cand(),vis=panelVisible();
+  r.innerHTML=[["viewer","Viewer"],["cands","Candidates"],["calls","Calls summary"]].map(([k,l])=>`<div data-r="${k}" class="${vis&&k===lastTab?"on":""}">${l}${k==="viewer"&&c&&callOf(c)?' <span class="dot"></span>':""}</div>`).join("")+`<div class="pinb" data-r="pin" title="Pin the panel (show it permanently, switch Auto-hide off)">${svg("pin")}</div>`}
+function applyPanel(){const panel=$("#panel"),rail=$("#rail"),pinned=!ph&&!ah,vis=pinned||peek;
+  panel.style.width=pw+"px";panel.classList.toggle("ovl",!pinned);panel.style.display=vis?"flex":"none";rail.style.display=pinned?"none":"flex";$("#ahchk").checked=ah;renderRail();requestAnimationFrame(()=>draw())}
+function hidePanel(){if(!ph&&!ah){ph=true;LSS("ph",true)}else peek=false;applyPanel()}
+function togglePanel(){if(!ph&&!ah){ph=true;LSS("ph",true)}else if(ph&&!ah){ph=false;LSS("ph",false)}else peek=!peek;applyPanel()}
+function setAutoHide(v){ah=v;LSS("ah",v);if(v){peek=true;ph=false;LSS("ph",false)}else{peek=false;ph=false;LSS("ph",false)}applyPanel()}
+function pinPanel(){ah=false;ph=false;peek=false;LSS("ah",false);LSS("ph",false);applyPanel()}
+function openTab(k){const t=k;if(ph&&!ah){ph=false;LSS("ph",false)}if(ah)peek=true;setTab(t);applyPanel();
+}
+function armLeave(){clearTimeout(leaveT);if(!ah||!peek)return;leaveT=setTimeout(()=>{const p=$("#panel");if(resizing||p.contains(document.activeElement)&&document.activeElement.tagName==="INPUT"&&document.activeElement.type==="text")return;peek=false;applyPanel()},600)}
+function keepOpen(){clearTimeout(leaveT)}
+$("#rail").addEventListener("mouseenter",e=>{keepOpen()});$("#rail").addEventListener("mouseleave",armLeave);
+$("#rail").addEventListener("mouseover",e=>{const d=e.target.closest("[data-r]");if(d&&ah&&d.dataset.r!=="pin"&&(!peek||d.dataset.r!==lastTab))openTab(d.dataset.r)});
+$("#rail").addEventListener("click",e=>{const d=e.target.closest("[data-r]");if(!d)return;if(d.dataset.r==="pin")pinPanel();else openTab(d.dataset.r)});
+$("#panel").addEventListener("mouseenter",keepOpen);$("#panel").addEventListener("mouseleave",armLeave);
+$("#tabs").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;if(b.dataset.tab===lastTab&&panelVisible()){hidePanel();return}setTab(b.dataset.tab)});
+$("#hideb").onclick=hidePanel;$("#ahchk").onchange=e=>setAutoHide(e.target.checked);
+$("#grip").addEventListener("mousedown",e=>{e.preventDefault();resizing=true;const x0=e.clientX,w0=pw,g=$("#grip");g.classList.add("drag");
+  const mv=ev=>{pw=Math.max(300,Math.min(Math.round(innerWidth*0.7),w0+(x0-ev.clientX)));$("#panel").style.width=pw+"px";draw()};
+  const up=()=>{resizing=false;g.classList.remove("drag");LSS("pw",pw);window.removeEventListener("mousemove",mv);window.removeEventListener("mouseup",up);armLeave()};
+  window.addEventListener("mousemove",mv);window.addEventListener("mouseup",up)});
+
+// ---------- missed cSS ----------
+function renderMissed(){$("#misslist").innerHTML=missed.length?missed.map(m=>`<div class="miss"><button class="btn" data-go="${m.missed_id}" title="go to it">${m.missed_id}</button><input type="text" data-mid="${m.missed_id}" value="${esc(m.comment)}" placeholder="note (${esc(m.reviewer)})"><button class="btn" data-del="${m.missed_id}" title="delete">×</button></div><div class="mut sm" style="margin:-2px 0 6px 2px">${esc(m.shape||"point")} · ${esc(m.detector_fate||"")}</div>`).join(""):'<span class="mut sm">None. Press X, draw a rectangle or trace with the pen, then Save.</span>';if(M)paintLists()}
+async function missedApi(body){if(!reviewer()){status("Enter your name first.",true);return false}try{const r=await api("/api/missed",Object.assign({study:M.study,reviewer:reviewer()},body));setMissed(r.missed);draw();status("✓ Saved · "+r.saved.slice(11));return true}catch(e){status("NOT SAVED: "+e.message,true);return false}}
+function setShape(s){shape=s;$("#dRect").classList.toggle("on",s==="rect");$("#dPen").classList.toggle("on",s==="pen");if(draft&&draft.type!==s){draft=null;draw()}}
+async function saveDraft(){if(!draft||!draft.strokes.length||(draft.type==="rect"&&draft.strokes[0].length<2)){$("#readout").textContent="Draw the missed cSS first.";return}
+  const ok=await missedApi({action:"add",plane:draft.k,slice:draft.s,shape:draft.type,strokes:draft.strokes,comment:$("#dNote").value});if(ok){draft=null;$("#dNote").value="";$("#readout").textContent="Missed cSS saved. Draw another, or Esc to finish.";draw()}}
+function cancelDraft(){draft=null;$("#dNote").value="";setTool("pan")}
+function undoStroke(){if(draft){draft.strokes.pop();if(!draft.strokes.length)draft=null;draw()}}
+
+// ---------- tools ----------
+function setTool(t){tool=t;LSS("tool",t==="miss"?"pan":t);if(t!=="miss")draft=null;panes.forEach(p=>p.cv.style.cursor=t==="pan"?"grab":t==="zoom"?"zoom-in":t==="scroll"?"ns-resize":"crosshair");
+  $("#drawbar").classList.toggle("show",t==="miss");if(t==="miss")setShape(shape);
+  $("#readout").textContent={pan:"",zoom:"Zoom: drag up / down.",wl:"Window: drag left–right = contrast, up–down = brightness.",scroll:"Scroll: drag up / down.",dark:"Darkness probe: click a point.",ruler:"Ruler: drag a line.",miss:"Missed cSS: draw on the slice where it is clearest, then Save."}[t]||"";paintToolbar();draw()}
+function doProbe(p,pt){const V=VIEWS[p.plane],d=[nx,ny,nz],VOL=vols[p.seq];let s=0,n=0;for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const q=pt.slice();q[V.h]+=a;q[V.v]+=b;if(q[V.h]<0||q[V.v]<0||q[V.h]>=d[V.h]||q[V.v]>=d[V.v])continue;s+=VOL[IDX(q[0],q[1],q[2])];n++}
+  const m=seqmeta[p.seq],raw=m.lo+(s/n/65535)*(m.hi-m.lo);probe={k:p.plane,p:pt};let t=`${m.label} signal ${raw.toFixed(p.seq==="phase"?2:0)} (3×3 mean)`;
+  if(p.seq==="swi"){const z=(raw-M.ref.mu)/M.ref.sd;t+=`\n${Math.round(100*raw/M.ref.mu)} % of normal ${M.ref.src}  ·  ${z>=0?"+":""}${z.toFixed(1)} SD`+(z<=-2.5?"  (dark: detector range)":z<=-2?"  (borderline dark)":"  (not dark)")}
+  else if(p.seq==="phase")t+=" rad";$("#readout").textContent=t;draw()}
+function step(p,d){const V=VIEWS[p.plane],n=[nx,ny,nz][V.s];cur[V.s]=Math.max(0,Math.min(n-1,cur[V.s]+d));draw()}
+let drag=null;
+function attachPane(p){const c=p.cv,pos=e=>{const r=c.getBoundingClientRect();return [e.clientX-r.left,e.clientY-r.top]};
+  c.addEventListener("mouseenter",()=>setAct(p.i));
+  c.addEventListener("mousemove",e=>{const [x,y]=pos(e);mouse={p,x,y};if(mag)drawLens()});
+  c.addEventListener("mouseleave",()=>{mouse=null;drawLens()});
+  c.addEventListener("contextmenu",e=>e.preventDefault());
+  c.addEventListener("wheel",e=>{e.preventDefault();if(!hasVol())return;const [x,y]=pos(e);if(e.ctrlKey||e.metaKey){zoomFrom(p,x,y,zoom,ctr.slice(),zoom*Math.exp(-e.deltaY*(e.deltaMode?0.05:0.004)));return}if(Math.abs(e.deltaY)<1)return;step(p,e.deltaY>0?-1:1)},{passive:false});
+  const sb=p.el.querySelector(".sb"),scrub=e=>{const r=sb.getBoundingClientRect(),f=1-Math.max(0,Math.min(1,(e.clientY-r.top)/r.height)),V=VIEWS[p.plane],n=[nx,ny,nz][V.s];cur[V.s]=Math.round(f*(n-1));draw()};
+  sb.addEventListener("mousedown",e=>{e.preventDefault();e.stopPropagation();setAct(p.i);scrub(e);const mv=ev=>scrub(ev),up=()=>{window.removeEventListener("mousemove",mv);window.removeEventListener("mouseup",up)};window.addEventListener("mousemove",mv);window.addEventListener("mouseup",up)});
+  c.addEventListener("mousedown",e=>{if(!hasVol())return;e.preventDefault();closeMenus();if(document.activeElement&&document.activeElement.blur)document.activeElement.blur();setAct(p.i);
+    const [mx,my]=pos(e),V=VIEWS[p.plane];let mode;
+    if(e.button===2||(e.button===0&&e.ctrlKey&&MAC))mode="wlmenu";else if(e.button===1)mode="pan";else if(e.button===0)mode=e.shiftKey?"wl":tool;else return;
+    drag={p,mode,btn:e.button,x:e.clientX,y:e.clientY,mx,my,moved:false,ctr:ctr.slice(),zoom0:zoom,wl0:getWL(p.seq),s0:cur[V.s],p0:toVox(p,mx,my)};
+    if(mode==="ruler")ruler={k:p.plane,s:cur[V.s],a:drag.p0,b:drag.p0,mm:0};
+    if(mode==="miss"){const s=cur[V.s],pt=toVoxF(p,mx,my);if(!draft||draft.k!==p.plane||draft.s!==s||draft.type!==shape||shape==="rect")draft={k:p.plane,s,type:shape,strokes:[]};draft.strokes.push(shape==="rect"?[pt,pt]:[pt]);draw()}})}
+window.addEventListener("mousemove",e=>{if(!drag)return;const d=drag,p=d.p,dx=e.clientX-d.x,dy=e.clientY-d.y,V=VIEWS[p.plane];if(Math.abs(dx)+Math.abs(dy)>3)d.moved=true;
+  const r=p.cv.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
+  if(d.mode==="wl"||d.mode==="wlmenu"){if(d.moved)setWLp(p.seq,d.wl0[0]-dx*0.15,d.wl0[1]-dy*0.15)}
+  else if(d.mode==="pan"){if(d.moved){const g=geom(p);ctr=d.ctr.slice();ctr[V.h]=d.ctr[V.h]+g.dir*dx/g.sx;ctr[V.v]=d.ctr[V.v]+dy/g.sy;clampCtr();draw()}}
+  else if(d.mode==="zoom"){if(d.moved)zoomFrom(p,d.mx,d.my,d.zoom0,d.ctr,d.zoom0*Math.exp(-dy*0.008))}
+  else if(d.mode==="scroll"){const n=[nx,ny,nz][V.s];cur[V.s]=Math.max(0,Math.min(n-1,d.s0-Math.trunc(dy/6)));draw()}
+  else if(d.mode==="ruler"&&ruler){ruler.b=toVox(p,mx,my);ruler.mm=Math.hypot((ruler.b[V.h]-ruler.a[V.h])*vox[V.h],(ruler.b[V.v]-ruler.a[V.v])*vox[V.v]);$("#readout").textContent="Length "+ruler.mm.toFixed(1)+" mm";draw()}
+  else if(d.mode==="miss"&&draft){const s=draft.strokes[draft.strokes.length-1],pt=toVoxF(p,mx,my);if(draft.type==="rect")s[1]=pt;else s.push(pt);draw()}});
+window.addEventListener("mouseup",e=>{if(!drag)return;const d=drag,p=d.p,V=VIEWS[p.plane];drag=null;
+  if(d.mode==="wlmenu"){if(!d.moved)ctxMenu(e.clientX,e.clientY,p,d.p0);return}
+  if(d.btn!==0)return;
+  if(d.mode==="dark")doProbe(p,d.p0);
+  else if(d.mode==="miss"&&draft){const t=draft.strokes[draft.strokes.length-1];if(draft.type==="rect"&&!d.moved){draft=null;draw()}else if(draft.type==="rect")$("#readout").textContent=`Rectangle ${(Math.abs(t[1][V.h]-t[0][V.h])*vox[V.h]).toFixed(0)} × ${(Math.abs(t[1][V.v]-t[0][V.v])*vox[V.v]).toFixed(0)} mm · Enter = save`}
+  else if(d.mode==="pan"&&!d.moved){cur=d.p0;draw()}});
+
+// ---------- snapshots ----------
+const pad3=n=>String(Math.round(n)).padStart(3,"0");
+function snapStamp(){const t=new Date(),z=n=>String(n).padStart(2,"0");return `${t.getFullYear()}${z(t.getMonth()+1)}${z(t.getDate())}-${z(t.getHours())}${z(t.getMinutes())}${z(t.getSeconds())}`}
+function snapName(ext,P){P=P||snap.parts;const c=cand(),p=panes[act],parts=[];if(!M)return "snapshot."+ext;
+  if(P.study)parts.push(M.study);if(c&&P.cand)parts.push("cand"+String(did(c)).padStart(2,"0"));if(c&&P.xyz)parts.push("x"+pad3(c.vox[0]),"y"+pad3(c.vox[1]),"z"+pad3(c.vox[2]));
+  if(P.plane&&p)parts.push(PLN[p.plane].toLowerCase()+(mir&&p.plane!==2?"-mirrored":""));if(P.slice&&p)parts.push("s"+pad3(cur[VIEWS[p.plane].s]+1));if(P.time)parts.push(snapStamp());
+  return (parts.join("_")||"snapshot")+"."+ext}
+function snapCanvas(){const o=Object.assign({},snap,{rl:showRL,bl:28,br:28,live:false,lm:10,rm:16,tm:30,rev:reviewer(),cross:snap.cross,arrow:snap.arrow}),res=snap.res;
+  panes.forEach(buildSlice);
+  if(snap.mode==="all"&&panes.length>1){const g=$("#vgrid"),gr=g.getBoundingClientRect(),W=Math.round(gr.width),H=Math.round(gr.height),cv=document.createElement("canvas");cv.width=W*res;cv.height=H*res;const x=cv.getContext("2d");x.scale(res,res);
+    panes.forEach(p=>{const r=p.el.getBoundingClientRect(),w=Math.round(r.width),h=Math.round(r.height);x.save();x.translate(r.left-gr.left,r.top-gr.top);x.beginPath();x.rect(0,0,w,h);x.clip();drawPane(p,x,w,h,o);x.restore()});return cv}
+  const p=panes[act],W=p.cv.clientWidth,H=p.cv.clientHeight,cv=document.createElement("canvas");cv.width=W*res;cv.height=H*res;const x=cv.getContext("2d");x.scale(res,res);drawPane(p,x,W,H,o);return cv}
+const blobOf=(cv,mime)=>new Promise(r=>cv.toBlob(r,mime,0.92));
+const dataUrlOf=b=>new Promise(r=>{const f=new FileReader();f.onload=()=>r(f.result);f.readAsDataURL(b)});
+function snapMeta(){const c=cand(),p=panes[act];return {cur:cur.slice(),plane:PLN[p.plane].toLowerCase(),mirrored:mir&&p.plane!==2,slice:cur[VIEWS[p.plane].s]+1,seq:(seqmeta[p.seq]||{}).label||p.seq,zoom:+zoom.toFixed(2),cand_id:c?c.id:null,call:c?callOf(c):"",meter:c?c.ai.score:null}}
+async function doSave(folder,name,dataUrl,blob){
+  try{const r=await api("/api/snapshot",{study:M.study,reviewer:reviewer(),folder,name,image:dataUrl,sidecar:snap.side,meta:snapMeta()});
+    if(snap.clip&&navigator.clipboard&&window.ClipboardItem){try{await navigator.clipboard.write([new ClipboardItem({[blob.type]:blob})])}catch(e){}}
+    toast(`✓ Snapshot saved · ${esc(r.path)} <u id="tOpen">Open folder</u>`);const o=$("#tOpen");if(o)o.onclick=()=>api("/api/openfolder",{study:M.study,path:r.folder}).catch(e=>toast("Could not open the folder: "+esc(e.message),true));return r}
+  catch(e){toast("Snapshot NOT saved: "+esc(e.message),true);return null}}
+async function takeSnapshot(forceAsk){if(!hasVol())return;if(!reviewer()){status("Enter your name (upper right) first.",true);$("#reviewer").focus();return}
+  const mime=snap.fmt==="jpg"?"image/jpeg":"image/png",ext=snap.fmt==="jpg"?"jpg":"png",cv=snapCanvas(),blob=await blobOf(cv,mime),dataUrl=await dataUrlOf(blob),name=snapName(ext);
+  if(forceAsk||snap.ask||!snap.folder){openSaveAs(name,blob,dataUrl,mime,ext)}else await doSave(snap.folder,name,dataUrl,blob)}
+let saveCtx=null;
+function openSaveAs(name,blob,dataUrl,mime,ext){saveCtx={name,blob,dataUrl,mime,ext};$("#saFolder").value=snap.folder||M.snapdir||"";$("#saName").value=name;$("#saDefault").checked=false;
+  $("#saChoose").style.display=window.showSaveFilePicker?"":"none";$("#saveas").classList.add("show");setTimeout(()=>{const f=$("#saName");f.focus();f.setSelectionRange(0,name.lastIndexOf("."))},50)}
+async function saveAsGo(){if(!saveCtx)return;const folder=$("#saFolder").value.trim(),name=$("#saName").value.trim();if(!name){return}
+  const r=await doSave(folder,name,saveCtx.dataUrl,saveCtx.blob);if(r){if($("#saDefault").checked&&folder){snap.folder=folder;LSS("snap",snap)}$("#saveas").classList.remove("show");saveCtx=null}}
+async function saveAsChoose(){if(!saveCtx||!window.showSaveFilePicker)return;try{const h=await window.showSaveFilePicker({suggestedName:$("#saName").value||saveCtx.name,types:[{description:"Image",accept:{[saveCtx.mime]:["."+saveCtx.ext]}}]});
+  const w=await h.createWritable();await w.write(saveCtx.blob);await w.close();$("#saveas").classList.remove("show");toast("✓ Snapshot saved with the browser dialog · "+esc(h.name));saveCtx=null}catch(e){}}
+function openSnapSettings(){const S=snap;$$('input[name=smode]').forEach(r=>r.checked=r.value===S.mode);$$('input[name=sfmt]').forEach(r=>r.checked=r.value===S.fmt);$$('input[name=sres]').forEach(r=>r.checked=+r.value===S.res);
+  $("#sText").checked=S.text;$("#sScale").checked=S.scale;$("#sOutline").checked=S.outline;$("#sCross").checked=S.cross;$("#sArrow").checked=S.arrow;
+  $("#sFolder").value=S.folder;$("#sFolder").placeholder=(M&&M.snapdir)||"~/css_project/review/snapshots/{study}";$("#sAsk").checked=S.ask;
+  for(const [k,id] of [["study","pStudy"],["cand","pCand"],["xyz","pXyz"],["plane","pPlane"],["slice","pSlice"],["time","pTime"]])$("#"+id).checked=!!S.parts[k];
+  $("#sSide").checked=S.side;$("#sClip").checked=S.clip;snapPrev();$("#snapdlg").classList.add("show")}
+function snapParts(){return {study:+$("#pStudy").checked,cand:+$("#pCand").checked,xyz:+$("#pXyz").checked,plane:+$("#pPlane").checked,slice:+$("#pSlice").checked,time:+$("#pTime").checked}}
+function snapPrev(){$("#sPrev").value=snapName($('input[name=sfmt]:checked').value==="jpg"?"jpg":"png",snapParts())}
+function saveSnapSettings(){snap=Object.assign({},snap,{mode:$('input[name=smode]:checked').value,fmt:$('input[name=sfmt]:checked').value,res:+$('input[name=sres]:checked').value,text:$("#sText").checked,scale:$("#sScale").checked,outline:$("#sOutline").checked,cross:$("#sCross").checked,arrow:$("#sArrow").checked,
+  folder:$("#sFolder").value.trim(),ask:$("#sAsk").checked,parts:snapParts(),side:$("#sSide").checked,clip:$("#sClip").checked});LSS("snap",snap);$("#snapdlg").classList.remove("show");status("Snapshot settings saved.")}
+function openSnapFolder(){const f=snap.folder||(M&&M.snapdir)||"";api("/api/openfolder",{study:M.study,path:f}).catch(e=>toast("Could not open the folder: "+esc(e.message),true))}
+
+// ---------- actions, menu bar, right-click menu ----------
+function tog(){$("#aibody").style.display=showAI&&!vmode?"":"none";LSS("mark",showMark);LSS("other",showOther);LSS("auto",autoNext);LSS("ai",showAI);LSS("text",showText);LSS("cross2",showCross);draw()}
+const A={m3d:{l:"3-D analysis of the candidate…",ic:"cube",f:()=>m3Open()},savefinal:{l:"Save final",k:MOD+(MAC?"":"+")+"↩",ic:"disk",f:()=>saveFinal()},
+ blind:{l:"Blind read (no AI, audit objects)",ic:"eye",f:()=>{const v=!LS("blind",false);LSS("blind",v);setVmode(v)},on:()=>vmode},
+ openset:{l:"Settings…",ic:"gear",f:()=>openSet()},s3:{l:"3-D shape card",k:"3",ic:"cube",f:()=>s3Toggle(),on:()=>showS3},
+ screencap:{l:"Screenshot",ic:"cam",f:()=>screenCap()},
+ summary:{l:"Summary and score",k:"Q",ic:"summary",f:summary},exportcsv:{l:"Export AI vs reviewer (CSV)",k:"E",ic:"export",f:exportCsv},
+ undo:{l:"Undo last decision",k:"Z",ic:"undo",f:doUndo},clear:{l:"Clear this decision",k:"⌫",ic:"clear",f:()=>decide("")},comment:{l:"Add a comment",k:"C",ic:"comment",f:()=>{if(!panelVisible())openTab("viewer");setTab("viewer");setTimeout(()=>$("#comment").focus(),60)}},
+ mark:{l:"Show this marking",k:"M",ic:"eye",f:()=>{showMark=!showMark;tog()},on:()=>showMark},other:{l:"Show other markings",k:"O",ic:"layers",f:()=>{showOther=!showOther;tog()},on:()=>showOther},
+ mag:{l:"Magnifier",k:"W",ic:"lens",f:()=>{mag=!mag;tog()},on:()=>mag},mip:{l:"minIP slab",k:"I",ic:"slab",f:()=>{const p=panes[act];p.mip=!p.mip;tog()},on:()=>panes[act]&&panes[act].mip},
+ ai:{l:"Show the AI meter",k:"K",ic:"gauge",f:()=>{if(vmode){status("The AI meter is locked during a validation read (Settings > Validation read).",true);return}showAI=!showAI;tog()},on:()=>showAI&&!vmode,dis:()=>vmode},mirror:{l:"Mirror left–right",k:"⇧H",ic:"mirror",f:()=>setMirror(!mir),on:()=>mir},rl:{l:"Show R badge",ic:"flag",f:()=>{showRL=!showRL;LSS("rl",showRL);draw()},on:()=>showRL},side:{l:"Side check…",ic:"flag",f:()=>toast(esc(sideMsg()),sideChk&&sideChk.bad,12000)},
+ text:{l:"Corner text and scale bar",k:"P",ic:"text",f:()=>{showText=!showText;tog()},on:()=>showText},
+ cross:{l:"Crosshair",ic:"target",f:()=>{showCross=!showCross;tog()},on:()=>showCross},
+ zin:{l:"Zoom in",k:"+",ic:"zoomin",f:()=>zoomBy(1.2)},zout:{l:"Zoom out",k:"-",ic:"lens",f:()=>zoomBy(1/1.2)},fit:{l:"Fit to window",k:"0",ic:"fit",f:fitView},actual:{l:"Actual size 1:1",k:"9",ic:"actual",f:actualSize},
+ reset:{l:"Reset view",k:"R",ic:"reset",f:resetView},centre:{l:"Go to the candidate",k:"F",ic:"target",f:gotoCandidate},
+ nextplane:{l:"Next plane",k:"Tab",ic:"cube",f:()=>setPlane(panes[act].plane+1)},
+ lay1:{l:"One image (1×1)",ic:"l1",f:()=>setLayout("1"),on:()=>layout==="1"},lay2:{l:"Two images (1×2)",ic:"l2",f:()=>setLayout("2"),on:()=>layout==="2"},lay4:{l:"Four images (2×2)",ic:"l4",f:()=>setLayout("4"),on:()=>layout==="4"},
+ laycyc:{l:"Next layout",k:"\\",ic:"l4",f:cycleLayout},
+ tviewer:{l:"Panel: viewer",k:"F1",ic:"side",f:()=>openTab("viewer")},tcands:{l:"Panel: candidates",k:"F2",ic:"side",f:()=>openTab("cands")},tcalls:{l:"Panel: calls summary",k:"F3",ic:"side",f:()=>openTab("calls")},
+ hidepanel:{l:"Hide right panel",k:"Space",ic:"side",f:hidePanel},autohide:{l:"Auto-hide right panel",ic:"pin",f:()=>setAutoHide(!ah),on:()=>ah},
+ prev:{l:"Previous candidate",k:"←",ic:"prev",f:()=>go(ci-1)},next:{l:"Next candidate",k:"→",ic:"next",f:()=>go(ci+1)},unread:{l:"Next unread",k:"J",ic:"next",f:nextUnread},
+ auto:{l:"Auto-next after a decision",k:"G",ic:"next",f:()=>{autoNext=!autoNext;tog();status("Auto-next "+(autoNext?"on":"off"))},on:()=>autoNext},
+ pan:{l:"Pan (click = crosshair)",ic:"hand",f:()=>setTool("pan"),on:()=>tool==="pan"},zoomtool:{l:"Zoom tool (drag)",ic:"zoomin",f:()=>setTool("zoom"),on:()=>tool==="zoom"},wl:{l:"Window / level tool (drag)",ic:"sliders",f:()=>setTool("wl"),on:()=>tool==="wl"},scroll:{l:"Scroll tool (drag)",ic:"scroll",f:()=>setTool("scroll"),on:()=>tool==="scroll"},
+ dark:{l:"Darkness probe",k:"D",ic:"dark",f:()=>setTool(tool==="dark"?"pan":"dark"),on:()=>tool==="dark"},ruler:{l:"Ruler",k:"L",ic:"ruler",f:()=>setTool(tool==="ruler"?"pan":"ruler"),on:()=>tool==="ruler"},
+ miss:{l:"Mark a missed cSS…",k:"X",ic:"plus",f:()=>setTool(tool==="miss"?"pan":"miss"),on:()=>tool==="miss"},
+ snap:{l:"Take snapshot",k:MOD+(MAC?"":"+")+"S",ic:"cam",f:()=>takeSnapshot(false)},snapas:{l:"Save snapshot as…",k:"⇧"+MOD+(MAC?"":"+")+"S",ic:"disk",f:()=>takeSnapshot(true)},snapfolder:{l:"Open snapshot folder",ic:"folder",f:openSnapFolder},snapset:{l:"Snapshot settings…",ic:"gear",f:openSnapSettings},
+ vmode:{l:"Validation read (meter hidden, excluded audit)",ic:"eye",f:()=>setVmode(!vmode),on:()=>vmode},
+ primary:{l:"Primary reviewer…",ic:"flag",f:showPrimary},import:{l:"Import earlier calls…",ic:"undo",f:openImport,dis:()=>vmode},
+ audit:{l:"Excluded audit objects",ic:"layers",f:nextAudit,dis:()=>!(M&&M.cands.some(c=>c.audit))},
+ autopt:{l:"Go to the next patient automatically after the final save",ic:"next",f:()=>{autoPt=!autoPt;LSS("autopt",autoPt)},on:()=>autoPt},
+ compare:{l:"Show the AI comparison before the final save",ic:"cmp",f:()=>setCompare(!compareOn),on:()=>compareOn},
+ help:{l:"Keys and reading rules",k:"?",ic:"help",f:()=>$("#help").classList.toggle("show")}};
+Object.entries(CALLKEYS).forEach(([k,c])=>A["call_"+k]={l:"Decide: "+CALLLBL[c],k:k.toUpperCase(),ic:"cmp",f:()=>decide(c),on:()=>M&&cand()&&callOf(cand())===c});
+const seqItems=()=>M.seqs.map((s,i)=>({l:s.label,k:String(i+1),ic:"seq",f:()=>setSeq(s.key),on:()=>panes[act]&&panes[act].seq===s.key})).concat(M.missing_seqs.map(n=>({l:n+" (not imported)",ic:"seq",dis:true})));
+const themeItems=()=>["light","dark","blue"].map(t=>({l:t==="blue"?"Eye-preserving blue":"Theme: "+t,ic:t==="light"?"sun":"moon",f:()=>theme(t),on:()=>document.documentElement.dataset.theme===t}));
+const studyItems=()=>M.studies.map(s=>({l:s,ic:"folder",f:()=>loadStudy(s),on:()=>s===M.study}));
+const planeItems=()=>PLN.map((n,i)=>({l:n,ic:"cube",f:()=>setPlane(i),on:()=>panes[act]&&panes[act].plane===i}));
+const MENUS={file:()=>[{sub:"Open patient",ic:"folder",items:studyItems},"savefinal","summary","blind","-","import","exportcsv","-","screencap","snap","snapfolder"],
+ cand:()=>["prev","next","unread","-","call_y","call_v","call_n","call_a","call_u","call_h","-","undo","clear","comment","miss","audit"],
+ view:()=>[{sub:"Plane",ic:"cube",k:"Tab",items:planeItems},{sub:"Sequence",ic:"seq",items:seqItems},{sub:"Layout",ic:"l4",k:"\\",items:()=>["lay1","lay2","lay4"]},"-","zin","zout","fit","actual","reset","centre","-","mark","mip","mag","s3","m3d","hidepanel"],
+ tools:()=>["pan","zoomtool","wl","scroll","-","ruler","dark","side","-","screencap","snap","snapas","-","help"],
+ settings:()=>["openset"],help:()=>["help"]};
+const MENUS_OLD={file:()=>[],edit:()=>["undo","clear","comment"],
+ view:()=>[{sub:"Layout",ic:"l4",k:"\\",items:()=>["lay1","lay2","lay4"]},{sub:"Plane",ic:"cube",k:"Tab",items:planeItems},{sub:"Sequence",ic:"seq",items:seqItems},"-","mark","other","mag","mip","text","cross","ai","-","mirror","rl","side","-","zin","zout","fit","actual","reset","centre","-","tviewer","tcands","tcalls","hidepanel","autohide","-",{sub:"Theme",ic:"moon",items:themeItems}],
+ cand:()=>["prev","next","unread","audit","-","call_y","call_v","call_n","call_a","call_u","call_h","-","auto"],
+ tools:()=>["pan","zoomtool","wl","scroll","-","mag","dark","ruler","miss","-","snap","snapas","snapfolder"],
+ settings:()=>["vmode","primary","-","autohide","text","rl","mirror","compare","ai","auto","-","autopt",{sub:"Close the summary after",ic:"next",items:()=>[[0,"Immediately (no summary)"],[3,"3 s"],[5,"5 s"],[10,"10 s (default)"],[20,"20 s"],[30,"30 s"]].map(([v,l])=>({l,ic:"next",f:()=>{autoSec=v;LSS("autosec",v)},on:()=>autoSec===v}))},"-",{sub:"Theme",ic:"moon",items:themeItems},"-","snapset"],help:()=>["help"]};
+// ---------- Save final, screenshot, settings window ----------
+function unreadN(){return M?M.cands.filter(c=>!c.audit&&!callOf(c)).length:0}
+setInterval(()=>{const b=$("#bSaveFinal");if(!b||!M)return;const n=unreadN();b.textContent=n?`💾 Save final · ${n} unread`:"💾 Save final";b.style.background=n?"":"#2e8b46";b.style.color=n?"":"#fff"},800);
+async function saveFinal(){if(!M)return;const n=unreadN();if(n&&!confirm(`${n} candidate(s) not read - save anyway? The score is then a lower bound.`))return;summary()}
+async function screenCap(){if(!M)return;const area=LS("scap","window")==="area";status(area?"drag over the area to capture (Esc cancels) …":"capturing the window …");
+  const name=`${M.study}_screen_${new Date().toISOString().slice(0,19).replace(/[:T]/g,"-")}.png`;
+  try{const r=await api("/api/screencap",{study:M.study,reviewer:reviewer()||"screen",mode:area?"area":"window",x:window.screenX,y:window.screenY,w:window.outerWidth,h:window.outerHeight,folder:snap.folder||"",name});status("saved "+r.path)}
+  catch(e){if(/macOS/.test(e.message)){takeSnapshot(false)}else status(e.message,true)}}
+function openSet(){closeMenus();const sw=(id,on,lab,dis)=>`<div class="it"><span class="nsw ${on?"on":""}" data-sw="${id}" ${dis?'style="opacity:.4"':""}><i></i></span><span>${lab}</span></div>`;
+  const sel=(id,cur,opts,lab)=>`<div class="it"><span>${lab}</span><span style="flex:1"></span><select data-sel="${id}">${opts.map(([v,l])=>`<option value="${v}" ${String(v)===String(cur)?"selected":""}>${l}</option>`).join("")}</select></div>`;
+  $("#setbody").innerHTML=`<div class="sgrid">
+   <div class="sbox"><h4>Reading</h4>${sw("auto",autoNext,"Auto-next candidate after a decision")}${sw("blind",LS("blind",false),"Blind read (no AI meter / score, audit objects)")}
+     <div class="it"><span>Primary reviewer</span><span style="flex:1"></span><button class="btn" id="setPrim">${esc((M&&M.primary)||"choose…")}</button></div>${sw("compare",compareOn,"AI comparison before the final save")}</div>
+   <div class="sbox"><h4>After the final save</h4>${sw("autopt",autoPt,"Next patient automatically")}${sel("autosec",autoSec,[[0,"Immediately (no summary)"],[3,"3 s"],[5,"5 s"],[10,"10 s"],[20,"20 s"],[30,"30 s"]],"Close the summary after")}</div>
+   <div class="sbox"><h4>AI support</h4>${sw("ai",showAI,"AI meter (K)",vmode)}${sw("s3",showS3,"3-D shape card (3)")}</div>
+   <div class="sbox"><h4>Image</h4>${sw("text",showText,"Corner text and scale bar")}${sw("rl",showRL,"R badge")}${sw("cross",showCross,"Crosshair")}${sw("mirror",mir,"Mirror left–right")}${sw("other",showOther,"Other candidates' markings")}
+     ${sel("layout",layout,[["1","1 × 1"],["2","1 × 2"],["4","2 × 2"]],"Layout")}</div>
+   <div class="sbox"><h4>Panel</h4>${sw("autohide",ah,"Auto-hide right panel")}${sw("ltah",ltah,"Fold the left tool strip")}</div>
+   <div class="sbox"><h4>Screenshots &amp; snapshots</h4>${sel("scap",LS("scap","window"),[["window","Whole reviewer window"],["area","Choose an area with the mouse"]],"Screenshot button")}
+     <div class="it"><span class="mut">Folder</span><span style="flex:1"></span><span class="mut sm">${esc(snap.folder||"review/snapshots/<study>")}</span></div><div class="it"><button class="btn" id="setSnap">Snapshot settings…</button></div></div></div>`;
+  const F={auto:()=>A.auto.f(),blind:()=>A.blind.f(),compare:()=>setCompare(!compareOn),autopt:()=>{autoPt=!autoPt;LSS("autopt",autoPt)},ai:()=>A.ai.f(),s3:()=>s3Toggle(),
+    text:()=>A.text.f(),rl:()=>A.rl.f(),cross:()=>A.cross.f(),mirror:()=>A.mirror.f(),other:()=>A.other.f(),autohide:()=>A.autohide.f(),ltah:()=>{ltah=!ltah;LSS("ltah",ltah);applyPalette()}};
+  $$("#setbody [data-sw]").forEach(e=>e.onclick=()=>{const f=F[e.dataset.sw];if(f)f();setTimeout(openSet,60)});
+  $$("#setbody [data-sel]").forEach(e=>e.onchange=()=>{const k=e.dataset.sel,v=e.value;if(k==="autosec"){autoSec=+v;LSS("autosec",+v)}else if(k==="scap")LSS("scap",v);else if(k==="layout")A["lay"+v].f()});
+  $("#setPrim").onclick=()=>{$("#setdlg").classList.remove("show");showPrimary()};$("#setSnap").onclick=()=>{$("#setdlg").classList.remove("show");openSnapSettings()};
+  $("#setdlg").classList.add("show")}
+function resetSet(){if(!confirm("Reset every reviewer setting to its default?"))return;for(const k of Object.keys(localStorage))if(k.startsWith("css_")&&!k.startsWith("css_vmode_"))localStorage.removeItem(k);
+  fetch("/api/vset",{method:"POST",headers:{"Content-Type":"application/json","X-CSS":"1"},body:JSON.stringify({auto:true,ai:true,compare:true,autopt:true,autosec:10,text:true,rl:true,cross2:false,other:true,mark:true,ah:false,ltah:false,layout:"1",s3:true,blind:false,scap:"window"})}).then(()=>location.reload())}
+// ---------- v5.12 3-D morphology analysis (css_morph3d.py; read-only, never changes the candidate or the score) ----------
+let m3open=false,m3o=null,m3init=false;
+const M3DEF={volume:"voxel count x voxel volume (mm3)",surface:"area of the marching-cubes surface of the exact mask (staircase included, so slightly high)",
+ length:"extent along the first principal axis (voxel centres + one voxel)",thick:"local thickness: 2 x distance to the nearest outside voxel minus one voxel, read at the medial ridge",
+ pca:"square roots of the eigenvalues of the coordinate covariance (spread of the voxels, NOT the image Hessian); describes the overall distribution, not the local cross-section",
+ sph:"pi^(1/3) (6V)^(2/3) / A: 1 for a ball, small for sheets and thin tubes",xs:"coefficient of variation of the cross-section diameter along the first principal axis (small = stable radius)",
+ skel:"curve skeleton (Lee thinning); shown only for curve-like objects - the medial set of a sheet is a surface",local:"per voxel, spread of the mask within 3x its local thickness: tube = thin and round across and elongated; sheet = thin in one direction; blob = solid in all three",
+ hess:"image intensity Hessian at 0.8 / 1.6 mm (detect_css.py convention: |l1|<=|l2|<=|l3|, dark structure -> l3 > 0): curvature of the SWI signal, independent of the mask",
+ surf:"share of candidate voxels within 1 mm of the pial surface (signed distance of the T1 labels); footprint = cortex-surface voxels within 1.5 mm",
+ ves:"the detector's vessel map (work/ID_vessels): a connection is evidence of vascular anatomy, not proof that the candidate is a vein"};
+function m3Defaults(){return {mode:"isolated",rep:"surface",color:"geometry",layers:{vessel:false,dark:false,cortex:false,skeleton:false,pca:false,footprint:false,contact:true,core:false,support:false,mri:{axial:false,coronal:false,sagittal:false}},comp:null,slab:-1,margin:8,light:document.documentElement.dataset.theme==="light"}}
+async function m3Open(){const c=M&&M.cands[ci];if(!c||c.audit){status("3-D analysis: choose a shown candidate",true);return}
+  $("#m3d").classList.add("show");m3open=true;if(!m3o)m3o=m3Defaults();m3o.light=document.documentElement.dataset.theme==="light";
+  if(!m3init){try{M3.init($("#m3cv"),m3o);m3init=true}catch(e){$("#m3left").innerHTML=`<p class="err">${esc(e.message)}</p>`;return}}
+  $("#m3title").textContent=`3-D analysis · ${M.study} · candidate ${did(c)}`;$("#m3right").innerHTML='<p class="mut">computing …</p>';
+  try{const d=await api(`/api/morph3d?study=${M.study}&cand=${c.id}&margin=${m3o.margin}`);M3.load(d,m3Pick);m3Panels();m3Prof();M3.setMarker(cur)}
+  catch(e){$("#m3right").innerHTML=`<p class="err">${esc(e.message)}</p>`}}
+function m3Close(){$("#m3d").classList.remove("show");m3open=false}
+function m3Pick(idx,k){cur=idx.slice();ctr=cur.slice();draw();M3.setMarker(cur);const V=M3.data().voxels,cl=["tube-like","sheet-like","blob-like","uncertain","not resolved (too small for the voxel grid)","not resolved (slice geometry / acquisition-limited)"];
+  $("#m3slab").innerHTML=`<b>voxel ${idx.join(", ")}</b><br>local geometry: ${vmode?"🔒":cl[V.gcls[k]]}<br>thickness ${V.thick[k]} mm<br>spread ${V.spread[k].join(" / ")} mm`+(V.heig?`<br>Hessian l1,l2,l3 ${V.heig[k].join(", ")}<br>image: ${vmode?"🔒":cl[V.hcls[k]]}`:"")+`<br><span class="mut">MRI slices moved here</span>`}
+function m3Panels(){const d=M3.data(),m=d.measures,o=m3o,sel=(g,cur,opts)=>`<div class="m3seg" data-g="${g}">${opts.map(([v,l,t])=>`<button data-v="${v}" class="${String(cur)===String(v)?"on":""}" title="${t||""}">${l}</button>`).join("")}</div>`;
+  const ck=(k,l,col,on)=>`<label><input type="checkbox" data-l="${k}" ${on?"checked":""}><span class="m3sw" style="background:${col}"></span>${l}</label>`,L=o.layers,lock=vmode;
+  if(lock&&["geometry","hessian"].includes(o.color))o.color="plain";if(lock){L.core=false;L.support=false}
+  $("#m3left").innerHTML=`<h5>View</h5>${sel("mode",o.mode,[["isolated","Isolated"],["context","Anatomical context"]])}
+   <h5>Representation</h5>${sel("rep",o.rep,[["surface","Surface","marching cubes + Taubin smoothing of a display copy"],["voxels","Voxels","the exact original mask, one box per voxel"],["both","Both"]])}
+   <h5>Colour by</h5>${sel("color",o.color,[["geometry","Local shape",lock?"hidden in a validation read":""],["hessian","Image Hessian"],["thickness","Thickness"],["component","Piece"],["plain","Plain"]].filter(x=>!lock||!["geometry","hessian"].includes(x[0])))}
+   <div class="mut sm" style="margin-top:4px">${o.color==="geometry"||o.color==="hessian"?'<span style="color:#4aa3ff">■</span> tube <span style="color:#f0a040">■</span> sheet <span style="color:#c77dff">■</span> blob <span style="color:#5c5e66">■</span> unresolved <span style="color:#d9d9d1">■</span> acquisition-limited <span style="color:#8a8f98">■</span> uncertain':o.color==="thickness"?"blue thin → red thick (p10–p90)":""}</div>
+   <h5>Layers</h5>${ck("vessel","Vessel map nearby","#4aa3ff",L.vessel)}${ck("dark","Other dark structures","#6b6b73",L.dark)}${ck("cortex","Cortical surface","#9ea3ad",L.cortex)}
+   ${ck("mri.axial","MRI axial plane","#ddd",L.mri.axial)}${ck("mri.coronal","MRI coronal plane","#ddd",L.mri.coronal)}${ck("mri.sagittal","MRI sagittal plane","#ddd",L.mri.sagittal)}
+   ${lock?'<div class="mut sm">dark core / support: hidden in a validation read 🔒</div>':`${ck("core","Dark core (experimental)","#ff4b4b",L.core)}${ck("support","Blooming / support","#4aa3ff",L.support)}`}
+   ${ck("contact","Contact with vessels","#ff3399",L.contact)}${ck("footprint","Cortical footprint","#5cd980",L.footprint)}${ck("skeleton","Skeleton"+(m.skeleton.ok?"":" (n/a)"),"#fff",L.skeleton)}${ck("pca","Principal axes","#ff5050",L.pca)}
+   <h5>Pieces (${m.components.length})</h5>${m.components.map(c=>`<label><input type="checkbox" data-c="${c.id}" ${!o.comp||o.comp.has(c.id)?"checked":""}>piece ${c.id} · ${c.volume_mm3} mm³</label>`).join("")}
+   <h5>Camera</h5><div class="m3seg">${["R","L","A","P","S","I"].map(k=>`<button data-cam="${k}">${k}</button>`).join("")}<button data-cam="best" title="look along the thinnest axis">Best</button><button data-cam="fit">Fit</button></div>
+   <h5>Context margin</h5>${sel("margin",o.margin,[[5,"5 mm"],[8,"8 mm"],[12,"12 mm"],[16,"16 mm"]])}
+   <p class="mut sm" style="margin-top:10px">Read-only view: the candidate, its score and the detector output are never changed. Measurements are descriptive, not a diagnosis.</p>`;
+  const tr=(k,l,v)=>`<tr title="${esc(M3DEF[k]||"")}"><td>${l}</td><td>${v}</td></tr>`,t=m.thickness_mm,bar=(l,v,c)=>`<div class="m3bar"><span style="width:70px">${l}</span><div><i style="width:${Math.round(v*100)}%;background:${c}"></i></div><span style="width:38px;text-align:right">${Math.round(v*100)} %</span></div>`;
+  const h=m.hessian,sf=m.surface||{},vs=m.vessel||{};
+  $("#m3right").innerHTML=`<h5>Candidate morphology</h5><table>
+   ${tr("volume","Volume",m.volume_mm3+" mm³")}${tr("surface","Surface area",m.surface_mm2+" mm²")}${tr("length","Length (1st axis)",m.extent_mm[0]+" mm")}${tr("length","Width / depth (2nd / 3rd)",m.extent_mm[1]+" / "+m.extent_mm[2]+" mm")}
+   ${tr("thick","Thickness median (min–max)",`${t.median} mm (${t.min}–${t.max})`)}${tr("thick","Thickness mean",t.mean+" mm")}${tr("pca","Principal spread ratio",m.pca_ratio.join(" : "))}
+   ${tr("sph","Sphericity",m.sphericity)}${tr("sph","Surface / volume",m.sa_to_vol+" /mm")}${tr("xs","Cross-section variability (CV)",m.xsection_cv??"–")}
+   ${tr("skel","Skeleton length",m.skeleton.ok?m.skeleton.length_mm+" mm":"n/a")}${tr("skel","Branch points",m.skeleton.ok?m.skeleton.n_branch:"n/a")}
+   ${tr("surf","On the pial surface (≤1 mm)",sf.within_1mm!=null?Math.round(sf.within_1mm*100)+" %":"–")}${tr("surf","Median pial distance",sf.median_pial_mm!=null?sf.median_pial_mm+" mm":"–")}${tr("surf","Cortical footprint",sf.footprint_mm2!=null?sf.footprint_mm2+" mm²":"–")}
+   ${tr("ves","Vessel map",vs.present?(vs.connected?`connected (${vs.n_connected_segments} segment${vs.n_connected_segments>1?"s":""})`:"near, not connected"):"no vessel map")}
+   ${tr("volume","Voxel size",m.vox.join(" × ")+" mm")}${tr("volume","Pieces",m.components.length)}</table>
+   ${lock?'<p class="mut" style="margin-top:8px">🔒 Shape interpretation is hidden during a validation read (measurements stay visible).</p>':`
+   <h5 title="${esc(M3DEF.local)}">Local shape of the mask (share of voxels)</h5>${bar("Tube-like",m.local_share.tube,"#4aa3ff")}${bar("Sheet-like",m.local_share.sheet,"#f0a040")}${bar("Blob-like",m.local_share.blob,"#c77dff")}${bar("Uncertain",m.local_share.uncertain,"#8a8f98")}${bar("Unresolved",m.local_share.unresolved||0,"#5c5e66")}${bar("Acq.-limited",m.local_share.acquisition_limited||0,"#d9d9d1")}
+   <div class="mut sm">${esc(m.resolution?m.resolution.rule:"")}</div>
+   ${((m.local_share.unresolved||0)+(m.local_share.acquisition_limited||0))>=0.05?`<div class="sm" style="margin-top:4px;padding:6px;border-left:3px solid #d9d9d1">
+    <b>Why part of this structure is not resolved:</b>
+    ${(m.local_share.acquisition_limited||0)>0?`<div>• <b>Acquisition-limited (${Math.round(100*m.local_share.acquisition_limited)} %)</b>: the structure spans two or fewer samples along the coarse slice direction ${m.vox?`(voxel ${esc(m.vox.join(" × "))} mm)`:""}, so a round tube and a flat sheet look the same there. Thinner slices would decide it.</div>`:""}
+    ${(m.local_share.unresolved||0)>0?`<div>• <b>Unresolved (${Math.round(100*m.local_share.unresolved)} %)</b>: the structure is two or fewer voxels across in the directions its shape depends on; the grid is too coarse for it in every direction.</div>`:""}
+    <div><b>Unresolved does not mean absent.</b> It says nothing against cSS: it means the scan cannot show this structure's 3-D shape. Judge the candidate on the images and the other evidence.</div></div>`:""}
+   ${h?`<h5 title="${esc(M3DEF.hess)}">Image Hessian (separate source)</h5>${bar("Tube-like",h.share.tube,"#4aa3ff")}${bar("Sheet-like",h.share.sheet,"#f0a040")}${bar("Blob-like",h.share.blob,"#c77dff")}
+     <div class="mut sm">agrees with the mask geometry on ${h.agree_with_geometry!=null?Math.round(h.agree_with_geometry*100)+" %":"–"} of voxels</div>`:""}
+   <div class="m3sum">${esc(m.summary)}</div>`}
+   <h5>Measurement reliability: ${esc(m.reliability)}</h5><div class="mut sm">${m.reliability_notes.map(esc).join("<br>")||"no limitation found"}</div>
+   <details style="margin-top:8px"><summary class="mut sm">Definitions</summary><div class="mut sm">${Object.entries(M3DEF).map(([k,v])=>`<p><b>${k}</b>: ${esc(v)}</p>`).join("")}</div></details>`;
+  $$("#m3left [data-g]").forEach(g=>g.querySelectorAll("button").forEach(b=>b.onclick=()=>{const k=g.dataset.g,v=b.dataset.v;
+    if(k==="margin"){o.margin=+v;m3Open();return}o[k]=v;
+    if(k==="mode"){Object.assign(o.layers,v==="context"?{vessel:true,cortex:true,dark:false,mri:{axial:true,coronal:false,sagittal:false}}:{vessel:false,cortex:false,dark:false,mri:{axial:false,coronal:false,sagittal:false}});M3.fit()}
+    m3Panels();M3.rebuild()}));
+  $$("#m3left [data-l]").forEach(e=>e.onchange=()=>{const k=e.dataset.l;if(k.startsWith("mri."))o.layers.mri[k.slice(4)]=e.checked;else o.layers[k]=e.checked;M3.draw()});
+  $$("#m3left [data-c]").forEach(e=>e.onchange=()=>{const on=new Set($$("#m3left [data-c]").filter(x=>x.checked).map(x=>+x.dataset.c));o.comp=on.size===m.components.length?null:on;M3.rebuild()});
+  $$("#m3left [data-cam]").forEach(b=>b.onclick=()=>b.dataset.cam==="fit"?M3.fit():M3.view(b.dataset.cam))}
+function m3Prof(){const d=M3.data(),xs=d.measures.xsections.filter(c=>c.area_mm2!=null),cv=$("#m3pf"),g=cv.getContext("2d"),W=cv.width=cv.clientWidth*devicePixelRatio,H=cv.height=cv.clientHeight*devicePixelRatio,pr=devicePixelRatio;
+  g.clearRect(0,0,W,H);g.font=`${11*pr}px sans-serif`;g.fillStyle="#9aa1ab";g.fillText("cross-sections along the 1st principal axis: equivalent diameter (bars) · thickness along the skeleton (line) · click a bar",6*pr,12*pr);
+  if(!xs.length)return;const mx=Math.max(...xs.map(c=>Math.max(c.eq_diam_mm,c.major_mm)),...(d.measures.skeleton.radius_profile||[]).map(r=>2*r[1]),1),n=d.measures.xsections.length,bw=(W-12*pr)/n;
+  d.measures.xsections.forEach((c,i)=>{if(c.area_mm2==null)return;const h=(c.eq_diam_mm/mx)*(H-34*pr),x=6*pr+i*bw;g.fillStyle=i===m3o.slab?"#ffffff":"#f0a040";g.fillRect(x+2*pr,H-14*pr-h,bw-4*pr,h);
+    g.fillStyle="#9aa1ab";g.fillText(String(i+1),x+bw/2-3*pr,H-2*pr)});
+  const rp=d.measures.skeleton.radius_profile;if(rp&&rp.length>1){const p0=Math.min(...d.measures.xsections.map(c=>c.pos_mm)),p1=Math.max(...d.measures.xsections.map(c=>c.pos_mm)),sx=p=>6*pr+((p-p0)/Math.max(p1-p0,1e-6)*(n-1)+0.5)*bw;
+    g.strokeStyle="#4aa3ff";g.lineWidth=2*pr;g.beginPath();rp.forEach((r,i)=>{const x=sx(r[0]),y=H-14*pr-(2*r[1]/mx)*(H-34*pr);i?g.lineTo(x,y):g.moveTo(x,y)});g.stroke()}
+  g.fillStyle="#9aa1ab";g.fillText(`${mx.toFixed(1)} mm`,W-48*pr,24*pr)}
+$("#m3pf").addEventListener("click",e=>{const d=M3.data();if(!d)return;const n=d.measures.xsections.length,r=e.target.getBoundingClientRect(),i=Math.floor((e.clientX-r.left-6)/((r.width-12)/n));
+  if(i<0||i>=n)return;m3o.slab=m3o.slab===i?-1:i;const c=d.measures.xsections[i];
+  $("#m3slab").innerHTML=c.area_mm2!=null&&m3o.slab>=0?`<b>cross-section ${i+1} / ${n}</b> at ${c.pos_mm} mm<br>area ${c.area_mm2} mm² · eq. diameter ${c.eq_diam_mm} mm<br>major ${c.major_mm} · minor ${c.minor_mm} mm<br>eccentricity ${c.ecc}<br><span class="mut">highlighted white in 3-D</span>`:"";M3.rebuild();m3Prof()});
+$("#m3close").onclick=m3Close;
+{const _d=draw;draw=function(){_d();if(m3open&&$("#m3d").classList.contains("show"))M3.setMarker(cur)}}
+function closeMenus(){$$(".menu").forEach(m=>m.remove());$$("#mbar span").forEach(s=>s.classList.remove("on"));drawLens()}
+function openMenu(items,x,y,level){$$(".menu").forEach(m=>{if(+m.dataset.level>=level)m.remove()});
+  const m=document.createElement("div");m.className="menu";m.dataset.level=level;
+  for(const it0 of items){if(it0==="-"){m.appendChild(document.createElement("hr"));continue}const it=typeof it0==="string"?A[it0]:it0,d=document.createElement("div");
+    d.innerHTML=`<span class="ck">${it.on&&it.on()?"✓":""}</span><span class="ic">${it.ic?svg(it.ic):""}</span><span>${esc(it.sub||it.l)}</span><span class="k">${it.sub?"▸":esc(it.k||"")}</span>`;if(typeof it.dis==="function"?it.dis():it.dis)d.className="dis";
+    const unhi=()=>$$(".menu div.hi").forEach(e=>{if(e.parentNode===m)e.classList.remove("hi")});
+    if(it.sub){const open=()=>{unhi();d.classList.add("hi");const r=d.getBoundingClientRect();openMenu(it.items(),r.right-2,r.top-5,level+1)};d.addEventListener("mouseenter",open);d.addEventListener("click",e=>{e.stopPropagation();open()})}
+    else{d.addEventListener("mouseenter",()=>{$$(".menu").forEach(q=>{if(+q.dataset.level>level)q.remove()});unhi()});d.addEventListener("click",e=>{e.stopPropagation();closeMenus();it.f()})}
+    m.appendChild(d)}
+  document.body.appendChild(m);const r=m.getBoundingClientRect();m.style.left=Math.max(4,Math.min(x,innerWidth-r.width-6))+"px";m.style.top=Math.max(4,Math.min(y,innerHeight-r.height-6))+"px";return m}
+function ctxMenu(x,y,p,pt){closeMenus();$("#lens").style.display="none";
+  openMenu(["mark","other","mag","mip","mirror","-",{sub:"Sequence",ic:"seq",items:seqItems},{l:"Mark a missed cSS here…",k:"X",ic:"plus",f:()=>{cur[VIEWS[p.plane].s]=pt[VIEWS[p.plane].s];setTool("miss")}},"dark","ruler","-","snap","snapas","-","centre","reset","-","hidepanel","autohide"],x,y,0)}
+$$("#mbar span").forEach(s=>{const open=()=>{closeMenus();s.classList.add("on");const r=s.getBoundingClientRect();openMenu(MENUS[s.dataset.m](),r.left,r.bottom+2,0)};
+  s.addEventListener("click",e=>{e.stopPropagation();if(s.classList.contains("on"))closeMenus();else open()});s.addEventListener("mouseenter",()=>{if($("#mbar span.on")&&!s.classList.contains("on"))open()})});
+window.addEventListener("mousedown",e=>{if(!e.target.closest(".menu")&&!e.target.closest("#mbar"))closeMenus()});
+
+// ---------- controls ----------
+$("#dec").innerHTML=Object.entries(CALLKEYS).map(([k,c])=>`<button class="b" data-call="${c}" title="${CALLLBL[c]}"><kbd>${k.toUpperCase()}</kbd>${c==="Normal"?"Normal":CALLLBL[c]}</button>`).join("");
+$("#dec").addEventListener("click",e=>{const b=e.target.closest(".b");if(b)decide(b.dataset.call)});
+$("#strip").addEventListener("click",e=>{const d=e.target.dataset.i;if(d!==undefined)go(+d)});
+for(const id of ["#candtable","#cmptable"])$(id).addEventListener("click",e=>{const r=e.target.closest("tr.r");if(r)go(+r.dataset.i)});
+(()=>{const sw=$("#themes");let dr=false;
+  const at=e=>{const r=sw.getBoundingClientRect(),i=Math.max(0,Math.min(2,Math.floor((e.clientX-r.left-3)/33)));theme(THEMES[i])};
+  sw.addEventListener("pointerdown",e=>{dr=true;sw.classList.add("drag");sw.setPointerCapture(e.pointerId);at(e)});
+  sw.addEventListener("pointermove",e=>{if(dr)at(e)});
+  sw.addEventListener("pointerup",e=>{dr=false;sw.classList.remove("drag")});})();
+$("#vsym").onclick=()=>{openMenu(MENUS.settings(),$("#vsym").getBoundingClientRect().left,$("#vsym").getBoundingClientRect().bottom+4,0)};
+$("#lt").addEventListener("change",e=>{if(e.target.id==="ltah"){ltah=e.target.checked;LSS("ltah",ltah);ltopen=false;applyPalette()}});
+$("#lt").addEventListener("mouseenter",()=>{if(ltah){ltopen=true;applyPalette()}});$("#lt").addEventListener("mouseleave",()=>{if(ltah){ltopen=false;applyPalette()}});
+$("#lt").addEventListener("click",e=>{if(e.target.closest(".ahb"))return;const d=e.target.closest("div");if(!d)return;if(d.dataset.tool==="shot")screenCap();else if(d.dataset.tool)setTool(d.dataset.tool);else if(d.dataset.a==="lens"){mag=!mag;tog()}});
+$("#pt").addEventListener("click",e=>{const s=e.target.closest("span");if(!s)return;if(s.dataset.pl!==undefined)setPlane(+s.dataset.pl);else if(s.dataset.lay)setLayout(s.dataset.lay);else if(s.dataset.a==="fit")fitView();else if(s.dataset.a==="actual")actualSize();else if(s.dataset.a==="cand")gotoCandidate()});
+$("#seq").onchange=e=>{setSeq(e.target.value);e.target.blur()};
+$("#bSaveFinal").onclick=saveFinal;$("#bM3").onclick=m3Open;$("#bGear").onclick=openSet;$("#setDone").onclick=()=>$("#setdlg").classList.remove("show");$("#setReset").onclick=resetSet;
+$("#study").onchange=e=>{loadStudy(e.target.value);e.target.blur()};
+$("#cohort").onchange=e=>{const l=((M.groups||{})[e.target.value]||[]).filter(s=>M.studies.includes(s));if(l.length)loadStudy(l[0]);e.target.blur()};
+$("#zoom").oninput=e=>{const p=panes[act];zoomFrom(p,p.cv.clientWidth/2,p.cv.clientHeight/2,zoom,ctr.slice(),0.25*Math.pow(96,e.target.value/100))};
+$("#win").oninput=e=>setWLp(panes[act].seq,101-e.target.value,getWL(panes[act].seq)[1]);$("#lev").oninput=e=>setWLp(panes[act].seq,getWL(panes[act].seq)[0],+e.target.value);
+$("#tMark").onclick=A.mark.f;$("#tOther").onclick=A.other.f;$("#tMip").onclick=A.mip.f;$("#tAuto").onclick=A.auto.f;
+$("#bReset").onclick=resetView;$("#bCentre").onclick=gotoCandidate;$("#bScore").onclick=summary;$("#bExport").onclick=exportCsv;$("#bUnread").onclick=nextUnread;
+$("#bDiffer").onclick=()=>{onlyDiffer=!onlyDiffer;paintLists()};
+$("#dRect").onclick=()=>setShape("rect");$("#dPen").onclick=()=>setShape("pen");$("#dUndo").onclick=undoStroke;$("#dSave").onclick=saveDraft;$("#dCancel").onclick=cancelDraft;
+$("#cRe").onclick=reReview;$("#cSave").onclick=()=>finalSave(true);$("#cClose").onclick=()=>$("#compare").classList.remove("show");$("#cNo").onchange=e=>setCompare(!e.target.checked);
+$("#cmpbody").addEventListener("click",e=>{if(e.target.id==="cInh"){const i=M.cands.findIndex(isInh);$("#compare").classList.remove("show");if(i>=0)go(i);return}
+  const r=e.target.closest("tr.r");if(r){$("#compare").classList.remove("show");onlyDiffer=true;setTab("calls");go(+r.dataset.i);status("Re-review this candidate; press Q to return to the comparison.")}});
+$("#saSave").onclick=saveAsGo;$("#saCancel").onclick=()=>{$("#saveas").classList.remove("show");saveCtx=null};$("#saChoose").onclick=saveAsChoose;$("#saName").addEventListener("keydown",e=>{if(e.key==="Enter")saveAsGo()});
+$("#sumbody").addEventListener("click",e=>{const r=e.target.closest("tr[data-aud]");if(!r)return;const i=M.cands.findIndex(c=>c.id===+r.dataset.aud);if(i>=0){$("#summary").classList.remove("show");go(i)}});
+$("#imGo").onclick=doImport;$("#imCancel").onclick=()=>$("#import").classList.remove("show");
+$("#sOk").onclick=saveSnapSettings;$("#sCancel").onclick=()=>$("#snapdlg").classList.remove("show");$("#sOpen").onclick=openSnapFolder;$("#snapdlg").addEventListener("change",snapPrev);
+$("#misslist").addEventListener("click",e=>{const d=e.target.dataset;if(d.del)missedApi({action:"delete",id:+d.del});if(d.go){const m=missed.find(x=>x.missed_id==d.go);if(m){cur=[m.can_i,m.can_j,m.can_k];if(m.pts)cur[VIEWS[+m.plane].s]=+m.slice;if(zoom>1.001)ctr=cur.slice();draw()}}});
+$("#misslist").addEventListener("change",e=>{const d=e.target.dataset;if(d.mid)missedApi({action:"comment",id:+d.mid,comment:e.target.value})});
+$$(".modal").forEach(m=>m.addEventListener("click",e=>{if(e.target===m)m.classList.remove("show")}));
+$("#comment").addEventListener("blur",saveComment);
+$("#reviewer").addEventListener("change",async()=>{const n=reviewer();if(!n)return;await api("/api/reviewer",{name:n});await loadStudy(M?M.study:"");status("Reviewer: "+n)});
+new ResizeObserver(()=>draw()).observe($("#vgrid"));
+window.addEventListener("keydown",e=>{const tag=(e.target.tagName||"").toLowerCase(),typing=(tag==="input"&&(e.target.type==="text"||e.target.type==="search"))||tag==="textarea";
+  if(e.key==="Escape"){if($(".menu")){closeMenus();return}if(typing){e.target.blur();return}if($(".modal.show")){$$(".modal").forEach(m=>m.classList.remove("show"));return}if(tool==="miss"){cancelDraft();return}setTool("pan");ruler=null;probe=null;draw();return}
+  if(typing){if(e.key==="Enter"){if(e.target.id==="dNote"){e.target.blur();saveDraft()}else if(e.target.id!=="saName"&&e.target.id!=="saFolder")e.target.blur()}return}
+  if(!M)return;if((e.metaKey||e.ctrlKey)&&e.key==="Enter"){e.preventDefault();saveFinal();return}
+  if((e.metaKey||e.ctrlKey)&&!e.altKey&&e.key.toLowerCase()==="s"){e.preventDefault();takeSnapshot(e.shiftKey);return}
+  if(e.altKey||((e.metaKey||e.ctrlKey)&&!["=","-","+","_"].includes(e.key)))return;
+  if($(".modal.show")&&e.key!=="?")return;
+  const k=e.key.length===1?e.key.toLowerCase():e.key;let used=true;
+  if(tool==="miss"&&k==="Enter")saveDraft();else if(tool==="miss"&&k==="w")setShape(shape==="rect"?"pen":"rect");else if(tool==="miss"&&(k==="Backspace"||k==="Delete"))undoStroke();
+  else if(k==="h"&&e.shiftKey)setMirror(!mir);else if(CALLKEYS[k])decide(CALLKEYS[k]);
+  else if(k==="ArrowRight")go(ci+1);else if(k==="ArrowLeft")go(ci-1);else if(k==="j")nextUnread();
+  else if(k==="ArrowUp")step(panes[act],1);else if(k==="ArrowDown")step(panes[act],-1);else if(k==="PageUp")step(panes[act],5);else if(k==="PageDown")step(panes[act],-5);
+  else if(k==="="||k==="+"||e.code==="NumpadAdd")zoomBy(1.2);else if(k==="-"||k==="_"||e.code==="NumpadSubtract")zoomBy(1/1.2);else if(k==="0")fitView();else if(k==="9")actualSize();
+  else if(k==="Tab")setPlane(panes[act].plane+(e.shiftKey?-1:1));else if(k==="\\")cycleLayout();else if(k===" ")togglePanel();
+  else if(k==="["){const w=getWL(panes[act].seq);setWLp(panes[act].seq,w[0],w[1]-2)}else if(k==="]"){const w=getWL(panes[act].seq);setWLp(panes[act].seq,w[0],w[1]+2)}
+  else if(k===";"){const w=getWL(panes[act].seq);setWLp(panes[act].seq,w[0]*1.1,w[1])}else if(k==="'"){const w=getWL(panes[act].seq);setWLp(panes[act].seq,w[0]/1.1,w[1])}
+  else if(k==="r")resetView();else if(k==="f")gotoCandidate();
+  else if(k==="m")A.mark.f();else if(k==="o")A.other.f();else if(k==="i")A.mip.f();else if(k==="g")A.auto.f();else if(k==="k")A.ai.f();else if(k==="3")s3Toggle();else if(k==="w")A.mag.f();else if(k==="p")A.text.f();
+  else if(k==="s")nextSeq();else if(/^[1-5]$/.test(k)){const s=M.seqs[+k-1];if(s)setSeq(s.key)}
+  else if(k==="t"){theme(THEMES[(THEMES.indexOf(document.documentElement.dataset.theme)+1)%3])}
+  else if(k==="d")A.dark.f();else if(k==="l")A.ruler.f();else if(k==="x")A.miss.f();
+  else if(k==="c")A.comment.f();else if(k==="z")doUndo();else if(k==="Backspace"||k==="Delete")decide("");
+  else if(k==="q")summary();else if(k==="e")exportCsv();else if(k==="F1")openTab("viewer");else if(k==="F2")openTab("cands");else if(k==="F3")openTab("calls");
+  else if(k==="?"||k==="/")A.help.f();else used=false;
+  if(used)e.preventDefault()});
+theme(LS("theme","dark"));buildPalette();setTab(lastTab);buildPanes();setTool(tool==="miss"?"pan":tool);tog();setCompare(compareOn);applyPanel();
+loadStudy("").catch(e=>status("Could not load: "+e.message,true));
+// ---------- v5.14-gui screen B: experimental unified score (read-only; never writes calls; hidden in a validation read) ----------
+const UPN={x1_vessel_continuity_mm:"vessel continuity",x2_core_contrast_nu:"dark-core contrast",x3_pial_distance_mm:"distance to surface",x4_sulcal_alignment:"surface conformity (x4)",x5_extracranial_mm:"extracranial"};
+const UCAT={css_compatible:["cSS-compatible / prioritized","#3aa655"],uncertain:["Uncertain / requires review","#c99a1c"],alternative_high_confidence:["High-confidence alternative","#b48cff"]};
+let uKey="";
+async function uLoad(){const b=$("#ubody");if(!b||!M||!M.cands||!M.cands.length)return;const c=M.cands[ci];if(!c)return;
+  if(vmode){b.innerHTML='<span class="mut">hidden in a validation read 🔒 (shown after your final save)</span>';return}
+  if(c.audit){b.innerHTML='<span class="mut">not scored (audit object)</span>';return}
+  const key=M.study+"|"+c.id;uKey=key;b.innerHTML='<span class="mut">loading…</span>';
+  let r;try{r=await api(`/api/uscore?study=${M.study}&cand=${c.id}`)}catch(e){b.innerHTML=`<span class="mut">unavailable (${esc(e.message)})</span>`;return}
+  if(uKey!==key)return;
+  if(!r||r.available===false){b.innerHTML='<span class="mut">no unified report for this candidate (Unified tab in the app: score the patient). The detector result above is unchanged.</span>';return}
+  const cat=UCAT[r.category]||[r.category,"#999"],con=r.contributions||{};
+  b.innerHTML=`<div style="color:${cat[1]};font-weight:700">${esc(cat[0])}</div><div class="mut">${(r.category_reasons||[]).map(esc).join("; ")}</div>
+   <div>${r.probability!=null?`probability ${r.probability.toFixed(2)}`:r.raw_score!=null?`raw score ${r.raw_score.toFixed(2)} <span class="mut">(not a probability)</span>`:'<span class="mut">no model score</span>'}</div>
+   <table style="width:100%;margin-top:4px">${Object.entries(r.predictors).map(([k,p])=>`<tr title="${esc((p.reasons||[]).join("; "))}"><td>${UPN[k]}</td><td>${p.value==null?"–":(+p.value).toFixed(2)}</td><td style="color:${p.status==="reliable"?"#3aa655":p.status==="unreliable"?"#c99a1c":"#888"}">${p.status}</td><td>${con[k]?(con[k].imputed?"0":con[k].contribution.toFixed(2)):""}</td></tr>`).join("")}</table>
+   <div style="margin-top:4px">${(r.alternative_detectors||[]).map(d=>`<div><b>${esc(d.detector.replace("_"," "))}</b>: ${esc(d.status)}${(d.against||[]).length?` <span class="mut">· against: ${esc(d.against[0])}</span>`:""}</div>`).join("")}</div>
+   <div class="mut">stability: ${r.stability?(r.stability.unstable?"unstable":"stable"):"–"} · protective: ${(r.protective_flags||[]).map(esc).join("; ")||"none"}</div>
+   <div class="mut">dark core: experimental representation, not ground truth — 3-D button → layers</div>`}
+{const g0=go;go=function(i,k){const out=g0(i,k);uLoad();return out}}
+{const p=new URLSearchParams(location.search),ws=p.get("study"),wc=p.get("cand");if(wc){let n=0;const t=setInterval(()=>{n++;
+  if(M&&M.cands&&M.cands.length&&(!ws||M.study===ws)){const i=M.cands.findIndex(c=>String(c.id)===wc);if(i>=0)go(i);clearInterval(t)}if(n>60)clearInterval(t)},250)}}
+</script></body></html>
