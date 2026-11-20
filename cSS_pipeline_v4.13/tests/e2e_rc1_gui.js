@@ -4,35 +4,39 @@ let fails=0;const ok=(c,m)=>{console.log((c?'PASS ':'FAIL ')+m);if(!c)fails++};
 const shot=async(p,n)=>{await p.screenshot({path:`${O}/${n}.png`,fullPage:true})};
 (async()=>{const b=await chromium.launch();const p=await b.newPage({viewport:{width:1500,height:1000},deviceScaleFactor:1});
  const errs=[];p.on('pageerror',e=>errs.push(String(e)));p.on('dialog',d=>d.accept());
- await p.goto(U);await p.addStyleTag({content:'.top{position:static!important}'});await p.waitForTimeout(1200);await shot(p,'R01_home');
- ok(await p.isVisible('nav button[data-v="proc"]'),'Processing tab present');
- await p.click('nav button[data-v="proc"]');await p.waitForTimeout(1200);
- ok((await p.textContent('#view')).includes('no study found'),'empty experimental project: no study yet');
+// UX redesign (2026-11): Studies list + study panel replace the Processing / Results tabs; same API calls underneath.
+ await p.goto(U);await p.waitForTimeout(1500);await shot(p,'R01_studies');
+ ok(await p.isVisible('nav button[data-v="add"]'),'Add studies section present');
+ ok((await p.textContent('#view')).includes('No studies yet'),'empty experimental project: no study yet');
+ await p.click('nav button[data-v="add"]');await p.waitForTimeout(800);await p.click('[data-at="project"]');await p.waitForTimeout(1200);
  await p.fill('#lsrc',SRC);await p.click('#lscan');await p.waitForTimeout(1200);await shot(p,'R02_bring_in_list');
  const n=await p.$$eval('[data-lk]',e=>e.length);ok(n===4,`4 studies listed in the source project (${n})`);
  for(const c of await p.$$('[data-lk]'))await c.check();
- await p.click('#lgo');await p.waitForTimeout(3000);
- await p.click('nav button[data-v="proc"]');await p.waitForTimeout(1500);
- await p.click('[data-pc="SYN01"]');await p.waitForTimeout(1500);await shot(p,'R03_SYN01_found_unknown');
- let t=await p.textContent('#pmd');ok(t.includes('8.2.0')&&t.includes('unknown'),'SYN01: linked FreeSurfer shown with version; status unknown until confirmed');
- await p.click('#adopt');await p.waitForTimeout(1500);await shot(p,'R04_SYN01_compatibility');
- t=await p.textContent('#pmd');ok(t.includes('compatible')&&t.includes('found on disk'),'SYN01 confirmed: compatibility per stage + first run recorded');
+ await p.click('#lgo');await p.waitForTimeout(3500);
+ const sheet=async(code,tab)=>{await p.click('nav button[data-v="studies"]');await p.waitForTimeout(1500);await p.click(`tr[data-st="${code}"]`);await p.waitForTimeout(1200);await p.click(`[data-tb="${tab}"]`);await p.waitForTimeout(1500)};
+ await sheet('SYN01','technical');await shot(p,'R03_SYN01_found_unknown');
+ let t=await p.textContent('#shb');ok(t.includes('8.2.0')&&t.includes('unknown'),'SYN01: linked FreeSurfer shown with version; status unknown until confirmed');
+ await p.click('[data-tb="processing"]');await p.waitForTimeout(1500);await p.click('#adopt');await p.waitForTimeout(1800);
+ await p.click('[data-tb="technical"]');await p.waitForTimeout(1500);await shot(p,'R04_SYN01_compatibility');
+ t=await p.textContent('#shb');ok(t.includes('compatible'),'SYN01 confirmed: compatibility per stage');
+ await p.click('[data-tb="processing"]');await p.waitForTimeout(1500);ok((await p.textContent('#pmh')).includes('found on disk'),'SYN01: first run recorded in the history');
  // SWI-only study: fresh detection
- await p.click('[data-pc="SYN02"]');await p.waitForTimeout(1500);if(await p.$('#adopt')){await p.click('#adopt');await p.waitForTimeout(1500)}
- t=await p.textContent('#pmd');ok(t.includes('not applicable'),'SYN02 (no T1): registration not applicable, not blocking');
- await shot(p,'R05_SYN02_before_run');
- await p.click('[data-o="fresh"]');await p.click('#pmgo');await p.waitForTimeout(600);await shot(p,'R06_start_confirm');
- await p.click('#dlg button[data-v="yes"]');await p.waitForTimeout(2500);await shot(p,'R07_running');
- for(let i=0;i<240;i++){await p.waitForTimeout(2500);t=await p.textContent('#pmd');if(!t.includes('Working: run'))break}
- await p.waitForTimeout(1500);await p.click('[data-pc="SYN02"]');await p.waitForTimeout(1500);
+ await sheet('SYN02','processing');if(await p.$('#adopt')){await p.click('#adopt');await p.waitForTimeout(1800)}
+ await p.click('[data-tb="technical"]');await p.waitForTimeout(1500);t=await p.textContent('#shb');ok(t.includes('not applicable'),'SYN02 (no T1): registration not applicable, not blocking');
+ await p.click('[data-tb="processing"]');await p.waitForTimeout(1500);await shot(p,'R05_SYN02_before_run');
+ await p.click('[data-c="fresh"]');await p.waitForTimeout(600);await shot(p,'R06_start_confirm');
+ await p.click('#dlg button[data-v="yes"]');await p.waitForTimeout(2500);
+ await p.click('nav button[data-v="act"]');await p.waitForTimeout(1500);await shot(p,'R07_running');
+ ok((await p.textContent('#view')).includes('new detection run'),'Activity lists the running detection run');
+ for(let i=0;i<240;i++){await p.waitForTimeout(2500);const a=await p.evaluate(async()=>(await fetch('/api/proc/audit?code=SYN02')).json());if(!a.busy)break}
+ await sheet('SYN02','processing');
  const det=await p.$$('[data-det]');if(det.length)await det[0].click();await p.waitForTimeout(1200);await shot(p,'R08_history_after_run');
  t=await p.textContent('#pmh');ok(/completed/.test(t)&&t.includes('★ active'),'SYN02: new run completed and active; history shows both runs');
  ok(/surface|detect_css|candidates/.test(t),'run log visible in the history');
- // Results
- await p.click('nav button[data-v="res"]');await p.waitForTimeout(2000);await shot(p,'R09_results');
- ok((await p.textContent('#view')).includes('SYN02'),'linked studies listed in Results');
- // export safety: no folder -> refused; Desktop refused in Settings
- await p.click('#shareb');await p.click('[data-fmt="csv"]');await p.waitForTimeout(800);await shot(p,'R10_export_warning');
+ await p.click('#shx');
+ await p.click('nav button[data-v="studies"]');await p.waitForTimeout(2000);await shot(p,'R09_studies');
+ ok((await p.textContent('#view')).includes('SYN02'),'linked studies listed in Studies');
+ await p.click('#sexp');await p.click('[data-fmt="csv"]');await p.waitForTimeout(800);await shot(p,'R10_export_warning');
  ok((await p.textContent('#dlg')).includes('never uploaded'),'export shows the clinical-data warning first');
  await p.click('#dlg button[data-v="no"]');
  await p.click('nav button[data-v="set"]');await p.waitForTimeout(1000);await p.fill('#xd',process.env.HOME+'/Desktop');await p.click('#save');await p.waitForTimeout(800);await shot(p,'R11_settings_desktop_refused');

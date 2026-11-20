@@ -1,66 +1,116 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Percival</title><link rel="icon" id="fav" href="/icon_dark.png">
 <style>
-:root{color-scheme:dark;--bg:#111418;--panel:#1a1e24;--line:#2c323b;--ink:#e6e8eb;--mut:#9aa3ad;--in:#0d1014;--acc:#3987e5;--ok:#3aa655;--warn:#d9a21b;--bad:#e05252}
-:root[data-theme=light]{color-scheme:light;--bg:#f4f5f7;--panel:#ffffff;--line:#d9dde3;--ink:#16181b;--mut:#5d6570;--in:#ffffff;--acc:#2a78d6;--ok:#2e8b46;--warn:#a87400;--bad:#c93a3a}
-*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-.top{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg);z-index:5;flex-wrap:wrap}
-.top b{font-size:17px}.sp{flex:1}.mut{color:var(--mut)}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
-nav button{background:none;border:0;color:var(--mut);font:inherit;padding:6px 10px;border-radius:7px;cursor:pointer}nav button.on{color:var(--ink);background:var(--panel)}
-.seg{display:inline-flex;background:var(--in);border:1px solid var(--line);border-radius:999px;padding:3px}.seg button{background:none;border:0;color:var(--ink);font:inherit;padding:4px 12px;border-radius:999px;cursor:pointer}
-.seg button.on{background:var(--acc);color:#fff}.seg.ico button{font-size:16px;padding:3px 11px;line-height:1.2}#theme button.on[data-t=dark]{background:#4a5260}
-.g{display:inline-block;border-radius:6px;padding:1px 7px;font-weight:700;font-size:12px}.gA{background:color-mix(in srgb,var(--ok) 22%,transparent);color:var(--ok)}
-.gB{background:color-mix(in srgb,var(--warn) 22%,transparent);color:var(--warn)}.gC{background:color-mix(in srgb,var(--bad) 22%,transparent);color:var(--bad)}
-button.b.bang{background:var(--bad);border-color:var(--bad);color:#fff;font-weight:800;min-width:26px!important;padding:4px 8px!important}
-.wrap{padding:16px 20px;max-width:1500px}.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:12px}
-h2{margin:0 0 10px;font-size:16px}.row{display:flex;align-items:center;gap:10px;margin:7px 0;flex-wrap:wrap}.lab{width:190px;color:var(--mut)}
-input,select{background:var(--in);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:inherit}
-select{-webkit-appearance:none;appearance:none;background:var(--panel) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%239aa3ad'/%3E%3C/svg%3E") no-repeat right 9px center;padding-right:26px;border-radius:7px;cursor:pointer}
-select option{background:var(--panel);color:var(--ink)}
-.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:2px 10px;font-size:12px;white-space:nowrap}
-.rec{background:color-mix(in srgb,var(--ok) 22%,transparent);color:var(--ok);border-radius:999px;padding:1px 8px;font-size:11px;white-space:nowrap}
-.ram{position:relative;height:12px;border-radius:6px;margin:6px 0 3px;background:linear-gradient(90deg,color-mix(in srgb,var(--ok) 22%,transparent) 0 70%,color-mix(in srgb,var(--warn) 22%,transparent) 70% 85%,color-mix(in srgb,var(--bad) 22%,transparent) 85%)}
+/* ---------- Percival design system (redesign 2026-11) ---------- */
+:root{color-scheme:dark;--bg:#0f1115;--side:#13161b;--panel:#171a20;--panel2:#1d2128;--line:#262b33;--line2:#323843;--ink:#e8eaed;--ink2:#c5cad1;--mut:#8b939e;--in:#0c0e12;
+ --acc:#4c8dff;--acc2:color-mix(in srgb,var(--acc) 16%,transparent);--ok:#3fb96f;--warn:#e0a52b;--bad:#ef5b5b;--r:10px;--sh:0 10px 34px #0008}
+:root[data-theme=light]{color-scheme:light;--bg:#f6f7f9;--side:#eef0f3;--panel:#ffffff;--panel2:#f7f8fa;--line:#e3e6ea;--line2:#d4d8de;--ink:#15181c;--ink2:#2c3138;--mut:#68717c;--in:#ffffff;
+ --acc:#2563d9;--ok:#1f8f4e;--warn:#a86d00;--bad:#cf3a3a;--sh:0 10px 30px #0002}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+.sp{flex:1}.mut{color:var(--mut)}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}.hide{display:none!important}
+#app{display:flex;min-height:100vh}
+#side{width:216px;flex:none;background:var(--side);border-right:1px solid var(--line);display:flex;flex-direction:column;position:sticky;top:0;height:100vh;padding:14px 10px}
+#side .brand{display:flex;align-items:center;gap:10px;padding:4px 8px 16px}#side .brand img{width:30px;height:30px;border-radius:8px}#side .brand b{font-size:17px;letter-spacing:.3px}
+nav{display:flex;flex-direction:column;gap:2px}
+nav button{display:flex;align-items:center;gap:11px;background:none;border:0;color:var(--ink2);font:inherit;font-size:14px;padding:8px 10px;border-radius:8px;cursor:pointer;text-align:left;width:100%}
+nav button svg{width:18px;height:18px;flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;opacity:.85}
+nav button:hover{background:var(--panel2)}nav button.on{background:var(--acc2);color:var(--ink);font-weight:600}nav button.on svg{opacity:1;stroke:var(--acc)}
+nav button .cnt{margin-left:auto;font-size:11px;font-weight:600;border-radius:9px;padding:0 6px;background:var(--panel2);color:var(--mut)}nav button .cnt.att{background:var(--bad);color:#fff}nav button .cnt:empty{display:none}
+nav .grp{font-size:11px;color:var(--mut);letter-spacing:.5px;text-transform:uppercase;padding:14px 10px 4px}
+#side .foot{margin-top:auto;padding:10px 8px 2px;border-top:1px solid var(--line);font-size:12px;color:var(--mut)}#side .foot .proj{color:var(--ink2);font-weight:600;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+main{flex:1;min-width:0;display:flex;flex-direction:column}
+#hdr{display:flex;align-items:center;gap:12px;padding:14px 28px;position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+#hdr h1{font-size:19px;margin:0;font-weight:650;letter-spacing:.1px}#hdr .sub{color:var(--mut);font-size:13px}
+.wrap{padding:22px 28px 60px;max-width:1440px;width:100%}
+@media(max-width:1100px){#side{width:62px;padding:12px 7px}#side .brand b,nav button span.l,nav .grp,#side .foot,nav button .cnt{display:none}nav button{justify-content:center}.wrap{padding:18px}#hdr{padding:12px 18px}}
+h2{margin:0 0 12px;font-size:15px;font-weight:650}h3{margin:0 0 8px;font-size:13px;font-weight:650;color:var(--ink2)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px;margin-bottom:14px}
+.sect{margin:0 0 26px}.sect>h2{display:flex;align-items:center;gap:8px}.divider{height:1px;background:var(--line);margin:18px 0}
+.row{display:flex;align-items:center;gap:10px;margin:8px 0;flex-wrap:wrap}.lab{width:200px;color:var(--mut)}
+input,select,textarea{background:var(--in);color:var(--ink);border:1px solid var(--line2);border-radius:8px;padding:7px 10px;font:inherit;outline:none}input:focus,select:focus{border-color:var(--acc);box-shadow:0 0 0 3px var(--acc2)}
+select{-webkit-appearance:none;appearance:none;background:var(--in) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238b939e'/%3E%3C/svg%3E") no-repeat right 10px center;padding-right:28px;cursor:pointer}
+select option{background:var(--panel);color:var(--ink)}input[type=checkbox]{accent-color:var(--acc);width:15px;height:15px;vertical-align:-2px}
+button.b{background:var(--panel);color:var(--ink);border:1px solid var(--line2);border-radius:8px;padding:7px 13px;font:inherit;font-size:13.5px;cursor:pointer;white-space:nowrap}button.b:hover{border-color:var(--mut)}
+button.pri{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}button.pri:hover{filter:brightness(1.08);border-color:var(--acc)}
+button.wb{background:var(--warn);border-color:var(--warn);color:#111}button.q{background:none;border-color:transparent;color:var(--ink2)}button.q:hover{background:var(--panel2)}
+button.danger{color:var(--bad)}button:disabled{opacity:.45;cursor:not-allowed}button.b.sm{padding:4px 10px;font-size:12.5px}
+.seg{display:inline-flex;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:2px}.seg button{background:none;border:0;color:var(--ink2);font:inherit;font-size:13px;padding:5px 12px;border-radius:7px;cursor:pointer}
+.seg button.on{background:var(--panel);color:var(--ink);box-shadow:0 1px 3px #0003;font-weight:600}:root[data-theme=light] .seg button.on{box-shadow:0 1px 3px #0002}.seg.ico button{font-size:15px;padding:3px 10px}
+.pill{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line2);border-radius:999px;padding:1px 9px;font-size:12px;white-space:nowrap}
+.rec{color:var(--ok);font-size:12px;white-space:nowrap}
+.note{font-size:12.5px;color:var(--mut)}.mono{font:12px ui-monospace,Menlo,monospace;color:var(--mut)}
+.g{display:inline-block;border-radius:6px;padding:1px 7px;font-weight:700;font-size:12px}.gA{background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok)}.gB{background:color-mix(in srgb,var(--warn) 18%,transparent);color:var(--warn)}.gC{background:color-mix(in srgb,var(--bad) 18%,transparent);color:var(--bad)}
+button.b.bang{background:var(--bad);border-color:var(--bad);color:#fff;font-weight:800;padding:4px 8px}
+.notice{border-color:color-mix(in srgb,var(--acc) 40%,transparent);background:color-mix(in srgb,var(--acc) 7%,var(--panel))}.notice.w{border-color:color-mix(in srgb,var(--warn) 45%,transparent);background:color-mix(in srgb,var(--warn) 7%,var(--panel))}
+.banner{display:flex;align-items:center;gap:12px;border-radius:var(--r);padding:11px 14px;margin-bottom:16px;border:1px solid}.banner.w{border-color:color-mix(in srgb,var(--warn) 45%,transparent);background:color-mix(in srgb,var(--warn) 8%,transparent)}.banner.e{border-color:color-mix(in srgb,var(--bad) 45%,transparent);background:color-mix(in srgb,var(--bad) 8%,transparent)}
+#shade{position:fixed;inset:0;background:#0009;display:none;z-index:40;align-items:center;justify-content:center}#shade .card{width:540px;max-width:92vw;box-shadow:var(--sh);padding:20px 22px}
+.acts{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;align-items:center}
+.tip{border:1px solid var(--line);border-radius:8px;padding:9px 12px;font-size:12.5px;margin-top:8px;background:var(--panel2)}input.wide{min-width:380px}
+table{width:100%;border-collapse:collapse}td,th{border-bottom:1px solid var(--line);padding:9px 10px;text-align:left;font-size:13.5px;vertical-align:middle}th{color:var(--mut);font-weight:500;font-size:12.5px}
+table.fix{table-layout:fixed}table.fix td{overflow:hidden;text-overflow:ellipsis}td input{padding:4px 8px;min-width:80px;max-width:160px}td select{padding:4px 26px 4px 8px;max-width:100%}#tbl{overflow-x:auto}td.note{min-width:180px}
+.bar{height:6px;background:var(--line);border-radius:4px;overflow:hidden;min-width:120px}.bar i{display:block;height:100%;background:var(--acc);border-radius:4px}
+.tag{font-size:11px;background:var(--acc2);color:var(--acc);border-radius:5px;padding:1px 6px;font-weight:600}.tag.ai{background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn)}
+.ram{position:relative;height:10px;border-radius:6px;margin:8px 0 4px;background:linear-gradient(90deg,color-mix(in srgb,var(--ok) 20%,transparent) 0 70%,color-mix(in srgb,var(--warn) 20%,transparent) 70% 85%,color-mix(in srgb,var(--bad) 20%,transparent) 85%)}
 .ram i{position:absolute;left:0;top:0;bottom:0;border-radius:6px}.ram s{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--mut);opacity:.6}
-.notice{border:1px solid color-mix(in srgb,var(--acc) 45%,transparent);background:color-mix(in srgb,var(--acc) 8%,transparent)}
-.notice.w{border-color:color-mix(in srgb,var(--warn) 50%,transparent);background:color-mix(in srgb,var(--warn) 8%,transparent)}
-#shade{position:fixed;inset:0;background:#0008;display:none;z-index:20;align-items:center;justify-content:center}#shade .card{width:520px;max-width:92vw;box-shadow:0 16px 50px #0009}
-table.fix{table-layout:fixed}table.fix td{overflow:hidden;text-overflow:ellipsis}.acts{display:flex;gap:6px;justify-content:flex-end;flex-wrap:nowrap;align-items:center}.acts button.b{min-width:76px;padding:4px 10px;font-size:12px}
-.tip{border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:12px;margin-top:8px}#logo{width:28px;height:28px;border-radius:7px}input.wide{min-width:380px}
-button.b{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:6px 12px;font:inherit;cursor:pointer}
-button.pri{background:var(--acc);border-color:var(--acc);color:#fff}button.wb{background:var(--warn);border-color:var(--warn);color:#111}button:disabled{opacity:.45;cursor:not-allowed}
-table{width:100%;border-collapse:collapse}td,th{border-bottom:1px solid var(--line);padding:6px 7px;text-align:left;font-size:13px;vertical-align:middle}th{color:var(--mut);font-weight:500}
-td input{padding:3px 6px;min-width:80px;max-width:150px}td select{padding:3px 26px 3px 7px;max-width:100%}#tbl{overflow-x:auto}a.b{color:var(--ink);text-decoration:none}td.note{min-width:180px}.note{font-size:12px;color:var(--mut)}
-.bar{height:9px;background:var(--in);border:1px solid var(--line);border-radius:6px;overflow:hidden;min-width:160px}.bar i{display:block;height:100%;background:var(--acc)}
-.tag{font-size:11px;background:#16263a;color:#86b6ef;border-radius:4px;padding:1px 6px}.tag.ai{background:#3a2a10;color:#f2c94c}
-#log{position:fixed;left:0;right:0;bottom:0;height:34%;background:#07090b;color:#b7c0c9;border-top:1px solid var(--line);display:none;z-index:9;font:12px ui-monospace,Menlo,monospace}
-#log pre{margin:0;padding:8px 12px;height:calc(100% - 34px);overflow:auto;white-space:pre-wrap}#log .h{display:flex;gap:8px;align-items:center;padding:4px 10px;background:#11161b}
-.err{color:var(--bad)}.steps span{margin-right:12px;font-size:12px}.hide{display:none}#toast{position:fixed;right:16px;bottom:16px;background:var(--panel);border:1px solid var(--line);padding:10px 14px;border-radius:8px;display:none;z-index:10;max-width:520px}
-.cat{display:inline-block;border-radius:999px;padding:1px 9px;font-size:11.5px;white-space:nowrap;font-weight:600}
-.cat.compatible,.cat.completed,.cat.done{background:color-mix(in srgb,var(--ok) 22%,transparent);color:var(--ok)}
-.cat.compatible_with_limitations,.cat.adopted{background:color-mix(in srgb,var(--ok) 12%,transparent);color:color-mix(in srgb,var(--ok) 70%,var(--warn))}
-.cat.incomplete,.cat.interrupted,.cat.running,.cat.pending{background:color-mix(in srgb,var(--warn) 22%,transparent);color:var(--warn)}
-.cat.incompatible,.cat.failed,.cat.corrupted{background:color-mix(in srgb,var(--bad) 22%,transparent);color:var(--bad)}
-.cat.unknown,.cat.missing,.cat.upstream_rerun,.cat.reused,.cat.not_applicable{background:color-mix(in srgb,var(--mut) 22%,transparent);color:var(--mut)}
-.opt{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:6px 0;cursor:pointer;display:block}.opt.on{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 10%,transparent)}.opt.dis{opacity:.45;cursor:not-allowed}
-tr.sel td{background:color-mix(in srgb,var(--acc) 10%,transparent)}.mono{font:12px ui-monospace,Menlo,monospace;color:var(--mut)}
-#bell{position:relative;cursor:pointer;font-size:18px;padding:3px 8px;border-radius:8px;border:1px solid var(--line);background:var(--panel)}#bell b{position:absolute;top:-6px;right:-7px;background:var(--bad);color:#fff;border-radius:9px;font-size:10px;padding:1px 5px;min-width:16px;text-align:center}#bell b:empty{display:none}#bell.urg{border-color:var(--bad)}
-#drawer{position:fixed;top:0;right:0;bottom:0;width:420px;max-width:92vw;background:var(--panel);border-left:1px solid var(--line);box-shadow:-12px 0 40px #0007;z-index:15;transform:translateX(105%);transition:transform .18s ease;display:flex;flex-direction:column}
-#drawer.open{transform:none}#drawer .dh{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line)}#drawer .db{overflow:auto;padding:4px 14px 20px}
-.nsec{font-size:11px;letter-spacing:.4px;color:var(--mut);margin:12px 0 4px;text-transform:uppercase}.nit{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:6px 0;font-size:12.5px;position:relative;background:var(--in)}
-.nit.urgent{border-color:var(--bad)}.nit.action{border-color:var(--warn)}.nit .nt{font-weight:600;padding-right:56px}.nit .nx{position:absolute;right:8px;top:6px;font-size:11px;color:var(--mut);cursor:pointer}.nit .nx:hover{color:var(--ink)}
-.nit .na{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}.nit .na button,.nit .na select{font-size:11px;padding:2px 8px}.nbar{height:6px;background:var(--line);border-radius:3px;margin-top:5px}.nbar i{display:block;height:6px;background:var(--acc);border-radius:3px}
+#log{position:fixed;left:0;right:0;bottom:0;height:36%;background:#07090b;color:#b7c0c9;border-top:1px solid var(--line);display:none;z-index:30;font:12px ui-monospace,Menlo,monospace}
+#log pre{margin:0;padding:8px 14px;height:calc(100% - 38px);overflow:auto;white-space:pre-wrap}#log .h{display:flex;gap:8px;align-items:center;padding:5px 12px;background:#11161b;color:#ddd}
+.err{color:var(--bad)}.steps span{margin-right:12px;font-size:12px}
+#toast{position:fixed;right:20px;bottom:20px;background:var(--panel);border:1px solid var(--line2);padding:11px 15px;border-radius:10px;display:none;z-index:50;max-width:520px;box-shadow:var(--sh)}
+.cat{display:inline-block;border-radius:999px;padding:1px 9px;font-size:12px;white-space:nowrap;font-weight:600}
+.cat.compatible,.cat.completed,.cat.done{background:color-mix(in srgb,var(--ok) 16%,transparent);color:var(--ok)}
+.cat.compatible_with_limitations,.cat.adopted{background:color-mix(in srgb,var(--ok) 10%,transparent);color:color-mix(in srgb,var(--ok) 70%,var(--warn))}
+.cat.incomplete,.cat.interrupted,.cat.running,.cat.pending{background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn)}
+.cat.incompatible,.cat.failed,.cat.corrupted{background:color-mix(in srgb,var(--bad) 16%,transparent);color:var(--bad)}
+.cat.unknown,.cat.missing,.cat.upstream_rerun,.cat.reused,.cat.not_applicable{background:color-mix(in srgb,var(--mut) 16%,transparent);color:var(--mut)}
+.opt{border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin:6px 0;cursor:pointer;display:block}.opt.on{border-color:var(--acc);background:var(--acc2)}.opt.dis{opacity:.45;cursor:not-allowed}
+tr.sel td{background:var(--acc2)}
+/* notification bell + curtain */
+.ibtn{position:relative;display:inline-flex;align-items:center;justify-content:center;width:36px;height:34px;border-radius:9px;border:1px solid var(--line2);background:var(--panel);cursor:pointer;color:var(--ink2)}
+.ibtn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+#bell b{position:absolute;top:-6px;right:-7px;background:var(--bad);color:#fff;border-radius:9px;font-size:10px;padding:1px 5px;min-width:16px;text-align:center;font-weight:700}#bell b:empty{display:none}#bell.urg{border-color:var(--bad);color:var(--bad)}
+#drawer{position:fixed;top:0;right:0;bottom:0;width:420px;max-width:92vw;background:var(--panel);border-left:1px solid var(--line);box-shadow:var(--sh);z-index:35;transform:translateX(105%);transition:transform .18s ease;display:flex;flex-direction:column}
+#drawer.open{transform:none}#drawer .dh{display:flex;align-items:center;gap:8px;padding:14px 16px;border-bottom:1px solid var(--line)}#drawer .db{overflow:auto;padding:4px 16px 20px}
+.nsec{font-size:11px;letter-spacing:.5px;color:var(--mut);margin:14px 0 4px;text-transform:uppercase}.nit{border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin:6px 0;font-size:13px;position:relative;background:var(--panel2)}
+.nit.urgent{border-color:color-mix(in srgb,var(--bad) 60%,transparent)}.nit.action{border-color:color-mix(in srgb,var(--warn) 60%,transparent)}.nit .nt{font-weight:600;padding-right:60px}.nit .nx{position:absolute;right:9px;top:7px;font-size:11.5px;color:var(--mut);cursor:pointer}.nit .nx:hover{color:var(--ink)}
+.nit .na{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}.nit .na button,.nit .na select{font-size:12px;padding:3px 9px}.nbar{height:5px;background:var(--line);border-radius:3px;margin-top:6px}.nbar i{display:block;height:5px;background:var(--acc);border-radius:3px}
+/* studies workspace */
+.tiles{display:flex;gap:0;border:1px solid var(--line);border-radius:var(--r);background:var(--panel);margin-bottom:18px;overflow:hidden}
+.tile{flex:1;padding:14px 18px;border-right:1px solid var(--line);cursor:pointer;min-width:0}.tile:last-child{border-right:0}.tile:hover{background:var(--panel2)}.tile.on{background:var(--acc2)}
+.tile .n{font-size:24px;font-weight:650;line-height:1.1}.tile .t{font-size:12.5px;color:var(--mut);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tbar{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}.tbar input[type=search]{width:240px}
+.list{border:1px solid var(--line);border-radius:var(--r);background:var(--panel);overflow:hidden}.list table td,.list table th{padding:11px 14px}.list tr:last-child td{border-bottom:0}
+.list tbody tr{cursor:pointer}.list tbody tr:hover td{background:var(--panel2)}.list tbody tr.cur td{background:var(--acc2)}
+.st{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}.st i{width:8px;height:8px;border-radius:50%;flex:none;background:var(--mut)}.st.ok i{background:var(--ok)}.st.warn i{background:var(--warn)}.st.bad i{background:var(--bad)}.st.acc i{background:var(--acc);box-shadow:0 0 0 3px var(--acc2)}
+.st small{color:var(--mut);font-size:12px}
+.code{font-weight:650}.sub2{display:block;font-size:12px;color:var(--mut);font-weight:400}
+/* study panel (sheet) */
+#sheet{position:fixed;top:0;right:0;bottom:0;width:560px;max-width:96vw;background:var(--panel);border-left:1px solid var(--line);box-shadow:var(--sh);z-index:25;transform:translateX(105%);transition:transform .2s ease;display:flex;flex-direction:column}
+#sheet.open{transform:none}#sheet .sh{padding:18px 22px 0;border-bottom:1px solid var(--line)}#sheet .sb{overflow:auto;padding:18px 22px 40px;flex:1}
+.tabs{display:flex;gap:4px;margin-top:14px}.tabs button{background:none;border:0;border-bottom:2px solid transparent;color:var(--mut);font:inherit;font-size:13.5px;padding:8px 10px;cursor:pointer}.tabs button.on{color:var(--ink);border-bottom-color:var(--acc);font-weight:600}
+.kv{display:grid;grid-template-columns:170px 1fr;gap:9px 14px;font-size:13.5px}.kv>div:nth-child(odd){color:var(--mut)}
+.alist .ar{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line)}.alist .ar:last-child{border-bottom:0}.alist .ar .at{flex:1;min-width:0}
+/* activity */
+.act{border:1px solid var(--line);border-radius:var(--r);background:var(--panel);margin-bottom:18px}.act>.ah{display:flex;align-items:center;gap:8px;padding:11px 16px;border-bottom:1px solid var(--line);font-weight:650;font-size:13.5px}
+.act .pr{display:flex;align-items:center;gap:14px;padding:12px 16px;border-bottom:1px solid var(--line)}.act .pr:last-child{border-bottom:0}.act .pr .pt{flex:1;min-width:0}.act .pr .pt b{font-weight:600}.act .pr .pm{font-size:12.5px;color:var(--mut);margin-top:2px}
+.act .pr .pg{width:180px;flex:none}.act .pr .pa{display:flex;gap:6px;flex:none}.kind{font-size:11px;color:var(--mut);border:1px solid var(--line2);border-radius:5px;padding:0 6px;margin-left:6px;font-weight:500}
+.empty{padding:22px 16px;color:var(--mut);font-size:13px}
+.subtabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:18px}.subtabs button{background:none;border:0;border-bottom:2px solid transparent;color:var(--mut);font:inherit;padding:9px 12px;cursor:pointer;font-size:14px}.subtabs button.on{color:var(--ink);border-bottom-color:var(--acc);font-weight:600}
+.menu{position:absolute;right:0;top:40px;background:var(--panel);border:1px solid var(--line2);border-radius:10px;box-shadow:var(--sh);padding:6px;z-index:12;min-width:230px}.menu button{display:block;width:100%;text-align:left;background:none;border:0;color:var(--ink);font:inherit;padding:7px 10px;border-radius:7px;cursor:pointer}.menu button:hover{background:var(--panel2)}
 </style></head><body>
-<div class="top"><img id="logo" src="/icon_dark.png" alt=""><b style="letter-spacing:.3px">Percival</b><span class="mut" id="ver" style="display:none"></span>
- <nav><button data-v="home" class="on">Home</button><button data-v="add">Add patients</button><button data-v="pts">Patients</button><button data-v="proc">Processing</button><button data-v="res">Results</button><button data-v="read">Review / Blind read</button><button data-v="uni">Unified (experimental)</button><button data-v="set">Settings</button></nav>
- <span class="sp"></span><span id="bell" title="Notifications (hover = preview, click = keep open)">🔔<b id="bb"></b></span><span class="seg ico" id="awake"><button data-a="1" title="Keep the Mac awake while patients are processing">☕</button><button data-a="0" title="Sleep allowed">🛏</button></span>
- <span class="seg ico" id="theme"><button data-t="light" title="Light theme">☀</button><button data-t="dark" title="Dark theme">☾</button></span><button class="b" id="logbtn">⌨ Show log</button></div>
-<div class="wrap" id="view"></div>
+<div id="app"><aside id="side"><div class="brand"><img id="logo" src="/icon_dark.png" alt=""><b>Percival</b></div>
+<nav><button data-v="studies"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v16"/></svg><span class="l">Studies</span><b class="cnt" id="cnt_studies"></b></button><button data-v="add"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span class="l">Add studies</span><b class="cnt" id="cnt_add"></b></button><button data-v="act"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><span class="l">Activity</span><b class="cnt" id="cnt_act"></b></button><button data-v="read"><svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><span class="l">Review</span><b class="cnt" id="cnt_read"></b></button><div class="grp">Research</div><button data-v="uni"><svg viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg><span class="l">Model</span><b class="cnt" id="cnt_uni"></b></button><div class="grp">&nbsp;</div><button data-v="set"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span class="l">Settings</span><b class="cnt" id="cnt_set"></b></button></nav>
+<div class="foot"><div>Project</div><div class="proj" id="projname">—</div><div id="awakebox" style="margin-top:8px"></div></div></aside>
+<main><header id="hdr"><div><h1 id="ttl">Studies</h1><div class="sub" id="ttls"></div></div><span class="sp"></span><span id="ver" class="hide"></span>
+<span class="ibtn" id="bell" title="Notifications (hover = preview, click = keep open)"><svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg><b id="bb"></b></span>
+<span class="seg ico" id="theme"><button data-t="light" title="Light theme">☀</button><button data-t="dark" title="Dark theme">☾</button></span></header>
+<div class="wrap" id="view"></div></main></div>
+<div id="sheet"></div>
 <div id="log"><div class="h"><b>Log</b><select id="logcode"></select><span class="sp"></span><button class="b" id="logcopy">Copy log</button><button class="b" id="logclose">Close</button></div><pre id="logtext"></pre></div>
 <div id="drawer"><div class="dh"><b style="font-size:15px">Notifications</b><span class="sp"></span><button class="b" id="nread" style="font-size:11px;padding:3px 8px">mark all read</button><button class="b" id="nclose" style="font-size:11px;padding:3px 8px">✕</button></div><div class="db" id="nbody"></div></div>
 <div id="toast"></div><div id="shade"><div class="card" id="dlg"></div></div>
 <script>
 const $=s=>document.querySelector(s),esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-let S=null,V="home",ADD={mode:"single",folder_is:"code",rule:"whole",store:false,pts:[],grades:null,cohort:"",anatomy:"synthseg",rmode:"semi",results:"",summary:false};
+let S=null,V="studies",ADD={mode:"single",folder_is:"code",rule:"whole",store:false,pts:[],grades:null,cohort:"",anatomy:"synthseg",rmode:"semi",results:"",summary:false};
 const api=async(u,b)=>{const r=await fetch(u,b?{method:"POST",headers:{"Content-Type":"application/json","X-CSS-App":"1"},body:JSON.stringify(b)}:{});const j=await r.json();if(j&&j.error&&r.status>=400)throw new Error(j.error);return j};
 const toast=(t,bad)=>{const e=$("#toast");e.innerHTML=t;e.style.borderColor=bad?"var(--bad)":"var(--line)";e.style.display="block";clearTimeout(e._t);e._t=setTimeout(()=>e.style.display="none",6000)};
 // confirmation box: ask(title, html, [[value,label,class]...]) -> value of the button pressed
@@ -80,19 +130,27 @@ const hms=s=>{s=Math.max(0,Math.round(s||0));const h=Math.floor(s/3600),m=Math.f
 const seg=(id,opts,cur,cb)=>`<span class="seg" data-seg="${id}">${opts.map(([v,l])=>`<button data-v="${v}" class="${v===cur?"on":""}">${l}</button>`).join("")}</span>`;
 function bindSeg(id,cb){document.querySelectorAll(`[data-seg="${id}"] button`).forEach(b=>b.onclick=()=>cb(b.dataset.v))}
 async function pick(kind,prompt){const r=await api("/api/pick",{kind,prompt});if(!r.path){if(r.error&&r.error!=="cancelled")toast(esc(r.error),1);return null}return r.path}
+const TITLES={studies:["Studies","Your project's studies, their status and results"],add:["Add studies","Import new images or bring in studies processed elsewhere"],act:["Activity","Everything running, waiting, finished or needing attention"],
+  read:["Review","Read candidates in the reviewer, or run a blind read"],uni:["Model","Experimental unified score — study selection, training and validation"],set:["Settings","Preferences, processing options and system"]};
+const VMAP={home:"studies",pts:"act",res:"studies",proc:"studies"};
 async function refresh(){S=await api("/api/state");$("#ver").textContent=`pipeline ${S.version}`;
-  document.querySelectorAll("#awake button").forEach(b=>b.classList.toggle("on",(b.dataset.a==="1")===!!S.settings.awake));
   document.documentElement.dataset.theme=S.settings.theme||"dark";{const ic=`/icon_${S.settings.theme==="light"?"light":"dark"}.png`;if(!$("#logo").src.endsWith(ic)){$("#logo").src=ic;$("#fav").href=ic}}document.querySelectorAll("#theme button").forEach(b=>b.classList.toggle("on",b.dataset.t===(S.settings.theme||"dark")));
+  $("#projname").textContent=(S.project||{}).name||"—";$("#projname").title=(S.project||{}).path||"";
+  $("#awakebox").innerHTML=`<label style="display:flex;gap:7px;align-items:center;cursor:pointer" title="Keep the Mac awake while studies are processing"><input type="checkbox" id="awk" ${S.settings.awake?"checked":""}> Keep Mac awake</label>`;
+  $("#awk").onchange=async e=>{await api("/api/settings",{awake:e.target.checked});await refresh()};
+  const P=S.patients,att=P.filter(p=>["failed","stopped","decision"].includes(p.status)).length,run=P.filter(p=>["running","paused","starting","waiting"].includes(p.status)).length;
+  $("#cnt_act").textContent=att?String(att):run?String(run):"";$("#cnt_act").classList.toggle("att",!!att);$("#cnt_studies").textContent=P.length?String(P.length):"";
   const lc=$("#logcode"),cur=lc.value;lc.innerHTML=S.patients.map(p=>`<option>${p.code}</option>`).join("");if(cur)lc.value=cur;else if(S.queue.running)lc.value=S.queue.running}
-document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{V=b.dataset.v;document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on",x===b));render()});
-document.querySelectorAll("#awake button").forEach(b=>b.onclick=async()=>{await api("/api/settings",{awake:b.dataset.a==="1"});await refresh()});
+function nav(v){V=VMAP[v]||v;document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on",x.dataset.v===V));const t=TITLES[V]||[V,""];$("#ttl").textContent=t[0];$("#ttls").textContent=t[1];closeSheet();window.scrollTo(0,0);render()}
+document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>nav(b.dataset.v));
 document.querySelectorAll("#theme button").forEach(b=>b.onclick=async()=>{await api("/api/settings",{theme:b.dataset.t});await refresh()});
-$("#logbtn").onclick=()=>{$("#log").style.display="block";loadLog()};$("#logclose").onclick=()=>$("#log").style.display="none";$("#logcode").onchange=loadLog;
+$("#logclose").onclick=()=>$("#log").style.display="none";$("#logcode").onchange=loadLog;
 $("#logcopy").onclick=()=>{navigator.clipboard.writeText($("#logtext").textContent);toast("log copied")};
+function openLog(code){$("#logcode").value=code;$("#log").style.display="block";loadLog()}
 async function loadLog(){const c=$("#logcode").value;if(!c){$("#logtext").textContent="(no patient yet)";return}const r=await api("/api/log?code="+encodeURIComponent(c));const t=$("#logtext"),bot=t.scrollTop+t.clientHeight>=t.scrollHeight-20;t.textContent=r.text;if(bot)t.scrollTop=t.scrollHeight}
 // ---------------- views
 async function render(){await refresh();const v=$("#view");
-  if(V==="home")return homeView(v);if(V==="add")return addView(v);if(V==="pts")return ptsView(v);if(V==="res")return resView(v);if(V==="read")return readView(v);if(V==="set")return setView(v);if(V==="uni")return uniView(v);if(V==="proc")return procView(v)}
+  if(V==="studies")return studiesView(v);if(V==="add")return addHost(v);if(V==="act")return activityView(v);if(V==="read")return readView(v);if(V==="set")return setHost(v);if(V==="uni")return uniView(v)}
 async function homeView(v){const pf=await api("/api/preflight");const q=S.queue;
   v.innerHTML=`<div class="card"><h2>Setup check</h2><table>${pf.map(x=>`<tr><td style="width:30px" class="${x.ok?"ok":"bad"}">${x.ok?"✓":"✗"}</td><td style="width:220px">${esc(x.item)}</td><td class="mut">${esc(x.detail)} ${x.fix==="dcm2niix"?`<button class="b pri" data-fix="dcm2niix">Install dcm2niix</button>`:""}${x.fix==="pywebview"?`<button class="b pri" data-fix="pywebview">Install (own window + Dock icon)</button>`:""}${x.fix==="licence"?`${x.fix_path?`<button class="b pri" data-lic="perm" data-p="${esc(x.fix_path)}">Make it readable (asks for your Mac password)</button> `:""}<button class="b" data-lic="choose">Choose licence file…</button>`:""}</td></tr>`).join("")}</table>
    ${pf.some(x=>!x.ok)?'<p class="note">Fix ✗ items in <b>Settings</b> (FreeSurfer folder, licence) before processing.</p>':""}</div>
@@ -106,7 +164,7 @@ async function homeView(v){const pf=await api("/api/preflight");const q=S.queue;
     toast(r.ok?'licence OK - go to Patients and press "Retry all failed"':`not fixed: ${esc(r.error)}`,!r.ok);render()});
   $("#inst").onclick=async()=>{const p=await pick("file","Choose the cSS pipeline zip");if(!p)return;const r=await api("/api/install",{path:p});toast(r.ok?`installed ${esc(r.version)} (${r.files} files; backup kept)`:esc(r.error),!r.ok);render()};
   $("#rb").onclick=async()=>{if(!confirm("Restore the previous pipeline version?"))return;const r=await api("/api/rollback",{});toast(r.ok?`restored ${esc(r.version)}`:esc(r.error),!r.ok);render()}}
-window.go=x=>document.querySelector(`nav button[data-v="${x}"]`).click();
+window.go=x=>nav(x);
 // ---------------- add patients
 const TYPES=["SWI","T1","FLAIR","PHASE"];
 function addView(v){if(ADD.summary)return summaryView(v);const A=ADD,coh=S.cohorts;
@@ -489,6 +547,218 @@ function bindNotifSettings(){const save=async o=>{await api("/api/notif/settings
   $("#nclr").onclick=async()=>{await api("/api/notif/clear_removed",{});toast("removed items cleared")};
   $("#nlog").onclick=async()=>{const r=await api("/api/notif/log");$("#dlg").innerHTML=`<h2>Notification log</h2><div style="max-height:55vh;overflow:auto"><table>${r.log.map(i=>`<tr><td class="note" style="white-space:nowrap">${new Date(i.t*1000).toLocaleString([], {dateStyle:"short",timeStyle:"short"})}</td><td>${esc(i.level)}</td><td>${esc(i.title)}<div class="note">${esc(i.text||"")}</div></td><td class="note">${i.removed?"removed":""}${i.resolved?" resolved":""}</td></tr>`).join("")||'<tr><td class="mut">empty</td></tr>'}</table></div><div class="acts"><button class="b pri">Close</button></div>`;
     $("#shade").style.display="flex";$("#dlg").querySelector("button").onclick=()=>$("#shade").style.display="none"}}
+// ======================================================================= redesign (2026-11): Studies · study panel · Activity
+const STEPN={import:"Importing images",anatomy:"Brain anatomy",align:"Aligning labels",detect:"Detecting candidates",qc:"Quality check"};
+const W={q:"",f:"all",coh:"all",hide:false,sel:new Set(),cur:null,tab:"summary",data:null,pf:null};
+function plainErr(e){if(!e)return"";if(/do not line up/.test(e)){const m=/shift ([\d.?]+) mm/.exec(e);return `T1 and SWI images did not line up${m?` (${m[1]} mm)`:""} — choose another registration method`}
+  if(/dcm2niix/.test(e))return "DICOM converter missing — Settings › System › Install dcm2niix";if(/licen/i.test(e))return "FreeSurfer licence problem — Settings › System";return e.split(" - ")[0].slice(0,140)}
+function studyStatus(p,r,d){ // one plain label per study (p: queue record, r: results row, d: processing-manager row)
+  if(d&&d.busy)return {k:"acc",l:"Processing",s:"new detection run"};
+  if(p){const st=p.status;
+    if(["running","starting","paused"].includes(st)){const k=Math.max(1,S.steps.indexOf(p.step)+1);return {k:"acc",l:st==="paused"?"Paused":"Processing",s:`step ${k} of 5 · ${STEPN[p.step]||"starting"}`}}
+    if(st==="waiting")return {k:"",l:"Waiting",s:"in the queue"};if(st==="decision")return {k:"warn",l:"Needs your decision",s:"anatomy method"};
+    if(st==="failed"||st==="stopped")return {k:"bad",l:"Needs attention",s:st==="stopped"?"stopped":plainErr(p.error)}}
+  if(d&&["failed","interrupted"].includes(d.last_status))return {k:"bad",l:"Needs attention",s:`last processing run ${d.last_status}`};
+  if(!r||r.candidates==null)return {k:"",l:"Not processed",s:d&&d.has_fs?"anatomy available":""};
+  if(r.score_total!=null)return {k:"ok",l:"Reviewed",s:`${r.reviewed} calls`};
+  if(r.reviewed)return {k:"warn",l:"Review in progress",s:`${r.reviewed} of ${r.candidates} called`};
+  return {k:"ok",l:"Ready for review",s:`${r.candidates} candidates`}}
+async function loadStudies(){const [R,D]=await Promise.all([api("/api/results"),api("/api/proc/studies")]);const by={};
+  S.patients.forEach(p=>by[p.code]={code:p.code,p});R.forEach(r=>(by[r.code]=by[r.code]||{code:r.code}).r=r);(D.studies||[]).forEach(d=>(by[d.code]=by[d.code]||{code:d.code}).d=d);
+  const rows=Object.values(by).map(x=>({...x,st:studyStatus(x.p,x.r,x.d),cohort:(x.p&&x.p.cohort)||(x.r&&x.r.cohort)||"",name:(x.p&&x.p.name)||(x.r&&x.r.name)||""}));
+  rows.sort((a,b)=>a.code.localeCompare(b.code,undefined,{numeric:true}));W.data={rows,recovered:D.recovered,rolled:D.imports_rolled_back};return W.data}
+const FIL=[["all","Studies",r=>true],["proc","Processing",r=>["Processing","Paused","Waiting"].includes(r.st.l)],["att","Need attention",r=>["Needs attention","Needs your decision"].includes(r.st.l)],
+  ["ready","Ready for review",r=>["Ready for review","Review in progress"].includes(r.st.l)],["done","Reviewed",r=>r.st.l==="Reviewed"]];
+async function studiesView(v){const D=await loadStudies();if(V!=="studies")return;
+  if(!W.pf)W.pf=await api("/api/preflight").catch(()=>[]);const bad=(W.pf||[]).filter(x=>!x.ok&&!/Own app window|Disk space/.test(x.item));
+  const coh=["all",...new Set(D.rows.map(r=>r.cohort).filter(Boolean))];
+  const vis=D.rows.filter(FIL.find(f=>f[0]===W.f)[2]).filter(r=>W.coh==="all"||r.cohort===W.coh).filter(r=>!W.q||(r.code+" "+r.name+" "+r.cohort).toLowerCase().includes(W.q.toLowerCase()));
+  const agr=agreement(D.rows.map(r=>r.r).filter(Boolean));
+  v.innerHTML=`${bad.length?`<div class="banner w"><b>Setup needs attention</b><span class="mut">${bad.map(x=>esc(x.item)).join(" · ")}</span><span class="sp"></span><button class="b sm" onclick="W.setTab='system';go('set')">Open setup</button></div>`:""}
+   ${S.queue.hold?`<div class="banner e"><b>Processing is paused</b><span>${esc(S.queue.hold)}</span><span class="sp"></span><button class="b sm" onclick="go('act')">Open Activity</button></div>`:""}
+   <div class="tiles">${FIL.map(([k,t,f])=>`<div class="tile ${W.f===k?"on":""}" data-fl="${k}"><div class="n ${k==="att"&&D.rows.filter(f).length?"bad":""}">${D.rows.filter(f).length}</div><div class="t">${t}</div></div>`).join("")}</div>
+   <div class="tbar"><input type="search" id="sq" placeholder="Search studies" value="${esc(W.q)}">${coh.length>2?`<select id="scoh">${coh.map(c=>`<option value="${esc(c)}" ${c===W.coh?"selected":""}>${c==="all"?"All cohorts":esc(c)}</option>`).join("")}</select>`:""}
+    <label class="note" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="shn" ${W.hide?"checked":""}> Hide names</label><span class="sp"></span>
+    <button class="b" id="srev">${W.sel.size?`Review ${W.sel.size} selected`:"Review"}</button>
+    <span style="position:relative"><button class="b" id="sexp">Export ▾</button><div class="menu hide" id="sexpm">${[["xlsx","Excel workbook (.xlsx)"],["csv","CSV (.csv)"],["docx","Word report (.docx)"],["pdf","PDF report (.pdf)"]].map(([f,l])=>`<button data-fmt="${f}">${l}</button>`).join("")}<button id="spkg">Share package (.zip)</button><div class="divider" style="margin:6px 0"></div><button id="sopx">Open results workbook</button><button id="sai">Update AI scores</button><div class="note" style="padding:4px 10px">Codes only · written to your export folder after a warning</div></div></span>
+    <button class="b pri" onclick="go('add')">Add studies</button></div>
+   <div class="list"><table><thead><tr><th style="width:34px"><input type="checkbox" id="sall"></th><th>Study</th><th>Cohort</th><th>Status</th><th style="width:110px">Candidates</th><th style="width:110px">Reviewed</th><th style="width:150px">Score <span class="note">reader · AI</span></th></tr></thead><tbody>
+   ${vis.map(x=>{const r=x.r||{};return `<tr data-st="${esc(x.code)}" class="${W.cur===x.code?"cur":""}"><td><input type="checkbox" data-sc="${esc(x.code)}" ${W.sel.has(x.code)?"checked":""}></td>
+    <td><span class="code">${esc(x.code)}</span>${x.name&&!W.hide?`<span class="sub2">${esc(x.name)}</span>`:""}</td><td class="mut">${esc(x.cohort||"—")}</td>
+    <td><span class="st ${x.st.k}"><i></i>${esc(x.st.l)}</span>${x.st.s?`<span class="sub2">${esc(x.st.s)}</span>`:""}</td>
+    <td>${r.candidates??'<span class="mut">—</span>'}</td><td>${r.reviewed!=null?`${r.reviewed}${r.css_called!=null?` <span class="mut">· ${r.css_called} cSS</span>`:""}`:'<span class="mut">—</span>'}</td>
+    <td>${r.score_total!=null?`<b>${r.score_total}</b>`:'<span class="mut">—</span>'} <span class="mut">·</span> ${r.ai_total!=null?`<span title="AI only, not validated">${r.ai_total}</span>`:'<span class="mut">—</span>'}</td></tr>`}).join("")||`<tr><td colspan="7" class="empty">${D.rows.length?"No study matches this filter.":`No studies yet. <a href="#" onclick="go('add');return false" style="color:var(--acc)">Add studies</a> to begin.`}</td></tr>`}
+   </tbody></table></div><div class="note" style="margin-top:10px">${agr} · AI scores are rule-based and not validated.</div>`;
+  v.querySelectorAll("[data-fl]").forEach(t=>t.onclick=()=>{W.f=t.dataset.fl;studiesView(v)});
+  $("#sq").oninput=e=>{W.q=e.target.value;clearTimeout(W.qt);W.qt=setTimeout(()=>{studiesView(v).then(()=>{const q=$("#sq");q.focus();q.setSelectionRange(q.value.length,q.value.length)})},200)};
+  $("#scoh")&&($("#scoh").onchange=e=>{W.coh=e.target.value;studiesView(v)});$("#shn").onchange=e=>{W.hide=e.target.checked;studiesView(v)};
+  v.querySelectorAll("[data-sc]").forEach(c=>{c.onclick=e=>e.stopPropagation();c.onchange=()=>{c.checked?W.sel.add(c.dataset.sc):W.sel.delete(c.dataset.sc);$("#srev").textContent=W.sel.size?`Review ${W.sel.size} selected`:"Review"}});
+  $("#sall").onchange=e=>{vis.forEach(x=>e.target.checked?W.sel.add(x.code):W.sel.delete(x.code));studiesView(v)};
+  v.querySelectorAll("[data-st]").forEach(tr=>tr.onclick=()=>openSheet(tr.dataset.st));
+  $("#srev").onclick=()=>{const c=W.sel.size?[...W.sel]:vis.filter(x=>x.r&&x.r.candidates!=null).map(x=>x.code);if(!c.length)return toast("no processed study to review",1);review(c,W.coh==="all"?"":W.coh)};
+  $("#sexp").onclick=e=>{e.stopPropagation();$("#sexpm").classList.toggle("hide")};document.addEventListener("click",()=>$("#sexpm")&&$("#sexpm").classList.add("hide"),{once:true});
+  v.querySelectorAll("[data-fmt]").forEach(b=>b.onclick=()=>clinicalExport("/api/export",{fmt:b.dataset.fmt,cohort:W.coh}));
+  $("#spkg").onclick=()=>clinicalExport("/api/share",{codes:vis.filter(x=>x.r&&x.r.candidates!=null).map(x=>x.code)});
+  $("#sopx").onclick=async()=>{const r=await api("/api/open_results",{});toast(r.ok?`opened ${esc(r.path)}`:esc(r.error),!r.ok)};
+  $("#sai").onclick=async()=>{await api("/api/ai_scores",{});toast("AI scores are being updated — they fill in within a minute")}}
+// ---------- study panel
+function closeSheet(){W.cur=null;$("#sheet").classList.remove("open");document.querySelectorAll("tr.cur").forEach(t=>t.classList.remove("cur"))}
+async function openSheet(code,tab){W.cur=code;if(tab)W.tab=tab;document.querySelectorAll("[data-st]").forEach(t=>t.classList.toggle("cur",t.dataset.st===code));
+  if(!W.data)await loadStudies();const x=W.data.rows.find(r=>r.code===code)||{code,st:{l:"",k:""}};const p=x.p,r=x.r||{},sh=$("#sheet");
+  const prim=primaryAction(x);
+  sh.innerHTML=`<div class="sh"><div style="display:flex;align-items:flex-start;gap:12px"><div style="flex:1;min-width:0"><div style="font-size:20px;font-weight:650">${esc(code)}${p&&["waiting","decision"].includes(p.status)?` <button class="b q sm" data-ren="${esc(code)}" title="Change the code (only before processing starts)">✎</button>`:""}</div>
+     <div class="note">${esc(x.cohort||"no cohort")}${p&&!W.hide?` · <input id="shname" value="${esc(p.name||"")}" placeholder="name (optional, stays on this Mac)" style="padding:2px 7px;font-size:12.5px;width:230px">`:""}</div>
+     <div style="margin-top:8px"><span class="st ${x.st.k}"><i></i><b>${esc(x.st.l)}</b></span>${x.st.s?` <span class="mut">· ${esc(x.st.s)}</span>`:""}</div></div>
+     <button class="b q" id="shx" title="Close (Esc)">✕</button></div>
+    <div class="row" style="margin:14px 0 2px">${prim?`<button class="b pri" id="shprim">${prim[0]}</button>`:""}${r.candidates!=null&&!(prim&&prim[1]==="review")?`<button class="b" id="shrev">Open in reviewer</button>`:""}</div>
+    <div class="tabs">${[["summary","Summary"],["processing","Processing"],["technical","Technical"],["log","Log"]].map(([k,l])=>`<button data-tb="${k}" class="${W.tab===k?"on":""}">${l}</button>`).join("")}</div></div><div class="sb" id="shb"></div>`;
+  sh.classList.add("open");$("#shx").onclick=closeSheet;
+  sh.querySelectorAll("[data-tb]").forEach(b=>b.onclick=()=>openSheet(code,b.dataset.tb));
+  if(prim)$("#shprim").onclick=prim[2];if($("#shrev"))$("#shrev").onclick=()=>review([code]);
+  $("#shname")&&($("#shname").onchange=async e=>{await api("/api/edit",{code,name:e.target.value.trim()});toast("name saved (this Mac only)")});
+  sh.querySelectorAll("[data-ren]").forEach(b=>b.onclick=async()=>{const nc=prompt("New study code for "+code,code);if(!nc||nc===code)return;const r2=await api("/api/edit",{code,new_code:nc.trim()});if(r2.error)return toast(esc(r2.error),1);closeSheet();render()});
+  const b=$("#shb");
+  if(W.tab==="summary")return sheetSummary(b,x);if(W.tab==="processing")return sheetProcessing(b,x);if(W.tab==="technical")return sheetTechnical(b,x);
+  if(W.tab==="log"){const L=await api("/api/log?code="+encodeURIComponent(code)).catch(()=>({text:""}));b.innerHTML=`<div class="row" style="margin-top:0"><span class="note">Technical log of the pipeline for this study</span><span class="sp"></span><button class="b sm" id="lgcp">Copy</button></div><pre class="mono" style="white-space:pre-wrap;max-height:65vh;overflow:auto;background:var(--panel2);padding:12px;border-radius:8px">${esc(L.text||"(no log yet)")}</pre>`;
+    $("#lgcp").onclick=()=>{navigator.clipboard.writeText(L.text||"");toast("log copied")}}}
+function primaryAction(x){const p=x.p,r=x.r||{};
+  if(p&&["failed","stopped"].includes(p.status))return ["Retry…","retry",()=>ctl(p,"retry")];
+  if(p&&p.status==="decision")return ["Choose anatomy method…","dec",()=>pathwayDialog(p)];
+  if(p&&["running","starting"].includes(p.status))return null;
+  if(r.candidates!=null)return ["Open in reviewer","review",()=>review([x.code])];
+  if(x.d&&!x.d.has_candidates)return ["Start processing…","proc",()=>{W.tab="processing";openSheet(x.code)}];
+  return null}
+function sheetSummary(b,x){const p=x.p||{},r=x.r||{};const warn=[];if(p.error)warn.push(plainErr(p.error));if(p.path_note&&!p.path_ack)warn.push(p.path_note);if(p.stalled)warn.push(`no progress for ${p.stalled} min — check the Log; if nothing uses CPU, Stop and Retry`);
+  b.innerHTML=`${warn.length?`<div class="banner w" style="display:block">${warn.map(w=>`<div>${esc(w)}</div>`).join("")}</div>`:""}
+   <div class="kv"><div>Candidates</div><div>${r.candidates??"—"}</div><div>Reviewed</div><div>${r.reviewed!=null?`${r.reviewed} calls · ${r.css_called} cSS`:"not read yet"}</div>
+    <div>Reader score</div><div>${r.score_total!=null?`<b>${r.score_total}</b> <span class="mut">(L ${r.score_L} / R ${r.score_R})</span>`:"—"}</div>
+    <div>AI score</div><div>${r.ai_total!=null?`${r.ai_total} <span class="mut">(L ${r.ai_L} / R ${r.ai_R})</span> <span class="tag ai">not validated</span>`:(r.ai_err?`<span class="mut" title="${esc(r.ai_err)}">not available</span>`:"—")}</div>
+    <div>Radiologist</div><div>${r.rad_R!==undefined&&r.rad_R!==""?`R ${r.rad_R} / L ${r.rad_L}${r.radiologist?` · ${esc(r.radiologist)}`:""}`:"—"}</div>
+    <div>Image quality (QC)</div><div>${grade(r.qc_grade||p.qc,r.qc_tip||p.qc_tip)}${p.has_qc?` <button class="b sm" id="shqc" style="margin-left:8px">QC image</button>`:""}</div>
+    <div>Anatomy method</div><div>${esc(PW()[p.pathway]||(x.d&&x.d.has_fs?"FreeSurfer (recon-all)":"—"))}</div>
+    ${r.unified_status&&r.unified_status!=="off"?`<div>Unified score</div><div>${esc(r.unified_status)}${r.unified_css_compatible!=null?` · ${r.unified_css_compatible} cSS-compatible / ${r.unified_uncertain} uncertain / ${r.unified_alternative} alternative`:""}</div>`:""}
+    <div>Pipeline version</div><div class="mono">${esc(r.version||p.version||"—")}</div></div>`;
+  $("#shqc")&&($("#shqc").onclick=()=>openWin("/qc?code="+encodeURIComponent(x.code),"cssqc"))}
+async function sheetProcessing(b,x){const p=x.p,code=x.code;let a=null;try{a=await api("/api/proc/audit?code="+encodeURIComponent(code))}catch(e){}
+  const rows=[];const A=(t,d,btns)=>rows.push(`<div class="ar"><div class="at"><b>${t}</b><div class="note">${d}</div></div>${btns}</div>`);
+  if(p){const s=p.status;
+    if(["running","starting","paused"].includes(s))A(s==="paused"?"Paused":"Processing now",`step ${Math.max(1,S.steps.indexOf(p.step)+1)} of 5 · ${STEPN[p.step]||"starting"} · ${hms(p.elapsed)} elapsed`,`${s==="running"?`<button class="b" data-c="pause">Pause</button>`:""}${s==="paused"?`<button class="b" data-c="resume">Resume</button>`:""}<button class="b danger" data-c="stop">Stop</button>`);
+    if(["failed","stopped"].includes(s))A("Retry",esc(plainErr(p.error)||"run the pipeline again"),`<button class="b pri" data-c="retry">Retry…</button>`);
+    if(["waiting","decision","failed","stopped"].includes(s))A("Anatomy method",`now: ${esc(PW()[p.pathway]||p.pathway)}${p.tried&&p.tried.length?` · tried: ${p.tried.map(t=>esc(PW()[t.pathway]||t.pathway)).join(", ")}`:""}`,`<button class="b" data-c="pathway">Change…</button>`);
+    if(s==="done")A("Run the full pipeline again","imports and processes from the original images; a finished FreeSurfer is reused",`<button class="b" data-c="rerun">Re-run…</button>`);
+    if(["waiting","decision","failed","stopped"].includes(s))A("Remove from the queue","the study's files are not deleted",`<button class="b danger" data-c="remove">Remove</button>`)}
+  const busy=a&&a.busy;
+  if(a&&a.ok){const st=a.stages,RU=["compatible","compatible_with_limitations","unknown","not_applicable"],first=["anatomy","registration","align","detect","unified"].find(k=>!RU.includes(st[k].status));
+    const early=first==="anatomy"||first==="registration",needAdopt=!a.adopted&&Object.values(st).some(z=>z.status==="unknown");
+    if(busy)A("New detection run in progress",`stage ${esc(busy.stage||"starting")} · started ${new Date(busy.started*1000).toLocaleTimeString([], {timeStyle:"short"})}`,"");
+    else if(st.detect.status!=="missing"||st.align.status!=="missing")A("New detection run",early?`not possible: ${esc(st[first].label)} ${esc(first)} — re-run from the original images instead`:
+      "detect candidates again with this version, reusing the existing anatomy, registration and labels (FreeSurfer is never re-run here)",early?"":`<button class="b" data-c="fresh">Start…</button>`);
+    if(needAdopt)rows.unshift(`<div class="banner w" style="display:block"><b>Earlier outputs found</b><div class="note">They are not yet linked to this MRI. If you know they were made from these images, confirm them — nothing is changed or moved.</div><div class="row"><button class="b pri" id="adopt">Confirm earlier outputs</button></div></div>`)}
+  b.innerHTML=`<div class="alist">${rows.join("")||'<div class="empty">No processing actions for this study.</div>'}</div><h3 style="margin-top:22px">Processing history</h3><div id="pmh"></div>`;
+  if(a&&a.ok)procHistory($("#pmh"),code,a);else $("#pmh").innerHTML='<div class="note">No history recorded.</div>';
+  b.querySelectorAll("[data-c]").forEach(btn=>btn.onclick=async()=>{const c=btn.dataset.c;
+    if(c==="fresh"){if(await ask("Start a new detection run?",`${esc(code)}: detect candidates again, with morphology, predictors, AI score and explanations. Anatomy, registration and labels are reused. The current results stay archived and come back if the run fails.`,[["no","Cancel"],["yes","Start","pri"]])!=="yes")return;
+      const r=await api("/api/proc/start",{code,choice:"selective",rerun_from:"detect"});toast(r.ok?`started: ${esc(r.run.join(" → "))}`:esc(r.error),!r.ok);return openSheet(code)}
+    if(c==="pathway")return pathwayDialog(p);await ctl(p,c);openSheet(code)});
+  $("#adopt")&&($("#adopt").onclick=async()=>{const r=await api("/api/proc/adopt",{code});toast(r.ok?"earlier outputs recorded as the first run":esc(r.error),!r.ok);openSheet(code)})}
+async function sheetTechnical(b,x){const a=await api("/api/proc/audit?code="+encodeURIComponent(x.code)).catch(()=>null);if(!a||!a.ok){b.innerHTML='<div class="empty">No technical record for this study yet.</div>';return}
+  const I=a.identity||{},im=z=>z?`<span class="mono">${esc((z.sha256||"").slice(0,8))}… · ${(z.dims||[]).join("×")} · ${(z.voxel_mm||[]).join("×")} mm · ${esc(z.orientation||"?")}</span>`:'<span class="mut">not present</span>';
+  b.innerHTML=`<h3>MRI identity</h3><div class="kv" style="margin-bottom:18px"><div>SWI</div><div>${im(I.swi)}</div><div>T1</div><div>${im(I.t1)}</div><div>FreeSurfer</div><div>${I.freesurfer?`${esc(I.freesurfer.version||"version not recorded")}${I.freesurfer.no_v8?" · -no-v8":""}`:'<span class="mut">none</span>'}</div><div>Previous detection</div><div>${I.detection?esc(I.detection.pipeline_version||"?"):'<span class="mut">none</span>'}</div></div>
+   <h3>Can earlier outputs be reused?</h3><table><tr><th>Stage</th><th>Status</th><th>Why</th></tr>${Object.values(a.stages).map(z=>`<tr><td>${esc({anatomy:"Brain anatomy",registration:"Registration (SWI → T1)",align:"Labels on the SWI",detect:"cSS detection",unified:"Unified score"}[z.stage]||z.stage)}</td><td>${cat(z.status,z.label)}</td><td class="note">${esc(z.why)}</td></tr>`).join("")}</table>`}
+// shared queue actions (same API calls and confirmations as before the redesign)
+async function ctl(p,a){const c=p.code;
+  if(a==="retry"&&/do not line up/.test(p.error||""))return pathwayDialog(p,true);
+  if(a==="stop"&&!confirm(`Stop ${c}? Its partial results are discarded; you can Retry later.`))return;
+  if(a==="remove"&&!confirm(`Remove ${c} from the queue? Its files are not deleted.`))return;
+  if(a==="rerun"){if(S.settings.rerun_mode==="auto"){const r=await api("/api/control",{code:c,action:"rerun"});toast(r.error?esc(r.error):`${esc(c)}: re-run with ${esc(PW()[p.pathway])}`,!!r.error);return render()}
+    return pathwayDialog(p,false,true)}
+  const r=await api("/api/control",{code:c,action:a});if(r.error)toast(esc(r.error),1);render()}
+function pathwayDialog(p,isRetry,isRerun){const rec=isRetry?(p.next_rec||"coreg_masked"):p.pathway;
+  $("#dlg").innerHTML=`<h2>${isRerun?"Re-run":isRetry?"Retry":"Anatomy method"} · ${esc(p.code)}</h2><p class="note">${isRetry?"The T1 and SWI did not line up. Choose how to register them; the 1.5 mm check runs again and refuses a bad result. The failed attempt's files are kept.":isRerun?"The earlier results stay until the new run finishes.":"How the brain anatomy is obtained for this study."}
+   ${p.tried&&p.tried.length?`<br>Tried: ${p.tried.map(t=>esc(PW()[t.pathway]||t.pathway)+" ("+t.shift+" mm)").join(", ")}`:""}</p>
+   <div class="row">${pwSel(rec,rec,'id="pwsel" style="width:100%"',p.tried)}</div>
+   <details class="note" style="margin-top:6px"><summary>Which method should I choose?</summary><table style="margin-top:6px">${[["Fast re-registration","minutes","try first"],["SynthMorph","minutes","if the fast option is refused (runs alone)"],["recon-all","~2–3 h","most accurate registration"],["SWI-only","~30 min","last resort, coarser labels"]].map(z=>`<tr><td><b>${z[0]}</b></td><td>${z[1]}</td><td>${z[2]}</td></tr>`).join("")}</table></details>
+   <div class="acts" style="margin-top:14px"><button class="b" data-v="x">Cancel</button><button class="b pri" data-v="ok">${isRerun?"Re-run":isRetry?"Retry":"Apply"}</button></div>`;
+  $("#shade").style.display="flex";$("#dlg").querySelectorAll("button[data-v]").forEach(x=>x.onclick=async()=>{const val=$("#pwsel").value;$("#shade").style.display="none";if(x.dataset.v!=="ok")return;
+    const r=await confirmPath(p.code,val,rec,isRetry?"after a failed registration":"");if(r===false)return;const ch=r==="rec"?rec:val;if(ch==="recon"&&!confirm("recon-all takes about 2-3 hours for this study. Continue?"))return;
+    const body=isRerun?{code:p.code,action:"rerun",pathway:ch}:["waiting","decision"].includes(p.status)?{code:p.code,action:"pathway",pathway:ch}:{code:p.code,action:ch};
+    const res=await api("/api/control",body);if(res.error)toast(esc(res.error),1);else toast(`${esc(p.code)}: ${esc(PW()[ch])}`);render();if(W.cur)openSheet(W.cur)})}
+// ---------- Activity (Process Manager)
+const AC={capOpen:false};
+async function activityView(v){const [U,D]=await Promise.all([api("/api/u/state").catch(()=>({jobs:{}})),api("/api/proc/studies").catch(()=>({studies:[]}))]);if(V!=="act")return;
+  const P=S.patients,sy=S.sys,z=S.mem_zones,par=S.settings.parallel||1,rec=S.rec,now=Date.now()/1000;const att=[],run=[],wait=[],done=[];
+  const btn=(c,l,cls)=>`<button class="b sm ${cls||""}" ${c}>${l}</button>`;
+  P.forEach(p=>{const s=p.status,k=Math.max(1,S.steps.indexOf(p.step)+1),log=btn(`data-lgc="${esc(p.code)}"`,"Details","q"),open=`data-op="${esc(p.code)}"`;
+    if(["running","starting","paused"].includes(s))run.push({t:`<b ${open} style="cursor:pointer">${esc(p.code)}</b><span class="kind">pipeline</span>`,m:`${s==="paused"?"Paused · ":""}step ${k} of 5 · ${STEPN[p.step]||"starting"} · ${hms(p.elapsed)} elapsed${p.remaining?` · ≈ ${hms(p.remaining)} left (estimate)`:""}${p.stalled?` · <span class="warn">no progress for ${p.stalled} min</span>`:""}`,
+      g:(k-1)/5,a:(s==="running"?btn(`data-pc="pause" data-cd="${esc(p.code)}"`,"Pause"):"")+(s==="paused"?btn(`data-pc="resume" data-cd="${esc(p.code)}"`,"Resume"):"")+btn(`data-pc="stop" data-cd="${esc(p.code)}"`,"Stop","danger")+log});
+    else if(s==="waiting")wait.push({t:`<b ${open} style="cursor:pointer">${esc(p.code)}</b><span class="kind">pipeline</span>`,m:`${esc(PW()[p.pathway]||p.pathway)}${p.solo?" · runs alone":""}${p.remaining?` · ≈ ${hms(p.remaining)} (estimate)`:""}`,a:btn(`data-pc="pathway" data-cd="${esc(p.code)}"`,"Method…","q")+btn(`data-pc="remove" data-cd="${esc(p.code)}"`,"Remove","q danger")});
+    else if(s==="decision")att.push({t:`<b ${open} style="cursor:pointer">${esc(p.code)}</b><span class="kind">needs your decision</span>`,m:esc(p.path_note||"choose the anatomy method"),a:btn(`data-pc="pathway" data-cd="${esc(p.code)}"`,"Choose…","pri")+btn(`data-pc="accept" data-cd="${esc(p.code)}"`,"Accept as is")});
+    else if(["failed","stopped"].includes(s))att.push({t:`<b ${open} style="cursor:pointer">${esc(p.code)}</b><span class="kind">pipeline ${s}</span>`,m:esc(plainErr(p.error)||s),a:btn(`data-pc="retry" data-cd="${esc(p.code)}"`,"Retry…","pri")+btn(`data-pc="remove" data-cd="${esc(p.code)}"`,"Remove","q danger")+log});
+    else if(s==="done"&&p.path_note&&!p.path_ack)att.push({t:`<b ${open} style="cursor:pointer">${esc(p.code)}</b><span class="kind">method changed</span>`,m:esc(p.path_note),a:btn(`data-pc="accept" data-cd="${esc(p.code)}"`,"OK")});
+    else if(s==="done"&&p.started&&now-p.started<86400)done.push({t:`<b ${open} style="cursor:pointer">${esc(p.code)}</b><span class="kind">pipeline</span>`,m:`finished · ${hms(p.elapsed)}`,a:log})});
+  (D.studies||[]).forEach(d=>{const open=`data-op="${esc(d.code)}"`;
+    if(d.busy)run.push({t:`<b ${open} style="cursor:pointer">${esc(d.code)}</b><span class="kind">new detection run</span>`,m:"working (stage shown in the study's Processing tab)",a:btn(`data-ops="${esc(d.code)}"`,"Open","q")});
+    else if(["failed","interrupted"].includes(d.last_status))att.push({t:`<b ${open} style="cursor:pointer">${esc(d.code)}</b><span class="kind">detection run ${d.last_status}</span>`,m:"previous results were restored · resume or start again from the study",a:btn(`data-ops="${esc(d.code)}"`,"Open…","pri")})});
+  Object.entries(U.jobs||{}).forEach(([n,j])=>{const nm={audit:"Cohort audit",extract:"Feature extraction",train:"Model training",robustness:"Robustness suite",export:"Export",protocol:"Test protocol"}[n]||n;
+    const last=(j.log||[]).slice(-1)[0]||"";
+    if(j.status==="running")run.push({t:`<b>${esc(nm)}</b><span class="kind">model</span>`,m:esc(last).slice(0,140),g:j.progress,a:btn(`data-ust="${esc(n)}"`,"Stop","danger")+btn(`data-ulg="${esc(n)}"`,"Details","q")});
+    else if(j.status==="failed")att.push({t:`<b>${esc(nm)}</b><span class="kind">model job failed</span>`,m:esc(((j.error||"").split("\n").filter(Boolean).slice(-1)[0]||"see details")).slice(0,160),a:btn(`data-ulg="${esc(n)}"`,"Details","q")+btn(`data-umd="1"`,"Open Model","q")});
+    else if(["completed","stopped"].includes(j.status)&&j.finished&&now-j.finished<86400)done.push({t:`<b>${esc(nm)}</b><span class="kind">model</span>`,m:`${j.status} · ${new Date(j.finished*1000).toLocaleTimeString([], {timeStyle:"short"})}`,a:btn(`data-ulg="${esc(n)}"`,"Details","q")})});
+  const grp=(t,arr,emp)=>`<div class="act"><div class="ah">${t}<span class="mut" style="font-weight:500">${arr.length}</span></div>${arr.length?arr.map(x=>`<div class="pr"><div class="pt">${x.t}<div class="pm">${x.m}</div></div>${x.g!=null?`<div class="pg"><div class="bar"><i style="width:${Math.max(3,Math.round(100*x.g))}%"></i></div></div>`:""}<div class="pa">${x.a||""}</div></div>`).join(""):`<div class="empty">${emp}</div>`}</div>`;
+  const dz=sy.mem_pct>=z[1];if(dz)AC.capOpen=true;
+  v.innerHTML=`${S.queue.hold?`<div class="banner e"><b>Processing is paused — setup problem</b><span>${esc(S.queue.hold)}</span><span class="sp"></span><button class="b sm" onclick="W.setTab='system';go('set')">Open setup</button></div>`:""}
+   ${dz?`<div class="banner e"><b>Memory almost full (${sy.mem_pct} %)</b><span>the Mac may freeze</span><span class="sp"></span>${run.length?`<button class="b sm wb" id="stopnew">Stop newest study</button>`:""}</div>`:""}
+   <div class="tbar"><span class="mut">Process</span><select id="par">${[1,2,3,4].map(n=>`<option value="${n}" ${n===par?"selected":""}>${n} stud${n>1?"ies":"y"} at a time${n===rec?" (recommended)":""}</option>`).join("")}</select>
+    ${att.some(x=>/pipeline (failed|stopped)/.test(x.t))?`<button class="b" id="rall">Retry all failed</button>`:""}<span class="sp"></span><button class="b q" id="capb">${AC.capOpen?"Hide":"Show"} capacity</button></div>
+   <div id="cap" class="${AC.capOpen?"":"hide"} card"><div class="row" style="margin-top:0"><b>Memory</b><span>${sy.mem_used} of ${sy.mem_total} GB (${sy.mem_pct} %)</span><span class="mut">· CPU ${sy.cpu_pct} % · free disk ${sy.disk_free} GB</span></div>${memBar(sy,z)}
+    <div class="note">Below ${z[0]} % new studies start normally · ${z[0]}–${z[1]} % no new study starts · above ${z[1]} % warning. Recommended now: ${rec} at a time (${esc(sy.chip)}, ${sy.cores} cores, ${sy.mem_total} GB${S.rec_why?`; ${esc(S.rec_why)}`:""}). SWI-only and SynthMorph always run alone. Memory figures are estimates.</div></div>
+   ${grp("Needs attention",att,"Nothing needs your attention.")}${grp("Running",run,"Nothing is running.")}${grp("Waiting",wait,"The queue is empty.")}${grp("Finished in the last 24 hours",done,"Nothing finished recently.")}
+   <div class="note">You can close the window: processing continues, and work cut off by a restart is resumed or marked interrupted automatically.</div>`;
+  $("#capb").onclick=()=>{AC.capOpen=!AC.capOpen;activityView(v)};
+  $("#par").onchange=async e=>{const n=+e.target.value;if(n>rec&&await ask("More than recommended",`${n} studies at a time is above the recommendation (${rec}) for this Mac (${sy.mem_total} GB). It may slow down; in the red memory zone new studies won't start.`,[["back","Back"],["go",`Use ${n}`,"wb"]])!=="go")return render();await api("/api/settings",{parallel:n});render()};
+  $("#rall")&&($("#rall").onclick=async()=>{const r=await api("/api/retry_failed",{});toast(`${r.n} stud${r.n===1?"y":"ies"} back in the queue`);render()});
+  $("#stopnew")&&($("#stopnew").onclick=async()=>{const p=P.filter(x=>["running","paused","starting"].includes(x.status)).sort((a,b)=>b.started-a.started)[0];if(!p||!confirm(`Stop ${p.code} to free memory? It goes back to the queue and starts again later.`))return;await api("/api/control",{code:p.code,action:"requeue"});render()});
+  v.querySelectorAll("[data-pc]").forEach(b=>b.onclick=async()=>{const p=P.find(x=>x.code===b.dataset.cd),c=b.dataset.pc;if(c==="pathway")return pathwayDialog(p);if(c==="accept"){await api("/api/control",{code:p.code,action:"accept"});return render()}await ctl(p,c)});
+  v.querySelectorAll("[data-lgc]").forEach(b=>b.onclick=()=>openLog(b.dataset.lgc));v.querySelectorAll("[data-op],[data-ops]").forEach(b=>b.onclick=()=>{go("studies");setTimeout(()=>openSheet(b.dataset.op||b.dataset.ops,b.dataset.ops?"processing":"summary"),300)});
+  v.querySelectorAll("[data-ust]").forEach(b=>b.onclick=async()=>{await api("/api/u/stop",{job:b.dataset.ust});toast("stopping…")});v.querySelectorAll("[data-umd]").forEach(b=>b.onclick=()=>go("uni"));
+  v.querySelectorAll("[data-ulg]").forEach(b=>b.onclick=async()=>{const r=await api("/api/u/log?job="+b.dataset.ulg);$("#dlg").innerHTML=`<h2>Details · ${esc(b.dataset.ulg)}</h2><pre class="mono" style="max-height:50vh;overflow:auto;white-space:pre-wrap">${esc((r.log||[]).join("\n")||"(empty)")}${r.error?"\n\n"+esc(r.error):""}</pre><div class="acts"><button class="b pri">Close</button></div>`;$("#shade").style.display="flex";$("#dlg").querySelector("button").onclick=()=>$("#shade").style.display="none"})}
+// ---------- Add studies (two ways in) and Settings (tabs)
+W.addTab="folders";W.setTab="general";
+function addHost(v){v.innerHTML=`<div class="subtabs"><button data-at="folders" class="${W.addTab==="folders"?"on":""}">From image folders</button><button data-at="project" class="${W.addTab==="project"?"on":""}">From another project</button></div><div id="addbody"></div>`;
+  v.querySelectorAll("[data-at]").forEach(b=>b.onclick=()=>{W.addTab=b.dataset.at;addHost(v)});const el=$("#addbody");return W.addTab==="folders"?addView(el):bringInView(el)}
+async function bringInView(el){const MS=(await api("/api/proc/models")).models||{};const L=await api("/api/proc/studies");
+  el.innerHTML=`<p class="note" style="max-width:820px;margin-top:0">Bring in studies already processed in another project (for example your production project). Everything is <b>copied and verified</b> — images, registrations, labels, earlier results and the FreeSurfer folder (an isolated copy). The other project is only read; nothing there is ever changed.</p>
+   <div class="row"><input class="wide" id="lsrc" value="${esc(PMS.src||"")}" placeholder="/Users/you/css_project"><button class="b" id="lsc">Choose…</button><button class="b pri" id="lscan">List studies</button></div><div id="llist"></div>
+   <h3 style="margin-top:26px">Production models in this project</h3><table>${Object.entries(MS).map(([n,m])=>`<tr><td class="mono" style="width:280px">review/${esc(n)}</td><td style="width:240px">${m.present&&m.compatible&&m.verified_copy_of_production?cat("compatible","verified copy · compatible"):m.present?cat("incompatible","not matching production"):cat("missing","not present")}</td><td class="note">${esc([m.import_status,...(m.reasons||[]),...(m.notes||[])].filter(Boolean).join(" · "))}</td></tr>`).join("")}</table>
+   <div class="note">Copied byte-for-byte when studies are brought in; never modified or retrained. ${(L.studies||[]).length} studies in this project.</div>`;
+  $("#lsc").onclick=async()=>{const p=await pick("folder","Choose the other project folder");if(p)$("#lsrc").value=p.replace(/\/$/,"")};
+  $("#lscan").onclick=async()=>{PMS.src=$("#lsrc").value.trim();const r=await api("/api/proc/scan_source?path="+encodeURIComponent(PMS.src));
+    if(!r.ok){$("#llist").innerHTML=`<div class="bad" style="margin:10px 0">${esc(r.error)}</div>`;return}
+    $("#llist").innerHTML=`<div class="list" style="margin-top:12px;max-height:340px;overflow:auto"><table><thead><tr><th style="width:34px"><input type="checkbox" id="lkall"></th><th>Study</th><th>FreeSurfer</th><th>Earlier results</th><th></th></tr></thead><tbody>${r.studies.map(x=>`<tr><td>${x.here?"":`<input type="checkbox" data-lk="${esc(x.code)}">`}</td><td><b>${esc(x.code)}</b></td><td>${x.has_fs?"yes (copied)":'<span class="mut">—</span>'}</td><td>${x.has_candidates?"yes":'<span class="mut">—</span>'}</td><td class="mut">${x.here?"already in this project":""}</td></tr>`).join("")}</tbody></table></div>
+     <div class="row"><button class="b pri" id="lgo">Bring selected into this project</button></div>`;
+    $("#lkall").onchange=e=>document.querySelectorAll("[data-lk]").forEach(c=>c.checked=e.target.checked);
+    $("#lgo").onclick=async()=>{const codes=[...document.querySelectorAll("[data-lk]:checked")].map(e=>e.dataset.lk);if(!codes.length)return toast("tick at least one study",1);
+      $("#lgo").disabled=true;$("#lgo").textContent="copying and verifying…";const x=await api("/api/proc/link",{source:PMS.src,codes});
+      toast((x.models&&!x.models.error?Object.entries(x.models).map(([n,m])=>`${esc(n)}: ${esc(m.status)}`).join("<br>")+"<br>":"")+x.results.map(y=>y.ok?`${esc(y.code)}: ${y.copied} files copied + verified${y.freesurfer?`, FreeSurfer ${y.fs_method==="apfs_clone"?"cloned":"copied"} (${y.fs_files} files)`:""}`:`${esc(y.code)}: ${esc(y.error)}`).join("<br>"),!x.ok);
+      go("studies");setTimeout(()=>openSheet(codes[0],"processing"),400)}}}
+const SETMAP=[["Version","system"],["FreeSurfer","processing"],["When SynthSeg","processing"],["Re-run","processing"],["When a retry","processing"],["Reviewer","general"],["Backup and export","general"],["Notification centre","notifications"],["Features","general"]];
+async function setHost(v){setView(v);const cards=[...v.querySelectorAll(":scope > .card")],last=v.lastElementChild;
+  const tabs=[["general","General"],["processing","Processing"],["notifications","Notifications"],["system","System"]];
+  v.insertAdjacentHTML("afterbegin",`<div class="subtabs">${tabs.map(([k,l])=>`<button data-stb="${k}" class="${W.setTab===k?"on":""}">${l}</button>`).join("")}</div>`);
+  cards.forEach(c=>{const h=(c.querySelector("h2")||{}).textContent||"";const m=SETMAP.find(([t])=>h.startsWith(t));c.dataset.tab=m?m[1]:"general";c.classList.toggle("hide",c.dataset.tab!==W.setTab)});
+  if(W.setTab==="processing"){const n=document.createElement("div");n.className="note";n.style.margin="0 0 14px";n.textContent="Advanced: these options change how studies are processed. The defaults are the validated production settings.";v.querySelector(".subtabs").after(n)}
+  if(W.setTab==="system"){const host=document.createElement("div");v.querySelector(".subtabs").after(host);await systemPanel(host)}
+  if(W.setTab==="notifications"&&last)last.classList.add("hide");
+  v.querySelectorAll("[data-stb]").forEach(b=>b.onclick=()=>{W.setTab=b.dataset.stb;render()})}
+async function systemPanel(el){const pf=await api("/api/preflight");W.pf=pf;
+  el.innerHTML=`<div class="card"><h2>Setup check</h2><table>${pf.map(x=>`<tr><td style="width:30px" class="${x.ok?"ok":"bad"}">${x.ok?"✓":"✗"}</td><td style="width:220px">${esc(x.item)}</td><td class="mut">${esc(x.detail)} ${x.fix==="dcm2niix"?`<button class="b sm pri" data-fix="dcm2niix">Install dcm2niix</button>`:""}${x.fix==="pywebview"?`<button class="b sm" data-fix="pywebview">Install (own window + Dock icon)</button>`:""}${x.fix==="licence"?`${x.fix_path?`<button class="b sm pri" data-lic="perm" data-p="${esc(x.fix_path)}">Make it readable</button> `:""}<button class="b sm" data-lic="choose">Choose licence file…</button>`:""}</td></tr>`).join("")}</table></div>
+   <div class="card"><h2>Pipeline code</h2><div class="row"><span class="mono">${esc(S.version)}</span></div><div class="row"><button class="b" id="inst">Install / update from zip…</button><button class="b" id="rb">Roll back to the previous version</button></div><div class="note">Installing keeps a backup of the current code; studies, calls and results are never touched.</div></div>`;
+  el.querySelectorAll("[data-fix]").forEach(b=>b.onclick=async()=>{b.disabled=true;b.textContent="installing…";const r=await api("/api/fix",{what:b.dataset.fix});toast(r.ok?(b.dataset.fix==="pywebview"?"installed — quit Percival and open it again":`${esc(b.dataset.fix)} installed — Activity › Retry all failed`):`install failed: ${esc(r.error)}`,!r.ok);W.pf=null;render()});
+  el.querySelectorAll("[data-lic]").forEach(b=>b.onclick=async()=>{const r=await api("/api/fix",b.dataset.lic==="perm"?{what:"licence_permission",path:b.dataset.p}:{what:"licence_choose"});toast(r.ok?"licence OK — Activity › Retry all failed":`not fixed: ${esc(r.error)}`,!r.ok);W.pf=null;render()});
+  $("#inst").onclick=async()=>{const p=await pick("file","Choose the cSS pipeline zip");if(!p)return;const r=await api("/api/install",{path:p});toast(r.ok?`installed ${esc(r.version)} (${r.files} files; backup kept)`:esc(r.error),!r.ok);render()};
+  $("#rb").onclick=async()=>{if(!confirm("Restore the previous pipeline version?"))return;const r=await api("/api/rollback",{});toast(r.ok?`restored ${esc(r.version)}`:esc(r.error),!r.ok);render()}}
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&$("#sheet").classList.contains("open")&&$("#shade").style.display!=="flex")closeSheet()});
+
 // ---------------- settings
 function setView(v){const s=S.settings,F=s.features;const L={duplicate_check:"Duplicate-scan check",preflight:"Pre-flight check before processing",qc_snapshot:"QC snapshot per patient",notify:"Notification when a patient finishes / fails",
    version_stamp:"Version stamp on every result",share:"Share package (codes only)",backup:"Automatic daily backup (calls, grades, results - no images)",name_warning:"Warn when a folder name looks like a person's name"};
@@ -517,6 +787,9 @@ function setView(v){const s=S.settings,F=s.features;const L={duplicate_check:"Du
   $("#fsc").onclick=async()=>{const p=await pick("folder","Choose the FreeSurfer folder");if(p)$("#fs").value=p.replace(/\/$/,"")};$("#bkc").onclick=async()=>{const p=await pick("folder","Choose the backup folder");if(p)$("#bk").value=p};$("#xdc").onclick=async()=>{const p=await pick("folder","Choose the export folder");if(p)$("#xd").value=p};
   $("#save").onclick=async()=>{const f={};document.querySelectorAll("[data-ft]").forEach(x=>f[x.dataset.ft]=x.checked);
     const r=await api("/api/settings",{fs_license:$("#lic").value.trim(),freesurfer_home:$("#fs").value.trim(),threads:+$("#thr").value,backup_dir:$("#bk").value.trim(),export_dir:$("#xd").value.trim(),features:f});toast(r.ok?"settings saved":esc(r.error),!r.ok);render()}}
-render();setInterval(async()=>{if(V==="res"&&!document.activeElement.matches("input,select")&&$("#sharem")&&$("#sharem").classList.contains("hide")&&$("#shade").style.display!=="flex")await render();else if(V==="pts"&&!document.activeElement.matches("input,select")&&$("#shade").style.display!=="flex")await render();else if(V==="home")await refresh();if($("#log").style.display==="block")loadLog()},3000);
+nav("studies");
+setInterval(async()=>{const busy=document.activeElement&&document.activeElement.matches("input,select,textarea")||$("#shade").style.display==="flex"||($("#sexpm")&&!$("#sexpm").classList.contains("hide"));
+  if(busy)return;if(V==="studies"||V==="act"){const y=window.scrollY;await render();window.scrollTo(0,y);if(V==="studies"&&W.cur&&W.tab!=="log"&&W.tab!=="technical"){const sb=$("#shb"),sy=sb?sb.scrollTop:0;await openSheet(W.cur);if($("#shb"))$("#shb").scrollTop=sy}}
+  if($("#log").style.display==="block")loadLog()},4000);
 </script><script src="/unified_view.js"></script>
 </body></html>

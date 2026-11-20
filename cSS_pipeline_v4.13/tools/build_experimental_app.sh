@@ -29,7 +29,7 @@ for f in "$ROOT"/scripts/*.py "$ROOT"/scripts/*.sh "$ROOT"/scripts/*.html "$ROOT
 echo "$COMMIT $(date +%Y-%m-%d) $BR$DIRTY (experimental app build $SHORT)" > "$APP/Contents/Resources/pipeline/scripts/BUILD"
 ( cd "$ROOT" && tar cf - --exclude output --exclude __pycache__ unified_score ) | ( cd "$APP/Contents/Resources/pipeline" && tar xf - )
 cp "$ROOT/tests/uscore_synth.py" "$ROOT/tests/uscore_synth_columns.json" "$ROOT/tests/check_uscore_seeds.py" "$APP/Contents/Resources/pipeline/tests/"
-for g in "$ROOT"/docs/gui_v514/rc4/INSTALL_AND_USER_GUIDE_RC4.md "$ROOT"/docs/gui_v514/rc4/TEST_REPORT_RC4.md "$ROOT"/docs/gui_v514/rc3/PRODUCTION_PARITY_RC3.md; do [ -f "$g" ] && cp "$g" "$OUT/"; done
+for g in "$ROOT"/docs/gui_v514/rc5/INSTALL_AND_USER_GUIDE_RC5.md "$ROOT"/docs/gui_v514/rc4/TEST_REPORT_RC4.md "$ROOT"/docs/gui_v514/rc3/PRODUCTION_PARITY_RC3.md; do [ -f "$g" ] && cp "$g" "$OUT/"; done
 cp "$ROOT/app/mac_experimental/uninstall_experimental.sh" "$OUT/" 2>/dev/null || true
 find "$APP" -name __pycache__ -prune -exec rm -rf {} +
 ZIP="$OUT/Percival_${SHORT}.zip"; rm -f "$ZIP"

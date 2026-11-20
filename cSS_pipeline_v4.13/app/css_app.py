@@ -1177,7 +1177,7 @@ def state():
     rem = sum(x["remaining"] for x in q) / min(par, max(1, len([x for x in q if not x["solo"]]) or 1))
     return dict(patients=out, queue=dict(n=len(q), remaining=rem, running=",".join(RUNNING), hold=CUR["hold"], mem_wait=CUR["mem_wait"]),
                 sys=si, rec=rec, rec_why=rec_why, pw_time=PW_TIME, pw_mem=PW_MEM, pathways=PATHWAYS, mem_zones=[MEM_YELLOW, MEM_RED],
-                settings=SET, version=version(), cohorts=sorted(set(jload("cohorts.json", [])) | {p.get("cohort", "") for p in PAT} - {""}), steps=STEPS)
+                settings=SET, version=version(), project=dict(name=os.path.basename(os.path.normpath(B)), path=B), cohorts=sorted(set(jload("cohorts.json", [])) | {p.get("cohort", "") for p in PAT} - {""}), steps=STEPS)
 
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass

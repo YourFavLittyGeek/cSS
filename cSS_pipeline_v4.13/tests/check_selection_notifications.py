@@ -96,7 +96,7 @@ try:
     if SHOTS:
         js = r"""const {chromium}=require('playwright');const [U,O]=process.argv.slice(2);(async()=>{const b=await chromium.launch();const errs=[];
 const p=await b.newPage({viewport:{width:1440,height:900},deviceScaleFactor:1});p.on('pageerror',e=>errs.push(String(e)));
-await p.goto(U);await p.waitForTimeout(1500);await p.screenshot({path:O+'/S01_home_topbar.png',clip:{x:0,y:0,width:1440,height:120}});
+await p.goto(U);await p.waitForTimeout(1500);await p.screenshot({path:O+'/S01_header.png',clip:{x:0,y:0,width:1440,height:120}});
 await p.click('nav button[data-v="uni"]');await p.waitForTimeout(2500);await p.screenshot({path:O+'/S02_study_selection.png',fullPage:true});
 await p.click('#bell');await p.waitForTimeout(800);await p.screenshot({path:O+'/S03_notification_centre.png'});await p.click('#nclose');
 await p.click('nav button[data-v="set"]');await p.waitForTimeout(1200);await p.screenshot({path:O+'/S04_settings.png',fullPage:true});
