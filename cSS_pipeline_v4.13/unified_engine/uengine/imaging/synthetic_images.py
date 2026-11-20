@@ -137,9 +137,41 @@ def guard_base(base):
         f.write("SYNTHETIC demonstration base written by uengine - no patient data\n")
 
 
+def _unit(x): return np.asarray(x, float) / np.linalg.norm(x)
+
+
+# synthetic candidate objects (world-defined): (list, id, kind, direction from the centre, in-plane tangent of the strip)
+OBJECTS = [("candidates", 1, "css_band", (0.55, 0.25, 0.80), (0.0, 1.0, 0.0)),
+           ("candidates", 2, "css_band", (-0.60, -0.20, 0.77), (0.3, 1.0, 0.0)),
+           ("candidates", 3, "surface_vein", (0.20, -0.65, 0.73), (1.0, 0.0, 0.0)),
+           ("candidates", 4, "surface_vein", (-0.25, 0.70, 0.67), (1.0, 0.2, 0.0)),
+           ("candidates", 5, "transcortical_vein", (0.70, -0.40, 0.59), None),
+           ("excluded", 1, "surface_vein", (-0.70, 0.45, 0.55), (0.0, 0.0, 1.0)),
+           ("excluded", 2, "tiny", (0.05, 0.05, 1.0), None)]
+
+
+def object_mask(p, kind, direction, tangent):
+    """world predicate of one synthetic object (cSS band: subpial sheet strip; surface vein: tube just outside the pial surface;
+    transcortical vein: radial tube crossing the cortex; tiny: a 1-2 voxel speck)"""
+    p = np.asarray(p, float); d = signed_distance(p); q = p / np.linalg.norm(p, axis=-1, keepdims=True)
+    k = _unit(direction)
+    if kind == "tiny": return np.zeros(d.shape, bool)                       # placed voxel-wise in write_study (2 voxels)
+    if kind == "transcortical_vein":
+        along = (p @ k); perp = np.linalg.norm(p - along[..., None] * k, axis=-1)
+        return (perp < 0.8) & (d > -6.0) & (d < 0.8) & (along > 0)
+    t = _unit(np.asarray(tangent, float) - (np.asarray(tangent, float) @ k) * k); w = np.cross(k, t)
+    in_strip_long = (q @ k) > np.cos(np.radians(16))
+    if kind == "css_band": return in_strip_long & (np.abs(q @ w) < 0.12) & (d > -1.3) & (d < 0.0)    # sheet, ~7 mm wide
+    if kind == "surface_vein": return in_strip_long & (np.abs(q @ w) < 0.022) & (d > 0.4) & (d < 1.5)
+    raise ValueError(kind)
+
+
 def write_study(base, sid, vox=(0.8, 0.8, 1.2), axcodes="RAS", rot_deg=(0, 0, 0), noise=0.01, seed=0, flair_shift_mm=(0, 0, 0),
-                channels=("swi", "phase", "flair", "labels", "pial_sd"), t1_route=True, lta_type=0, reg_cost=0.45, acquisition=None):
-    """one synthetic study laid out like $CSS_BASE; returns the file paths. Channels off the list are simply absent."""
+                channels=("swi", "phase", "flair", "labels", "pial_sd"), t1_route=True, lta_type=0, reg_cost=0.45, acquisition=None,
+                objects=True):
+    """one synthetic study laid out like $CSS_BASE; returns the file paths. Channels off the list are simply absent.
+    objects=True also writes review/ID_candidates|excluded.{nii.gz,csv} (detector-like tables: id + fingerprint only) and the truth
+    separately to unified_engine/image_truth/ID.csv (never read by the patch extractor)."""
     if not str(sid).startswith("SYN"): raise ValueError("synthetic study codes start with SYN")
     guard_base(base)
     for d in ("data", "work", f"raw/{sid}/SWI", "review"): os.makedirs(os.path.join(base, d), exist_ok=True)
@@ -149,7 +181,20 @@ def write_study(base, sid, vox=(0.8, 0.8, 1.2), axcodes="RAS", rot_deg=(0, 0, 0)
     def save(ch, data, rel, dtype=None):
         img = reorient(nifti(data if dtype is None else data.astype(dtype), A), axcodes)
         p = os.path.join(base, rel); nib.save(img, p); paths[ch] = p; return img
-    swi_img = save("swi", sample("swi", A, shape, noise, seed), f"data/{sid}_swi.nii")
+    swi = sample("swi", A, shape, noise, seed)
+    masks = {}
+    if objects:
+        ijk = np.indices(shape).reshape(3, -1).T.astype(float); W = (A[:3, :3] @ ijk.T).T + A[:3, 3]
+        for lst, oid, kind, k, t in OBJECTS:
+            m = object_mask(W, kind, k, t).reshape(shape)
+            if kind == "tiny":                                                   # exactly 2 voxels: the extractor's < 3 voxel path
+                c = _unit(k) / np.sqrt(((_unit(k) / SEMI_AXES_MM) ** 2).sum()) * 0.98
+                v0 = np.round(np.linalg.solve(A[:3, :3], c - A[:3, 3])).astype(int)
+                m = np.zeros(shape, bool); m[tuple(v0)] = True; m[tuple(v0 + [1, 0, 0])] = True
+            masks[(lst, oid, kind)] = m
+            swi = np.where(m, swi * 0.25, swi)                                 # dark on SWI (haemosiderin / deoxygenated blood)
+    swi_img = save("swi", swi, f"data/{sid}_swi.nii")
+    if objects: _write_objects(base, sid, masks, A, save, vox)
     if "phase" in channels: save("phase", sample("swi", A, shape, noise, seed + 1) - 0.5, f"data/{sid}_phase.nii.gz")
     if "flair" in channels: save("flair", sample("flair", A, shape, noise, seed + 2, shift_mm=flair_shift_mm), f"work/{sid}_flair_swispace.nii.gz")
     if "labels" in channels:
@@ -173,6 +218,33 @@ def write_study(base, sid, vox=(0.8, 0.8, 1.2), axcodes="RAS", rot_deg=(0, 0, 0)
                                                          SliceThickness=float(vox[2]), MRAcquisitionType="3D")
     with open(os.path.join(base, f"raw/{sid}/SWI/{sid}_swi.json"), "w") as f: json.dump(acq, f)
     return paths
+
+
+def _write_objects(base, sid, masks, A, save, vox):
+    """label maps + detector-like tables (id, fingerprint vox_i/j/k + volume_mm3, rule_version) in the STORED array order"""
+    import csv
+    shape = next(iter(masks.values())).shape; truth = []
+    for lst, idc in (("candidates", "cand_id"), ("excluded", "excl_id")):
+        lab = np.zeros(shape, np.int16)
+        for (l_, oid, _), m in masks.items():
+            if l_ == lst: lab[m & (lab == 0)] = oid
+        img = save(f"{lst}_mask", lab, f"review/{sid}_{lst}.nii.gz", np.int16)
+        L = np.asarray(img.dataobj); rows = []
+        for (l_, oid, kind), _ in masks.items():
+            if l_ != lst: continue
+            ijk = np.argwhere(L == oid)
+            if not len(ijk): continue
+            near = ijk[np.argmin(np.linalg.norm(ijk - ijk.mean(0), axis=1))]
+            rows.append({idc: oid, "vox_i": int(near[0]), "vox_j": int(near[1]), "vox_k": int(near[2]),
+                         "volume_mm3": round(float(len(ijk) * np.prod(vox)), 3), "rule_version": "SYNTHETIC-P2"})
+            if lst == "excluded": rows[-1]["reason"] = "synthetic"
+            truth.append(dict(study=sid, list=lst, id=oid, kind=kind, n_vox=len(ijk)))
+        cols = [idc] + (["reason"] if lst == "excluded" else []) + ["vox_i", "vox_j", "vox_k", "volume_mm3", "rule_version"]
+        with open(os.path.join(base, f"review/{sid}_{lst}.csv"), "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=cols); w.writeheader(); w.writerows(rows)
+    os.makedirs(os.path.join(base, "unified_engine", "image_truth"), exist_ok=True)
+    with open(os.path.join(base, "unified_engine", "image_truth", f"{sid}.csv"), "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=["study", "list", "id", "kind", "n_vox"]); w.writeheader(); w.writerows(truth)
 
 
 def make_older(path, than, seconds=60):
