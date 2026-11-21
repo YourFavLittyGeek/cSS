@@ -81,7 +81,9 @@ try:
     check("no vault yet -> Incognito by default; existing study registered", st["mode"] == "incognito" and not st["vault_exists"] and st["n_studies"] == 1)
     r1 = res(U)["P001"]
     check("Incognito without vault: legacy name not shown; study id = its code", r1["ident"]["study_id"] == "P001" and not leaks(json.dumps(r1)))
-    xl = pd.read_excel(io.BytesIO(raw(U, "/api/id/template.xlsx")), dtype=str)
+    tb = raw(U, "/api/id/template.xlsx")
+    if tb[:2] != b"PK": print("DIAG template response was not an xlsx:", tb[:300])      # intermittent failure seen once (2026-11-20): keep the evidence
+    xl = pd.read_excel(io.BytesIO(tb), dtype=str) if tb[:2] == b"PK" else pd.DataFrame()
     check("template: the four columns in order, example rows", list(xl.columns) == MF.COLUMNS and len(xl) == 3)
     check("vault: short passphrase refused", post(U, "/api/id/vault/create", dict(passphrase="short")).get("ok") is False)
     r = post(U, "/api/id/vault/create", dict(passphrase=PW)); check("vault created; legacy names copied in", r.get("ok") and r["names_copied"] == 1)

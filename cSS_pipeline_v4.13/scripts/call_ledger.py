@@ -79,10 +79,73 @@ def ledger(base, sid, cand=None):
                 nii = os.path.join(base, "review", f"{sid}_candidates.nii.gz"); fpath = os.path.join(base, s["file"])
                 if not (os.path.exists(nii) and os.path.getmtime(nii) > os.path.getmtime(fpath)) and int(r["cand_id"]) in set(cand.cand_id.astype(int)):
                     cid = int(r["cand_id"])
-            if cid is None: stale.append(dict(ent, cand_id=int(r["cand_id"]) if "cand_id" in r else None))
+            if cid is not None and all(c in s["rows"].columns for c in FP):
+                cur = cand.set_index("cand_id").loc[cid]
+                if any(abs(float(cur[f]) - float(r[f])) > 1e-6 for f in FP):     # same lesion by the strict fingerprint rule, but re-detected
+                    ent["matched"] = "re-attached by fingerprint after re-detection (centroid within 2 voxels, volume within 15 %)"
+            if cid is None:
+                ru = f"{sid}:{int(r['vox_i'])}:{int(r['vox_j'])}:{int(r['vox_k'])}:{float(r['volume_mm3']):g}" if all(c in s["rows"].columns for c in FP) else ""
+                stale.append(dict(ent, cand_id=int(r["cand_id"]) if "cand_id" in r else None, row_uid=ru))
             else: hist.setdefault(cid, []).append(ent)
+    # v5.17 candidate lineage (re-processing): a call made on an earlier run's candidate follows it ONLY through a confident match;
+    # possible matches stay out of the effective calls and are listed for confirmation (never silently transferred)
+    lin = lineage(base, sid); dec = decisions(base, sid); keep = []
+    for e in stale:
+        r = e.get("row_uid") and lin.get(e["row_uid"])
+        if r and r["status"] == "confident" and r.get("new_cand_id") is not None and len(cand) and int(r["new_cand_id"]) in set(cand.cand_id.astype(int)):
+            hist.setdefault(int(r["new_cand_id"]), []).append(dict(e, carried=dict(from_run=lin.get("_run_old", ""), old_cand_id=r["old_cand_id"], iou=r.get("iou"), why=r["why"])))
+        else:
+            if r and r["status"] == "possible":
+                k = f"{e['row_uid']}|{e['reviewer']}|{e['time']}"
+                e = dict(e, possible=True, suggested_new_cand_id=r.get("new_cand_id"), lineage_why=r["why"], decision=dec.get(k, ""))
+            keep.append(e)
+    stale = keep
     for v in hist.values(): v.sort(key=lambda e: (e["time"], e["reviewer"]))
     return hist, stale, names
+
+
+def lineage(base, sid):
+    """review/ID_lineage.json (candidate_lineage.py) as {old candidate uid: record}, plus _run_old"""
+    p = os.path.join(base, "review", f"{sid}_lineage.json")
+    try:
+        with open(p) as f: L = json.load(f)
+    except Exception: return {}
+    out = {r["old_uid"]: r for r in L.get("old", []) if r.get("old_uid")}; out["_run_old"] = L.get("run_old", ""); return out
+
+
+def decisions(base, sid):
+    p = os.path.join(base, "review", f"{sid}_lineage_decisions.json")
+    try:
+        with open(p) as f: return json.load(f)
+    except Exception: return {}
+
+
+def pending_confirmations(base, sid):
+    """earlier calls whose candidate has only a POSSIBLE match in the current run and no decision yet"""
+    _, stale, _ = ledger(base, sid)
+    return [e for e in stale if e.get("possible") and not e.get("decision")]
+
+
+def decide_carry(base, sid, row_uid, reviewer_of_call, time_of_call, decision, by):
+    """decision 'confirm': the confirming reviewer's OWN new call on the suggested current candidate (their file; comment records what
+    was confirmed). 'reject': recorded, the earlier call stays historical only. The earlier call itself is never changed."""
+    if decision not in ("confirm", "reject"): raise ValueError("decision must be confirm or reject")
+    if not str(by or "").strip(): raise ValueError("a reviewer name is required")
+    e = next((x for x in pending_confirmations(base, sid) if x["row_uid"] == row_uid and x["reviewer"] == reviewer_of_call and x["time"] == time_of_call), None)
+    if e is None: raise ValueError("no pending confirmation for that call")
+    k = f"{row_uid}|{reviewer_of_call}|{time_of_call}"; D = decisions(base, sid)
+    if decision == "confirm":
+        cand = candidates(base, sid).set_index("cand_id"); nc = int(e["suggested_new_cand_id"])
+        p = os.path.join(base, "review", f"{sid}_calls_{slug(by)}.csv")
+        d = _read(p) if os.path.exists(p) else pd.DataFrame(columns=["cand_id", "call", "comment", "reviewer", "time"] + FP)
+        d = d[d.cand_id != nc] if len(d) else d
+        row = dict(cand_id=nc, call=e["call"], comment=f"[confirmed carry-over of {reviewer_of_call}'s '{e['call']}' ({time_of_call}) from an earlier run: {e['lineage_why']}]",
+                   reviewer=by.strip(), time=_now(), **{f: cand.loc[nc, f] for f in FP})
+        pd.concat([d, pd.DataFrame([row])], ignore_index=True).to_csv(p, index=False)
+    D[k] = dict(decision=decision, by=by, time=_now()); dp = os.path.join(base, "review", f"{sid}_lineage_decisions.json")
+    with open(dp + ".tmp", "w") as f: json.dump(D, f, indent=1)
+    os.replace(dp + ".tmp", dp)
+    return dict(ok=True, decision=decision)
 
 
 # ---------------------------------------------------------------- policy
@@ -157,6 +220,8 @@ def effective(base, sid, cohort="", policy=None, cand=None):
             if own: pick, how = own[-1], "chosen reviewer"
             elif rule.get("fallback", "newest") == "newest" and H: pick, how = H[-1], "newest (chosen reviewer did not call it)"
         elif H: pick, how = H[-1], "newest"
+        if pick and pick.get("carried"): how += " · carried over from the earlier run (confident match)"
+        elif pick and pick.get("matched"): how += " · re-attached after re-detection (fingerprint)"
         rows.append(dict(cand_id=cid, effective_call=pick["call"] if pick else "", source_reviewer=pick["reviewer"] if pick else "",
                          source_time=pick["time"] if pick else "", source_rule=how, n_reviewers=len({e["reviewer"] for e in H}),
                          disagreement=len({e["call"] for e in H}) > 1, history=H))
@@ -188,10 +253,13 @@ def review_state(base, sid, cohort="", policy=None):
     if not any_calls and not comp: st, why = "not_started", "no reviewer call yet"
     elif last and called == n and (n > 0 or comp): st, why = "reviewed", f"all {n} candidates called; {last['kind']} by {last['reviewer']} {last['time']}"
     elif last and (E["stale"] or (cand_time and cand_time > last["time"])) and called < n:
-        st, why = "needs_rereview", f"candidates changed after the review ({n - called} without a call, {len(E['stale'])} earlier call(s) no longer match)"
+        pend = sum(1 for e in E["stale"] if e.get("possible") and not e.get("decision"))
+        st, why = "needs_rereview", f"candidates changed after the review ({n - called} without a call, {len(E['stale'])} earlier call(s) no longer match" + (
+            f", {pend} of them need your confirmation)" if pend else ")")
     elif called < n: st, why = "in_progress", f"{called} of {n} candidates called" + ("" if last else "; not finished")
     else: st, why = "in_progress", f"all {n} called but the review was not finished (no finish / final save)"
     return dict(state=st, label=STATE_LABEL[st], reason=why, n_candidates=n, n_called=called, n_stale=len(E["stale"]), completions=comp,
+                n_carried=sum(1 for r in E["rows"] if "carried over" in r.get("source_rule", "")), n_pending_confirmation=sum(1 for e in E["stale"] if e.get("possible") and not e.get("decision")),
                 reviewers=E["reviewers"], rule_text=E["rule_text"], scope=E["scope"])
 
 

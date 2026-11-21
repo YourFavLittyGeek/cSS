@@ -26,4 +26,5 @@ python3 tests/check_app_review_qc.py      # v5.15: Anatomy QC restored, review s
 python3 tests/check_identity.py            # v5.16: vault, uuids, unique identifiers, audited edits, manifest, import wizard
 python3 tests/check_app_identity.py        # v5.16: Standard / Incognito through the app, no identifier leaks, guided import
 python3 tests/check_gui_js_syntax.py      # every GUI script parses (a syntax error blanks the screen)
+python3 tests/check_lineage.py             # v5.17: re-processing keeps history; candidate lineage; calls move only on confident matches
 echo "unified-score tests: all passed"

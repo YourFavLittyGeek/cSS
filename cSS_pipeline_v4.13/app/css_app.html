@@ -330,7 +330,7 @@ function ptsView(v){const q=S.queue,sy=S.sys,z=S.mem_zones,coh=["all"].concat(S.
     if(a==="stop"&&!confirm("Stop this patient?"))return;
     if(a==="rerun"){const p=S.patients.find(x=>x.code===b.dataset.code);if(S.settings.rerun_mode==="auto"){const r=await api("/api/control",{code:p.code,action:"rerun"});
         toast(r.error?esc(r.error):`${esc(p.code)}: re-run with ${esc(PW()[p.pathway])} (same as last run)`,!!r.error);return render()}
-      $("#dlg").innerHTML=`<h2>Re-run ${esc(p.code)}</h2><p class="note">Last run: ${esc(PW()[p.pathway]||p.pathway)}${p.qc?` · QC ${esc(p.qc)}`:""}. The earlier results stay until the new run finishes.</p>
+      $("#dlg").innerHTML=`<h2>Re-run ${esc(p.code)}</h2><p class="note">Last run: ${esc(PW()[p.pathway]||p.pathway)}${p.qc?` · QC ${esc(p.qc)}`:""}. The earlier results stay until the new run finishes.</p><div class="banner" data-ln="rerun-note" style="display:block"><b>Re-processing from the original MRI</b> — detection, measurements, MATH and the experimental scores are made again with the current pipeline. The previous run is archived (Compare runs), never replaced. Every human call is kept: it moves to a new candidate only when the match is confident; possible matches wait for your confirmation and the study shows <b>Needs re-review</b> where calls are missing.</div>
        <div class="row">Pathway ${pwSel(p.pathway,p.pathway,'id="rrsel" style="flex:1"',p.tried)}</div><div class="note">✓ recommended = same as last run · Settings › Re-run can make this automatic.</div>
        <div class="acts" style="margin-top:10px"><button class="b" data-v="x">Cancel</button><button class="b pri" data-v="ok">Re-run</button></div>`;
       $("#shade").style.display="flex";$("#dlg").querySelectorAll("button").forEach(x=>x.onclick=async()=>{const val=$("#rrsel").value;$("#shade").style.display="none";if(x.dataset.v!=="ok")return;
@@ -632,7 +632,7 @@ function primaryAction(x){const p=x.p,r=x.r||{};
   return null}
 function sheetSummary(b,x){const p=x.p||{},r=x.r||{};const warn=[];if(p.error)warn.push(plainErr(p.error));if(p.path_note&&!p.path_ack)warn.push(p.path_note);if(p.stalled)warn.push(`no progress for ${p.stalled} min — check the Log; if nothing uses CPU, Stop and Retry`);
   b.innerHTML=`${warn.length?`<div class="banner w" style="display:block">${warn.map(w=>`<div>${esc(w)}</div>`).join("")}</div>`:""}
-   <div class="row" style="margin-bottom:8px"><button class="b sm" onclick="typeof openIdEdit==='function'&&openIdEdit('${esc(x.code)}')" data-id="edit">Edit identifiers</button></div>
+   <div class="row" style="margin-bottom:8px"><button class="b sm" onclick="typeof openIdEdit==='function'&&openIdEdit('${esc(x.code)}')" data-id="edit">Edit identifiers</button> <button class="b sm" onclick="typeof openLineage==='function'&&openLineage('${esc(x.code)}')" data-ln="open">Compare runs</button></div>
    <div class="kv"><div>Candidates</div><div>${r.candidates??"—"}</div><div>Reviewed</div><div>${r.reviewed!=null?`${r.reviewed} calls · ${r.css_called} cSS`:"not read yet"}</div>
     <div>Reader score</div><div>${r.score_total!=null?`<b>${r.score_total}</b> <span class="mut">(L ${r.score_L} / R ${r.score_R})</span>`:"—"}</div>
     <div>AI score</div><div>${r.ai_total!=null?`${r.ai_total} <span class="mut">(L ${r.ai_L} / R ${r.ai_R})</span> <span class="tag ai">not validated</span>`:(r.ai_err?`<span class="mut" title="${esc(r.ai_err)}">not available</span>`:"—")}</div>
@@ -794,5 +794,5 @@ nav((location.hash.match(/^#(\w+)/)||[])[1]||"studies");   // optional #view (e.
 setInterval(async()=>{const busy=document.activeElement&&document.activeElement.matches("input,select,textarea")||$("#shade").style.display==="flex"||($("#sexpm")&&!$("#sexpm").classList.contains("hide"));
   if(busy)return;if(V==="studies"||V==="act"){const y=window.scrollY;await render();window.scrollTo(0,y);if(V==="studies"&&W.cur&&W.tab!=="log"&&W.tab!=="technical"){const sb=$("#shb"),sy=sb?sb.scrollTop:0;await openSheet(W.cur);if($("#shb"))$("#shb").scrollTop=sy}}
   if($("#log").style.display==="block")loadLog()},4000);
-</script><script src="/unified_view.js"></script><script src="/shadow_view.js"></script><script src="/image_ml_view.js"></script><script src="/calls_view.js"></script><script src="/qc_view.js"></script><script src="/identity_view.js"></script><script src="/import_wizard_view.js"></script>
+</script><script src="/unified_view.js"></script><script src="/shadow_view.js"></script><script src="/image_ml_view.js"></script><script src="/calls_view.js"></script><script src="/qc_view.js"></script><script src="/identity_view.js"></script><script src="/import_wizard_view.js"></script><script src="/lineage_view.js"></script>
 </body></html>

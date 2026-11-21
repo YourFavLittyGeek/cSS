@@ -5,8 +5,12 @@ review_css.py format; calls re-load for the same reviewer and not for another; n
 import os, sys, json, time, subprocess, urllib.request, pandas as pd, numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); S = os.path.join(HERE, "..", "scripts"); B = os.environ["CSS_BASE"]
 def fail(m): print("FAIL:", m); srv.kill(); sys.exit(1)
-for f in ("PH3_calls.csv", "PH3_calls_Reader_A.csv", "PH3_calls_Reader_B.csv", "PH3_review_log.csv", "PH3_missed.csv", "reviewers.json", "PH3_primary.json"):
+for f in ("PH3_calls.csv", "PH3_calls_Reader_A.csv", "PH3_calls_Reader_B.csv", "PH3_review_log.csv", "PH3_missed.csv", "reviewers.json", "PH3_primary.json",
+          "call_policy.json", "PH3_effective.json", "PH3_lineage.json", "PH3_lineage_decisions.json"):            # v5.15+: ledger files, so the test can be re-run
     if os.path.exists(f"{B}/review/{f}"): os.remove(f"{B}/review/{f}")
+import shutil as _sh, glob as _gl; _sh.rmtree(f"{B}/review/call_history/PH3", ignore_errors=True)
+for f in _gl.glob(f"{B}/review/PH3_final*.json") + _gl.glob(f"{B}/review/PH3_score_rev_*.json") + _gl.glob(f"{B}/review/PH3_excluded_audit_*.csv") + _gl.glob(f"{B}/review/PH3_calls_*.csv"):
+    os.remove(f)                                                     # reviewer-made files of an earlier run of this test (detector outputs are kept)
 srv = subprocess.Popen([sys.executable, f"{S}/review_web.py", "PH3", "--no-browser", "--port", "8931", "--audit"], stdout=subprocess.PIPE, text=True)
 U = srv.stdout.readline().split("http://")[1].split()[0]; U = "http://" + U.rstrip("/")
 def get(p):

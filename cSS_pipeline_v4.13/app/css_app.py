@@ -122,6 +122,7 @@ def pm_execute(code, plan, note):
         try:
             if not ok: msg += "\nlog tail:\n" + (open(logf, errors="replace").read()[-1500:] if os.path.exists(logf) else "")
             st.finish_run(rid, ok, msg)
+            if ok and "detect" in plan["run"]: after_run_done(code, rid)
             notify_c("done" if ok else "action", "processing", f"Processing run {'finished' if ok else 'FAILED'} · {code}",
                      f"run {rid}: {', '.join(plan['run'])}" + ("" if ok else f" - {msg.splitlines()[0][:200]}; previous outputs restored"), actions=["open_processing"], study=code)
             p = pget(code)
@@ -134,6 +135,21 @@ def pm_execute(code, plan, note):
     threading.Thread(target=run, daemon=True).start()
     return rid
 
+def after_run_done(code, rid):
+    """v5.17: after a completed run - candidate lineage against the previous run (scripts/candidate_lineage.py) and the model provenance
+    of the run (which experimental models were applied or withheld). Never changes candidates, calls or scores."""
+    try:
+        import review_calls_gui as RCG
+        L = RCG._ledger(B)                                   # makes the project's scripts importable
+        import candidate_lineage as CLN
+        lin = CLN.after_run(B, code, rid)
+        st = PM.Study(B, code); p = pget(code) or {}
+        mdl = dict(deterministic_math=f"detector {version()}", unified_score=p.get("uscore_status") or ("off" if not SET["features"].get("unified_score") else "pending"),
+                   shadow_ml="on (after each finished study)" if SET["features"].get("shadow_engine") else "off",
+                   image_ml="withheld: only a SYNTHETIC-trained model exists" if not os.path.exists(f"{B}/unified_engine/SYNTHETIC_BASE") else "synthetic study: Image ML screen")
+        st._upd(rid, models=mdl, lineage=(lin or {}).get("summary"), ledger=L.LEDGER_VERSION)
+        return lin
+    except Exception as e: print("lineage / provenance not recorded:", e, flush=True)
 def pm_begin_full(p):
     """the normal pipeline (Add patients / Re-run) is recorded as a run too: the current outputs are archived first and put back if
     it fails. FreeSurfer is NOT renamed (prep_anat reuses a finished recon itself). Never blocks processing."""
@@ -152,6 +168,7 @@ def pm_end_full(p, ok, msg=""):
         for s_ in ("anatomy", "registration", "align", "detect"): st.stage_state(rid, s_, "done" if ok else "not completed")
         st.stage_state(rid, "unified", "runs separately after 'done' (opt-in)" if ok else "not run")
         st.finish_run(rid, ok, msg)
+        if ok: after_run_done(p["code"], rid)
     except Exception as e: print("processing history not updated:", e, flush=True)
 def pm_models_note(logf):
     """written at the start of every detection run: which production models are in force, verified and compatible"""
@@ -1004,6 +1021,28 @@ def id_post(op, d):
         if op == "import/commit": return IDG.plan_commit(d, add_to_queue, dict(cohort=d.get("cohort", ""), mode="semi"), by, import_src=f"{AD}/import_src")
         return dict(ok=False, error=f"unknown {op}")
     except Exception as e: return dict(ok=False, error=IDG.redact_text(f"{e}", SET, B)[-400:], kind=type(e).__name__)
+# ------------------------------------------------------------------ candidate lineage between runs (v5.17)
+def lineage_get(op, q):
+    try:
+        import review_calls_gui as RCG
+        L = RCG._ledger(B); code = q.get("code", "")
+        if op == "study":
+            p = os.path.join(B, "review", f"{code}_lineage.json"); lin = json.load(open(p)) if os.path.exists(p) else None
+            st = PM.Study(B, code); runs = [dict(run_id=m["run_id"], status=m.get("status"), note=m.get("note", ""), created=m.get("created"), parent=m.get("parent"),
+                                                 models=m.get("models"), lineage=m.get("lineage"), software=m.get("software")) for m in st.history()]
+            pend = L.pending_confirmations(B, code)
+            return dict(code=code, lineage=lin, runs=runs, active=(st.active_manifest() or {}).get("run_id"), pending=[{k: e.get(k) for k in
+                        ("row_uid", "reviewer", "call", "time", "comment", "suggested_new_cand_id", "lineage_why")} for e in pend], state=L.review_state(B, code))
+        return dict(error=f"unknown {op}")
+    except Exception as e: return dict(error=f"{type(e).__name__}: {e}"[-300:])
+def lineage_post(op, d):
+    try:
+        import review_calls_gui as RCG
+        L = RCG._ledger(B)
+        if op == "decide": return L.decide_carry(B, str(d.get("code", "")), str(d.get("row_uid", "")), str(d.get("reviewer", "")), str(d.get("time", "")),
+                                                 str(d.get("decision", "")), str(d.get("by", "")))
+        return dict(ok=False, error=f"unknown {op}")
+    except Exception as e: return dict(ok=False, error=f"{type(e).__name__}: {e}"[-300:])
 def last_activity(code):
     m = [os.path.getmtime(f) for f in (f"{AD}/logs/{code}.log", f"{B}/logs/{code}_run.log") if os.path.exists(f)]
     return max(m) if m else 0
@@ -1388,7 +1427,7 @@ class H(BaseHTTPRequestHandler):
             if u.path in ("/icon_dark.png", "/icon_light.png"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="image/png")
             if u.path == "/unified_view.js": return self.send(open(f"{HERE}/unified_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/shadow_view.js": return self.send(open(f"{HERE}/shadow_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
-            if u.path in ("/identity_view.js", "/import_wizard_view.js"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="text/javascript; charset=utf-8")
+            if u.path in ("/identity_view.js", "/import_wizard_view.js", "/lineage_view.js"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/qc_view.js": return self.send(open(f"{HERE}/qc_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/calls_view.js": return self.send(open(f"{HERE}/calls_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/image_ml_view.js": return self.send(open(f"{HERE}/image_ml_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
@@ -1428,6 +1467,7 @@ class H(BaseHTTPRequestHandler):
             if u.path.startswith("/api/im/"): return self.send(image_get(u.path[8:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/calls/"): return self.send(calls_get(u.path[11:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/fsqc/"): return self.send(fsqc_get(u.path[10:], {k: v[0] for k, v in parse_qs(u.query).items()}))
+            if u.path.startswith("/api/lineage/"): return self.send(lineage_get(u.path[13:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/id/") and u.path != "/api/id/template.xlsx": return self.send(id_get(u.path[8:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path == "/api/id/template.xlsx":
                 import manifest as MF
@@ -1573,6 +1613,7 @@ class H(BaseHTTPRequestHandler):
             if u.path.startswith("/api/im/"): return self.send(image_post(u.path[8:], d))
             if u.path.startswith("/api/calls/"): return self.send(calls_post(u.path[11:], d))
             if u.path.startswith("/api/fsqc/"): return self.send(fsqc_post(u.path[10:], d))
+            if u.path.startswith("/api/lineage/"): return self.send(lineage_post(u.path[13:], d))
             if u.path.startswith("/api/id/"): return self.send(id_post(u.path[8:], d))
             if u.path in ("/api/share", "/api/export"):           # explicit warning + confirmation, verified local folder only
                 if d.get("confirm_clinical") is not True: return self.send(dict(ok=False, needs_confirm=True, warning=EXPORT_WARNING,
