@@ -20,6 +20,9 @@ for c in range(1, len(s.df) + 1):
     print(("ok    " if ok else "FAIL  ") + f"PH6 #{c} ({kind}): tube {sh['tube']} sheet {sh['sheet']} blob {sh['blob']} | {m['summary'][:70]}")
     if not ok: fails.append(c)
     assert len(o["voxels"]["p"]) == int(obj.sum()), "every candidate voxel is sent (no subsampling)"
-check = np.array_equal(lab0, s.lab) and before == h()
+# v5.15: with FreeSurfer's mri_vol2vol on the PATH the reviewer writes ONE display cache, work/PH6_t1_swispace.nii.gz (review_web._make_t1,
+# by design, once). Every file that existed before must still be byte-identical; that cache is the only new file allowed.
+after = h(); cache = f"{B}/work/PH6_t1_swispace.nii.gz"
+check = np.array_equal(lab0, s.lab) and all(after.get(f) == v for f, v in before.items()) and set(after) - set(before) <= {cache}
 print(("ok    " if check else "FAIL  ") + "candidate labels and every PH6 review / work file unchanged")
 print(f"RESULT morph3d_api {'OK' if not fails and check else 'FAILED'}"); sys.exit(0 if not fails and check else 1)

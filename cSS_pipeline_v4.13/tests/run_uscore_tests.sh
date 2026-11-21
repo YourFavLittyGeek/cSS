@@ -20,4 +20,10 @@ python3 tests/check_local_only.py
 python3 tests/check_ui_poll.py
 python3 tests/check_selection_notifications.py
 python3 tests/check_app_unified.py
+python3 tests/check_call_ledger.py         # v5.15: every reviewer kept, effective call policy, review states, consolidation hard stop
+python3 tests/check_duplicate_detection.py # v5.15: no false duplicate on first-time import; genuine repeats still caught
+python3 tests/check_app_review_qc.py      # v5.15: Anatomy QC restored, review status, reviewer-call API / Excel
+python3 tests/check_identity.py            # v5.16: vault, uuids, unique identifiers, audited edits, manifest, import wizard
+python3 tests/check_app_identity.py        # v5.16: Standard / Incognito through the app, no identifier leaks, guided import
+python3 tests/check_gui_js_syntax.py      # every GUI script parses (a syntax error blanks the screen)
 echo "unified-score tests: all passed"

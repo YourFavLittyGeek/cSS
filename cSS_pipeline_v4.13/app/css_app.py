@@ -47,6 +47,9 @@ for p in PAT:                                            # resume after a restar
         p.update(uscore_status="interrupted", uscore_error="the app was closed during the unified step - press 'Score patient' to run it again")
 def save_pat(): jsave("patients.json", PAT)
 import processing_manager as PM                       # v5.14-gui Previous Processing Manager
+import identity_gui as IDG                            # v5.16 patient / examination identification (Standard / Incognito, encrypted vault)
+IDG.init(B, PAT, SET)
+def pname(code): return IDG.ident(code, SET).get("patient_name", "")       # only in Standard mode with the vault unlocked
 try: PM_RECOVERED = PM.recover_all(B)                 # runs left "running" by a closed app become "interrupted" (previous outputs restored)
 except Exception as _e: PM_RECOVERED = {"error": str(_e)}
 try: PM_IMPORTS_ROLLED_BACK = PM.recover_imports(B)  # imports cut off by a crash / quit are rolled back (nothing half-imported stays)
@@ -495,13 +498,55 @@ def scan_patient(folder, folder_is, rule):
         r["warnings"].append("this folder looks like an angiogram study - check that it is the brain MRI")
     if alt.get("SWI"): r["warnings"].append(f"{len(alt['SWI']) + 1} SWI series - the highest resolution was chosen")
     if SET["features"].get("duplicate_check") and "SWI" in pick_:
-        fp = next((s["fingerprint"] for s in ser if s["path"] == pick_["SWI"]), "")
-        r["fingerprint"] = fp
-        dup = [p["code"] for p in PAT if fp and p.get("fingerprint") == fp]
-        if dup: r["warnings"].append(f"this SWI is already in the project as {', '.join(dup)}")
+        r.update(duplicate_check(pick_["SWI"], ser))
+    r["warnings"] += r.pop("warnings_dup", [])
+    code_owner = next((p["code"] for p in PAT if r.get("code") and p["code"] == r["code"]), "")
+    if code_owner and not r.get("duplicate_of"):
+        r["warnings"].append(f"the code {r['code']} is already used by another study in this project (a different image, not a duplicate) - type a new code")
     if SET["features"].get("name_warning") and folder_is == "code" and looks_like_name(base):
         r["warnings"].append("the folder name looks like a person's name - it will be used as the study code")
     return r
+def upgrade_fingerprint(p):
+    """v5.15 additive migration of ONE study: compute the full content fingerprint of the SWI copy the import kept in raw/ID/SWI (the
+    NIfTI file whose old 64 KB fingerprint is the stored one, or the copied DICOM series). The old value stays in fingerprint_v1;
+    app_data/patients.json is backed up once before the first such change. Returns True when upgraded."""
+    old = str(p.get("fingerprint", "")); d = f"{B}/raw/{p['code']}/SWI"; new = ""
+    try:
+        if os.path.isdir(f"{d}/_dicom") and os.listdir(f"{d}/_dicom"): new = SD.content_fingerprint(f"{d}/_dicom")
+        else:
+            for f in sorted(glob.glob(f"{d}/*.nii") + glob.glob(f"{d}/*.nii.gz")):
+                with open(f, "rb") as fh: h1 = hashlib.sha1(fh.read(1 << 16)).hexdigest()[:16]
+                if h1 == old: new = SD.content_fingerprint(f); break
+    except Exception: return False
+    if not new: return False
+    bk = f"{AD}/backups/patients.before_fingerprint_v2.json"
+    if not os.path.exists(bk):
+        os.makedirs(os.path.dirname(bk), exist_ok=True); shutil.copy2(f"{AD}/patients.json", bk) if os.path.exists(f"{AD}/patients.json") else None
+    p.update(fingerprint=new, fingerprint_v1=old, fingerprint_upgraded=time.time()); save_pat(); return True
+def duplicate_check(swi_path, ser):
+    """v5.15: is this SWI already in the project? exact = the complete image content (or the full DICOM SeriesInstanceUID) is identical;
+    possible = only the old weak fingerprint of an earlier study matches (stored before v5.15: first 64 KB of the file). Different
+    studies with the same protocol header are no longer duplicates; a renamed or moved folder of the same study still is."""
+    v1 = next((x.get("fingerprint", "") for x in ser if x["path"] == swi_path), "")
+    try: fp = SD.content_fingerprint(swi_path)
+    except Exception as e: fp = ""; err = f"{type(e).__name__}: {e}"
+    else: err = ""
+    out = dict(fingerprint=fp, fingerprint_v1=v1, duplicate_of=[], duplicate_kind="", warnings_dup=[])
+    for p in PAT:                    # a study known only by the old weak fingerprint that matches: settle it from its own raw copy first
+        if fp and v1 and not str(p.get("fingerprint", "")).startswith(("c2:", "uid:")) and p.get("fingerprint") == v1: upgrade_fingerprint(p)
+    exact = [p["code"] for p in PAT if fp and p.get("fingerprint") == fp]
+    weak = [p["code"] for p in PAT if not exact and v1 and not str(p.get("fingerprint", "")).startswith(("c2:", "uid:")) and p.get("fingerprint") == v1]
+    if exact:
+        out.update(duplicate_of=exact, duplicate_kind="exact")
+        out["warnings_dup"].append(f"DUPLICATE: this SWI is identical to the one already imported as {', '.join(exact)} (same "
+                                   f"{'DICOM SeriesInstanceUID' if fp.startswith('uid:') else 'complete image content'}; folder name and location do not matter). "
+                                   "It is left out; tick Include to import it again anyway.")
+    elif weak:
+        out.update(duplicate_of=weak, duplicate_kind="possible")
+        out["warnings_dup"].append(f"possibly the same SWI as {', '.join(weak)}: only the older, weak fingerprint of that study is stored (first 64 KB of "
+                                   "the file: header + empty corner, which different studies with the same protocol can share). Check before including.")
+    if err: out["warnings_dup"].append(f"duplicate check not possible: {err}")
+    return out
 PATHWAYS = {"synthseg": "SynthSeg", "coreg_masked": "Fast re-registration", "synthmorph": "SynthMorph", "recon": "recon-all", "swi_only": "SWI-only"}
 SOLO = ("swi_only", "synthmorph")       # high / unknown memory: always run alone
 PW_TIME = {"synthseg": "~4 min", "coreg_masked": "~4 min", "synthmorph": "~5 min", "recon": "~2-3 h", "swi_only": "~30 min"}
@@ -590,23 +635,24 @@ def add_to_queue(items, st):
         if it.get("code"):
             c = it["code"]
             if not re.fullmatch(r"[A-Za-z0-9_\-]{1,32}", c): errs.append(f"{c}: codes may use letters, digits, - and _ only")
-            if c in codes_now or c in seen: errs.append(f"{c}: duplicate code")
+            if c in codes_now: errs.append(f"{c}: this code is already used by a study in the project - choose another code")
+            elif c in seen: errs.append(f"{c}: this code appears more than once in this batch")
             seen.add(c)
         if not it.get("chosen", {}).get("SWI"): errs.append(f"{it.get('code') or it.get('folder_name')}: no SWI chosen")
     if st.get("results_dir"):
         okd, why = verify_local_dest(st["results_dir"])
         if not okd: errs.append(f"results folder refused: {why}")
     if errs: return dict(ok=False, errors=errs)
-    added = []
+    added = []; pending_names = {}
     with LOCK:
         for it in items:
             code = it.get("code") or next_code()
-            if st.get("store_names") and it.get("name"): set_name(code, it["name"])
+            if st.get("store_names") and it.get("name") and IDG.reveal(SET): pending_names[code] = it["name"]     # v5.16: names go to the vault only
             pw = it.get("pathway") or ("recon" if st.get("anatomy") == "recon" else "synthseg")
             rec = it.get("pathway_rec") or pw
             p = dict(code=code, cohort=st.get("cohort", ""), anatomy="recon" if pw == "recon" else "synthseg", mode=st.get("mode", "semi"), pathway=pw,
                      results_dir=st.get("results_dir", ""), radiologist=it.get("radiologist", ""), grade_R=it.get("grade_R", ""), grade_L=it.get("grade_L", ""),
-                     series=it["chosen"], fingerprint=it.get("fingerprint", ""), step="", steps_done={}, added=time.time(),
+                     series=it["chosen"], fingerprint=it.get("fingerprint", ""), fingerprint_v1=it.get("fingerprint_v1", ""), step="", steps_done={}, added=time.time(),
                      status="decision" if (rec != (st.get("anatomy") or "synthseg") and not SET.get("auto_path", True) and it.get("decided") is not True) else "waiting",
                      path_note=(it.get("pathway_reason") or "") if rec != (st.get("anatomy") or "synthseg") or it.get("check") in ("changed", "look") else "", path_ack=False,
                      source_folder_hash=hashlib.sha1(it.get("folder", "").encode()).hexdigest()[:12])     # the folder path itself is not stored (may hold a name)
@@ -615,6 +661,10 @@ def add_to_queue(items, st):
             if p["cohort"] and p["cohort"] not in coh: coh.append(p["cohort"]); jsave("cohorts.json", coh)
         save_pat()
     write_grades_file()
+    IDG.ensure(PAT)                                   # v5.16: every new study gets a uuid / patient record (deid code = its code)
+    for code, nm in pending_names.items():
+        try: IDG.edit(dict(code=code, patient_name=nm, confirm=True, reason="name given at import"), SET, by="add studies")
+        except Exception: pass
     return dict(ok=True, added=added)
 def apply_pathway(p, pw):
     """set the run options for a pathway (SWI-only drops the T1 / FLAIR; registration methods go to prep_anat.sh)"""
@@ -635,7 +685,7 @@ def write_grades_file():
     import pandas as pd
     p = f"{B}/review/radiologist_grades.csv"; os.makedirs(f"{B}/review", exist_ok=True)
     old = pd.read_csv(p, dtype=str) if os.path.exists(p) else pd.DataFrame(columns=["study_id", "R", "L"])
-    new = pd.DataFrame([dict(study_id=x["code"], R=x["grade_R"], L=x["grade_L"]) for x in PAT if x.get("grade_R") != "" and x.get("grade_L") != ""])
+    new = pd.DataFrame([dict(study_id=x["code"], R=x["grade_R"], L=x["grade_L"]) for x in PAT if x.get("grade_R") not in (None, "") and x.get("grade_L") not in (None, "")])
     if len(new):
         old = old[~old.study_id.isin(new.study_id)]; pd.concat([old, new]).to_csv(p, index=False)
 
@@ -649,8 +699,13 @@ def stage(p):
             os.makedirs(f"{d}/{mod}", exist_ok=True)
             files = [src] if os.path.isfile(src) else [os.path.join(src, f) for f in os.listdir(src) if not f.startswith(".")]
             if os.path.isfile(src) and src.endswith((".nii", ".nii.gz")):
-                js = re.sub(r"\.nii(\.gz)?$", ".json", src)
-                if os.path.exists(js): files.append(js)
+                # v5.16: a NIfTI series is staged under a NEUTRAL name (its original file name can contain a patient name, and it would be
+                # copied into raw/ and the logs); the dcm2niix sidecar keeps the same base name so cohort.py still pairs them
+                ext = ".nii.gz" if src.endswith(".nii.gz") else ".nii"; js = re.sub(r"\.nii(\.gz)?$", ".json", src)
+                pairs = [(src, f"{d}/{mod}/{k}_series{ext}")] + ([(js, f"{d}/{mod}/{k}_series.json")] if os.path.exists(js) else [])
+                for f, dst in pairs:
+                    if not os.path.exists(dst): os.symlink(f, dst)
+                continue
             for f in files:
                 if os.path.isfile(f):
                     dst = f"{d}/{mod}/{k}_{os.path.basename(f)}"
@@ -890,6 +945,65 @@ def image_post(op, d):
         return dict(ok=False, error=f"unknown {op}")
     except Exception as e:
         return dict(ok=False, error=f"{type(e).__name__}: {e}"[-400:])
+# ------------------------------------------------------------------ reviewer calls: every reviewer kept, effective call by policy (v5.15)
+def calls_get(op, q):
+    try:
+        import review_calls_gui as RCG
+        if op == "policy": return RCG.policy(B, PAT)
+        if op == "study":
+            p = pget(q.get("code", "")); return RCG.study_calls(B, q["code"], (p or {}).get("cohort", "")) if p else dict(error="unknown study")
+        if op == "consolidate_plan": return RCG.consolidate_plan(B, PAT, q.get("scope", "study"), q.get("target", ""))
+        return dict(error=f"unknown {op}")
+    except Exception as e: return dict(error=f"{type(e).__name__}: {e}"[-400:])
+def calls_post(op, d):
+    try:
+        import review_calls_gui as RCG
+        by = str(d.get("by") or "").strip()
+        if op == "policy": return RCG.set_policy(B, PAT, d.get("scope", "all"), d.get("target", ""), d.get("rule"), by=by)
+        if op == "consolidate":
+            if d.get("confirm") is None: return dict(ok=False, needs_confirm=True, error="destructive: type the confirmation phrase")
+            return RCG.consolidate(B, PAT, d.get("scope", "study"), d.get("target", ""), str(d.get("confirm")), by=by)
+        if op == "restore": return RCG.restore(B, d["code"], d["archive"])
+        return dict(ok=False, error=f"unknown {op}")
+    except PermissionError as e: return dict(ok=False, refused=True, error=str(e))
+    except Exception as e: return dict(ok=False, error=f"{type(e).__name__}: {e}"[-400:])
+# ------------------------------------------------------------------ Anatomy QC (FreeSurfer / SynthSeg), restored in v5.15 - app/qc_gui.py
+def fsqc_get(op, q):
+    try:
+        import qc_gui as QG
+        if op == "state": return QG.state(B, AD, PAT, SET, PM, PM.studies_on_disk(B), find_license)
+        if op == "study": return QG.study(B, AD, q.get("code", ""), PM)
+        if op == "install": return QG.install(SET, find_license)
+        return dict(error=f"unknown {op}")
+    except Exception as e: return dict(error=f"Anatomy QC unavailable: {type(e).__name__}: {e}"[-400:])
+def fsqc_post(op, d):
+    try:
+        import qc_gui as QG
+        code = str(d.get("code", ""))
+        if not re.fullmatch(r"[A-Za-z0-9_\-]{1,32}", code): return dict(ok=False, error="bad study code")
+        if op == "snapshot": return QG.make_snapshot(B, AD, code, qc_snapshot)
+        if op == "freeview": return QG.freeview(B, code, SET, d.get("what", "swi"), find_license=find_license)
+        return dict(ok=False, error=f"unknown {op}")
+    except Exception as e: return dict(ok=False, error=f"{type(e).__name__}: {e}"[-400:])
+# ------------------------------------------------------------------ identification (v5.16) - app/identity_gui.py
+def id_get(op, q):
+    try:
+        if op == "state": return IDG.state(SET, PAT)
+        if op == "study": return IDG.ident(q.get("code", ""), SET)
+        if op == "history": return dict(history=IDG.history(q.get("code", ""), SET))
+        return dict(error=f"unknown {op}")
+    except Exception as e: return dict(error=f"{type(e).__name__}: {e}"[-300:])
+def id_post(op, d):
+    by = str(d.get("by") or "").strip() or "app user"
+    try:
+        if op == "mode": return IDG.set_mode(SET, d.get("mode"), str(d.get("passphrase", "")), save=lambda: jsave("settings.json", SET))
+        if op.startswith("vault/"): return IDG.vault(op[6:], d, SET, names=names, verify_dest=verify_local_dest)
+        if op == "edit": return IDG.edit(d, SET, by)
+        if op == "import/plan": return IDG.plan(d, SET, [p["code"] for p in PAT])
+        if op == "import/update": return IDG.plan_update(d, [p["code"] for p in PAT])
+        if op == "import/commit": return IDG.plan_commit(d, add_to_queue, dict(cohort=d.get("cohort", ""), mode="semi"), by, import_src=f"{AD}/import_src")
+        return dict(ok=False, error=f"unknown {op}")
+    except Exception as e: return dict(ok=False, error=IDG.redact_text(f"{e}", SET, B)[-400:], kind=type(e).__name__)
 def last_activity(code):
     m = [os.path.getmtime(f) for f in (f"{AD}/logs/{code}.log", f"{B}/logs/{code}_run.log") if os.path.exists(f)]
     return max(m) if m else 0
@@ -1053,15 +1167,20 @@ def eta(p):
 # ------------------------------------------------------------------ results
 def results():
     import pandas as pd
-    rows = []; nm = names()
+    rows = []
     for p in PAT:
-        c = p["code"]; r = dict(code=c, name=nm.get(c, ""), cohort=p.get("cohort", ""), mode=p.get("mode", ""), status=p["status"], version=p.get("version", ""),
+        c = p["code"]; r = dict(code=c, name=pname(c), ident=IDG.ident(c, SET), cohort=p.get("cohort", ""), mode=p.get("mode", ""), status=p["status"], version=p.get("version", ""),
                                 radiologist=p.get("radiologist", ""), rad_R=p.get("grade_R", ""), rad_L=p.get("grade_L", ""))
         f = f"{B}/review/{c}_candidates.csv"
         if os.path.exists(f): r["candidates"] = int(len(pd.read_csv(f)))
         f = f"{B}/review/{c}_calls.csv"
         if os.path.exists(f):
             k = pd.read_csv(f); r["reviewed"] = int(k.call.notna().sum()) if "call" in k else 0; r["css_called"] = int((k.get("call") == "cSS").sum()) if "call" in k else 0
+        if r.get("candidates") is not None:                 # v5.15: review state from EVERY reviewer's calls (call_ledger), not one score file
+            import review_calls_gui as RCG
+            rs = RCG.state(B, c, p.get("cohort", "")); r["review_state"] = rs.get("state"); r["review_label"] = rs.get("label")
+            r["review_reason"] = rs.get("reason", ""); r["reviewers"] = rs.get("reviewers", []); r["calls_rule"] = rs.get("rule_text", "")
+            if rs.get("n_called") is not None: r["reviewed"] = rs["n_called"]
         for tag, key in (("score", ""), ("ai", "_ai")):
             f = f"{B}/review/{c}_score{key}.json"
             if os.path.exists(f):
@@ -1073,13 +1192,36 @@ def results():
             r.update(unified_css_compatible=u.get("css_compatible"), unified_uncertain=u.get("uncertain"),
                      unified_alternative=u.get("alternative_high_confidence"), unified_model="fitted" if u.get("model") else "no model yet (detectors only)")
         elif u: r["unified_note"] = u.get("error", "")[:200]
-        r["label"] = "reviewed" if r.get("score_total") is not None else ("AI only, not validated" if r.get("ai_total") is not None else "")
+        r["label"] = ("reviewed" if r.get("review_state", "reviewed" if r.get("score_total") is not None else "") == "reviewed" else
+                      ("AI only, not validated" if r.get("ai_total") is not None else (r.get("review_label") or "").lower()))
         rows.append(r)
     return rows
+def _xlsx_sheets(writer, df, cohort=""):
+    """results + v5.15 per-candidate reviewer calls (one call / date-time column per reviewer; nothing removed) + the call policy"""
+    import pandas as pd, review_calls_gui as RCG
+    df.to_excel(writer, index=False, sheet_name="results")
+    try:
+        RCG.calls_sheet(B, PAT, cohort).to_excel(writer, index=False, sheet_name="candidate_calls")
+        pol = RCG.policy(B, PAT)["policy"]
+        rows = [dict(Scope="all studies", Target="", Rule=json.dumps(pol["default"]))] + [dict(Scope="cohort", Target=k, Rule=json.dumps(v)) for k, v in pol["cohorts"].items()] \
+            + [dict(Scope="study", Target=k, Rule=json.dumps(v)) for k, v in pol["studies"].items()]
+        pd.DataFrame(rows).to_excel(writer, index=False, sheet_name="call_policy")
+    except Exception as e: pd.DataFrame([dict(error=f"{type(e).__name__}: {e}")]).to_excel(writer, index=False, sheet_name="candidate_calls")
+def export_frame(rows):
+    """v5.16: exports carry the study identifier of the ACTIVE mode (accession in Standard, de-identified code in Incognito) and the
+    de-identified code; never MRN, patient name or the identity record"""
+    import pandas as pd
+    df = pd.DataFrame(rows)
+    if "ident" in df.columns:
+        df.insert(1, "study_id", [i.get("study_id", "") for i in df["ident"]]); df.insert(2, "deid_code", [i.get("deid_code", "") for i in df["ident"]])
+        df.insert(3, "study_id_kind", [i.get("id_kind", "") for i in df["ident"]]); df.insert(4, "display_name", [i.get("display_name", "") for i in df["ident"]])
+    return df.drop(columns=["name", "ident", "qc_tip", "ai_err", "reviewers"], errors="ignore")
 def export_xlsx():
     import pandas as pd
-    df = pd.DataFrame(results()).drop(columns=["name", "qc_tip", "ai_err"], errors="ignore")
-    bio = io.BytesIO(); df.to_excel(bio, index=False, sheet_name="results"); return bio.getvalue()
+    df = export_frame(results())
+    bio = io.BytesIO()
+    with pd.ExcelWriter(bio) as w: _xlsx_sheets(w, df)
+    return bio.getvalue()
 class ExportRefused(Exception): pass
 EXPORT_WARNING = ("This file holds clinical-derived research data (study codes, candidate calls, grades, scores). "
                   "It is written only to your chosen local folder and is never uploaded. Do not move it to cloud storage, e-mail or chat.")
@@ -1091,16 +1233,20 @@ def export_as(fmt, cohort=""):
     """results (codes only) -> <verified export folder>/cSS_results_<cohort>_<time>.<fmt>; fmt xlsx / csv / docx / pdf"""
     import pandas as pd
     rows = [r for r in results() if not cohort or cohort == "all" or r["cohort"] == cohort]
-    df = pd.DataFrame(rows).drop(columns=["name", "qc_tip", "ai_err"], errors="ignore")
+    miss = [r["code"] for r in rows if IDG.requires_accession(r["code"], SET)]
+    if miss: raise ExportRefused(f"export refused in Standard mode: {len(miss)} studies have no accession number yet ({', '.join(IDG.ident(c, SET).get('deid_code', c) for c in miss[:5])}"
+                                 f"{' ...' if len(miss) > 5 else ''}) - enter them (Studies › Edit identifiers) or export in Incognito mode")
+    df = export_frame(rows)
     out = os.path.join(export_dest(), f"cSS_results_{(cohort or 'all').replace('/', '_')}_{datetime.datetime.now():%Y%m%d_%H%M}.{fmt}")
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    if fmt == "xlsx": df.to_excel(out, index=False, sheet_name="results")
+    if fmt == "xlsx":
+        with pd.ExcelWriter(out) as w: _xlsx_sheets(w, df, cohort)
     elif fmt == "csv": df.to_csv(out, index=False)
     elif fmt == "docx": write_docx(out, df, cohort)
     elif fmt == "pdf": write_pdf(out, df, cohort)
     else: raise ValueError(f"unknown format {fmt}")
     return out
-COLS_SHORT = [("code", "Code"), ("cohort", "Cohort"), ("status", "Status"), ("qc_grade", "QC"), ("candidates", "Candidates"), ("score_L", "Reader L"),
+COLS_SHORT = [("study_id", "Study"), ("deid_code", "Code"), ("cohort", "Cohort"), ("status", "Status"), ("qc_grade", "QC"), ("candidates", "Candidates"), ("score_L", "Reader L"),
               ("score_R", "Reader R"), ("score_total", "Reader total"), ("ai_total", "AI total*"), ("rad_R", "Radiologist R"), ("rad_L", "Radiologist L")]
 def _cells(df):
     cols = [(k, h) for k, h in COLS_SHORT if k in df.columns]
@@ -1206,10 +1352,10 @@ def launch_child(kind, args, port0):
 
 # ------------------------------------------------------------------ HTTP
 def state():
-    nm = names(); out = []
+    out = []
     for p in PAT:
         el, rem = eta(p)
-        out.append(dict(code=p["code"], name=nm.get(p["code"], ""), cohort=p.get("cohort", ""), mode=p.get("mode"), anatomy=p.get("anatomy"),
+        out.append(dict(code=p["code"], name=pname(p["code"]), ident=IDG.ident(p["code"], SET), cohort=p.get("cohort", ""), mode=p.get("mode"), anatomy=p.get("anatomy"),
                         status=p["status"], step=p.get("step", ""), steps_done=list(p.get("steps_done", {}).keys()), error=p.get("error", ""),
                         elapsed=el, remaining=rem, reg_method=p.get("reg_method", ""), pathway=p.get("pathway", "synthseg"),
                         path_note=p.get("path_note", ""), path_ack=p.get("path_ack", True), solo=solo(p), started=p.get("started", 0),
@@ -1242,6 +1388,9 @@ class H(BaseHTTPRequestHandler):
             if u.path in ("/icon_dark.png", "/icon_light.png"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="image/png")
             if u.path == "/unified_view.js": return self.send(open(f"{HERE}/unified_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/shadow_view.js": return self.send(open(f"{HERE}/shadow_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
+            if u.path in ("/identity_view.js", "/import_wizard_view.js"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="text/javascript; charset=utf-8")
+            if u.path == "/qc_view.js": return self.send(open(f"{HERE}/qc_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
+            if u.path == "/calls_view.js": return self.send(open(f"{HERE}/calls_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/image_ml_view.js": return self.send(open(f"{HERE}/image_ml_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/api/preflight": return self.send(preflight())
             if u.path == "/api/log":
@@ -1249,7 +1398,7 @@ class H(BaseHTTPRequestHandler):
                 p = pget(q["code"]); rl = f"{B}/logs/{q['code']}_run.log"
                 if p and p["status"] in ("running", "paused") and os.path.exists(rl) and os.path.getmtime(rl) >= p.get("started", 0):
                     t += "\n----- live pipeline log (logs/" + q["code"] + "_run.log) -----\n" + open(rl, errors="replace").read()[-20000:]
-                return self.send(dict(text=t))
+                return self.send(dict(text=IDG.redact_text(t, SET, B)))
             if u.path == "/qc":
                 done = [p["code"] for p in PAT if os.path.exists(f"{AD}/qc/{p['code']}.png")]; c = q.get("code", done[0] if done else "")
                 i = done.index(c) if c in done else 0; th = SET.get("theme", "dark")
@@ -1277,7 +1426,15 @@ class H(BaseHTTPRequestHandler):
             if u.path.startswith("/api/u/"): return self.send(unified_get(u.path[7:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/se/"): return self.send(shadow_get(u.path[8:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/im/"): return self.send(image_get(u.path[8:], {k: v[0] for k, v in parse_qs(u.query).items()}))
+            if u.path.startswith("/api/calls/"): return self.send(calls_get(u.path[11:], {k: v[0] for k, v in parse_qs(u.query).items()}))
+            if u.path.startswith("/api/fsqc/"): return self.send(fsqc_get(u.path[10:], {k: v[0] for k, v in parse_qs(u.query).items()}))
+            if u.path.startswith("/api/id/") and u.path != "/api/id/template.xlsx": return self.send(id_get(u.path[8:], {k: v[0] for k, v in parse_qs(u.query).items()}))
+            if u.path == "/api/id/template.xlsx":
+                import manifest as MF
+                return self.send(MF.template_bytes(), ctype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fname="Percival_Import_Template.xlsx")
             if u.path == "/api/results": return self.send(results())
+            if u.path == "/api/export.xlsx" and [p["code"] for p in PAT if IDG.requires_accession(p["code"], SET)]:
+                return self.send(dict(error="export refused in Standard mode: some studies have no accession number yet - enter them (Studies › Edit identifiers) or switch to Incognito"), code=409)
             if u.path == "/api/export.xlsx": return self.send(export_xlsx(), ctype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fname="cSS_results.xlsx")
             if u.path == "/api/grades_template.xlsx": return self.send(grades_template(), ctype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fname="grades_template.xlsx")
             if u.path == "/api/packets":
@@ -1320,6 +1477,8 @@ class H(BaseHTTPRequestHandler):
                     if pr: os.killpg(pr.pid, signal.SIGCONT); os.killpg(pr.pid, signal.SIGTERM)
                 elif a in ("retry", "rerun") and p.get("linked"):
                     return self.send(dict(ok=False, error="this study was brought in from another project without its raw series: use the Processing tab (new detection run; anatomy is reused)"))
+                elif a in ("retry", "rerun", "swi_only", "recon", "coreg_masked", "synthmorph") and IDG.requires_accession(p["code"], SET):
+                    return self.send(dict(ok=False, error=IDG.requires_accession(p["code"], SET)))
                 elif a in ("retry", "rerun") and p["status"] in ("failed", "stopped", "done"):
                     if d.get("pathway") in PATHWAYS and d["pathway"] != p.get("pathway"): apply_pathway(p, d["pathway"])
                     p.update(status="waiting", error="", steps_done={}); CUR["hold"] = ""
@@ -1339,12 +1498,15 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/edit":
                 p = pget(d["code"])
                 if not p: return self.send(dict(error="unknown code"))
-                if "name" in d: set_name(p["code"], d["name"])
+                if "name" in d:                                # v5.16: names only in the encrypted vault (Standard mode, unlocked)
+                    if not IDG.reveal(SET): return self.send(dict(error="switch to Standard mode and unlock the identity vault to edit the patient name"))
+                    IDG.edit(dict(code=p["code"], patient_name=d["name"], confirm=True, reason="edited in the study list"), SET, by="app user")
                 if d.get("new_code") and d["new_code"] != p["code"]:
                     nc = d["new_code"]
                     if not re.fullmatch(r"[A-Za-z0-9_\-]{1,32}", nc) or pget(nc): return self.send(dict(error="invalid or duplicate code"))
                     if p["status"] not in ("waiting", "decision"): return self.send(dict(error="a code can only be changed before processing starts (results are filed under it)"))
-                    nm = names().get(p["code"], ""); set_name(nc, nm, old_code=p["code"]); p["code"] = nc
+                    nm = names().get(p["code"], ""); set_name(nc, nm, old_code=p["code"]) if nm else None
+                    IDG.rekey(p["code"], nc); p["code"] = nc            # before processing only: no file is named after it yet
                 for k in ("radiologist", "grade_R", "grade_L"):
                     if k in d: p[k] = d[k]
                 save_pat(); write_grades_file(); return self.send(dict(ok=True))
@@ -1409,6 +1571,9 @@ class H(BaseHTTPRequestHandler):
             if u.path.startswith("/api/u/"): return self.send(unified_post(u.path[7:], d))
             if u.path.startswith("/api/se/"): return self.send(shadow_post(u.path[8:], d))
             if u.path.startswith("/api/im/"): return self.send(image_post(u.path[8:], d))
+            if u.path.startswith("/api/calls/"): return self.send(calls_post(u.path[11:], d))
+            if u.path.startswith("/api/fsqc/"): return self.send(fsqc_post(u.path[10:], d))
+            if u.path.startswith("/api/id/"): return self.send(id_post(u.path[8:], d))
             if u.path in ("/api/share", "/api/export"):           # explicit warning + confirmation, verified local folder only
                 if d.get("confirm_clinical") is not True: return self.send(dict(ok=False, needs_confirm=True, warning=EXPORT_WARNING,
                                                                      error="export needs your confirmation of the clinical-data warning (dialog pending design approval)"))

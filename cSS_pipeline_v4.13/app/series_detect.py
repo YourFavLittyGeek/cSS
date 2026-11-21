@@ -47,6 +47,31 @@ def _dicom_info(files):
         except Exception: continue
     return info
 
+def _v1(p, n=16):
+    """the pre-v5.15 fingerprint (first 64 KB), kept only to recognise studies recorded before v5.15"""
+    with open(p, "rb") as fh: return hashlib.sha1(fh.read(1 << 16)).hexdigest()[:n]
+
+
+def content_fingerprint(path):
+    """v5.15 duplicate identity of an image: sha256 of the COMPLETE uncompressed NIfTI (header + every voxel), the same for .nii and
+    .nii.gz and independent of the folder name or location; for a DICOM series folder: 'uid:' + SeriesInstanceUID (or the sha256 of
+    every file of the series when no UID). The v1 fingerprint (first 64 KB only) collided for different studies with the same header."""
+    import gzip
+    h = hashlib.sha256()
+    if os.path.isdir(path):
+        dcm = sorted(os.path.join(path, f) for f in os.listdir(path) if not f.startswith(".") and os.path.isfile(os.path.join(path, f)))
+        uid = (_dicom_info(dcm).get("series_uid") or "") if dcm else ""
+        if uid: return "uid:" + uid
+        for f in dcm:
+            with open(f, "rb") as fh:
+                for b in iter(lambda: fh.read(1 << 20), b""): h.update(b)
+        return "c2:" + h.hexdigest()
+    op = gzip.open if path.endswith(".gz") else open
+    with op(path, "rb") as fh:
+        for b in iter(lambda: fh.read(1 << 20), b""): h.update(b)
+    return "c2:" + h.hexdigest()
+
+
 def scan(folder, max_depth=4):
     """-> list of series dicts: path, format, files, description, proposed type, reason, voxel, fingerprint"""
     out = []
@@ -66,12 +91,13 @@ def scan(folder, max_depth=4):
             js = os.path.join(root, name + ".json")
             if os.path.exists(js):
                 try:
-                    j = json.load(open(js)); desc = j.get("SeriesDescription", "") + " " + "\\".join(j.get("ImageType", []))
+                    with open(js) as fh: j = json.load(fh)
+                    desc = j.get("SeriesDescription", "") + " " + "\\".join(j.get("ImageType", []))
                     sdate = str(j.get("AcquisitionDateTime", "") or j.get("StudyDate", ""))[:10].replace("-", ""); acq = j.get("MRAcquisitionType", "")
                 except Exception: pass
             typ, why = classify(f"{os.path.basename(root) if root != folder else ''} {f} {desc}", desc)
             out.append(dict(path=p, format="NIfTI", ok=True, name=(os.path.basename(root) + "/" + f) if root != folder else f, relpath=os.path.relpath(p, folder), files=1, description=desc.strip(), type=typ, reason=why,
-                            voxel=vox, shape=shape, study_date=sdate, mr_acq=acq, fingerprint=hashlib.sha1(open(p, "rb").read(1 << 16)).hexdigest()[:16]))
+                            voxel=vox, shape=shape, study_date=sdate, mr_acq=acq, fingerprint=_v1(p)))
         dcm = [os.path.join(root, f) for f in files if f.lower().endswith(".dcm") or (not os.path.splitext(f)[1] and is_dicom(os.path.join(root, f)))]
         if dcm:
             inf = _dicom_info(dcm)
@@ -80,7 +106,7 @@ def scan(folder, max_depth=4):
                             description=inf.get("description", ""), image_type=inf.get("image_type", ""), type=typ, reason=why,
                             voxel=inf.get("voxel"), shape=[None, None, len(dcm)], te=inf.get("te"), field=inf.get("field"),
                             study_date=inf.get("study_date", ""), study_uid=inf.get("study_uid", ""), mr_acq=inf.get("mr_acq", ""),
-                            fingerprint=(inf.get("series_uid") or hashlib.sha1(open(dcm[0], "rb").read(1 << 16)).hexdigest())[:40]))
+                            fingerprint=(inf.get("series_uid") or _v1(dcm[0], 40))[:40]))
     return out
 
 def _res(s):

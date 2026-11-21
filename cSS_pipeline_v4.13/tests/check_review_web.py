@@ -59,7 +59,7 @@ if fin["reviewer"] != "Reader A" or fin["n_revoted"] != 1 or fin["reviewer_score
 rep = pd.read_csv(f"{B}/review/css_report.csv")
 if list(rep.Study) != ["PH3"] or "cSS score (0-4)" not in rep.columns or "Category" not in rep.columns: fail(f"report: {rep}")
 if get("/api/meta?study=PH3&reviewer=Reader%20A")["final"]["reviewer"] != "Reader A": fail("final record not returned with the study")
-# v5.7: a second reviewer starts empty, can import, has own score + final, never touches the shared files
+# v5.7: a second reviewer starts empty, can import, has own score + final; v5.15: shared files = effective (newest) calls
 if get("/api/meta?study=PH3&reviewer=Reader%20B")["calls"]: fail("a new reviewer must start empty")
 shared_before = open(f"{B}/review/PH3_calls.csv").read(); score_before = open(f"{B}/review/PH3_score.json").read()
 srcs = get("/api/meta?study=PH3&reviewer=Reader%20B")["import_sources"]
@@ -71,8 +71,22 @@ mb = get("/api/meta?study=PH3&reviewer=Reader%20B")["calls"][str(ids[0])]
 if mb["call"] != "Microbleed" or mb["comment"].startswith("[imported"): fail(f"Microbleed call / import marker not cleared: {mb}")
 gb = post("/api/finish", dict(study="PH3", reviewer="Reader B", final=True, read_mode="validation"))
 if gb["counts"].get("Microbleed") != 1 or gb["counts"].get("cSS", 0) != 0: fail(f"Reader B counts: {gb['counts']}")
-if open(f"{B}/review/PH3_calls.csv").read() != shared_before or open(f"{B}/review/PH3_score.json").read() != score_before:
-    fail("a non-primary reviewer changed the shared ID_calls.csv / ID_score.json")
+# v5.15 (user decision 2026-11-20): every reviewer is kept; the shared ID_calls.csv / ID_score.json hold the EFFECTIVE calls, by default
+# the NEWEST call of any reviewer. Reader B's newer Microbleed call is now effective; Reader A's own file is untouched; the earlier shared
+# files were copied to review/call_history/ first; choosing Reader A restores A's calls as the effective ones.
+sh = pd.read_csv(f"{B}/review/PH3_calls.csv").set_index("cand_id").call
+if sh.get(ids[0]) != "Microbleed": fail(f"newest call (Reader B: Microbleed) must be effective: {dict(sh)}")
+if list(pd.read_csv(f"{B}/review/PH3_calls.csv").columns) != ["cand_id", "call", "vox_i", "vox_j", "vox_k", "volume_mm3"]: fail("ID_calls.csv format changed")
+if pd.read_csv(f"{B}/review/PH3_calls_Reader_A.csv").set_index("cand_id").call.get(ids[0]) != "cSS": fail("Reader A's own calls were changed")
+if json.load(open(f"{B}/review/PH3_score.json"))["multifocality_0_4"] != 0: fail("shared score must follow the effective calls")
+hist = os.listdir(f"{B}/review/call_history/PH3")
+if not any(h.endswith("_PH3_calls.csv") and open(f"{B}/review/call_history/PH3/{h}").read() == shared_before for h in hist): fail("earlier shared calls not archived")
+if not any(h.endswith("_PH3_score.json") and open(f"{B}/review/call_history/PH3/{h}").read() == score_before for h in hist): fail("earlier shared score not archived")
+eff = json.load(open(f"{B}/review/PH3_effective.json"))
+if eff["rule"] != {"mode": "newest"} or eff["score_current"] is not True: fail(f"effective record: {eff}")
+post("/api/primary", dict(study="PH3", reviewer="Reader A", name="Reader A"))                 # = use Reader A's calls for this study
+if open(f"{B}/review/PH3_calls.csv").read() != shared_before: fail("choosing Reader A must make A's calls effective again")
+if json.load(open(f"{B}/review/PH3_score.json"))["multifocality_0_4"] != json.loads(score_before)["multifocality_0_4"]: fail("score must follow Reader A again")
 if not os.path.exists(f"{B}/review/PH3_score_rev_Reader_B.json") or gb["reader_score"]["multifocality_0_4"] != 0: fail(f"Reader B own score: {gb.get('reader_score')}")
 fb = json.load(open(f"{B}/review/PH3_final_Reader_B.json"))
 if fb["primary"] or fb["n_microbleed"] != 1 or fb["read_mode"] != "validation": fail(f"Reader B final: {fb}")

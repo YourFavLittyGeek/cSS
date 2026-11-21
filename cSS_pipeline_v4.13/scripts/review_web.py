@@ -31,6 +31,7 @@ from urllib.parse import urlparse, parse_qs
 from scipy import ndimage as ndi
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 from css_common import base as _base, save_calls, FP, norm_call
+import call_ledger as CL      # v5.15: every reviewer kept; shared ID_calls.csv / ID_score.json = EFFECTIVE calls (policy, default newest)
 
 B = _base()
 CALLS = ["cSS", "Vessel", "Normal", "Artifact", "Unsure", "Near ICH", "Microbleed"]   # v5.7: Microbleed (fine code MB) = not cSS
@@ -57,9 +58,9 @@ def primary(sid, set_to=None, if_missing=False):
 
 
 def score_path(sid, reviewer):
-    """the primary reviewer's score is the shared ID_score.json; every other reviewer has ID_score_rev_<name>.json"""
-    pr = primary(sid)                  # no primary yet (studies read before v5.7): the shared file, as before
-    return f"{B}/review/{sid}_score.json" if (not pr or (reviewer and pr == reviewer.strip())) else f"{B}/review/{sid}_score_rev_{slug(reviewer)}.json"
+    """v5.15: every reviewer's OWN score is ID_score_rev_<name>.json; the shared ID_score.json is the score of the EFFECTIVE calls
+    (call_ledger policy). Without a reviewer name: the shared file."""
+    return f"{B}/review/{sid}_score_rev_{slug(reviewer)}.json" if reviewer and reviewer.strip() else f"{B}/review/{sid}_score.json"
 
 
 def final_path(sid, reviewer): return f"{B}/review/{sid}_final_{slug(reviewer)}.json"
@@ -435,8 +436,8 @@ class Study:
         rows = [dict(cand_id=k, call=v["call"], comment=v.get("comment", ""), reviewer=reviewer, time=v.get("time", ""),
                      **{f: c.loc[k, f] for f in FP}) for k, v in sorted(calls.items()) if v.get("call") or v.get("comment")]
         pd.DataFrame(rows, columns=["cand_id", "call", "comment", "reviewer", "time"] + FP).to_csv(self.rpath(reviewer), index=False)
-        if primary(self.sid, reviewer, if_missing=True) == reviewer.strip():     # v5.7: shared legacy file = primary reviewer only
-            save_calls(B, self.sid, self.df, {k: v["call"] for k, v in calls.items() if v.get("call")})
+        primary(self.sid, reviewer, if_missing=True)                              # kept for display / the "use this reviewer" choice
+        CL.materialize(B, self.sid, by=reviewer, rescore=False)                  # v5.15: shared ID_calls.csv = effective calls (no re-score per click)
         if cand_id is not None:
             v = calls.get(cand_id, {}); lp = f"{B}/review/{self.sid}_review_log.csv"; new = not os.path.exists(lp)
             with open(lp, "a") as f:
@@ -615,7 +616,7 @@ def meta(sid, reviewer, mode=""):
                 seqs=[dict(key=k, **{a: b for a, b in s.meta_seq.get(k, dict(label=SEQ_NAMES[k])).items()}) for k in s.avail],
                 missing_seqs=[SEQ_NAMES[k] for k in ("flair", "t1", "t2", "phase") if k not in s.avail], ai_score=ai_score(s),
                 reader_score=(_score_json(score_path(sid, reviewer)) if calls else None),
-                final=load_final(sid, reviewer) if reviewer else None, primary=primary(sid),
+                final=load_final(sid, reviewer) if reviewer else None, primary=primary(sid), calls_rule=CL.effective(B, sid)["rule_text"],
                 import_sources=s.import_sources(reviewer) if reviewer else [],
                 ref=dict(mu=s.mu, sd=s.sd, src=s.ref_src), missed=s.missed().to_dict("records"), reviewers=reviewers(),
                 call_names=CALLS, side_check=side_check(s), snapdir=f"{B}/review/snapshots/{sid}", acq=acq_info(sid))
@@ -712,7 +713,11 @@ class H(BaseHTTPRequestHandler):
                 return self._send(dict(ok=True, calls=calls, imported=n, saved=now()))
             if u.path == "/api/primary":
                 name = str(d.get("name") or rev).strip()
-                return self._send(dict(ok=True, primary=primary(s.sid, name)))
+                pr = primary(s.sid, name)                     # v5.15: = use this reviewer's calls for this study (newest where they did not call)
+                with LOCK:
+                    CL.set_policy(B, "study", s.sid, dict(mode="reviewer", reviewer=name, fallback="newest"), by=rev or name)
+                    CL.materialize(B, s.sid, by=rev or name, rescore=True)
+                return self._send(dict(ok=True, primary=pr))
             if u.path == "/api/call" and int(d.get("cand_id", 0)) >= AUDIT_OFFSET:      # v5.7 excluded-object audit call
                 with LOCK:
                     au = s.load_audit(rev); cid = int(d["cand_id"]); cur = au.get(cid, dict(call="", comment=""))
@@ -745,14 +750,13 @@ class H(BaseHTTPRequestHandler):
                 calls, _ = s.load_calls(rev); c = {k: v["call"] for k, v in calls.items() if v.get("call")}
                 acc = sorted(k for k, v in c.items() if v == "cSS"); ich = sorted(k for k, v in c.items() if v == "Near ICH")
                 with LOCK: s.save(rev, calls)
-                if primary(s.sid) == rev:          # v5.7: only the primary reviewer writes the shared accept column / ID_score.json
-                    cmd = [sys.executable, f"{HERE}/mark_css.py", s.sid, ",".join(map(str, acc)) or "none", "--reviewed",
-                           ",".join(map(str, sorted(c))) or "none"] + (["--ich", ",".join(map(str, ich))] if ich else [])
-                else:
-                    cmd = [sys.executable, f"{HERE}/score_css.py", s.sid, "--accept-ids", ",".join(map(str, acc)) or "none",
-                           "--ich-ids", ",".join(map(str, ich)) or "none", "--reviewed-ids", ",".join(map(str, sorted(c))) or "none",
-                           "--tag", f"rev_{slug(rev)}"]
+                # v5.15: this reviewer's OWN score (ID_score_rev_<name>.json), then the shared score of the EFFECTIVE calls
+                cmd = [sys.executable, f"{HERE}/score_css.py", s.sid, "--accept-ids", ",".join(map(str, acc)) or "none",
+                       "--ich-ids", ",".join(map(str, ich)) or "none", "--reviewed-ids", ",".join(map(str, sorted(c))) or "none",
+                       "--tag", f"rev_{slug(rev)}"]
                 r = subprocess.run(cmd, capture_output=True, text=True, env=dict(os.environ, CSS_BASE=B, PYTHONWARNINGS="ignore"))
+                with LOCK: eff = CL.materialize(B, s.sid, by=rev, rescore=True)
+                if eff.get("score_ok") is False: r = subprocess.CompletedProcess(cmd, 1, r.stdout, (r.stderr or "") + "\neffective score failed: " + eff.get("score_note", ""))
                 xd_, _ = s._excluded(); au_ = s.load_audit(rev) if d.get("read_mode") == "validation" or d.get("final") else {}
                 audit = [dict(id=AUDIT_OFFSET + int(e.excl_id), rule=str(e.get("reason", "")).split(":")[0], region=str(e.get("region", "")).replace("ctx-lh-", "").replace("ctx-rh-", ""),
                               call=au_.get(AUDIT_OFFSET + int(e.excl_id), {}).get("call", "")) for _, e in xd_.iterrows()

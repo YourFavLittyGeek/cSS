@@ -25,7 +25,7 @@ async function uniView(v,keep){
   const st=await api("/api/u/state");U.st=st;U.sig=uSig(st);
   const banner=st.synthetic?`<div class="card" style="border-color:var(--bad);background:color-mix(in srgb,var(--bad) 12%,transparent)"><b class="bad">SYNTHETIC DEMO</b> — SYN studies only. Nothing on this page is a result.</div>`:"";
   v.innerHTML=`${banner}<div class="row" style="justify-content:space-between"><div><b style="font-size:17px">Unified cSS scoring</b> <span class="pill warn">EXPERIMENTAL · research only · not a diagnosis</span>
-    <span class="pill ok" id="u-supp">suppression: ${st.suppression?"ON":"OFF"}</span> <span class="pill" title="${esc(st.heldout.why)}">held-out: locked</span></div>
+    <span class="pill ok" id="u-supp">suppression: ${st.suppression?"ON":"OFF"}</span> <span class="pill" title="${esc(st.heldout.why)}">held-out: locked</span> <button class="b sm" onclick="typeof openCalls==='function'&&openCalls()" title="which reviewer's calls are used as training labels">Reviewer calls used for training</button></div>
     <div class="row"><span class="mut">Run after each patient</span>${seg("u-en",[["0","Off"],["1","On"]],st.enabled?"1":"0")}
     ${seg("u-tab",[["flow","Workflow"],["tests","Test protocol"]],U.tab)}</div></div><div id="u-body"></div>`;
   bindSeg("u-en",async x=>{if(x==="1"){const r=await ask("Turn on the unified score after each patient?","After a patient finishes and its original results are saved, the experimental unified score runs in the background (15-minute limit). It never changes the detector output, reader files or the original export.",[["no","Cancel"],["yes","Turn on","pri"]]);if(r!=="yes")return render()}

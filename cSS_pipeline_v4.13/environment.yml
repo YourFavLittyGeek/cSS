@@ -18,3 +18,4 @@ dependencies:
   - pydicom>=2.4        # v5.2.2 cohort import: isolate / repair broken DICOM series
   - dcmtk              # v5.2.2 dcmdjpeg: JPEG-compressed DICOM exports
   - openpyxl           # v5.2.1 compare_grades.py .xlsx output
+  - cryptography>=42  # v5.16 identity vault (AES-256-GCM); tested with 50.0.2

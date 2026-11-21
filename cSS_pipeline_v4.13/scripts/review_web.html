@@ -466,7 +466,7 @@ function scoreCard(title,sc,note){if(!sc||sc.multifocality_0_4===undefined)retur
   return `<div class="card"><div class="h">${title}</div><div class="big">${sc.multifocality_0_4}<span class="mut" style="font-size:16px"> / 4</span></div><div>Right <b>${sc.R_score}</b> · Left <b>${sc.L_score}</b></div><div><b>${esc(CATLBL[sc.category]||sc.category)}</b></div>
    <div class="mut sm">${sc.n_sulci_total!==undefined?sc.n_sulci_total+" sulci · ":""}${sc.n_lines_total!==undefined?sc.n_lines_total+" continuous cSS line(s)":""}${note?"<br>"+note:""}</div></div>`}
 function paintScores(){const ai=vmode?{}:(M.ai_score||{});
-  $("#scorechip").innerHTML=`Reviewer <b>${readerScore&&readerScore.multifocality_0_4!==undefined?readerScore.multifocality_0_4+"/4":"—"}</b> · AI <b>${vmode?"hidden":ai.multifocality_0_4!==undefined?ai.multifocality_0_4+"/4":"—"}</b>`+(M.primary?` · primary <b>${esc(M.primary)}</b>`:"")+(finalRec?` · <span class="ok">final saved</span>`:"");
+  $("#scorechip").innerHTML=`Reviewer <b>${readerScore&&readerScore.multifocality_0_4!==undefined?readerScore.multifocality_0_4+"/4":"—"}</b> · AI <b>${vmode?"hidden":ai.multifocality_0_4!==undefined?ai.multifocality_0_4+"/4":"—"}</b>`+(M.calls_rule?` · effective calls: <b>${esc(M.calls_rule)}</b>`:"")+(finalRec?` · <span class="ok">final saved</span>`:"");
   $("#scorecard").innerHTML=`<div class="sc">${scoreCard("Reviewer",readerScore,finalRec?("final saved "+esc(finalRec.saved)):"press Q to score")}${vmode?'<div class="card"><div class="h">AI</div><div class="mut">hidden in a validation read</div></div>':scoreCard("AI (not validated)",ai,(ai.n_green||0)+" green-band candidate(s)")}</div>`}
 function paintLists(){let n=0;$$("#strip .chip").forEach((e,i)=>{const c=M.cands[i];if(!c)return;const call=callOf(c);if(call)n++;e.style.background=call?CALLCOL[call]:"";e.style.color=call?"#fff":"";e.style.border=isInh(c)?"2px dashed #fff":"";e.style.opacity=isInh(c)?".75":"";
     e.title=(isInh(c)?"inherited from the earlier detection - press the same key to confirm  ·  ":"")+c.hemi+" "+c.region;e.classList.toggle("cur",i===ci)});
@@ -598,11 +598,11 @@ function nextAudit(){const L=M.cands.map((c,i)=>c.audit?i:-1).filter(i=>i>=0);
   if(!M.cands.some(c=>c.audit&&c.rule)){status("The excluded objects are revealed after your final save (press Q).",true);return}
   go(L.find(i=>i>ci)??L[0])}
 function setVmode(v){if(!M||!reviewer()){status("Enter your name first.",true);return}LSS("vmode_"+M.study+"|"+reviewer(),v);loadStudy(M.study)}
-async function showPrimary(){if(!M)return;const cur=M.primary||"(none yet: the first reviewer who saves)";
+async function showPrimary(){if(!M)return;const cur=M.calls_rule||"newest call of any reviewer";
   if(!reviewer()){status("Enter your name first.",true);return}
-  if(M.primary===reviewer()){toast(`You (${esc(reviewer())}) are the primary reviewer of ${esc(M.study)}: your calls are written to the shared files.`);return}
-  if(confirm(`Primary reviewer of ${M.study}: ${cur}.\n\nOnly the primary reviewer's calls go to the shared ${M.study}_calls.csv and ${M.study}_score.json; every other reviewer keeps an own score file.\n\nMake ${reviewer()} the primary reviewer?`)){
-    try{const r=await api("/api/primary",{study:M.study,reviewer:reviewer(),name:reviewer()});M.primary=r.primary;toast(`Primary reviewer of ${esc(M.study)}: ${esc(r.primary)}`)}catch(e){toast(esc(e.message),true)}}}
+  if(M.primary===reviewer()&&/calls of/.test(M.calls_rule||"")&&(M.calls_rule||"").includes(reviewer())){toast(`Your calls (${esc(reviewer())}) are the effective calls of ${esc(M.study)}.`);return}
+  if(confirm(`Effective calls of ${M.study}: ${cur}.\n\nEvery reviewer's calls are always kept. By default the newest call of any reviewer is used for the score, results and training.\n\nUse ${reviewer()}'s calls for ${M.study} instead (the newest call where ${reviewer()} did not call)? This can be changed back in the app (Studies › Reviewer calls).`)){
+    try{const r=await api("/api/primary",{study:M.study,reviewer:reviewer(),name:reviewer()});M.primary=r.primary;toast(`${esc(M.study)}: ${esc(r.primary)}'s calls are now the effective calls`)}catch(e){toast(esc(e.message),true)}}}
 function openImport(){if(vmode){status("Import is switched off during a validation read (it would unblind you).",true);return}
   if(!reviewer()){status("Enter your name first.",true);return}const S=M.import_sources||[];
   $("#imFrom").innerHTML=S.length?S.map(s=>`<option value="${esc(s.key)}">${esc(s.label)}</option>`).join(""):'<option value="">no earlier calls for this study</option>';
