@@ -1057,6 +1057,40 @@ def train_post(op, d):
         if op == "evaluate": return TG.run_evaluation(AD, n=int(d.get("n", 12)))
         return dict(ok=False, error=f"unknown {op}")
     except Exception as e: return dict(ok=False, error=f"{type(e).__name__}: {e}"[-300:])
+# ------------------------------------------------------------------ first-run setup wizard (v5.17) - app/setup_gui.py
+def _image_model_ok():
+    import image_ml_gui as IMG
+    return any(m.get("status") == "ok" for m in IMG.models(force=True).get("models", []))
+def setup_get(op, q):
+    try:
+        import setup_gui as SG
+        if op == "state":
+            items = SG.checks(B, AD, SET, fs_env, find_license, which, os.path.join(os.path.dirname(HERE), "unified_engine"), _image_model_ok)
+            return dict(first_run=SG.first_run(AD), items=items, report=SG.report(items, AD), settings=dict(freesurfer_home=SET.get("freesurfer_home", ""), fs_license=SET.get("fs_license", "")))
+        if op == "first_run": return dict(first_run=SG.first_run(AD))
+        return dict(error=f"unknown {op}")
+    except Exception as e: return dict(error=f"setup unavailable: {type(e).__name__}: {e}"[-300:])
+def setup_post(op, d):
+    try:
+        import setup_gui as SG
+        if op == "validate_fs": return SG.validate_fs(d.get("path"))
+        if op == "validate_license": return SG.validate_license(d.get("path"))
+        if op == "test": return SG.test_fs(d.get("home") or SET.get("freesurfer_home", ""), d.get("license") or find_license(SET.get("freesurfer_home", ""), fs_env()))
+        if op == "save":
+            v = SG.validate_fs(d.get("home")) if d.get("home") else dict(ok=True)
+            l = SG.validate_license(d.get("license")) if d.get("license") else dict(ok=True)
+            if not v["ok"]: return dict(ok=False, error=v["error"])
+            if not l["ok"]: return dict(ok=False, error=l["error"])
+            with LOCK:
+                if d.get("home"): SET["freesurfer_home"] = v["home"]
+                if d.get("license"): SET["fs_license"] = l["path"]
+                jsave("settings.json", SET)
+            return dict(ok=True, saved=dict(freesurfer_home=SET.get("freesurfer_home", ""), fs_license=SET.get("fs_license", "")))
+        if op == "finish":
+            items = SG.checks(B, AD, SET, fs_env, find_license, which, os.path.join(os.path.dirname(HERE), "unified_engine"), _image_model_ok)
+            return dict(ok=True, report=SG.report(items, AD, done=True))
+        return dict(ok=False, error=f"unknown {op}")
+    except Exception as e: return dict(ok=False, error=f"{type(e).__name__}: {e}"[-300:])
 def last_activity(code):
     m = [os.path.getmtime(f) for f in (f"{AD}/logs/{code}.log", f"{B}/logs/{code}_run.log") if os.path.exists(f)]
     return max(m) if m else 0
@@ -1441,7 +1475,7 @@ class H(BaseHTTPRequestHandler):
             if u.path in ("/icon_dark.png", "/icon_light.png"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="image/png")
             if u.path == "/unified_view.js": return self.send(open(f"{HERE}/unified_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/shadow_view.js": return self.send(open(f"{HERE}/shadow_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
-            if u.path in ("/identity_view.js", "/import_wizard_view.js", "/lineage_view.js", "/training_view.js"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="text/javascript; charset=utf-8")
+            if u.path in ("/identity_view.js", "/import_wizard_view.js", "/lineage_view.js", "/training_view.js", "/setup_view.js"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/qc_view.js": return self.send(open(f"{HERE}/qc_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/calls_view.js": return self.send(open(f"{HERE}/calls_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/image_ml_view.js": return self.send(open(f"{HERE}/image_ml_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
@@ -1483,6 +1517,7 @@ class H(BaseHTTPRequestHandler):
             if u.path.startswith("/api/fsqc/"): return self.send(fsqc_get(u.path[10:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/lineage/"): return self.send(lineage_get(u.path[13:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/train/"): return self.send(train_get(u.path[11:], {k: v[0] for k, v in parse_qs(u.query).items()}))
+            if u.path.startswith("/api/setup/"): return self.send(setup_get(u.path[11:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/id/") and u.path != "/api/id/template.xlsx": return self.send(id_get(u.path[8:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path == "/api/id/template.xlsx":
                 import manifest as MF
@@ -1630,6 +1665,7 @@ class H(BaseHTTPRequestHandler):
             if u.path.startswith("/api/fsqc/"): return self.send(fsqc_post(u.path[10:], d))
             if u.path.startswith("/api/lineage/"): return self.send(lineage_post(u.path[13:], d))
             if u.path.startswith("/api/train/"): return self.send(train_post(u.path[11:], d))
+            if u.path.startswith("/api/setup/"): return self.send(setup_post(u.path[11:], d))
             if u.path.startswith("/api/id/"): return self.send(id_post(u.path[8:], d))
             if u.path in ("/api/share", "/api/export"):           # explicit warning + confirmation, verified local folder only
                 if d.get("confirm_clinical") is not True: return self.send(dict(ok=False, needs_confirm=True, warning=EXPORT_WARNING,
