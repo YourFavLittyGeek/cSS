@@ -1,5 +1,5 @@
 #!/bin/bash
-# Percival DEVELOPMENT build launcher (branch feature/unified-score-ml-integration; v5.16 identification, v5.17 lineage / setup wizard).
+# Percival DEVELOPMENT build launcher (branch feature/unified-score-ml-integration; v5.16-v5.18: identification, lineage, setup wizard, one import pathway, study library, export).
 # Kept SEPARATE from both the production app and the Percival RC app:
 #   project folder  ~/Percival_project  (PERCIVAL_BASE overrides; ~/css_project and ~/cSS_experimental are refused and write-protected)
 #   port 8830 (production 8800, RC 8810), bundle id research.css.pipeline.percival-dev

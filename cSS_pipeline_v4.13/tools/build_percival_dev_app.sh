@@ -8,7 +8,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; OUT="${1:-$ROOT/../dist}"; mkdir -p "$OUT"; OUT="$(cd "$OUT" && pwd)"
 COMMIT="$(git -C "$ROOT" rev-parse HEAD)"; SHORT="${COMMIT:0:7}"; BR="$(git -C "$ROOT" rev-parse --abbrev-ref HEAD)"
 DIRTY=""; git -C "$ROOT" diff --quiet HEAD -- app scripts unified_score unified_engine tests tools || DIRTY=" (working tree has uncommitted changes - NOT included)"
-VER="v5.17-dev"; NAME="Percival_${VER}_${SHORT}"; STAGE="$(mktemp -d)"; SRC="$STAGE/src"; PKG="$STAGE/$NAME"; APP="$PKG/Percival Dev.app"
+VER="v5.18-dev"; NAME="Percival_${VER}_${SHORT}"; STAGE="$(mktemp -d)"; SRC="$STAGE/src"; PKG="$STAGE/$NAME"; APP="$PKG/Percival Dev.app"
 mkdir -p "$SRC" && git -C "$ROOT" archive HEAD . | tar -x -C "$SRC"          # committed files of the package root only
 R="$APP/Contents/Resources"; mkdir -p "$APP/Contents/MacOS" "$R/app/guard" "$R/pipeline/scripts" "$R/pipeline/tests"
 cp "$SRC/app/mac_percival/launcher.sh" "$APP/Contents/MacOS/Percival Dev"; chmod +x "$APP/Contents/MacOS/Percival Dev"

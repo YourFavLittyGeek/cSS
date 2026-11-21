@@ -1,4 +1,4 @@
-# Percival Dev - install and use (development build v5.17-dev)
+# Percival Dev - install and use (development build v5.18-dev)
 
 **Research software, not a diagnostic device.** The learned models in this build were trained on SYNTHETIC data only. The app runs
 entirely on this Mac, with no internet and no external AI service. It is separate from the production app (`~/css_project`, port 8800)
