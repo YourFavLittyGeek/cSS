@@ -46,5 +46,5 @@ FSH="${FSH%/}"     # never guessed: set in the setup wizard (or FREESURFER_HOME 
 if [ -n "$FSH" ] && [ -f "$FSH/SetUpFreeSurfer.sh" ]; then export FREESURFER_HOME="$FSH"; source "$FSH/SetUpFreeSurfer.sh" >> "$LOG" 2>&1; fi
 export SUBJECTS_DIR="$CSS_BASE/subjects" CSS_SUBJECTS_DIR="$CSS_BASE/subjects"
 export PYTHONPATH="$CSS_BASE/app/guard${PYTHONPATH:+:$PYTHONPATH}"
-nohup python "$CSS_BASE/app/css_app.py" --port "$PORT" >> "$LOG" 2>&1 &
+nohup python "$CSS_BASE/app/css_app.py" --port "$PORT" ${PERCIVAL_NO_WINDOW:+--no-window} >> "$LOG" 2>&1 &
 exit 0
