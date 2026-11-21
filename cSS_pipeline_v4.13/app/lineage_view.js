@@ -6,7 +6,7 @@ async function openLineage(code){const r=await api(`/api/lineage/study?code=${en
   const L=r.lineage,S=(L||{}).summary||{},st={confident:["confident match","ok"],possible:["possible match - confirm","warn"],no_match:["no longer detected","bad"]};
   const f=(x,n=2)=>x===null||x===undefined?"–":(typeof x==="number"?x.toFixed(n):esc(String(x)));
   const runs=(r.runs||[]).slice().reverse();
-  o.innerHTML=`<div class="card" style="width:min(1150px,100%);margin:0" data-ln="panel"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Compare runs · ${esc(code)}</h2><button class="b" id="ln-x">Close</button></div>
+  o.innerHTML=`<div class="card" style="width:min(1150px,100%);margin:0" data-ln="panel"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Compare runs · ${sidH(code)}</h2><button class="b" id="ln-x">Close</button></div>
    ${r.error?`<p class="bad">${esc(r.error)}</p>`:""}
    <div class="card"><b>Runs</b> <span class="note">every run is kept; the active run is the one shown in the app</span><table data-ln="runs"><tr><th>Run</th><th>Status</th><th>What</th><th>Models</th><th>Candidates vs previous</th></tr>
     ${runs.map(m=>`<tr><td class="mono">${esc(m.run_id)}${m.run_id===r.active?' <span class="pill ok">active</span>':""}</td><td>${esc(m.status)}</td><td class="note">${esc(m.note||"")}</td>

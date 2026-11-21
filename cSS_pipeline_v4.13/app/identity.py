@@ -202,9 +202,21 @@ class Identity:
         return dict(root=s["library_root"], rel=s.get("library_rel", ""), layout="incognito", locked=False)
 
     def commit(self):
+        if getattr(self, "_defer", False): return            # inside transaction(): written once at the end
         with LOCK:
             self._save_registry()
             if self._key is not None: self._write_vault()
+
+    def transaction(self, fn):
+        """v5.20 all-or-nothing change: fn() runs with commits deferred; on any error the registry and vault are restored in memory and
+        nothing is written; on success everything is written once"""
+        import copy
+        snap = (copy.deepcopy(self.R), copy.deepcopy(self._vault) if self._vault is not None else None)
+        self._defer = True
+        try: out = fn()
+        except Exception:
+            self.R, self._vault = snap; self._defer = False; raise
+        self._defer = False; self.commit(); return out
 
     # ------------------------------------------------------------------ migration of existing studies (additive)
     def migrate_existing(self, PAT, names=None, by="migration"):
@@ -321,5 +333,7 @@ class Identity:
             if pm and pu not in pm: return dict(kind="conflict", study_uuid=acc[0], why="this accession number belongs to an examination of a DIFFERENT patient")
             return dict(kind="conflict", study_uuid=acc[0], why="this accession number is already used by another examination (different images)")
         if dc: return dict(kind="conflict", study_uuid=dc, why="this de-identified study code is already used by another examination (different images)")
-        if mrn and self.unlocked() and self.patients_by_mrn(mrn): return dict(kind="same_patient_new_exam", study_uuid="", why="existing patient (same MRN), new examination")
-        return dict(kind="new", study_uuid="", why="new examination")
+        ret = [u for u, s in self.R["studies"].items() if fingerprint and (s.get("retired") or {}).get("fingerprint") == fingerprint]
+        note = f"previously removed - its results are kept for machine learning as {self.R['studies'][ret[0]]['deid_code']}" if ret else ""
+        if mrn and self.unlocked() and self.patients_by_mrn(mrn): return dict(kind="same_patient_new_exam", study_uuid="", why="existing patient (same MRN), new examination", retired_note=note)
+        return dict(kind="new", study_uuid="", why="new examination", retired_note=note)

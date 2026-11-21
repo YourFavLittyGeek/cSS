@@ -26,9 +26,21 @@ USABLE = ("ok", "low_confidence")
 QC_KEYS = ("status", "orientation_ok", "obliquity_deg", "anatomy", "edge_agreement_mm", "label_shift_mm")
 
 
+def local_learning_authorized(base):
+    """v5.21: the user authorised LOCAL learning on this project's MRI in the app (app_data/ml_authorization.json, written only by the
+    app's Model screen). Everything stays on this computer."""
+    try:
+        with open(os.path.join(base, "app_data", "ml_authorization.json")) as f: return bool(json.load(f).get("local_learning"))
+    except Exception: return False
+
+
+def is_synthetic_study(base, sid): return is_synthetic_base(base) and str(sid).startswith("SYN")
+
+
 def require_synthetic(base, sid):
-    if not is_synthetic_base(base): raise NotSynthetic(f"{base} is not a synthetic base (no marker) - Stage 2 P1 indexes synthetic data only")
-    if not str(sid).startswith("SYN"): raise NotSynthetic(f"study {sid!r} is not a synthetic study code (SYN...)")
+    if is_synthetic_study(base, sid) or local_learning_authorized(base): return
+    if not is_synthetic_base(base): raise NotSynthetic(f"{base} is not a synthetic base (no marker) - Stage 2 P1 indexes synthetic data only (local learning not authorised)")
+    raise NotSynthetic(f"study {sid!r} is not a synthetic study code (SYN...)")
 
 
 def _inputs(base, sid):
@@ -57,7 +69,7 @@ def _channel(base, sid, ch, swi_d, swi_path):
 def index_study(base, sid, write=False):
     require_synthetic(base, sid)
     before = _inputs(base, sid)
-    rec = dict(schema=INDEX_SCHEMA, imaging_version=IMAGING_VERSION, engine_version=ENGINE_VERSION, study_id=sid, synthetic=True,
+    rec = dict(schema=INDEX_SCHEMA, imaging_version=IMAGING_VERSION, engine_version=ENGINE_VERSION, study_id=sid, synthetic=is_synthetic_study(base, sid),
                created=datetime.datetime.now().isoformat(timespec="seconds"), pinned_sources_problems=verify_sources(),
                thresholds=dict(max_inplane_mm=G.MAX_INPLANE_MM, max_slice_mm=G.MAX_SLICE_MM, thick_slice_mm=G.THICK_SLICE_MM,
                                oblique_low_conf_deg=G.OBLIQUE_LOW_CONF_DEG, reg_cost_low_conf=RG.REG_COST_LOW_CONF,

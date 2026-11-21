@@ -1,10 +1,10 @@
 """Local-only verification: (1) static scan - no network library / external host in app, pipeline or scoring code;
-(2) runtime - the app, Processing Manager and unified-score app tests run with every non-loopback connection blocked and logged."""
+(2) runtime - the app, Processing Manager, unified-score and Percival (training, scoring, GUI) tests run with every non-loopback connection blocked and logged."""
 import os, re, sys, glob, subprocess, tempfile
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..")); F = []
 def ok(c, m): print(("PASS " if c else "FAIL ") + m); c or F.append(m)
-ALLOWED = {"scripts/run_lemon.sh"}       # optional public-dataset downloader (OpenNeuro LEMON); sends no local data, never called by the app
-files = [p for d in ("app", "scripts", "unified_score") for p in glob.glob(f"{ROOT}/{d}/**/*", recursive=True)
+ALLOWED = {"scripts/run_lemon.sh", "app/mac_percival/first_run_setup.sh"}       # first_run_setup: one-time, user-confirmed installer (Miniforge + open-source packages); sends no project data       # optional public-dataset downloader (OpenNeuro LEMON); sends no local data, never called by the app
+files = [p for d in ("app", "scripts", "unified_score", "unified_engine") for p in glob.glob(f"{ROOT}/{d}/**/*", recursive=True)      # v5.23: + unified_engine (Image ML, Percival)
          if p.endswith((".py", ".sh", ".js", ".html", ".command")) and "/mac/" not in p]
 bad = []
 for p in files:
@@ -18,9 +18,9 @@ for p in files:
 ok(not bad, "static scan: no network code or external host" + ("" if not bad else " -> " + "; ".join(sorted(set(bad))[:10])))
 ok(all(re.search(r'ThreadingHTTPServer\(\("127\.0\.0\.1"', open(f"{ROOT}/{p}").read()) for p in ("app/css_app.py", "scripts/review_web.py")), "servers bind to 127.0.0.1 only")
 log = tempfile.mktemp(); env = dict(os.environ, PYTHONPATH=os.path.join(ROOT, "tests", "netguard") + os.pathsep + os.environ.get("PYTHONPATH", ""), CSS_NETGUARD_LOG=log)
-for t in ("check_processing_manager.py", "check_app_unified.py"):
+for t in ("check_processing_manager.py", "check_app_unified.py", "check_percival.py", "check_app_percival.py"):      # v5.23: Percival training + scoring + GUI
     r = subprocess.run([sys.executable, os.path.join(ROOT, "tests", t)], env=env, capture_output=True, text=True, timeout=3000)
-    ok(r.returncode == 0, f"{t} passes with the network blocked")
+    ok(r.returncode == 0, f"{t} passes with the network blocked" + ("" if r.returncode == 0 else ": " + (r.stdout + r.stderr)[-300:]))
 ok(not os.path.exists(log) or not open(log).read().strip(), "no process attempted a non-loopback connection" + ("" if not os.path.exists(log) else ": " + open(log).read()[:300]))
 sys.path.insert(0, f"{ROOT}/app")
 sys.path.insert(0, f"{ROOT}/app/guard"); import css_writeguard as WG

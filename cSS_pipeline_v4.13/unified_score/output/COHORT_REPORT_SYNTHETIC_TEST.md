@@ -1,13 +1,13 @@
 # Unified cSS score: cohort report — SYNTHETIC TEST (not a result)
 
-Model `uscore-model/1.0` hash `93cb3ea6c6f0ac73` (FROZEN 2026-11-20T14:18:04); predictors x1_vessel_continuity_mm, x2_core_contrast_nu, x3_pial_distance_mm; ridge lambda 0.01; effective df 3.13. Probability output: **yes**. EXPERIMENTAL research output; not a diagnosis.
+Model `uscore-model/1.0` hash `1c4c1e81e8dc0bf4` (FROZEN 2026-11-21T03:14:01); predictors x1_vessel_continuity_mm, x2_core_contrast_nu, x3_pial_distance_mm; ridge lambda 0.01; effective df 3.13. Probability output: **yes**. EXPERIMENTAL research output; not a diagnosis.
 
 ## 1. Development estimates (nested leave-one-patient-out, out-of-fold; SYN01, SYN02, SYN03, SYN04, SYN05, SYN06)
 
 - **WARNING: the chosen penalty is at the edge of the search grid in some folds** (near-separable data: probabilities saturate)
 - candidates 24 (10 cSS) from 6 patients; fallback: ['fallback: 10 events / 5 slopes < 10 -> dropped x4_sulcal_alignment', 'fallback: 10 events / 4 slopes < 10 -> dropped x5_extracranial_mm']
 - discrimination: AUC 1.00 (patient-bootstrap 95 % CI [1.0, 1.0]); raw-score AUC 1.00
-- calibration: slope 0.97, intercept -0.19; Brier 0.000 (CI [2.4669119607478186e-21, 3.893679134296391e-19])
+- calibration: slope 0.97, intercept -0.19; Brier 0.000 (CI [2.4669119607478446e-21, 3.8936791342961756e-19])
 - reliability bins (mean predicted vs observed): 0.00→0.00 (n 11); 0.00→0.00 (n 11); 0.00→0.00 (n 14); 1.00→1.00 (n 10); 1.00→1.00 (n 8)
 - at the ordering cut 1.00 (prioritisation only): candidate sensitivity 1.00, specificity 1.00, FP per patient 0.00, patient sensitivity 1.00 (6 cSS-positive patients)
 

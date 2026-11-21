@@ -21,7 +21,7 @@ async function shadowView(v){
     ${bad.length?`<div class="card"><b>Models not used</b>${bad.map(m=>`<div class="note">${esc(m.name||m.path)}: <b>${esc(m.status)}</b> — ${esc((m.reasons||[]).join("; "))}</div>`).join("")}</div>`:""}
     ${st.models_error?`<div class="card"><b class="bad">Model registry error</b><div class="note">${esc(st.models_error)}</div></div>`:""}
     <div class="card"><table data-se="studies"><tr><th>Study</th><th>Study status</th><th>Shadow run</th><th>ML</th><th>Unified categories</th><th>Existing outputs unchanged</th><th></th></tr>
-    ${st.studies.map(s=>`<tr><td><b>${esc(s.code)}</b></td><td>${esc(s.status)}</td><td>${esc(s.shadow)}${s.created?` · ${esc(s.created)}`:""}</td>
+    ${st.studies.map(s=>`<tr><td><b>${sidH(s.code)}</b></td><td>${esc(s.status)}</td><td>${esc(s.shadow)}${s.created?` · ${esc(s.created)}`:""}</td>
       <td>${s.ml_applied===true?'<span class="ok">applied</span>':s.ml_applied===false?'<span class="warn">withheld (fallback)</span>':"–"}</td>
       <td class="note">${s.counts?Object.entries(s.counts).map(([k,n])=>`${esc(k)} ${n}`).join(" · "):"–"}</td>
       <td>${s.unchanged===true?'<span class="ok">✓ verified</span>':s.unchanged===false?'<b class="bad">✗ CHANGED</b>':"–"}</td>

@@ -22,6 +22,11 @@ PRODUCTION_FILES = ["detect_css.py", "score_css.py", "css_common.py", "css_qc.py
 def cohort():
     from uscore import common as cm
     if DEMO: return cm.Cohort(os.environ["CSS_USCORE_MANIFEST"], eligible_prefix="SYN", synthetic_test=True)
+    if not os.path.exists(cm.DEFAULT_MANIFEST):         # v5.21: the packaged app ships no cohort file (clinical-derived): an empty one
+        e = os.path.join(B, "uscore", "cohort_manifest_empty.csv"); os.makedirs(os.path.dirname(e), exist_ok=True)
+        if not os.path.exists(e):
+            with open(e, "w") as f: f.write("study_id,starts_with_M,decision,role,exclusion_reason,scoreability,source,note,container_name_collision\n")
+        return cm.Cohort(e)
     return cm.Cohort()
 
 

@@ -25,7 +25,7 @@ async function imageMlView(v){
      ${m?`<span class="pill warn" data-im="model">model ${esc(m.name)} v${esc(m.version)} · ${esc(m.data_kind)} · ${esc(m.status)}</span>`:'<span class="pill bad" data-im="model">no healthy image model — predictions withheld</span>'}</div></div>
    ${bad.length?`<div class="card"><b>Models not used</b>${bad.map(x=>`<div class="note">${esc(x.name||x.path)}: <b>${esc(x.status)}</b> — ${esc((x.reasons||[]).join("; "))}</div>`).join("")}</div>`:""}
    <div class="card"><table data-im="studies"><tr><th>Synthetic study</th><th>Image ML run</th><th>Model applied</th><th>Categories</th><th>Inputs unchanged</th><th></th></tr>
-   ${st.studies.map(s=>`<tr><td><b>${esc(s.code)}</b></td><td>${esc(s.job)}${s.created?` · ${esc(s.created)}`:""}</td>
+   ${st.studies.map(s=>`<tr><td><b>${sidH(s.code)}</b></td><td>${esc(s.job)}${s.created?` · ${esc(s.created)}`:""}</td>
      <td>${s.applied===true?'<span class="ok">yes</span>':s.applied===false?'<span class="warn">no</span>':"–"}</td>
      <td class="note">${s.counts?Object.entries(s.counts).map(([k,n])=>`${esc(k)} ${n}`).join(" · "):"–"}</td>
      <td>${s.unchanged===true?'<span class="ok">✓ verified</span>':s.unchanged===false?'<b class="bad">✗ CHANGED</b>':"–"}</td>

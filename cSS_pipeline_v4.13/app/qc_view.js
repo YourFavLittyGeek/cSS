@@ -21,7 +21,7 @@ async function qcView(v){
    <div class="tbar"><span class="seg">${[["all","All"],["ok","QC ok"],["low_confidence","Low confidence"],["missing_outputs","Outputs missing"],["insufficient_quality","Insufficient"],["not_processed","Not processed"]]
      .map(([k,t])=>`<button data-qf="${k}" class="${QCV.f===k?"on":""}">${t} <span class="mut">${cnt(k)}</span></button>`).join("")}</span></div>
    <div class="card" style="padding:0"><table data-qc="studies"><tr><th>Study</th><th>Anatomy route</th><th>QC</th><th>Label shift</th><th>Edge agreement</th><th>Registration</th><th>QC image</th><th>Why</th></tr>
-    ${S_.filter(s=>QCV.f==="all"||s.verdict===QCV.f).map(s=>`<tr data-qcs="${esc(s.code)}" style="cursor:pointer" class="${QCV.code===s.code?"sel":""}"><td><b>${esc(s.code)}</b></td><td>${esc(s.route)}</td><td>${qcPill(s.verdict)}</td>
+    ${S_.filter(s=>QCV.f==="all"||s.verdict===QCV.f).map(s=>`<tr data-qcs="${esc(s.code)}" style="cursor:pointer" class="${QCV.code===s.code?"sel":""}"><td><b>${sidH(s.code)}</b></td><td>${esc(s.route)}</td><td>${qcPill(s.verdict)}</td>
       <td>${s.metrics.label_shift_mm!=null?`${(+s.metrics.label_shift_mm).toFixed(2)} mm`:"–"}</td><td>${s.metrics.edge_agreement_mm!=null?`${(+s.metrics.edge_agreement_mm).toFixed(2)} mm`:"–"}</td>
       <td class="note">${s.metrics.registration?esc(`${s.metrics.registration.method||""} ${s.metrics.registration.cost!=null?"cost "+s.metrics.registration.cost:""}`):"–"}</td>
       <td>${s.snapshot.exists?(s.snapshot.stale?'<span class="warn">older than inputs</span>':'<span class="ok">yes</span>'):'<span class="mut">none</span>'}</td><td class="note" style="max-width:340px">${esc(s.why)}</td></tr>`).join("")}
@@ -31,7 +31,7 @@ async function qcView(v){
   if(QCV.code){const s=S_.find(x=>x.code===QCV.code);if(s)qcDetail(s)}}
 function qcDetail(s){
   const el=$("#qc-detail");if(!el)return;const fs=Object.entries(s.freesurfer||{}),wk=Object.entries(s.work||{}),M=s.metrics||{};
-  el.innerHTML=`<div class="card" data-qc="detail"><div class="row" style="justify-content:space-between"><h2 style="margin:0">${esc(s.code)} · ${esc(s.route)} ${qcPill(s.verdict)}</h2>
+  el.innerHTML=`<div class="card" data-qc="detail"><div class="row" style="justify-content:space-between"><h2 style="margin:0">${sidH(s.code)} · ${esc(s.route)} ${qcPill(s.verdict)}</h2>
      <div class="row"><button class="b" id="qc-snap" ${s.snapshot.can_make?"":"disabled"} title="${esc(s.snapshot.why_not||"")}">${s.snapshot.exists?"Re-make QC image":"Make QC image"}</button>
       <button class="b" id="qc-fv1" title="SWI with the labels used by the detector">Freeview: labels on SWI</button>
       <button class="b" id="qc-fv2" ${s.freesurfer_dir?"":"disabled"} title="FreeSurfer orig + aparc+aseg + surfaces">Freeview: FreeSurfer recon</button></div></div>

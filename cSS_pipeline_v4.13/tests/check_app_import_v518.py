@@ -15,7 +15,7 @@ write guard on, simulated pipeline runs). Covers:
   GUI       Add studies = one screen with two tabs (From folders / From another project); no "Store names", no separate guided import;
             folder-name choices name / MRN / accession / code / irrelevant
 usage: python tests/check_app_import_v518.py [--shots DIR]   (exit 1 on any FAIL)"""
-import glob, hashlib, json, os, shutil, socket, subprocess, sys, tempfile, time, urllib.error, urllib.request
+import glob, hashlib, json, re, os, shutil, socket, subprocess, sys, tempfile, time, urllib.error, urllib.request
 import numpy as np, nibabel as nib
 H = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(H); PY = sys.executable
 sys.path.insert(0, os.path.join(ROOT, "app")); import manifest as MF   # noqa: E402
@@ -203,7 +203,8 @@ try:
     D3 = dom(U, "#studies?grp=none&sort=mrn&dir=asc")
     check("Studies: sort by MRN ascending", D3.index(MRNS[0]) < D3.index(MRNS[1]))
     D4 = dom(U, f"#studies?grp=name&mrn={MRNS[1]}")
-    check("Studies: filter by MRN; grouped by patient name", MRNS[1] in D4 and f">{ACCS[0]}<" not in D4 and 'class="sgroup"' in D4)
+    TB4 = D4[D4.find("<tbody>"):D4.find("</tbody>")]       # the studies table only (the hidden log dialog lists every study too)
+    check("Studies: filter by MRN; grouped by patient name", MRNS[1] in TB4 and f">{ACCS[0]}<" not in TB4 and 'class="sgroup"' in TB4)
     D5 = dom(U, "#studies?grp=none&status=Reviewed")
     check("Studies: filter by status (none reviewed yet)", "No study matches these filters." in D5)
     shot(U, "v518_studies_standard", "#studies")

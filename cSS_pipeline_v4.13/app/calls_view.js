@@ -34,7 +34,7 @@ async function cvRender(){
         <label class="note"><input type="checkbox" id="cv-fb" ${CV.fallback==="newest"?"checked":""}> where this reviewer did not call: use the newest call</label>`:""}
       <button class="b pri" id="cv-apply" ${CV.mode==="reviewer"&&!rv.length?"disabled":""}>Apply</button></div></div>
    <div class="card" data-cv="studies"><b>Effective calls per study</b><div style="max-height:300px;overflow:auto"><table><tr><th>Study</th><th>Cohort</th><th>Rule (set for)</th><th>Reviewers</th><th>Effective calls from</th><th>Candidates with disagreement</th></tr>
-     ${r.studies.map(s=>`<tr><td><b>${esc(s.code)}</b></td><td>${esc(s.cohort)}</td><td class="note">${esc(s.rule_text)} <span class="mut">(${esc(s.scope)})</span></td><td class="note">${esc(s.reviewers.join(", ")||"–")}</td>
+     ${r.studies.map(s=>`<tr><td><b>${sidH(s.code)}</b></td><td>${esc(s.cohort)}</td><td class="note">${esc(s.rule_text)} <span class="mut">(${esc(s.scope)})</span></td><td class="note">${esc(s.reviewers.join(", ")||"–")}</td>
        <td class="note">${Object.entries(s.from_reviewer).filter(([k,n])=>n).map(([k,n])=>`${esc(k)} ${n}`).join(" · ")||"–"} <span class="mut">of ${s.n_candidates}</span></td><td>${s.disagreements||"–"}</td></tr>`).join("")}</table></div></div>
    ${hist.length?`<details><summary class="note">Recent rule changes</summary><table>${hist.map(h=>`<tr><td class="mono">${esc(h.time)}</td><td>${esc(h.scope)} ${esc(h.target||"")}</td><td class="note">${h.rule?ruleTxt(h.rule):"override removed"}</td><td class="note">${esc(h.by||"")}</td></tr>`).join("")}</table></details>`:""}
    <details data-cv="danger" ${CV.danger?"open":""}><summary><b class="bad">Rewrite old calls — keep only the newest</b></summary>

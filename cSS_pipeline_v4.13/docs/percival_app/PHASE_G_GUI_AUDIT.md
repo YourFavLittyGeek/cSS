@@ -90,3 +90,16 @@ opened, nothing was pushed, merged or deployed, and the model weights were not r
 - **Tests:** `check_app_import_v518.py` checks columns, status options, grouping, ungrouping, ascending / descending sort, MRN and
   status filters, Incognito without grouping, FLAIR, series advice and the template save. `check_app_add_layout.py` checks the series
   review layout.
+
+## 6. v5.20 (on your request): study administration
+See `STUDY_ADMINISTRATION.md`.
+- **Identifier rule:** accession in Standard, code in Incognito, on every screen including the reviewer window and notifications.
+- **Study panel:** MRN first.
+- **Edit:** Save / Discard, all-or-nothing checkpoint, library folder renamed.
+- **Archive:** separate screen; included in training by default (setting).
+- **Remove (keep for ML, RET identifier)** and **Purge**, both to the Trash.
+- **Import duplicate choices.**
+- **Previous-version reuse:** projects found, bring in all, and automatic reuse during imports.
+- **Tests:** `check_app_study_admin.py` (new, synthetic; uses a temporary Trash folder).
+- **Not covered by an automated test:** the reviewer window's labels. The label map is passed in memory and the reviewer shows it; the
+  reviewer's own test runs in the pipeline suite without a label map.

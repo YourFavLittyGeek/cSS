@@ -1,84 +1,57 @@
-# Percival Dev - install and use (development build v5.18-dev)
+# Percival Dev - read me first (development build v5.23-dev)
 
-**Research software, not a diagnostic device.** The learned models in this build were trained on SYNTHETIC data only. The app runs
-entirely on this Mac, with no internet and no external AI service. It is separate from the production app (`~/css_project`, port 8800)
-and the Percival RC app (`~/cSS_experimental`, port 8810), and it refuses to open or write to either of those project folders.
+**Research software, not a diagnostic device.** Percival learns only on this Mac, from your own MRI and expert reviews. The models it
+comes with were tested on SYNTHETIC data only; nothing in this build is clinically validated. No internet and no external AI service
+are used once it is installed. It is separate from the production app (`~/css_project`) and the Percival RC app (`~/cSS_experimental`)
+and refuses to open either of those project folders.
 
-## What is in the zip
-| item | what it is |
+## What is in the folder
+| Item | What it is |
 |---|---|
-| `Percival Dev.app` | the app, with the cSS pipeline scripts, the Unified Score code, the Unified engine and the synthetic image model inside |
-| `environment.yml` | the Python environment the app needs (conda env `css`) |
+| **Percival Dev.app** | the application for your project |
+| **Percival Demo.app** | the same application on a synthetic demo project (6 phantom studies, no patient data) - for trying things out |
+| `docs/` | how Percival works (`PERCIVAL_ARCHITECTURE.md`), the local-only design, the v5.23 report |
 | `USER_GUIDE.md` | screen-by-screen user guide |
-| `uninstall_percival_dev.sh` | removes the app (keeps your project folder unless you ask) |
+| `environment.yml`, `uninstall_percival_dev.sh` | for administrators only - not needed for normal use |
 
-## Install (once)
-1. **Miniforge (conda)**: if `conda` is not installed yet, install Miniforge from conda-forge.
-2. **Python environment** (in Terminal, from the unzipped folder):
-   ```zsh
-   conda env create -f environment.yml          # first time
-   conda env update -n css -f environment.yml   # if the "css" environment already exists (adds cryptography, openpyxl)
-   ```
-3. **FreeSurfer 8.x** and its licence file (`license.txt`), installed in any folder. Percival does not assume a location; you choose
-   it in the setup wizard. `dcm2niix` is needed for DICOM input (`brew install dcm2niix`).
-4. Drag **Percival Dev.app** into Applications. The app is not signed, so the first time: right-click › **Open** › **Open**.
+## Install - no Terminal needed
+1. Drag **Percival Dev.app** and **Percival Demo.app** into **Applications**.
+2. Double-click **Percival Dev**. If macOS says it cannot verify the developer (the app is not notarised): right-click the app ›
+   **Open** › **Open**. This is needed only the first time.
+3. **First start only** - Percival asks two things:
+   - **Where to keep your project** (default: `Percival_project` in your home folder; an existing one is reused automatically).
+     Desktop, Documents and cloud-synced folders are refused.
+   - **The one-time installation** of its Python components (when this Mac does not have them yet): press **Install**. It downloads
+     open-source packages from conda-forge (about 2 GB, 5-15 minutes, internet needed once) and tells you when it is finished. Your
+     projects are never sent anywhere. An existing `css` environment of the production pipeline is used if it is complete and is never
+     changed; otherwise Percival makes its own environment called `percival`.
+4. The Percival window opens and the **setup wizard** starts by itself: choose the **FreeSurfer** folder and its **licence file**
+   (Browse › Validate › Test the installation › Save), then **Finish setup**. FreeSurfer 8.x itself is installed separately (it is large
+   and has its own licence). Without FreeSurfer you can still review, look at results and use the research screens.
 
-## First start
-- On first start the app creates its project folder **`~/Percival_project`** and installs the bundled pipeline into it (scripts are
-  backed up on later updates).
-- The **setup wizard** opens by itself:
-  1. Installation check (required and optional items).
-  2. FreeSurfer folder and licence: Browse, Validate, then Test the installation and Save. The licence contents are never shown.
-  3. Readiness report, then **Finish setup**.
-- The window opens at http://127.0.0.1:8830. Closing the window does not stop processing; Settings › **Quit the app** does.
-- To use another project folder or port, start the app from Terminal:
-  ```zsh
-  PERCIVAL_BASE=~/Percival_other PERCIVAL_PORT=8831 "/Applications/Percival Dev.app/Contents/MacOS/Percival Dev"
-  ```
-  Desktop, Documents and cloud-synced folders are refused.
+Double-clicking Percival again while it runs just brings its window back.
 
-## Try it on synthetic data first
-```zsh
-conda activate css
-python "/Applications/Percival Dev.app/Contents/Resources/pipeline/unified_engine/run_imaging.py" cohort ~/Percival_demo --n 4 --seed 42
-PERCIVAL_BASE=~/Percival_demo "/Applications/Percival Dev.app/Contents/MacOS/Percival Dev"
-```
-This makes four synthetic studies (SYN001-SYN004) that work with every screen, including Image ML. Image ML only runs on synthetic
-studies.
+## Try it first with the demo
+Double-click **Percival Demo**. It creates synthetic studies in `~/Percival_demo` and opens on them (port 8831), so it never mixes with
+your project.
 
-## Daily use
-1. **Identification**: the header switch is **Standard | Incognito**.
-   - Incognito (the default) shows only de-identified study codes.
-   - Standard shows MRN, name and accession number from the encrypted vault on this Mac. It asks for the vault passphrase after each
-     start; keep the passphrase somewhere separate.
-2. **Add studies › From folders**: choose the data folder, say what the folder names are (patient name · MRN · accession number · code
-   · irrelevant), and choose the mode.
-   - **Standard:** MRN and accession number are required; the name is optional; a blank code is generated.
-   - **Incognito:** the key is required (Excel file with MRN, name, accession number and code), and every examination needs its code.
-   - The Excel file is **Percival_Import_Template.xlsx**. When the folder names are irrelevant, fill its `folder` column.
-   - Optionally turn on the **study library** (a verified copy of your MRI; your folders are never renamed). Check the preview; SWI and
-     T1 are chosen automatically, and **Series…** lets you choose another. Then press **Import and start**.
-   - To export: **Studies › Export ▾ › Studies with files…** saves results, processed files and MRI to a folder you choose.
-3. **Activity**: processing runs from the queue.
-4. **Review**: give your call per candidate.
-   - Calls are grouped as cSS / mimics / other, with subtype chips. Keys: Y V N B A U H; Shift+1..6 picks a subtype; Z undoes.
-   - The AI meter is the rule-based detector, not a reviewer.
-5. **Studies › Reviewer calls**: every reviewer's calls are kept, with date and time.
-   - The newest call is used by default, or a chosen reviewer per study, per cohort or for all studies.
-   - "Rewrite old calls" asks for a typed confirmation and archives the old calls first.
-6. **Re-run** reprocesses a study from the original MRI.
-   - Earlier calls move to the new candidates only on a confident match.
-   - Possible matches wait for you in **Compare runs**.
-7. **Anatomy QC**: FreeSurfer / SynthSeg / registration outputs, the QC image, Freeview.
-8. **Research screens** (experimental): Training, Model (Unified Score), Shadow ML, Image ML.
+## Using the Percival Score
+1. Research › **Percival Intelligence** › **Switch on local learning** (once per project).
+2. Review studies as usual and press **Save final**.
+3. **Start a training cycle** (or let one start after every 5 newly finished studies). A new model is used only if it passes the
+   acceptance tests on patients it never learned from; otherwise it is kept as a candidate (Registry: Make active / Roll back).
+4. In the reviewer each candidate has **one Percival Score (0-100)** with red / yellow / green; **Why this score** shows the evidence.
+   It is hidden during a blind validation read.
+The score is an experimental assessment calibrated on your own reviews - not a probability of cSS.
 
 ## Update / uninstall
-- **Update**: replace the app with a newer build. On the next start it reinstalls the pipeline into the project; old scripts go to
-  `scripts/backup_*`, and your calls, grades and results are kept.
-- **Uninstall**: `bash uninstall_percival_dev.sh` removes the app. Adding `--remove-project` moves the project to the Trash, after a
-  typed confirmation.
+- **Update**: drag the newer Percival Dev.app over the old one. On the next start it updates the pipeline in your project; old scripts
+  are backed up; your calls, grades, results and models are kept.
+- **Uninstall**: drag the two apps to the Trash. Your project folder stays until you delete it yourself.
 
-## Logs and help
-- Logs: `~/Percival_project/app_data/logs/launcher.log`.
-- If the app does not open, check that log first. The usual causes are: conda env `css` missing, the env missing cryptography (step 2),
-  or port 8830 already in use (set `PERCIVAL_PORT`).
+## If something does not work
+- Installation log: `~/Library/Application Support/Percival Dev/setup.log`
+- App log: `<your project>/app_data/logs/launcher.log`
+- "Port 8830 is used by another program": quit the other program or the other Percival, then open Percival again.
+- To choose a different project folder later: delete `~/Library/Application Support/Percival Dev/project_path` (Finder › Go › Go to
+  Folder…) and open Percival again.

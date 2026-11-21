@@ -533,6 +533,11 @@ def ai_score(s):
     return s._ai
 
 STUDIES = {}; IDS = []
+# v5.20 display labels from the Percival app (in memory, never written to disk): Standard = accession number, Incognito = code.
+# Run on its own (no label map) the reviewer shows the study keys as before.
+# (named STUDY_LABELS: 'LABELS' is css_common's fine-label table, used by meta() - v5.23 fix of the v5.20 name clash that broke /api/meta)
+try: STUDY_LABELS = json.loads(os.environ.get("CSS_STUDY_LABELS", "") or "{}")
+except Exception: STUDY_LABELS = {}
 def study(sid):
     if sid not in IDS: raise KeyError(sid)
     with LOCK:
@@ -625,7 +630,10 @@ def meta(sid, reviewer, mode=""):
                           feat={k: g(k) for k in ("darkness_z", "pial_dist_mm", "tube_ratio", "tram_frac", "extent_mm", "n_slices",
                                                   "css_evidence", "vein_evidence", "score")}))
     if audit: cands += s.audit_cands(reviewer)
-    return dict(study=sid, studies=IDS, groups=GROUPS, shape=list(s.shape), vox=s.vox, cands=cands, calls=calls, mode="validation" if audit else "", open_read=OPEN_READ, note=note, qc=s.qc,
+    up = f"{B}/unified_engine/percival/scores/{sid}.json"                # v5.22 Percival Score of the app's local model (display only, an AI prediction)
+    try: percival = json.load(open(up)) if os.path.exists(up) else None
+    except Exception: percival = None
+    return dict(study=sid, studies=IDS, labels={k: STUDY_LABELS[k] for k in IDS if k in STUDY_LABELS}, percival=percival, groups=GROUPS, shape=list(s.shape), vox=s.vox, cands=cands, calls=calls, mode="validation" if audit else "", open_read=OPEN_READ, note=note, qc=s.qc,
                 seqs=[dict(key=k, **{a: b for a, b in s.meta_seq.get(k, dict(label=SEQ_NAMES[k])).items()}) for k in s.avail],
                 missing_seqs=[SEQ_NAMES[k] for k in ("flair", "t1", "t2", "phase") if k not in s.avail], ai_score=ai_score(s),
                 reader_score=(_score_json(score_path(sid, reviewer)) if calls else None),

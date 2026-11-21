@@ -150,7 +150,7 @@ def extract_study(base, sid, write=False):
                             registration={k: v.get("status") for k, v in rec["registration"].items()},
                             channel_status={c: ch[c]["status"] for c in X.CHANNELS}, extractor="scripts/surface_aligned_patch.py",
                             extractor_sha256=SAP_SHA256, imaging_version=IMAGING_VERSION, engine_version=ENGINE_VERSION,
-                            synthetic=True, research_only=True)
+                            synthetic=bool(rec.get("synthetic", True)), research_only=True)
                 arrs["metadata_json"] = json.dumps(meta, sort_keys=True)
                 patches[(lst, oid)] = arrs
                 row.update(status="ok", patch_sha=psha, frame_hash=frame_hash, channels=";".join(sorted(chans)),

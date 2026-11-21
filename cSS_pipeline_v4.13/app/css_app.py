@@ -38,6 +38,7 @@ SET = dict(dict(awake=True, theme="dark", backup_dir="", freesurfer_home=os.envi
 import notify_centre as NC, study_split as SS      # v5.14.2-rc4: notification centre + user study selection / training gate
 SET.setdefault("notif", dict(NC.DEFAULTS)); [SET["notif"].setdefault(k, v) for k, v in NC.DEFAULTS.items()]
 SET.setdefault("autotrain", dict(on=False, threshold=3))
+SET["features"].setdefault("train_include_archived", True)      # v5.20: archived studies stay in model training unless switched off
 PAT = jload("patients.json", [])
 for p in PAT:                                            # resume after a restart: interrupted runs go back to the queue
     if p.get("status") in ("running", "paused"): p.update(status="waiting", step="", note="restarted after the app was closed")
@@ -49,6 +50,8 @@ def save_pat(): jsave("patients.json", PAT)
 import processing_manager as PM                       # v5.14-gui Previous Processing Manager
 import identity_gui as IDG                            # v5.16 patient / examination identification (Standard / Incognito, encrypted vault)
 IDG.init(B, PAT, SET)
+SET.setdefault("percival_autocycle", True); SET.setdefault("percival_cycle_n", 5); SET.setdefault("percival_test_fraction", 0.2)
+import percival_gui as PG                             # v5.22 Percival Score (local)
 def pname(code): return IDG.ident(code, SET).get("patient_name", "")       # only in Standard mode with the vault unlocked
 try: PM_RECOVERED = PM.recover_all(B)                 # runs left "running" by a closed app become "interrupted" (previous outputs restored)
 except Exception as _e: PM_RECOVERED = {"error": str(_e)}
@@ -200,17 +203,32 @@ def pm_rank_like_production(code, env, logf):
     if run_logged([sys.executable, f"{SC}/rank_candidates.py", code], logf, env, code="pm:" + code) != 0:
         open(logf, "a").write(f"      WARNING: rank_candidates.py did not rank {code} - the score_v4 order stands (as in production)\n")
 # ------------------------------------------------------------------ v5.14.2-rc4 study selection, training gate, notifications
+def study_label(code):
+    """v5.20 the study's identifier for display: Standard (vault unlocked) = accession number, otherwise the de-identified code"""
+    try:
+        i = IDG.ident(code, SET)
+        return (i.get("accession") if IDG.mode(SET) == "standard" and not i.get("locked") and i.get("accession") else "") or i.get("deid_code") or code
+    except Exception: return code
+def os_label(code):
+    """macOS banners are stored by macOS outside the app: Incognito shows the code, Standard no identifier at all (open the app to see it)"""
+    try: return "A study" if IDG.mode(SET) == "standard" else (IDG.ident(code, SET).get("deid_code") or code)
+    except Exception: return "A study"
 def notify_c(level, source, title, text="", actions=None, key=None, study=None):
     """one entry point: the local notification centre + (by setting) a macOS banner. Never raises."""
     try:
         NC.add(B, level, source, title, text, actions, key, study)
         bm = SET["notif"].get("banner", "urgent")
-        if SET["features"].get("notify") and (bm == "all" or (bm == "urgent" and level == "urgent")): notify("Percival", f"{title} {text}"[:180])
+        if SET["features"].get("notify") and (bm == "all" or (bm == "urgent" and level == "urgent")):
+            t_ = f"{title} {text}"
+            if study and IDG.mode(SET) == "standard": t_ = t_.replace(study, "a study")      # macOS keeps banners outside the app: no identifier in Standard
+            notify("Percival", t_[:180])
     except Exception as e: print("notification not stored:", e, flush=True)
 SEL_PREFIX = "SYN" if os.environ.get("CSS_USCORE_DEMO") == "1" else "M"     # synthetic demo / tests use SYN studies only
 def sel_studies():
     ids = set(k for k in SS.manifest_rows(B) if k.startswith(SEL_PREFIX)) | set((SS.current(B) or {}).get("roles", {}).keys())
     ids |= set(c for c in PM.studies_on_disk(B) if c.startswith(SEL_PREFIX))
+    ids |= set(p["code"] for p in PAT if p.get("retired"))                                  # v5.20: removed studies kept for ML
+    if not SET["features"].get("train_include_archived", True): ids -= set(p["code"] for p in PAT if p.get("archived"))
     return sorted(ids, key=lambda x: (len(x), x))
 def sel_get(op, q):
     if op == "status":
@@ -308,14 +326,21 @@ def watcher():
                     WATCH["autotrain_last"] = time.time(); UG.train()
                     notify_c("done", "training", "Auto-train started", f"{len(pend)} train studies with new or changed reads: {', '.join(pend[:8])}")
         except Exception as e: print("watcher:", e, flush=True)
+        try: PG.snapshot_reviews()                        # v5.23: immutable expert-review snapshots (labels + outputs shown at review time)
+        except Exception as e: print("percival snapshots:", e, flush=True)
+        try: PG.maybe_cycle()                             # v5.22: a controlled Percival training cycle once N newly finished studies accumulated
+        except Exception as e: print("percival watcher:", e, flush=True)
         time.sleep(float(os.environ.get("CSS_WATCH_S", "30")))        # tests use a shorter interval
 def proc_post(op, d):
     if op == "link":
         src = os.path.expanduser(d.get("source", "")); out = []
         try: models = PM.import_production_models(src, B)         # project-level production models, byte-for-byte + verified (rc2b)
         except Exception as e: models = {"error": str(e)[:300]}
+        import study_admin as SA
         for c in d.get("codes", []):
             if not _pm_code(c): out.append(dict(code=c, ok=False, error="bad code")); continue
+            ck = SA.check_ids(IDG.ID(), [p["code"] for p in PAT], code=c) if not pget(c) else []
+            if ck: out.append(dict(code=c, ok=False, error="checkpoint: " + "; ".join(ck))); continue
             try:
                 r = PM.import_study(src, B, c); fsr = r["freesurfer"] or {}
                 out.append(dict(code=c, ok=True, copied=len(r["copied"]), historical=len(r["historical"]), freesurfer=bool(fsr),
@@ -823,7 +848,7 @@ def process(p):
     p["ai_note"] = ai_score(code, env)              # AI score computed for every patient (labelled "AI only, not validated")
     copy_results(p); step_end(p, "qc")
     pm_end_full(p, True)
-    p.update(status="done", finished=time.time(), step=""); save_pat(); notify("Percival", f"{code} finished")
+    p.update(status="done", finished=time.time(), step=""); save_pat(); notify("Percival", f"{os_label(code)} finished")
     try: NC.add(B, "done", "processing", f"Patient {code} finished", "pipeline complete")
     except Exception: pass
     try: write_results_file()
@@ -1030,11 +1055,12 @@ def id_post(op, d):
             with open(out, "wb") as f_: f_.write(MF.template_bytes())
             if d.get("open") and mac(): subprocess.run(["open", out])
             return dict(ok=True, path=out)
-        if op == "import/plan": return IDG.plan(d, SET, [p["code"] for p in PAT], verify_dest=verify_local_dest, hooks=dict(pathway=check_pathway, looks_like_name=(looks_like_name if SET["features"].get("name_warning") else None)))
+        if op == "import/plan": return IDG.plan(d, SET, [p["code"] for p in PAT], verify_dest=verify_local_dest, hooks=dict(pathway=check_pathway, looks_like_name=(looks_like_name if SET["features"].get("name_warning") else None), describe=describe_study, known_match=known_match))
         if op == "import/update": return IDG.plan_update(d, [p["code"] for p in PAT], verify_dest=verify_local_dest)
         if op == "import/commit":
             pl = IDG.IW.PLANS.get(str(d.get("plan", ""))); lib = dict(pl["library"]) if pl else {}
-            r = IDG.plan_commit(d, add_to_queue, dict(cohort=d.get("cohort", ""), mode="semi"), by, import_src=f"{AD}/import_src")
+            r = IDG.plan_commit(d, add_to_queue, dict(cohort=d.get("cohort", ""), mode="semi", _resolve=resolve_duplicate, _reuse=reuse_processed, _replace_confirm=str(d.get("replace_confirm", "")).strip()),
+                                by, import_src=f"{AD}/import_src")
             if r.get("ok") and lib.get("enabled") and lib.get("root"):              # remember the library place for the next import
                 SET["library_dir"] = lib["root"]; SET["library_whole_exam"] = bool(lib.get("whole_exam")); jsave("settings.json", SET)
             if r.get("ok"): notify_c("done", "imports", f"{len(r.get('imported', []))} examination(s) added", "queued for processing" + (" · library copy running" if r.get("library_job") else ""))
@@ -1042,6 +1068,129 @@ def id_post(op, d):
             return r
         return dict(ok=False, error=f"unknown {op}")
     except Exception as e: return dict(ok=False, error=IDG.redact_text(f"{e}", SET, B)[-400:], kind=type(e).__name__)
+# ------------------------------------------------------------------ v5.22 PERCIVAL SCORE - app/percival_gui.py, unified_engine/uengine/percival/
+def pg_init():
+    import review_calls_gui as RCG
+    def reviewed(c):
+        try: return RCG.state(B, c, (pget(c) or {}).get("cohort", "")).get("state") == "reviewed"
+        except Exception: return False
+    def patient_of(c):
+        u = IDG.ID().by_file_key(c); return (IDG.ID().R["studies"].get(u) or {}).get("patient_uuid") or c
+    def fingerprint_of(c):
+        u = IDG.ID().by_file_key(c); return (IDG.ID().R["studies"].get(u) or {}).get("fingerprint", "") or (pget(c) or {}).get("fingerprint", "")
+    PG.init(B=B, SC=SC, SET=SET, patients=lambda: list(PAT), is_reviewed=reviewed, label=study_label, patient_of=patient_of, fingerprint_of=fingerprint_of,
+            save_settings=lambda: jsave("settings.json", SET), notify=lambda t, x: notify_c("done", "training", t, x))
+def pg_get(op, q):
+    if op == "state": return PG.state()
+    if op == "score":
+        p = PG.P("scores", f"{q.get('code', '')}.json"); return json.load(open(p)) if os.path.exists(p) else dict(none=True)
+    if op == "model":
+        m = PG.load(q.get("version", "")) or {}; return {k: v for k, v in m.items() if k not in ("components", "meta_ensemble")}
+    if op == "history": return dict(ledger=PG.history_of(q.get("code", "")))
+    if op == "reviews": return dict(reviews=PG.reviews_of(q.get("code", "")))
+    return dict(error=f"unknown {op}")
+def pg_post(op, d):
+    try:
+        if op == "authorize":
+            r = PG.authorize(bool(d.get("on", True)), by=str(d.get("by") or "app user"))
+            if d.get("on", True): SET["features"]["unified_score"] = True; jsave("settings.json", SET)
+            return r
+        if op == "train": return PG.train_async("started by you")
+        if op == "promote": return PG.promote(str(d.get("version", "")), by=str(d.get("by") or "app user"))
+        if op == "rollback": return PG.rollback()
+        if op == "select": return PG.set_selection(d.get("codes", []), bool(d.get("include", True)))
+        if op == "settings":
+            for k in ("percival_autocycle", "percival_cycle_n", "percival_test_fraction"):
+                if k in d: SET[k] = d[k]
+            jsave("settings.json", SET); return dict(ok=True)
+        if op == "score": return PG.score_study(str(d.get("code", ""))) or dict(ok=False, error="no active model or no candidates")
+        return dict(ok=False, error=f"unknown {op}")
+    except Exception as e: return dict(ok=False, error=f"{type(e).__name__}: {e}"[:400])
+# ------------------------------------------------------------------ v5.20 study administration - app/study_admin.py
+def sa_ctx():
+    def drop(c):
+        with LOCK:
+            PAT[:] = [p for p in PAT if p["code"] != c]; save_pat()
+    return dict(ID=IDG.ID, B=B, AD=AD, pget=pget, save_pat=save_pat, file_keys=lambda: [p["code"] for p in PAT], reveal=lambda: IDG.reveal(SET),
+                mode=lambda: IDG.mode(SET), drop_pat=drop, after_edit=lambda c: write_grades_file())
+def known_match(e):
+    import known_projects as KP
+    try: return KP.match(e, B, SET, PM.studies_on_disk, SD._v1)
+    except Exception: return {}
+def reuse_processed(src, code, qs, item):
+    """import: bring in the earlier processing of the same examination (verified copy; the other project is only read)"""
+    r = PM.import_study(src, B, code)
+    with LOCK:
+        if not pget(code):
+            PAT.append(dict(code=code, cohort=qs.get("cohort", ""), anatomy="recon" if r["freesurfer"] else "synthseg", mode=qs.get("mode", "semi"),
+                            pathway="recon" if r["freesurfer"] else "synthseg", series=item.get("chosen", {}), fingerprint=item.get("fingerprint", ""), step="", steps_done={},
+                            added=time.time(), status="done", linked=True, radiologist=item.get("radiologist", ""), grade_R=item.get("grade_R", ""), grade_L=item.get("grade_L", ""),
+                            note="processed earlier in another project - results brought in (verified copy), not processed again"))
+            save_pat()
+    write_grades_file()
+def kp_get(op, q):
+    import known_projects as KP
+    if op == "list": return dict(ok=True, projects=KP.candidates(B, SET, PM.studies_on_disk))
+    return dict(error=f"unknown {op}")
+def kp_post(op, d):
+    import known_projects as KP
+    path = os.path.expanduser(str(d.get("path", "")))
+    if op == "toggle":
+        off = set(SET.get("known_projects_off", [])); (off.discard if d.get("on") else off.add)(os.path.realpath(path)); SET["known_projects_off"] = sorted(off)
+        jsave("settings.json", SET); return dict(ok=True)
+    if op == "add":
+        if not os.path.isdir(path) or os.path.realpath(path) == os.path.realpath(B): return dict(ok=False, error="choose another project folder")
+        SET["known_projects_extra"] = sorted(set(SET.get("known_projects_extra", [])) | {path}); jsave("settings.json", SET); return dict(ok=True)
+    if op == "bring_all":                                   # every processed study of that project that is not here yet
+        here = set(PM.studies_on_disk(B)) | {p["code"] for p in PAT}
+        codes = [c for c in PM.studies_on_disk(path) if os.path.exists(os.path.join(path, "review", f"{c}_candidates.csv")) and c not in here]
+        return proc_post("link", dict(source=path, codes=codes))
+    return dict(ok=False, error=f"unknown {op}")
+def describe_study(u):
+    """the existing examination an import collides with (for the duplicate choice)"""
+    s = IDG.ID().R["studies"].get(u) or {}; fk = s.get("file_key", ""); p = pget(fk) or {}
+    return dict(label=study_label(fk), status=p.get("status", ""), archived=bool(p.get("archived")), processed=os.path.exists(f"{B}/review/{fk}_candidates.csv"),
+                has_calls=bool(glob.glob(f"{B}/review/{fk}_calls*.csv")), cohort=p.get("cohort", ""))
+def resolve_duplicate(choice, fk):
+    """import duplicate resolution: replace = purge the old study; keep_ml = remove it but keep its results for ML (it gets a RET identifier)"""
+    import study_admin as SA
+    r = SA.remove(sa_ctx(), [fk], "purge" if choice == "replace" else "remove", by="import (duplicate resolved)")
+    if r["refused"]: raise ValueError(f"the existing study could not be {'purged' if choice == 'replace' else 'removed'}: {r['refused'][0]['why']}")
+def sa_post(op, d):
+    import study_admin as SA
+    by = str(d.get("by") or "").strip() or "app user"
+    try:
+        codes = [c for c in (d.get("codes") or ([d["code"]] if d.get("code") else [])) if pget(c)]
+        if op == "edit":
+            if d.get("confirm") is not True: return dict(ok=False, needs_confirm=True, error="confirm the change")
+            r = SA.edit(sa_ctx(), str(d.get("code", "")), d.get("fields") or {}, by=by, reason=str(d.get("reason", ""))[:300])
+            if r.get("ok") and r.get("changes"): notify_c("done", "edits", f"Identifiers edited · {d.get('code')}", ", ".join(r["changes"]), study=d.get("code"))
+            return r
+        if op == "bulk":                                   # several studies: cohort / display name only (identifiers one at a time)
+            if d.get("confirm") is not True: return dict(ok=False, needs_confirm=True, error="confirm the change")
+            f = {k: v for k, v in (d.get("fields") or {}).items() if k in ("cohort", "display_name")}
+            res = [SA.edit(sa_ctx(), c, f, by=by, reason="bulk edit") for c in codes]
+            bad = [(c, r["error"]) for c, r in zip(codes, res) if not r.get("ok")]
+            return dict(ok=not bad, n=len(codes) - len(bad), errors=[f"{study_label(c)}: {e}" for c, e in bad])
+        if op == "archive": return SA.archive(sa_ctx(), codes, bool(d.get("on", True)), by=by)
+        if op == "archive_cohort":
+            cs = [p["code"] for p in PAT if p.get("cohort") == d.get("cohort") and not p.get("retired")]
+            return SA.archive(sa_ctx(), cs, bool(d.get("on", True)), by=by)
+        if op == "plan_remove":
+            pl = SA.plan_removal(sa_ctx(), codes, d.get("mode", "remove"))
+            return dict(ok=True, mode=d.get("mode"), studies=[dict(code=x["code"], label=study_label(x["code"]), refused=x.get("refused", ""), n_trash=x.get("n_trash", 0), n_keep=x.get("n_keep", 0),
+                        bytes_trash=x.get("bytes_trash", 0), bytes_keep=x.get("bytes_keep", 0), library=bool(x.get("library")), library_locked=x.get("library_locked", False),
+                        has_calls=x.get("has_calls", False)) for x in pl], vault_needed=d.get("mode") == "remove" and not IDG.ID().unlocked())
+        if op == "remove":
+            mode_ = d.get("mode", "remove"); phrase = "PURGE" if mode_ == "purge" else "REMOVE"
+            if str(d.get("confirm_phrase", "")).strip() != phrase: return dict(ok=False, needs_confirm=True, error=f"type {phrase} to confirm")
+            labels = {c: study_label(c) for c in codes}
+            r = SA.remove(sa_ctx(), codes, mode_, by=by, delete_library=bool(d.get("delete_library", True)))
+            if r["done"]: notify_c("done", "edits", f"{len(r['done'])} studies {'purged' if mode_ == 'purge' else 'removed (results kept for ML)'}", f"moved to {r['trash'] or 'the Trash'}")
+            for x in r["done"]: x["label"] = labels.get(x["code"], x["code"])
+            return r
+        return dict(ok=False, error=f"unknown {op}")
+    except Exception as e: return dict(ok=False, error=IDG.redact_text(f"{type(e).__name__}: {e}", SET, B)[-400:])
 # ------------------------------------------------------------------ v5.18 export of studies with their files - app/study_export.py
 def xs_args(d):
     import study_export as XS
@@ -1206,11 +1355,11 @@ def fail(p, msg):
                 apply_pathway(p, nxt)
                 p.update(status="waiting", error="", steps_done={}, path_ack=False,
                          path_note=f"{msg.split(' - ')[0]} -> retrying automatically with {PATHWAYS[nxt]} ({PW_TIME[nxt]})")
-                save_pat(); notify("Percival", f"{p['code']}: registration retried with {PATHWAYS[nxt]}"); return
+                save_pat(); notify("Percival", f"{os_label(p['code'])}: registration retried with {PATHWAYS[nxt]}"); return
         pm_end_full(p, False, msg)                       # previous outputs put back; this attempt stays in the history as failed
         p.update(status="failed", error=msg, finished=time.time()); save_pat()
         if any(k in msg for k in SETUP_ERR): CUR["hold"] = msg
-    notify("Percival", f"{p['code']} failed: {msg[:60]}")
+    notify("Percival", f"{os_label(p['code'])} failed: {msg[:60]}")
     try: NC.add(B, "action", "processing", f"Patient {p['code']} failed", msg[:300])
     except Exception: pass
 def copy_results(p):
@@ -1250,7 +1399,7 @@ def next_to_start():
     """the next waiting patient that may start now, or None. Rules: at most SET['parallel'] at once; SWI-only / SynthMorph run alone
     (and wait until the normal patients are done); no new start while memory is in the yellow / red zone"""
     if CUR["hold"]: return None
-    wait = [p for p in PAT if p["status"] == "waiting"]
+    wait = [p for p in PAT if p["status"] == "waiting" and not p.get("archived")]       # v5.20: archived studies wait until restored
     if not wait: return None
     run = [pget(c) for c in list(RUNNING)]; run = [p for p in run if p]
     if any(solo(p) for p in run): return None
@@ -1311,7 +1460,7 @@ def results():
     import pandas as pd
     rows = []
     for p in PAT:
-        c = p["code"]; r = dict(code=c, name=pname(c), ident=IDG.ident(c, SET), cohort=p.get("cohort", ""), mode=p.get("mode", ""), status=p["status"], version=p.get("version", ""),
+        c = p["code"]; r = dict(code=c, name=pname(c), ident=IDG.ident(c, SET), archived=bool(p.get("archived")), retired=bool(p.get("retired")), archived_at=(p.get("archived") or {}).get("at", ""), retired_at=(p.get("retired") or {}).get("at", ""), cohort=p.get("cohort", ""), mode=p.get("mode", ""), status=p["status"], version=p.get("version", ""),
                                 radiologist=p.get("radiologist", ""), rad_R=p.get("grade_R", ""), rad_L=p.get("grade_L", ""))
         f = f"{B}/review/{c}_candidates.csv"
         if os.path.exists(f): r["candidates"] = int(len(pd.read_csv(f)))
@@ -1484,6 +1633,7 @@ def launch_child(kind, args, port0):
     else: cmd = [sys.executable, f"{B}/reference_audit/blind_read/blind_read.py", args["packet"], args["reader"], "--port", str(port), "--no-browser"]
     if kind == "review" and args.get("reviewer"): cmd += ["--reviewer", args["reviewer"]]
     if kind == "review": cmd += ["--groups", f"{AD}/review_groups.json", "--start", args.get("start", args["codes"][0])]
+    if kind == "review": env["CSS_STUDY_LABELS"] = json.dumps({c: study_label(c) for c in args["codes"]})      # in memory only
     CHILD[kind] = subprocess.Popen(cmd, stdout=open(f"{AD}/logs/{kind}.log", "w"), stderr=subprocess.STDOUT, env=env)
     for _ in range(100):
         time.sleep(0.2)
@@ -1497,7 +1647,7 @@ def state():
     out = []
     for p in PAT:
         el, rem = eta(p)
-        out.append(dict(code=p["code"], name=pname(p["code"]), ident=IDG.ident(p["code"], SET), cohort=p.get("cohort", ""), mode=p.get("mode"), anatomy=p.get("anatomy"),
+        out.append(dict(code=p["code"], name=pname(p["code"]), ident=IDG.ident(p["code"], SET), archived=bool(p.get("archived")), retired=bool(p.get("retired")), archived_at=(p.get("archived") or {}).get("at", ""), retired_at=(p.get("retired") or {}).get("at", ""), cohort=p.get("cohort", ""), mode=p.get("mode"), anatomy=p.get("anatomy"),
                         status=p["status"], step=p.get("step", ""), steps_done=list(p.get("steps_done", {}).keys()), error=p.get("error", ""),
                         elapsed=el, remaining=rem, reg_method=p.get("reg_method", ""), pathway=p.get("pathway", "synthseg"),
                         path_note=p.get("path_note", ""), path_ack=p.get("path_ack", True), solo=solo(p), started=p.get("started", 0),
@@ -1530,7 +1680,7 @@ class H(BaseHTTPRequestHandler):
             if u.path in ("/icon_dark.png", "/icon_light.png"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="image/png")
             if u.path == "/unified_view.js": return self.send(open(f"{HERE}/unified_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/shadow_view.js": return self.send(open(f"{HERE}/shadow_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
-            if u.path in ("/identity_view.js", "/import_wizard_view.js", "/lineage_view.js", "/training_view.js", "/setup_view.js", "/export_view.js"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="text/javascript; charset=utf-8")
+            if u.path in ("/identity_view.js", "/import_wizard_view.js", "/lineage_view.js", "/training_view.js", "/setup_view.js", "/export_view.js", "/study_admin_view.js", "/percival_view.js"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/qc_view.js": return self.send(open(f"{HERE}/qc_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/calls_view.js": return self.send(open(f"{HERE}/calls_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/image_ml_view.js": return self.send(open(f"{HERE}/image_ml_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
@@ -1578,6 +1728,8 @@ class H(BaseHTTPRequestHandler):
                 try: return self.send(IDG.IW.thumb(q_.get("plan", ""), q_.get("eid", ""), q_.get("i", "0")), ctype="image/png")
                 except Exception as e_: return self.send(dict(error=f"{type(e_).__name__}"), 404)
             if u.path.startswith("/api/xs/"): return self.send(xs_get(u.path[8:], {k: v[0] for k, v in parse_qs(u.query).items()}))
+            if u.path.startswith("/api/kp/"): return self.send(kp_get(u.path[8:], {k: v[0] for k, v in parse_qs(u.query).items()}))
+            if u.path.startswith("/api/percival/"): return self.send(pg_get(u.path[14:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/id/") and u.path != "/api/id/template.xlsx": return self.send(id_get(u.path[8:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path == "/api/id/template.xlsx":
                 import manifest as MF
@@ -1728,6 +1880,9 @@ class H(BaseHTTPRequestHandler):
             if u.path.startswith("/api/setup/"): return self.send(setup_post(u.path[11:], d))
             if u.path.startswith("/api/id/"): return self.send(id_post(u.path[8:], d))
             if u.path.startswith("/api/xs/"): return self.send(xs_post(u.path[8:], d))
+            if u.path.startswith("/api/sa/"): return self.send(sa_post(u.path[8:], d))
+            if u.path.startswith("/api/kp/"): return self.send(kp_post(u.path[8:], d))
+            if u.path.startswith("/api/percival/"): return self.send(pg_post(u.path[14:], d))
             if u.path in ("/api/share", "/api/export"):           # explicit warning + confirmation, verified local folder only
                 if d.get("confirm_clinical") is not True: return self.send(dict(ok=False, needs_confirm=True, warning=EXPORT_WARNING,
                                                                      error="export needs your confirmation of the clinical-data warning (dialog pending design approval)"))
@@ -1797,6 +1952,7 @@ if __name__ == "__main__":
     reread_failures()
     threading.Thread(target=ai_backfill, daemon=True).start()
     threading.Thread(target=worker, daemon=True).start()
+    pg_init()
     threading.Thread(target=watcher, daemon=True).start()          # v5.14.2-rc4: notifications + auto-train
     def _caff_watch():
         while True: caffeinate(bool(RUNNING)); time.sleep(5)

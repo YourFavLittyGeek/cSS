@@ -107,6 +107,10 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
 #setdlg .pri,#bSaveFinal{font-weight:600}#setdlg .pri{background:var(--acc);border-color:var(--acc);color:#fff}#nextcard{position:fixed;right:18px;bottom:18px;width:360px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;z-index:70;display:none;box-shadow:0 10px 30px rgba(0,0,0,.5);font-size:13px}#nextcard.show{display:block}
 .nsw{display:inline-flex;align-items:center;width:34px;height:19px;border-radius:999px;padding:2px;background:#5a626e;cursor:pointer;flex:none}.nsw i{width:15px;height:15px;border-radius:50%;background:#fff;display:block}.nsw.on{background:#3aa655;justify-content:flex-end}#nextcard .pri{background:var(--acc);border-color:var(--acc);color:#fff}#prevStudy,#nextStudy{padding:3px 9px;color:var(--text)}
 .toast.err{background:#8a2b2b}.toast u{cursor:pointer;margin-left:8px}
+.pbig{display:flex;align-items:baseline;gap:8px;margin:2px 0 8px}.pbig b{font-size:46px;line-height:1;font-weight:750;font-variant-numeric:tabular-nums}.pmax{color:var(--mut);font-size:14px}.pchip{margin-left:auto;color:#fff;font-size:12px;font-weight:650;padding:3px 9px;border-radius:999px}
+.pbar{position:relative;display:flex;gap:2px;height:8px;border-radius:4px;overflow:visible;margin-bottom:6px}.pbar span{display:block;height:8px;border-radius:3px}.pbar i{position:absolute;top:-4px;width:3px;height:16px;background:var(--text);border-radius:2px;transform:translateX(-1px)}
+.ubar{display:flex;align-items:center;gap:6px;font-size:11.5px;margin:2px 0}.ubar .ul{width:66px;color:var(--mut)}.ubar .uv{width:40px;text-align:right;font-variant-numeric:tabular-nums}
+.ubar .ut{position:relative;flex:1;height:8px;border-radius:4px;background:#8882}.ubar .ut i{position:absolute;left:50%;top:-2px;bottom:-2px;width:1px;background:#888}.ubar .ut b{position:absolute;top:0;bottom:0;border-radius:4px}.ubar .pos{background:#3987e5}.ubar .neg{background:#d95926}
 </style></head><body>
 <div class="top"><b>Percival</b><span class="mut" style="margin-left:-4px">reviewer</span>
  <select id="cohort" title="Cohort" class="hide"></select><select id="study" title="Patient"></select><button class="b" id="prevStudy" title="Previous patient">◂</button><button class="b" id="nextStudy" title="Next patient">▸</button>
@@ -132,10 +136,9 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
   <div class="phdr"><label><input type="checkbox" id="ahchk"> Auto-hide panel</label><span class="sp"></span><span class="hb" id="hideb" title="hide the panel (Space)">Hide &#9656;</span></div>
   <div class="tabs" id="tabs"><button data-tab="viewer" title="F1">Viewer</button><button data-tab="cands" title="F2">Candidates</button><button data-tab="calls" title="F3">Calls summary</button></div>
   <div class="tab" id="tab-viewer">
-   <div class="card" id="aicard"><div class="h"><span title="Automated pipeline output - NOT a human review and never saved as one">AI evidence for cSS <span class="mut sm" id="aiwho">· automated: rule-based detector, not a reviewer</span></span><span class="mut sm">hide <kbd>K</kbd></span></div>
-    <div id="aibody"><svg id="gauge" viewBox="0 0 220 122"></svg>
-    <div class="band"><span style="color:#d64545">not cSS</span><span style="color:#c99a1c">uncertain</span><span style="color:#3aa655">cSS likely</span></div>
-    <div class="say" id="aisay"></div><div class="mut sm" id="aisrc"></div><div class="mut sm" id="aiconf" style="margin-top:4px"></div></div></div>
+   <div class="card" id="aicard"><div class="h"><span title="AI prediction of Percival (learned on this computer) - NOT a human review and never saved as one">Percival Score <span class="mut sm" id="aiwho">· AI prediction, not a reviewer</span></span><span class="mut sm">hide <kbd>K</kbd></span></div>
+    <div id="aibody"><div id="pscore" data-id="percival-score"></div><svg id="gauge" viewBox="0 0 220 122" style="display:none"></svg>
+    <div class="say" id="aisay" style="display:none"></div><div class="mut sm" id="aisrc"></div><div class="mut sm" id="aiconf" style="display:none"></div></div></div>
    <div class="card" id="s3card"><div class="h"><span>3-D shape of the dark structure</span><span class="mut sm"><a href="#" id="s3hide" style="color:inherit">hide <kbd>3</kbd></a></span></div>
     <div id="s3body"><button class="btn" id="bM3" style="width:100%;margin-bottom:6px" title="Isolated 3-D analysis of this candidate: surface, voxels, local tube / sheet / blob, thickness, cross-sections, Hessian, vessels, pial surface">Open 3-D analysis ▸</button><canvas id="s3cv" width="300" height="200" style="width:100%;border-radius:8px;background:#0e1116;cursor:grab;touch-action:none"></canvas>
     <div class="mut sm">drag = rotate · wheel = zoom · double-click = reset · <span style="color:#e04b4b">red</span> structure, <span style="color:#ffd25a">yellow</span> detector object, <span style="color:#7d8590">grey</span> cortex</div>
@@ -265,6 +268,7 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
 <script src="/morph3d.js"></script>
 <script>
 "use strict";
+const studyLabel=s=>(typeof M!=="undefined"&&M&&M.labels&&M.labels[s])||s;   // v5.20 study label from the app (accession in Standard, code in Incognito); v5.23: renamed from LB (clashed with loadStudy's label buffer)
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const MAC=/Mac|iPhone|iPad/.test(navigator.platform||navigator.userAgent), MOD=MAC?"⌘":"Ctrl";
 $$(".modk").forEach(e=>e.textContent=MOD);
@@ -376,7 +380,7 @@ function drawPane(p,x,W,H,o){
   if(o.text){
     x.font="12px Menlo,Consolas,monospace";x.fillStyle="#ffd866";x.shadowColor="#000";x.shadowBlur=3;x.textBaseline="alphabetic";
     const T=(t,xx,yy,al)=>{x.textAlign=al||"left";x.fillText(t,xx,yy)},sm=seqmeta[p.seq]||{},lab=(sm.label||p.seq)+(p.mip&&p.plane===0?" · minIP":"");
-    T(`${M.study} · ${PLN[p.plane]}`,o.lm,o.tm);T(lab,o.lm,o.tm+16);if(c)T(`Cand #${did(c)} of ${M.cands.length}`,o.lm,o.tm+32);
+    T(`${studyLabel(M.study)} · ${PLN[p.plane]}`,o.lm,o.tm);T(lab,o.lm,o.tm+16);if(c)T(`Cand #${did(c)} of ${M.cands.length}`,o.lm,o.tm+32);
     T(`Slice ${cur[V.s]+1} / ${[nx,ny,nz][V.s]}`,W-o.rm,o.tm,"right");T(`Zoom ${zoom.toFixed(1)}×${Math.abs(zoom-1)<0.001?" (fit)":""}`,W-o.rm,o.tm+16,"right");
     const w=getWL(p.seq);T(`C ${Math.round(101-w[0])}  B ${Math.round(w[1])}`,o.lm,H-24);T(`${vox.map(v=>v.toFixed(1)).join("×")} mm`,o.lm,H-8);
     T(`Reviewer ${(o.rev||"")}`,W-o.rm,H-24,"right");if(M.acq&&(M.acq.TE_ms||M.acq.field_T))T(`${M.acq.TE_ms?"TE "+M.acq.TE_ms+" ms":""}${M.acq.TE_ms&&M.acq.field_T?" · ":""}${M.acq.field_T?M.acq.field_T+" T":""}`,W-o.rm,H-8,"right");
@@ -436,7 +440,7 @@ async function loadStudy(sid){status("loading study ...");const my=++loadSeq,sta
   {const G=M.groups||{},gs=Object.keys(G),cur=gs.find(g=>G[g].includes(M.study));$("#cohort").classList.toggle("hide",!gs.length);
    if(gs.length)$("#cohort").innerHTML=gs.map(g=>`<option ${g===cur?"selected":""}>${esc(g)}</option>`).join("");
    const list=cur?G[cur].filter(s=>M.studies.includes(s)):M.studies,i=list.indexOf(M.study);
-   $("#study").innerHTML=list.map((s,k)=>`<option value="${esc(s)}" ${s===M.study?"selected":""}>${esc(s)} (${k+1} / ${list.length})</option>`).join("");
+   $("#study").innerHTML=list.map((s,k)=>`<option value="${esc(s)}" ${s===M.study?"selected":""}>${esc(studyLabel(s))} (${k+1} / ${list.length})</option>`).join("");
    $("#prevStudy").disabled=i<=0;$("#nextStudy").disabled=i<0||i>=list.length-1;$("#prevStudy").onclick=()=>loadStudy(list[i-1]);$("#nextStudy").onclick=()=>loadStudy(list[i+1])}
   $("#seq").innerHTML=M.seqs.map((s,i)=>`<option value="${s.key}">${s.label}  (${i+1})</option>`).join("");
   $("#revlist").innerHTML=M.reviewers.names.map(n=>`<option value="${esc(n)}">`).join("");
@@ -468,9 +472,34 @@ const CATLBL={absent:"No cSS",focal:"Focal (1–3 sulci)",disseminated:"Dissemin
 function scoreCard(title,sc,note){if(!sc||sc.multifocality_0_4===undefined)return `<div class="card"><div class="h">${title}</div><div class="mut">not scored yet</div></div>`;
   return `<div class="card"><div class="h">${title}</div><div class="big">${sc.multifocality_0_4}<span class="mut" style="font-size:16px"> / 4</span></div><div>Right <b>${sc.R_score}</b> · Left <b>${sc.L_score}</b></div><div><b>${esc(CATLBL[sc.category]||sc.category)}</b></div>
    <div class="mut sm">${sc.n_sulci_total!==undefined?sc.n_sulci_total+" sulci · ":""}${sc.n_lines_total!==undefined?sc.n_lines_total+" continuous cSS line(s)":""}${note?"<br>"+note:""}</div></div>`}
-function paintScores(){const ai=vmode?{}:(M.ai_score||{});
-  $("#scorechip").innerHTML=`Reviewer <b>${readerScore&&readerScore.multifocality_0_4!==undefined?readerScore.multifocality_0_4+"/4":"—"}</b> · AI <b>${vmode?"hidden":ai.multifocality_0_4!==undefined?ai.multifocality_0_4+"/4":"—"}</b>`+(M.calls_rule?` · effective calls: <b>${esc(M.calls_rule)}</b>`:"")+(finalRec?` · <span class="ok">final saved</span>`:"");
-  $("#scorecard").innerHTML=`<div class="sc">${scoreCard("Reviewer",readerScore,finalRec?("final saved "+esc(finalRec.saved)):"press Q to score")}${vmode?'<div class="card"><div class="h">AI</div><div class="mut">hidden in a validation read</div></div>':scoreCard("AI (not validated)",ai,(ai.n_green||0)+" green-band candidate(s)")}</div>`}
+function pOf(c){const P=M.percival;if(!P)return null;return (P.candidates||[]).find(r=>r.cand_id===c.id)||null}
+function pCard(c){const el=$("#pscore");if(!el)return;
+  if(M.percival&&$("#ucard"))$("#ucard").remove();   // v5.23 one primary score: with a Percival assessment the Unified Score is shown as a component under "Why this score"if(vmode){el.innerHTML='<div class="mut">hidden in a validation read</div>';$("#aisrc").textContent="";return}
+  const P=M.percival,x=pOf(c);let sc,band,note,st="";
+  if(x&&x.status!=="insufficient"){sc=x.percival_score;band=x.band;note=`model ${P.model}${P.ready?"":" · still learning"}${x.status==="uncertain"?" · uncertain":""}`}
+  else if(x){sc=null;note="insufficient evidence - no learned source for this candidate"}
+  else{sc=Math.round(100*c.ai.score);band=c.ai.band==="green"?"green":c.ai.band==="yellow"?"yellow":"red";note="MATH only - Percival has not learned yet"}
+  const col={red:"#d64545",yellow:"#e0b030",green:"#3aa655"}[band]||"#8b939e",lab={red:"unlikely cSS",yellow:"uncertain",green:"likely cSS"}[band]||"insufficient evidence";
+  const th=P&&P.thresholds?P.thresholds:{red_below:.33,green_from:.66};
+  el.innerHTML=`<div class="pbig"><b style="color:${col}">${sc==null?"—":Math.round(sc)}</b><span class="pmax">/ 100</span><span class="pchip" style="background:${col}">${lab}</span></div>
+    <div class="pbar"><span style="width:${100*th.red_below}%;background:#d64545"></span><span style="width:${100*(th.green_from-th.red_below)}%;background:#e0b030"></span><span style="flex:1;background:#3aa655"></span>${sc==null?"":`<i style="left:${sc}%"></i>`}</div>`;
+  $("#aisrc").textContent=note+(P&&P.in_training&&x?" · in-sample: this study trained the model (optimistic)":"")+" · experimental, not validated";
+  if(x)el.insertAdjacentHTML("beforeend",pWhy(x,P))}
+// v5.23 "Why this score": the evidence behind the single Percival Score (components, contributions, disagreement learned from expert reviews, reliability)
+const PCN={math:"MATH",unified:"Unified",char:"Charact. ML",image:"Image ML",fusion:"Fusion"},PST={reliable:["reliable","#3aa655"],uncertain:["uncertain","#e0b030"],review:["expert review required","#d64545"],insufficient:["insufficient evidence","#8b939e"]};
+function pWhy(x,P){let open="";try{open=localStorage.getItem("pwhy_open")==="1"?"open":""}catch(e){}
+  const st=PST[x.status]||[x.status,"#8b939e"],comp=Object.entries(x.components||{}).map(([k,v])=>`<div class="ubar"><span class="ul">${PCN[k]||esc(k)}</span><span class="ut">${v==null?"":`<b class="${v>=50?"pos":"neg"}" style="left:${Math.min(v,50)}%;width:${Math.abs(v-50)}%"></b>`}<i></i></span><span class="uv">${v==null?"—":Math.round(v)}</span></div>`).join("");
+  const C=x.contributions||{},cm=Math.max(.5,...Object.values(C).map(v=>Math.abs(v))),con=Object.keys(C).length?Object.entries(C).filter(([k])=>!/missing$/.test(k)||C[k]!==0).map(([k,v])=>`<div class="ubar"><span class="ul">${esc(PCN[k]||k.replace(/_/g," "))}</span><span class="ut"><b class="${v>=0?"pos":"neg"}" style="left:${v>=0?50:50-50*Math.abs(v)/cm}%;width:${50*Math.abs(v)/cm}%"></b><i></i></span><span class="uv">${v>=0?"+":""}${v.toFixed(2)}</span></div>`).join(""):'<div class="mut sm">this meta-model has no linear contributions</div>';
+  const pt=x.pattern,pat=pt&&pt.n?`<div class="sm" style="margin-top:6px">${esc(pt.pair.replace("char","Characteristic ML").replace("image","Image ML"))}: <b>${esc(pt.pattern.replace("char_only","Characteristic ML only says cSS").replace("image_only","Image ML only says cSS").replace("both_high","both say cSS").replace("both_low","both say not cSS"))}</b> — in ${pt.n} expert-reviewed case(s) with this pattern ${pt.css_rate==null?"":Math.round(100*pt.css_rate)+" % were cSS"}${pt.ci&&pt.ci[0]!=null?` (95 % CI ${Math.round(100*pt.ci[0])}–${Math.round(100*pt.ci[1])} %)`:""}</div>`:"";
+  return `<details id="pwhy" ${open} ontoggle="try{localStorage.setItem('pwhy_open',this.open?'1':'0')}catch(e){}" style="margin-top:6px"><summary class="sm" style="cursor:pointer">Why this score <span class="pchip" style="background:${st[1]};margin-left:6px;font-size:11px">${esc(st[0])}</span></summary>
+   ${(x.reasons||[]).length?`<ul class="sm" style="margin:4px 0 6px 16px;padding:0">${x.reasons.map(r=>`<li>${esc(r)}</li>`).join("")}</ul>`:""}
+   <div class="mut sm" style="margin:4px 0 2px">Each source on its own (0–100, 50 = undecided)</div>${comp}
+   <div class="mut sm" style="margin:8px 0 2px">What moved the final score (log-odds; blue toward cSS)</div>${con}${pat}
+   <div class="mut sm" style="margin-top:6px">± ${x.uncertainty_sd} points (model ensemble)${x.ood_distance!=null?` · distance from training data ${x.ood_distance} (limit ${x.ood_limit})`:""}${x.image_tta_spread!=null?` · Image ML stability ±${x.image_tta_spread}`:""} · model ${esc(P.model)}</div>
+   ${P.in_training?`<div class="sm" style="color:#e0b030;margin-top:4px">${esc(P.in_training_note)}</div>`:""}</details>`}
+function paintScores(){const ai=vmode?{}:(M.ai_score||{});const U=vmode?null:M.percival,us=U&&U.study_score?U.study_score:null;
+  $("#scorechip").innerHTML=`Reviewer <b>${readerScore&&readerScore.multifocality_0_4!==undefined?readerScore.multifocality_0_4+"/4":"—"}</b> · AI <b>${vmode?"hidden":ai.multifocality_0_4!==undefined?ai.multifocality_0_4+"/4":"—"}</b> · Percival <b>${vmode?"hidden":us&&us.total!=null?us.total+"/4":"—"}</b>`+(M.calls_rule?` · effective calls: <b>${esc(M.calls_rule)}</b>`:"")+(finalRec?` · <span class="ok">final saved</span>`:"");
+  $("#scorecard").innerHTML=`<div class="sc">${scoreCard("Reviewer",readerScore,finalRec?("final saved "+esc(finalRec.saved)):"press Q to score")}${vmode?'<div class="card"><div class="h">AI</div><div class="mut">hidden in a validation read</div></div>':scoreCard("AI (not validated)",ai,(ai.n_green||0)+" green-band candidate(s)")}${vmode?"":us&&us.total!=null?scoreCard("Percival (experimental)",{L_score:us.L_score,R_score:us.R_score,multifocality_0_4:us.total},`${us.n_called} candidate(s) with Percival Score ≥ 50 · model ${esc(U.model)}`):""}</div>`}
 function paintLists(){let n=0;$$("#strip .chip").forEach((e,i)=>{const c=M.cands[i];if(!c)return;const call=callOf(c);if(call)n++;e.style.background=call?CALLCOL[call]:"";e.style.color=call?"#fff":"";e.style.border=isInh(c)?"2px dashed #fff":"";e.style.opacity=isInh(c)?".75":"";
     e.title=(isInh(c)?"inherited from the earlier detection - press the same key to confirm  ·  ":"")+c.hemi+" "+c.region;e.classList.toggle("cur",i===ci)});
   $("#progbar").style.width=(M.cands.length?100*n/M.cands.length:0)+"%";$("#progtxt").textContent=n+" of "+M.cands.length+" read";
@@ -528,7 +557,7 @@ function go(i,keepView){if(!M.cands.length){paintLists();draw();return}ci=Math.m
   if(!keepView&&zoom>1.001){ctr=cur.slice()}            // nothing is zoomed for you: an existing zoom is only re-centred on the candidate
   ruler=null;probe=null;if(tool!=="miss")$("#readout").textContent="";
   $("#candinfo").textContent=(c.audit&&c.rule?`EXCLUDED OBJECT (rule: ${c.rule}) · `:"")+`Candidate ${ci+1} of ${M.cands.length} · #${did(c)} · ${c.hemi==="L"?"left":"right"} ${c.region} · ${Math.round(c.volume)} mm³`;
-  gauge(c.ai);$("#aiconf").innerHTML=(c.conf===null||c.conf===undefined)?"":`<b>Confidence model: ${Math.round(c.conf)} %</b>${c.conf_why?" · "+esc(c.conf_why):""} · fitted on 10 patients, not a validated probability`;
+  gauge(c.ai);pCard(c);$("#aiconf").innerHTML=(c.conf===null||c.conf===undefined)?"":`<b>Confidence model: ${Math.round(c.conf)} %</b>${c.conf_why?" · "+esc(c.conf_why):""} · fitted on 10 patients, not a validated probability`;
   paintDecision();paintLists();draw();s3Bind();s3Load()}
 function paintDecision(){const c=cand();if(!c)return;const st=calls[c.id]||{};$$("#dec .b.qa").forEach(b=>{const on=b.dataset.call===st.call;b.classList.toggle("on",on);b.style.borderColor=on?CALLCOL[st.call]:"";b.style.background=on?CALLCOL[st.call]+"33":""});
   $$("#dec .chip").forEach(b=>{const on=b.dataset.call===st.call&&b.dataset.fine===st.fine;b.classList.toggle("on",on);b.style.display=b.dataset.call===st.call||!st.call?"":"none"});
@@ -563,7 +592,7 @@ async function summary(){if(!reviewer()){status("Enter your name first.",true);r
     if(!cmpOn){await finalSave(false);return}
     const dx=differIdx(),rowsd=dx.map(i=>{const c=M.cands[i],call=callOf(c);return `<tr class="r" data-i="${i}"><td><b>${did(c)}</b></td><td>${c.hemi} · ${esc(c.region)}</td><td>${pill(c.ai.score.toFixed(2),BANDCOL[c.ai.band])} ${esc(c.ai.band==="green"?"cSS":c.ai.suspect.replace(/^I suspect /,""))}</td><td>${pill(CALLLBL[call],CALLCOL[call])}</td><td class="mut">re-review →</td></tr>`}).join("");
     revoteMode=true;
-    $("#cmpbody").innerHTML=`<p><b>${esc(M.study)}</b> · reviewer <b>${esc(reviewer())}</b></p><div class="sc">${scoreCard("Reviewer",r.reader_score,"")}${scoreCard("AI (not validated)",r.ai_score,(r.ai_score.n_green||0)+" green-band candidate(s)")}</div>`
+    $("#cmpbody").innerHTML=`<p><b>${esc(studyLabel(M.study))}</b> · reviewer <b>${esc(reviewer())}</b></p><div class="sc">${scoreCard("Reviewer",r.reader_score,"")}${scoreCard("AI (not validated)",r.ai_score,(r.ai_score.n_green||0)+" green-band candidate(s)")}</div>`
       +(r.unread?`<p class="err">${r.unread} candidate(s) not read: the reviewer score is a lower bound.</p>`:"")
       +(M.cands.filter(isInh).length?`<p class="err">${M.cands.filter(isInh).length} inherited call(s) not re-confirmed (dashed in the strip): press the same key on them to confirm. <button class="btn" id="cInh">Go to the first one</button></p>`:"")
       +`<h3>Calls that differ from the AI (${dx.length})</h3>`+(dx.length?`<table class="cmp" id="cmpdiff"><tr><th>#</th><th>Side · region</th><th>AI</th><th>Your call</th><th></th></tr>${rowsd}</table>`:'<p class="mut">None: every decided candidate agrees with the AI band (yellow counts as neither).</p>')}
@@ -572,14 +601,14 @@ async function finalSave(shown){$("#compare").classList.remove("show");$("#sumbo
   try{const r=await api("/api/finish",{study:M.study,reviewer:reviewer(),final:true,n_inherited_unconfirmed:M.cands.filter(isInh).length,n_differ:differIdx().length,meter_visible:showAI&&!vmode?1:0,comparison_shown:!!shown,read_mode:vmode?"validation":"second look"});
     readerScore=r.reader_score;finalRec=r.final;revoteMode=false;paintScores();
     const L=cohortList(),i=L.indexOf(M.study),nxt=i>=0&&i<L.length-1?L[i+1]:"";
-    $("#sumbody").innerHTML=`<p><b>${esc(M.study)}</b> · reviewer <b>${esc(reviewer())}</b> · <span class="ok">final saved ${esc(r.final.saved)}</span>${i>=0&&!nxt?` · <b class="ok">Cohort finished - ${L.length} / ${L.length} read</b>`:""}</p>`+summaryHtml(r)+`<p class="mut sm">Cohort report: ${esc(r.report||"")}</p>`;
+    $("#sumbody").innerHTML=`<p><b>${esc(studyLabel(M.study))}</b> · reviewer <b>${esc(reviewer())}</b> · <span class="ok">final saved ${esc(r.final.saved)}</span>${i>=0&&!nxt?` · <b class="ok">Cohort finished - ${L.length} / ${L.length} read</b>`:""}</p>`+summaryHtml(r)+`<p class="mut sm">Cohort report: ${esc(r.report||"")}</p>`;
     if(nxt)nextCard(r,nxt,i,L.length)}
   catch(e){$("#sumbody").innerHTML=`<p class="err">${esc(e.message)}</p>`}}
 function cohortList(){const G=M.groups||{},g=Object.keys(G).find(k=>G[k].includes(M.study));return g?G[g].filter(s=>M.studies.includes(s)):M.studies}
 function nextCard(r,nxt,i,n){clearInterval(nxTimer);const go2=()=>{clearInterval(nxTimer);$("#nextcard").classList.remove("show");$("#summary").classList.remove("show");loadStudy(nxt)};
   if(autoPt&&autoSec===0){go2();return}
   $("#summary").classList.remove("show");const sc=(x)=>x?`<b style="font-size:19px">${x.multifocality_0_4??"–"}</b> <span class="mut">L${x.L_score??"–"} R${x.R_score??"–"}</span>`:"–";
-  const paint=(left)=>{$("#nextcard").innerHTML=`<div style="display:flex;gap:8px;align-items:center"><b>${esc(M.study)} done</b><span class="mut">${i+1} / ${n}</span><span style="flex:1"></span><span class="mut sm" style="cursor:pointer" id="ncFull" title="Open the full summary">details</span></div>
+  const paint=(left)=>{$("#nextcard").innerHTML=`<div style="display:flex;gap:8px;align-items:center"><b>${esc(studyLabel(M.study))} done</b><span class="mut">${i+1} / ${n}</span><span style="flex:1"></span><span class="mut sm" style="cursor:pointer" id="ncFull" title="Open the full summary">details</span></div>
     <div style="display:flex;gap:6px;align-items:center;margin:6px 0"><span class="mut">You</span>${sc(r.reader_score)}<span style="flex:1"></span><span class="mut" title="AI only, not validated">${vmode?"":"AI*"}</span>${vmode?"":sc(r.ai_score)}</div>
     <div style="display:flex;gap:8px;align-items:center;border-top:1px solid var(--line);padding-top:7px"><span class="nsw ${autoPt?"on":""}" id="ncSw" title="Next patient automatically (Settings: default and seconds)"><i></i></span>
     ${autoPt?`<span>Next: ${esc(nxt)} in <b>${left} s</b></span>`:'<span class="mut">Auto next off</span>'}<span style="flex:1"></span>
@@ -605,9 +634,9 @@ function nextAudit(){const L=M.cands.map((c,i)=>c.audit?i:-1).filter(i=>i>=0);
 function setVmode(v){if(!M||!reviewer()){status("Enter your name first.",true);return}LSS("vmode_"+M.study+"|"+reviewer(),v);loadStudy(M.study)}
 async function showPrimary(){if(!M)return;const cur=M.calls_rule||"newest call of any reviewer";
   if(!reviewer()){status("Enter your name first.",true);return}
-  if(M.primary===reviewer()&&/calls of/.test(M.calls_rule||"")&&(M.calls_rule||"").includes(reviewer())){toast(`Your calls (${esc(reviewer())}) are the effective calls of ${esc(M.study)}.`);return}
+  if(M.primary===reviewer()&&/calls of/.test(M.calls_rule||"")&&(M.calls_rule||"").includes(reviewer())){toast(`Your calls (${esc(reviewer())}) are the effective calls of ${esc(studyLabel(M.study))}.`);return}
   if(confirm(`Effective calls of ${M.study}: ${cur}.\n\nEvery reviewer's calls are always kept. By default the newest call of any reviewer is used for the score, results and training.\n\nUse ${reviewer()}'s calls for ${M.study} instead (the newest call where ${reviewer()} did not call)? This can be changed back in the app (Studies › Reviewer calls).`)){
-    try{const r=await api("/api/primary",{study:M.study,reviewer:reviewer(),name:reviewer()});M.primary=r.primary;toast(`${esc(M.study)}: ${esc(r.primary)}'s calls are now the effective calls`)}catch(e){toast(esc(e.message),true)}}}
+    try{const r=await api("/api/primary",{study:M.study,reviewer:reviewer(),name:reviewer()});M.primary=r.primary;toast(`${esc(studyLabel(M.study))}: ${esc(r.primary)}'s calls are now the effective calls`)}catch(e){toast(esc(e.message),true)}}}
 function openImport(){if(vmode){status("Import is switched off during a validation read (it would unblind you).",true);return}
   if(!reviewer()){status("Enter your name first.",true);return}const S=M.import_sources||[];
   $("#imFrom").innerHTML=S.length?S.map(s=>`<option value="${esc(s.key)}">${esc(s.label)}</option>`).join(""):'<option value="">no earlier calls for this study</option>';

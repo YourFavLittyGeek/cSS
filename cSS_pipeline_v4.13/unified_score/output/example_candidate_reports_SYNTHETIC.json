@@ -3,7 +3,7 @@
   "study": "SYN01",
   "cand_id": 1,
   "probability": 0.9999999566644681,
-  "raw_score": 0.8542198194628507,
+  "raw_score": 0.8542198194628505,
   "score_note": null,
   "predictors": {
    "x1_vessel_continuity_mm": {
@@ -44,9 +44,9 @@
     "beta_std": -1.311647079291006
    },
    "x2_core_contrast_nu": {
-    "contribution": -4.543694663909423,
+    "contribution": -4.543694663909424,
     "imputed": false,
-    "beta_std": 6.427122326298668
+    "beta_std": 6.427122326298669
    },
    "x3_pial_distance_mm": {
     "contribution": 9.38171595441965,
@@ -148,7 +148,7 @@
    "core_kept_frac": 0.9375,
    "unstable": true,
    "score_range": [
-    3.888353255752308e-08,
+    3.8883532557522945e-08,
     0.9999999999999993
    ]
   },
@@ -173,7 +173,7 @@
   },
   "registration": "ok",
   "model_version": "uscore-model/1.0",
-  "model_hash": "93cb3ea6c6f0ac737c78f249e61f335759acf2ce057db70bd79137784ccd2f82",
+  "model_hash": "1c4c1e81e8dc0bf4ddd2bc9a892e9be193e9672bd4eebb8f843a8ca1d33a5cbb",
   "feature_version": "uscore-features/1.0",
   "synthetic_test": true,
   "disclaimer": "EXPERIMENTAL research output; not a diagnosis; the dark core is an experimental representation, not ground truth"
@@ -227,7 +227,7 @@
    "x2_core_contrast_nu": {
     "contribution": 0.0,
     "imputed": true,
-    "beta_std": 6.427122326298668
+    "beta_std": 6.427122326298669
    },
    "x3_pial_distance_mm": {
     "contribution": 6.070522097828524,
@@ -356,7 +356,7 @@
   },
   "registration": "ok",
   "model_version": "uscore-model/1.0",
-  "model_hash": "93cb3ea6c6f0ac737c78f249e61f335759acf2ce057db70bd79137784ccd2f82",
+  "model_hash": "1c4c1e81e8dc0bf4ddd2bc9a892e9be193e9672bd4eebb8f843a8ca1d33a5cbb",
   "feature_version": "uscore-features/1.0",
   "synthetic_test": true,
   "disclaimer": "EXPERIMENTAL research output; not a diagnosis; the dark core is an experimental representation, not ground truth"
@@ -389,7 +389,7 @@
     "reasons": []
    },
    "x4_sulcal_alignment": {
-    "value": 0.9952699279390791,
+    "value": 0.9952699279390788,
     "unit": "-",
     "status": "reliable",
     "reasons": []
@@ -410,7 +410,7 @@
    "x2_core_contrast_nu": {
     "contribution": 0.0,
     "imputed": true,
-    "beta_std": 6.427122326298668
+    "beta_std": 6.427122326298669
    },
    "x3_pial_distance_mm": {
     "contribution": -7.174252670660891,
@@ -501,7 +501,7 @@
    ],
    "x4_sulcal_alignment_unstable_frac": 0.0,
    "x4_sulcal_alignment_range": [
-    0.9951592034952953,
+    0.9951592034952954,
     0.9984888629605349
    ],
    "x5_extracranial_mm_unstable_frac": 0.0,
@@ -540,7 +540,7 @@
   },
   "registration": "ok",
   "model_version": "uscore-model/1.0",
-  "model_hash": "93cb3ea6c6f0ac737c78f249e61f335759acf2ce057db70bd79137784ccd2f82",
+  "model_hash": "1c4c1e81e8dc0bf4ddd2bc9a892e9be193e9672bd4eebb8f843a8ca1d33a5cbb",
   "feature_version": "uscore-features/1.0",
   "synthetic_test": true,
   "disclaimer": "EXPERIMENTAL research output; not a diagnosis; the dark core is an experimental representation, not ground truth"

@@ -70,6 +70,17 @@ fields (this examination only); every change is audited; internal ids and file n
 local folder you choose. Every file is verified with sha256. In Incognito the folders are named by code and DICOM files are left out.
 Full details: `IMPORT_WORKFLOW.md`.
 
+## 3b. Study administration
+- **Identifiers:** in Standard the accession number identifies studies everywhere; in Incognito the code does.
+- **Study panel:** MRN first, then the patient's examinations. **Edit** opens a form with Save / Discard; a checkpoint stops duplicate
+  accession numbers or codes.
+- **Studies toolbar:** **Archive ▾** (archive ticked studies or a cohort, or open the archive) and **Remove…** (Remove keeps results for
+  ML; Purge removes everything; both move files to the Trash).
+- **Import:** duplicates offer Skip / Replace / Import and keep the old results for ML / Cancel.
+- **Previous version:** studies processed there are found under **Add studies › From another project**, and reused automatically during
+  imports.
+- Details: `STUDY_ADMINISTRATION.md`.
+
 ## 4. Process, review, re-process
 - Processing runs from the queue (Activity). Each run is archived (Studies › study › **Compare runs**).
 - **Review** opens the reviewer. *Your call (human reviewer)* - grouped calls (cSS / mimics / other) with subtype chips, keys
@@ -91,9 +102,26 @@ the QC image (labels + brain mask on the SWI; can be made for imported studies),
 - **Model** (Unified Score: study selection, training, validation), **Shadow ML** (Stage 1 engine, shadow mode), **Image ML**
   (synthetic studies only).
 
+## 6b. Percival Score and Percival Intelligence (v5.22 / v5.23)
+How it works: `PERCIVAL_ARCHITECTURE.md`. Local-only design and its verification: `LOCAL_AI_ARCHITECTURE.md`.
+1. **Research › Percival Intelligence › Switch on local learning** (once per project; synthetic projects do not need it).
+2. Review studies as usual and save the final review. Each final review is stored with the model outputs that existed when you saved it.
+3. **Start a training cycle** (or let one start automatically after 5 newly finished studies - Training tab). A cycle compares model
+   families, chooses the combination by cross-validation, calibrates, sets thresholds, evaluates once on the locked test patients and
+   promotes the new model **only if it passes the acceptance criteria**; otherwise it is kept as a candidate (Registry: Make active /
+   Roll back).
+4. In the reviewer each candidate shows **one Percival Score 0-100** with red / yellow / green; open **Why this score** for the sources,
+   contributions, disagreement pattern, uncertainty and reasons. It is hidden during a validation (blind) read. A study whose labels
+   trained the model is marked *in-sample*.
+5. **Evidence & reliability** (`#intel?tab=evidence`) shows whether each source adds information, where sources share inputs, whether
+   fusion helps, what disagreements meant in your reviewed cases, and the calibration plot.
+
+The score is an experimental assessment calibrated on this project's reviews - not a probability of cSS and not clinically validated.
+
 ## 7. Tests
 ```zsh
-bash tests/run_uscore_tests.sh            # app suite (stops at check_ui_poll without Node; see the handover for the no-stop run)
+bash tests/run_uscore_tests.sh            # app + Percival suite: runs every check; a check that cannot run here (check_ui_poll without
+                                          # Node / npm) is reported SKIPPED, never passed; exit 1 if any check failed
 bash unified_engine/run_tests.sh /tmp/u.log
 bash tests/run_tests.sh                   # pipeline suite on synthetic phantoms
 ```

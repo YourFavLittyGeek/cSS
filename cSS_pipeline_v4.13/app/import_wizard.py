@@ -169,6 +169,11 @@ def new_plan(folder, folder_is, mode, manifest_path="", generate_codes=False, ID
             plan["exams"].append(dict(e, eid=f"{i}.{j}", patient_idx=i, patient_folder=d, row=None, display_name="", include=True, code_override="", n_in_folder=len(ex), j=j,
                                       pathway=""))
     plan["has_subfolders"] = any(e["sub"] for e in plan["exams"])
+    km = plan["hooks"].get("known_match")                   # v5.20: processed before in another project (e.g. the previous version)?
+    if km:
+        for e in plan["exams"]:
+            m = km(e)
+            if m and m.get("processed"): e["reuse_src"] = m; e["reuse"] = True
     _match(plan)
     for e in plan["exams"]: _pathway(plan, e)
     set_library(plan, library or {}, verify_dest)
@@ -353,11 +358,18 @@ def revalidate(plan, ID=None, existing_file_keys=()):
         if ID is not None:
             c = ID.classify(fingerprint=e.get("fingerprint", ""), dicom_study_uid=e.get("dicom_study_uid", ""), accession=i["accession"] if mode == "standard" else (r or {}).get("accession", ""),
                             institution=e.get("dicom_institution", ""), deid_code=i["code"], mrn=i["mrn"])
-            e["duplicate"] = c
-            if c["kind"] == "same_exam":
-                if e["include"]: e["include"] = False; e["excluded_why"] = c["why"]
-                e["problems"] = [p for p in e["problems"] if "already exists" not in p]
-            if c["kind"] == "conflict": e["problems"].append(c["why"])
+            e["duplicate"] = c; ch = e.get("dup_choice", ""); e["dup_target"] = ""
+            if c.get("retired_note"): e["notes"].append(c["retired_note"])
+            if c["kind"] in ("same_exam", "conflict"):                   # v5.20: the user decides - skip / replace / import and keep the old for ML / cancel
+                d = plan["hooks"].get("describe"); e["dup_other"] = d(c["study_uuid"]) if d and c.get("study_uuid") else {}
+                if ch in ("replace", "keep_ml"):
+                    e["dup_target"] = c["study_uuid"]; e["include"] = True; e.pop("excluded_why", None)
+                    e["problems"] = [p for p in e["problems"] if "already exists" not in p and "already used" not in p]
+                elif c["kind"] == "same_exam" or ch == "skip":
+                    if e["include"] or not e.get("excluded_why"): e["include"] = False; e["excluded_why"] = c["why"] + (" - skipped" if ch == "skip" else "")
+                    e["problems"] = [p for p in e["problems"] if "already exists" not in p]
+                else:
+                    e["problems"].append(c["why"] + " - choose: skip, replace the old study, import and keep the old results for ML, or cancel and correct the identifier")
         e["library_rel"], e["library_why"] = library_place(plan, e) if L["enabled"] else ("", "")
         e["library_state"] = ""
         if L["enabled"] and L["root_ok"] and e["library_rel"]:
@@ -367,12 +379,18 @@ def revalidate(plan, ID=None, existing_file_keys=()):
                     import json
                     same = bool(e.get("fingerprint")) and json.load(open(os.path.join(d, "percival_library.json"))).get("fingerprint") == e.get("fingerprint")
                 except Exception: same = False
-                if same: e["library_state"] = "already in the library"
+                try: owner = json.load(open(os.path.join(d, "percival_library.json"))).get("study_uuid", "")
+                except Exception: owner = ""
+                if same and not e.get("dup_target"): e["library_state"] = "already in the library"
+                elif e.get("dup_target") and owner == e["dup_target"]: e["library_state"] = "replaces the old study's library copy (it goes to the Trash)"
                 else: e["problems"].append("the study library already has a different examination in this folder - check the identifiers (nothing is overwritten)")
         if e["check"] == "cannot" and "no SWI" not in " ".join(e["problems"]): e["problems"].append(e["pathway_reason"])
         lln = plan["hooks"].get("looks_like_name")
         if lln and plan["folder_is"] in ("code", "accession", "mrn") and any(lln(x) for x in (e["patient_folder"], e["sub"]) if x):
             e["notes"].append("a folder name looks like a person's name - check what the folder names are (step 2)")
+        if e.get("reuse_src"):
+            e["reuse_ok"] = e["reuse_src"]["code"] not in set(existing_file_keys) and not (ID is not None and ID.by_file_key(e["reuse_src"]["code"]))
+            if e.get("reuse") and not e["reuse_ok"]: e["notes"].append("processed before, but its key is already used in this project - it will be processed again")
         if e["include"]:
             errs += [dict(eid=e["eid"], msg=f"examination {e['eid']}: {m}") for m in e["problems"]]
     if not plan["processing"].get("cohort"): warns.append(dict(eid="", msg="no cohort chosen - the studies are added without a cohort (processing options)"))
@@ -401,6 +419,11 @@ def update(plan_id, changes, ID=None, existing_file_keys=(), verify_dest=None):
         if "display_name" in c: e["display_name"] = str(c["display_name"])[:120]
         if "code" in c: e["code_override"] = _s(c["code"])[:32]
         if "pathway" in c: e["pathway"] = _s(c["pathway"]); e["pathway_user"] = e["pathway"] != e.get("pathway_rec")
+        if "reuse" in c: e["reuse"] = bool(c["reuse"])
+        if "dup_choice" in c:
+            if c["dup_choice"] not in ("", "skip", "replace", "keep_ml"): raise ValueError("unknown duplicate choice")
+            e["dup_choice"] = c["dup_choice"]
+            if c["dup_choice"] in ("", "skip"): e["include"] = False if c["dup_choice"] == "skip" else e["include"]
         if "series" in c:
             for t, i in (c["series"] or {}).items():
                 if t not in SER_TYPES: continue
@@ -488,6 +511,9 @@ def view(plan):
                  chosen={t: next((k for k, s in enumerate(e["series"]) if s["path"] == e["chosen"].get(t)), None) for t in SER_TYPES if e["chosen"].get(t)},
                  auto_why=e.get("auto_why", {}), user_series=bool(e.get("user_series")), n_series=len(e["series"]),
                  duplicate=dict(kind=(e.get("duplicate") or {}).get("kind", ""), why=(e.get("duplicate") or {}).get("why", "")),
+                 dup_choice=e.get("dup_choice", ""), dup_other=e.get("dup_other", {}),
+                 reuse=bool(e.get("reuse") and e.get("reuse_src") and e.get("reuse_ok", True)), reuse_possible=bool(e.get("reuse_src") and e.get("reuse_ok", True)),
+                 reuse_from=(dict(kind=e["reuse_src"]["kind"], code=e["reuse_src"]["code"] if not inc else "") if e.get("reuse_src") else {}),
                  code=i["code"], code_source=i["code_src"], code_generated=not i["code"] and plan["mode"] == "standard",
                  library=e.get("library_rel", "") if plan["library"]["enabled"] else "", library_state=e.get("library_state", ""), library_why=e.get("library_why", ""),
                  check=e.get("check", ""), pathway=e.get("pathway", ""), pathway_rec=e.get("pathway_rec", ""), pathway_reason=e.get("pathway_reason", ""), overlap=e.get("overlap", ""),
@@ -549,12 +575,25 @@ def commit(plan_id, ID, add_to_queue, settings, by=""):
 
 
 def _commit(p, ID, add_to_queue, settings, by, mode, inc, patients, items, out):
-    lib_items = []; P = p["processing"]
+    lib_items = []; P = p["processing"]; reuse_items = []; reuse_src = {}
+    res = [e for e in inc if e.get("dup_target") and e.get("dup_choice") in ("replace", "keep_ml")]
+    if res:                                                                   # v5.20: resolve duplicates first (old study purged / retired)
+        rs = settings.get("_resolve")
+        if not rs: raise ValueError("duplicate resolution is not available here")
+        if any(e["dup_choice"] == "replace" for e in res) and settings.get("_replace_confirm") != "REPLACE":
+            raise ValueError("type REPLACE to confirm: replacing purges the old studies (files to the Trash)")
+        for e in res:
+            fk = (ID.R["studies"].get(e["dup_target"]) or {}).get("file_key")
+            if fk: rs(e["dup_choice"], fk)
+        ID.R = ID._load_registry()                                            # the resolution committed its own changes
+        if ID.unlocked(): ID.unlock_reload()
     for e in inc:
         i = ids(p, e)
         code = i["code"]; generated = False
         if not code: code = ID.unique_code(); e["generated_code"] = code; generated = True
         fk = code if MF.CODE_RE.fullmatch(code) and not ID.by_file_key(code) else ID.unique_code()
+        reuse = bool(e.get("reuse") and e.get("reuse_src") and e.get("reuse_ok", True) and settings.get("_reuse"))
+        if reuse: fk = e["reuse_src"]["code"]                 # the processed files keep the key they were made under
         pkey = (f"mrn:{i['mrn']}" if i["mrn"] and (mode == "standard" or i["mrn_src"] in ("Excel", "folder name")) else "") or \
                (f"pid:{e['dicom_patient_id']}" if e.get("dicom_patient_id") and p["folder_is"] in ("none", "accession") else "") or f"folder:{e['patient_idx']}"
         if pkey not in patients:
@@ -565,11 +604,12 @@ def _commit(p, ID, add_to_queue, settings, by, mode, inc, patients, items, out):
         su = ID.add_study(patients[pkey], fk, code, display_name=e["display_name"], accession=i["accession"] if ID.unlocked() else "",
                           institution=e.get("dicom_institution", "") if ID.unlocked() else "", dicom_study_uid=e.get("dicom_study_uid", "") if ID.unlocked() else "",
                           fingerprint=e.get("fingerprint", ""), source="add studies", by=by)
-        items.append(dict(folder_name=fk, folder="", code=fk, name="", chosen=_neutral_copy(e["chosen"], fk, settings.get("_import_src")),
+        (reuse_items if reuse else items).append(dict(folder_name=fk, folder="", code=fk, name="", chosen=_neutral_copy(e["chosen"], fk, settings.get("_import_src")),
                           fingerprint=e.get("fingerprint", ""), fingerprint_v1="", radiologist=i["radiologist"], grade_R=i["grade_R"], grade_L=i["grade_L"],
                           pathway=e.get("pathway") or e.get("pathway_rec") or "", pathway_rec=e.get("pathway_rec", ""), pathway_reason=e.get("pathway_reason", ""),
                           check=e.get("check", ""), decided=True))
-        out.append(dict(eid=e["eid"], study_uuid=su, file_key=fk, deid_code=code, generated=generated, user_series=bool(e.get("user_series"))))
+        out.append(dict(eid=e["eid"], study_uuid=su, file_key=fk, deid_code=code, generated=generated, user_series=bool(e.get("user_series")), reused=reuse))
+        if reuse: reuse_src[fk] = e["reuse_src"]
         L = p["library"]
         if L["enabled"]:
             if mode == "standard": rel, why = SL.place("standard", mrn=i["mrn"], accession=i["accession"])
@@ -586,6 +626,13 @@ def _commit(p, ID, add_to_queue, settings, by, mode, inc, patients, items, out):
     except Exception: rollback(); raise
     if not q.get("ok"): rollback(); raise ValueError("queue refused: " + "; ".join(q.get("errors", [])))
     ID.commit(); PLANS.pop(p["id"], None)
+    for it in reuse_items:                                    # bring in the earlier processing; if that fails, process normally
+        src = reuse_src[it["code"]]
+        try: settings["_reuse"](src["project"], it["code"], qs, it)
+        except Exception as ex:
+            for o in out:
+                if o["file_key"] == it["code"]: o["reused"] = False; o["reuse_error"] = str(ex)[:200]
+            add_to_queue([it], qs)
     job = ""
     if lib_items:
         root = p["library"]["root"]

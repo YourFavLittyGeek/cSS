@@ -584,3 +584,12 @@ Reviewer viewer rebuilt (docs/CHANGELOG_v5.6.md): single un-zoomed image, layout
   Held-out audit: docs/HELDOUT_PROTECTION_AUDIT_v514.md - authorization + recomputed model hash enforced inside LabelAccess,
   private _read_calls, cohort_audit no longer opens held-out calls, protocol integrity check signs reader files by stat only;
   tests/check_heldout_protection.py. Protocol: auto vs manual sections, manual items never auto-passed, auto results not editable.
+
+- v5.20-v5.23 Percival (branch feature/unified-score-ml-integration, UNCOMMITTED at handover 2026-11-21; backup refs refs/backup/handover-2026-11-21
+  and refs/backup/v523-*): study administration (v5.20), Percival Score engine unified_engine/uengine/percival/ (meta.py, cnn.py, learners.py,
+  intelligence.py) + app/percival_gui.py + app/percival_view.js (v5.22/v5.23). Docs: docs/percival_app/PERCIVAL_ARCHITECTURE.md,
+  LOCAL_AI_ARCHITECTURE.md, RECOVERY_REPORT_2026-11-21.md, IMPLEMENTATION_REPORT_v5.23.md. Pure numpy (no sklearn/torch in env 'css').
+  Pitfalls fixed in v5.23: review_web.py LABELS name clash (/api/meta 500) and review_web.html LB clash (TDZ) - never reuse those names;
+  /api/percival/state must read JOB first. Tests: tests/run_uscore_tests.sh runs every check (SKIPPED != passed), check_percival.py,
+  check_app_percival.py (CSS_KEEP_TMP=1 keeps the temp project on failure). The user's own reviewer sessions on clinical projects may be
+  listening on 8765-8773 - never kill them.

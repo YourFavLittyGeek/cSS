@@ -131,7 +131,7 @@ async function candView(el){const st=U.st;const opts=[...new Set(st.studies.filt
   const pts=st.patients.filter(p=>p.status==="done");
   el.innerHTML=`<h2>6 · Candidate-level results</h2><div class="row"><span class="mut">Study</span><select id="cs">${opts.map(o=>`<option ${o===U.study?"selected":""}>${esc(o)}</option>`).join("")||"<option>(none scored)</option>"}</select>
     <button class="b pri" id="sa" ${st.model.frozen?"":"disabled"} title="${st.model.frozen?"":"freeze a model first (step 5)"}">Score all extracted studies</button>
-    <span class="mut">Patient</span><select id="pp">${pts.map(p=>`<option>${esc(p.code)}</option>`).join("")}</select><button class="b" id="sp">Score patient</button></div>${jobBox("score",st.jobs.score)}
+    <span class="mut">Patient</span><select id="pp">${pts.map(p=>`<option>${sidH(p.code)}</option>`).join("")}</select><button class="b" id="sp">Score patient</button></div>${jobBox("score",st.jobs.score)}
     <table class="fix"><tr><th style="width:52px">#</th><th>Category</th><th style="width:90px">Score</th><th>Reliability (x1…x5)</th><th>Alternative detectors</th></tr>
     ${C.map(r=>`<tr data-c="${r.cand_id}" style="cursor:pointer;${U.cand==r.cand_id?"background:var(--in)":""}"><td>${r.cand_id}</td><td>${catPill(r.category)}</td><td>${r.probability!=null?f2(r.probability)+" p":r.raw_score!=null?f2(r.raw_score)+" raw":"–"}</td>
       <td>${Object.values(r.predictors).map(p=>`<span title="${esc(p.status)}" style="color:${p.status==="reliable"?"var(--ok)":p.status==="unreliable"?"var(--warn)":"var(--mut)"}">●</span>`).join(" ")}</td>

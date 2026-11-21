@@ -77,6 +77,14 @@ async function saveTemplate(then){const d=await pick("folder","Choose where to s
   const r=await api("/api/id/template/save",{dest:d,open:true});if(!r.ok)return toast(esc(r.error),1);
   toast(`template saved: ${esc(r.path)} - it opens in Excel; fill it in, save it, then it is already chosen as the Excel file`);if(then)then(r.path)}
 function iwPatient(e,std){if(!std)return INCOG_ICON;const v=[e.patient_name,e.mrn?`MRN ${e.mrn}`:""].filter(Boolean).join(" · ");return v?`${esc(v)}${e.mrn_source?` <span class="note">(${esc(e.mrn_source)})</span>`:""}`:'<span class="bad">MRN missing</span>'}
+function dupBox(e){const d=e.duplicate||{},o=e.dup_other||{};
+  return `<div class="dupbox" data-iw="dup"><div class="${d.kind==="conflict"&&!e.dup_choice?"bad":"warn"}">${d.kind==="same_exam"?"Already in the project":"Identifier already used"}: <b>${esc(o.label||"existing study")}</b></div>
+    <div class="note">${esc(d.why||"")}${o.status?` · ${esc(o.status)}`:""}${o.processed?" · processed":""}${o.has_calls?" · has reviewer calls":""}${o.archived?" · archived":""}</div>
+    <select data-iwd="${esc(e.eid)}"><option value="" ${!e.dup_choice?"selected":""}>${d.kind==="same_exam"?"Skip (do not import)":"— choose what to do —"}</option>
+      ${d.kind==="conflict"?`<option value="skip" ${e.dup_choice==="skip"?"selected":""}>Skip (do not import)</option>`:""}
+      <option value="replace" ${e.dup_choice==="replace"?"selected":""}>Replace: purge the old study, import this one</option>
+      <option value="keep_ml" ${e.dup_choice==="keep_ml"?"selected":""}>Import, keep the old results for ML (old study gets a new identifier)</option></select>
+    <div class="note">or cancel and correct the identifier in the Excel file / folder name</div></div>`}
 function iwPreview(){const P=IW.plan,el=$("#iw-prev");if(!el||!P)return;const std=P.mode==="standard";if(!IW.tab)IW.tab="series";
   const lbl=e=>std?(e.accession||"accession missing"):(e.code||"code missing");
   const dup=d=>!d.kind||d.kind==="new"?'<span class="ok">new</span>':d.kind==="same_patient_new_exam"?'<span class="ok">new exam of an existing patient</span>':d.kind==="same_exam"?`<span class="warn" title="${esc(d.why)}">already imported</span>`:`<span class="bad" title="${esc(d.why)}">conflict</span>`;
@@ -104,9 +112,10 @@ function iwPreview(){const P=IW.plan,el=$("#iw-prev");if(!el||!P)return;const st
        <td>${e.accession?`<b>${esc(e.accession)}</b>${src(e.accession_source)}`:'<span class="bad">missing</span>'}${e.study_date?`<div class="note">${esc(e.study_date)}</div>`:""}</td>`:`<td data-iw="patient">${INCOG_ICON}</td>`}
      <td><input data-iwk="${esc(e.eid)}" value="${esc(e.code)}" placeholder="${e.code_generated?"generated at import":"code (required)"}" style="width:100%" title="de-identified study code">${e.code_source&&e.code_source!=="you"?src(e.code_source):""}${e.has_grades?'<div class="note">grades from Excel</div>':""}</td>
      <td>${rowOpt(e)}</td>
-     <td>${e.check==="cannot"?'<span class="bad">cannot run</span>':(typeof pwSel==="function"&&S.pathways?pwSel(e.pathway,e.pathway_rec,`data-iwp="${esc(e.eid)}" style="width:100%"`):esc(e.pathway))}${e.pathway_reason&&e.check!=="ok"?`<div class="note warn">${esc(e.pathway_reason)}</div>`:""}</td>
+     <td>${e.reuse_possible?`<label class="reuse" data-iw="reuse"><input type="checkbox" data-iwu="${esc(e.eid)}" ${e.reuse?"checked":""}> <b>Reuse earlier processing</b><div class="note">processed before in the ${esc(e.reuse_from.kind||"other project")}${e.reuse_from.code?` (${esc(e.reuse_from.code)})`:""} - its results are brought in, not processed again</div></label>`:""}
+       ${e.reuse?"":(e.check==="cannot"?'<span class="bad">cannot run</span>':(typeof pwSel==="function"&&S.pathways?pwSel(e.pathway,e.pathway_rec,`data-iwp="${esc(e.eid)}" style="width:100%"`):esc(e.pathway)))+(e.pathway_reason&&e.check!=="ok"?`<div class="note warn">${esc(e.pathway_reason)}</div>`:"")}</td>
      <td>${P.library.enabled?`<div class="mono note" style="overflow-wrap:anywhere" data-iw="lib">${e.library?esc(e.library):`<span class="${std?"bad":"mut"}">${esc(e.library_why||"—")}</span>`}${e.library_state?` · ${esc(e.library_state)}`:""}</div>`:""}
-       ${dup(e.duplicate||{})}${e.excluded_why?`<div class="note">${esc(e.excluded_why)}</div>`:""}${e.problems.length&&e.include?`<div class="bad">${e.problems.map(esc).join("<br>")}</div>`:""}${(e.notes||[]).length?`<div class="note">${e.notes.map(esc).join("<br>")}</div>`:""}
+       ${["same_exam","conflict"].includes((e.duplicate||{}).kind)?dupBox(e):dup(e.duplicate||{})}${e.excluded_why&&!["same_exam","conflict"].includes((e.duplicate||{}).kind)?`<div class="note">${esc(e.excluded_why)}</div>`:""}${e.problems.length&&e.include?`<div class="bad">${e.problems.map(esc).join("<br>")}</div>`:""}${(e.notes||[]).length?`<div class="note">${e.notes.map(esc).join("<br>")}</div>`:""}
        <input data-iwn="${esc(e.eid)}" value="${esc(e.display_name)}" placeholder="display name (optional)" style="width:100%;margin-top:4px"></td></tr>`).join("")}</table>
    <div class="row" style="margin-top:10px"><button class="b" data-iwt="series">◂ Series review</button><button class="b pri" id="iw-imp" ${P.ok?"":"disabled"} data-iw="confirm">Import ${P.n_include} examination(s) and start ▶</button><span class="note">${P.ok?`cohort ${esc(P.processing.cohort||"—")} · ${P.processing.run_mode==="semi"?"semi-automatic":"automatic"}${P.library.enabled?" · library copy after import":""}`:(P.errors.length?"fix the problems above (assign rows, choose series, correct the Excel file, or untick examinations)":"tick at least one examination")}</span></div>`;
   el.innerHTML=`<div class="card" data-iw="preview">${head}${IW.tab==="series"?series:ids}</div>`;
@@ -114,6 +123,8 @@ function iwPreview(){const P=IW.plan,el=$("#iw-prev");if(!el||!P)return;const st
   el.querySelectorAll("[data-iwt]").forEach(b=>b.onclick=()=>{IW.tab=b.dataset.iwt;iwPreview()});
   $("#iw-next")&&($("#iw-next").onclick=()=>{IW.tab="ids";iwPreview()});
   el.querySelectorAll("[data-iwss]").forEach(s=>s.onchange=()=>iwUpdate([{eid:s.dataset.iwss,series:{[s.dataset.t]:s.value}}]));
+  el.querySelectorAll("[data-iwd]").forEach(s=>s.onchange=()=>iwUpdate([{eid:s.dataset.iwd,dup_choice:s.value}]));
+  el.querySelectorAll("[data-iwu]").forEach(c=>c.onchange=()=>iwUpdate([{eid:c.dataset.iwu,reuse:c.checked}]));
   el.querySelectorAll("[data-iwr]").forEach(s=>s.onchange=()=>iwUpdate([{eid:s.dataset.iwr,row:s.value}]));
   el.querySelectorAll("[data-iwi]").forEach(c=>c.onchange=()=>iwUpdate([{eid:c.dataset.iwi,include:c.checked}]));
   el.querySelectorAll("[data-iwn]").forEach(c=>c.onchange=()=>iwUpdate([{eid:c.dataset.iwn,display_name:c.value}]));
@@ -121,7 +132,10 @@ function iwPreview(){const P=IW.plan,el=$("#iw-prev");if(!el||!P)return;const st
   el.querySelectorAll("[data-iwp]").forEach(s=>s.onchange=async()=>{const e=P.exams.find(x=>x.eid===s.dataset.iwp),r=typeof confirmPath==="function"?await confirmPath(e.code||e.eid,s.value,e.pathway_rec,e.pathway_reason):true;
     iwUpdate([{eid:e.eid,pathway:r===true?s.value:r==="rec"?e.pathway_rec:e.pathway}])});
   $("#iw-imp")&&($("#iw-imp").onclick=async()=>{if(!confirm(`Import ${P.n_include} examination(s) as shown in the preview and start processing?`))return;
-    const r=await api("/api/id/import/commit",{plan:P.id,confirm:true,cohort:P.processing.cohort});if(!r.ok)return toast(esc(r.error),1);IW.done=r;IW.plan=null;IW.tab="series";iwDone()})}
+    const nr=P.exams.filter(e=>e.include&&e.dup_choice==="replace").length,nk=P.exams.filter(e=>e.include&&e.dup_choice==="keep_ml").length;let rc="";
+    if(nr){rc=prompt(`${nr} existing studies will be PURGED (every file to the Trash) and replaced${P.exams.some(e=>e.include&&e.dup_choice==="replace"&&e.dup_other&&e.dup_other.has_calls)?" - some have reviewer calls (expert labels), which are deleted too":""}.${nk?` ${nk} existing studies keep their results for ML under a new identifier.`:""}\n\nType REPLACE to confirm.`)||"";if(rc.trim()!=="REPLACE")return toast("not imported: REPLACE was not typed",1)}
+    else if(nk&&!confirm(`${nk} existing studies will be removed - their results are kept for machine learning under a new identifier (RET-…) and their images go to the Trash. Continue?`))return;
+    const r=await api("/api/id/import/commit",{plan:P.id,confirm:true,cohort:P.processing.cohort,replace_confirm:rc});if(!r.ok)return toast(esc(r.error),1);IW.done=r;IW.plan=null;IW.tab="series";iwDone()})}
 function iwMeasure(){const c=$('[data-iw="preview"]'),t=$('[data-iw="exams"]')||$('[data-iw="series-review"]');if(!c||!t)return;      // layout self-check (tests read these)
   c.dataset.overflow=t.scrollWidth>c.clientWidth+2?"yes":"no";const bad=[];
   t.querySelectorAll("td").forEach(td=>{const r=td.getBoundingClientRect();td.querySelectorAll("input,select,button").forEach(x=>{const q=x.getBoundingClientRect();if(q.width&&(q.right>r.right+1||q.left<r.left-1))bad.push(x.tagName.toLowerCase()+(x.type?":"+x.type:""))})});
