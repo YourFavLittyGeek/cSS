@@ -9,6 +9,7 @@ usage:
   run_imaging.py models [--base DIR]                  image models and their health (JSON)
   run_imaging.py infer SID --base DIR [--model F] [--write]   local Image ML inference; --write stores DIR/unified_engine/image_ml/SID.json
   run_imaging.py train-synthetic OUT.json [--n-train 48]      train + evaluate the SYNTHETIC demonstration image model (never overwrites)
+  run_imaging.py evaluate-synthetic OUT.json [--model F]      score an EXISTING model on a fresh synthetic cohort (model only read)
 exit codes: 0 ok, 1 problems, 3 refused (not synthetic), 4 inference failed (nothing written)"""
 import argparse, json, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -26,9 +27,10 @@ def main():
     q = sp.add_parser("patches"); q.add_argument("sid"); q.add_argument("--base", required=True); q.add_argument("--write", action="store_true")
     c = sp.add_parser("cohort"); c.add_argument("dir"); c.add_argument("--n", type=int, default=8); c.add_argument("--seed", type=int, default=0)
     c.add_argument("--signal", type=int, default=1, choices=(0, 1))
-    m = sp.add_parser("models"); m.add_argument("--base", default=None)
+    m = sp.add_parser("models"); m.add_argument("--base", default=None); m.add_argument("--cards", action="store_true")
     f = sp.add_parser("infer"); f.add_argument("sid"); f.add_argument("--base", required=True); f.add_argument("--model", default=None)
     f.add_argument("--write", action="store_true")
+    ev = sp.add_parser("evaluate-synthetic"); ev.add_argument("out"); ev.add_argument("--model", default=None); ev.add_argument("--n", type=int, default=12); ev.add_argument("--seed", type=int, default=900)
     t = sp.add_parser("train-synthetic"); t.add_argument("out"); t.add_argument("--n-train", type=int, default=48); t.add_argument("--seed", type=int, default=500)
     a = ap.parse_args()
     if a.cmd == "verify":
@@ -42,7 +44,13 @@ def main():
         r = SC.write_cohort(a.dir, n=a.n, seed=a.seed, signal=a.signal)
         print(f"{len(r['profiles'])} SYNTHETIC studies ({', '.join(r['profiles'])}) written to {a.dir}; truth in unified_engine/image_truth/"); return 0
     if a.cmd == "models":
-        print(json.dumps(INF.list_models(a.base), default=str)); return 0
+        print(json.dumps(INF.list_models(a.base, cards=a.cards), default=str)); return 0
+    if a.cmd == "evaluate-synthetic":
+        from uengine.imaging import train_image_model as TR
+        mp = a.model or INF.select_model(None)[0]
+        if not mp: print("no healthy image model", file=sys.stderr); return 1
+        r = TR.evaluate_existing(mp, a.out, n=a.n, seed=a.seed)
+        print(json.dumps(dict(path=a.out, sensitivity=r["sensitivity"], specificity=r["specificity"], auc=r["metrics"]["auc_pooled"]), default=float)); return 0
     if a.cmd == "train-synthetic":
         from uengine.imaging import train_image_model as TR
         r = TR.train(a.out, n_train=a.n_train, seed=a.seed); ev = r["card"]["evaluation"]

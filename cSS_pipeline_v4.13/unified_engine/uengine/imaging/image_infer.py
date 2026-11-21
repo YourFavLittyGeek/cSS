@@ -24,10 +24,15 @@ def model_paths(base=None):
     return [p for d in dirs for p in sorted(glob.glob(os.path.join(d, "*.json")))]
 
 
-def list_models(base=None):
+def list_models(base=None, cards=False):
     out = []
     for p in model_paths(base):
-        h = IM.health(p); h.pop("card", None); out.append(h)
+        h = IM.health(p)
+        if not cards: h.pop("card", None)
+        else:
+            c = h.get("card") or {}; h["card"] = {k: c.get(k) for k in ("name", "version", "created", "data_kind", "classes", "n_features", "method", "training", "evaluation",
+                                                                        "intended_use", "out_of_scope")}
+        h["file_size"] = os.path.getsize(p) if os.path.exists(p) else 0; out.append(h)
     return out
 
 

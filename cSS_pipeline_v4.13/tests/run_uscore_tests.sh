@@ -27,4 +27,5 @@ python3 tests/check_identity.py            # v5.16: vault, uuids, unique identif
 python3 tests/check_app_identity.py        # v5.16: Standard / Incognito through the app, no identifier leaks, guided import
 python3 tests/check_gui_js_syntax.py      # every GUI script parses (a syntax error blanks the screen)
 python3 tests/check_lineage.py             # v5.17: re-processing keeps history; candidate lineage; calls move only on confident matches
+python3 tests/check_app_training.py        # v5.17: Training screen A-D; synthetic vs clinical apart; evaluation never changes the model
 echo "unified-score tests: all passed"

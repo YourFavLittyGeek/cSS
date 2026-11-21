@@ -1043,6 +1043,20 @@ def lineage_post(op, d):
                                                  str(d.get("decision", "")), str(d.get("by", "")))
         return dict(ok=False, error=f"unknown {op}")
     except Exception as e: return dict(ok=False, error=f"{type(e).__name__}: {e}"[-300:])
+# ------------------------------------------------------------------ Training screen (v5.17) - app/training_gui.py
+def train_get(op, q):
+    try:
+        import training_gui as TG, shadow_engine_gui as SEG, unified_gui as UG, review_calls_gui as RCG
+        if op == "overview": return TG.overview(B, AD, PAT, SET, version, SEG.models, lambda: unified_get("state", {}), UG.validation, lambda: RCG.policy(B, PAT))
+        if op == "job": return dict(TG.JOB)
+        return dict(error=f"unknown {op}")
+    except Exception as e: return dict(error=f"Training screen unavailable: {type(e).__name__}: {e}"[-300:])
+def train_post(op, d):
+    try:
+        import training_gui as TG
+        if op == "evaluate": return TG.run_evaluation(AD, n=int(d.get("n", 12)))
+        return dict(ok=False, error=f"unknown {op}")
+    except Exception as e: return dict(ok=False, error=f"{type(e).__name__}: {e}"[-300:])
 def last_activity(code):
     m = [os.path.getmtime(f) for f in (f"{AD}/logs/{code}.log", f"{B}/logs/{code}_run.log") if os.path.exists(f)]
     return max(m) if m else 0
@@ -1427,7 +1441,7 @@ class H(BaseHTTPRequestHandler):
             if u.path in ("/icon_dark.png", "/icon_light.png"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="image/png")
             if u.path == "/unified_view.js": return self.send(open(f"{HERE}/unified_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/shadow_view.js": return self.send(open(f"{HERE}/shadow_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
-            if u.path in ("/identity_view.js", "/import_wizard_view.js", "/lineage_view.js"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="text/javascript; charset=utf-8")
+            if u.path in ("/identity_view.js", "/import_wizard_view.js", "/lineage_view.js", "/training_view.js"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/qc_view.js": return self.send(open(f"{HERE}/qc_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/calls_view.js": return self.send(open(f"{HERE}/calls_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/image_ml_view.js": return self.send(open(f"{HERE}/image_ml_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
@@ -1468,6 +1482,7 @@ class H(BaseHTTPRequestHandler):
             if u.path.startswith("/api/calls/"): return self.send(calls_get(u.path[11:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/fsqc/"): return self.send(fsqc_get(u.path[10:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/lineage/"): return self.send(lineage_get(u.path[13:], {k: v[0] for k, v in parse_qs(u.query).items()}))
+            if u.path.startswith("/api/train/"): return self.send(train_get(u.path[11:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/id/") and u.path != "/api/id/template.xlsx": return self.send(id_get(u.path[8:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path == "/api/id/template.xlsx":
                 import manifest as MF
@@ -1614,6 +1629,7 @@ class H(BaseHTTPRequestHandler):
             if u.path.startswith("/api/calls/"): return self.send(calls_post(u.path[11:], d))
             if u.path.startswith("/api/fsqc/"): return self.send(fsqc_post(u.path[10:], d))
             if u.path.startswith("/api/lineage/"): return self.send(lineage_post(u.path[13:], d))
+            if u.path.startswith("/api/train/"): return self.send(train_post(u.path[11:], d))
             if u.path.startswith("/api/id/"): return self.send(id_post(u.path[8:], d))
             if u.path in ("/api/share", "/api/export"):           # explicit warning + confirmation, verified local folder only
                 if d.get("confirm_clinical") is not True: return self.send(dict(ok=False, needs_confirm=True, warning=EXPORT_WARNING,

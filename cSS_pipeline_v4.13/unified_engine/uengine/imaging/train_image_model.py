@@ -127,3 +127,34 @@ def train(out_path, n_train=48, n_test=16, n_null=24, seed=500, l2=0.05, n_boot=
                 out_of_scope="any real study, any clinical decision, any performance claim")
     h = model.save(out_path, card)
     return dict(path=out_path, model_hash=h, card=card, workdir=work)
+
+
+def evaluate_existing(model_path, out_path, n=12, seed=900, workdir=None):
+    """score an EXISTING model on a fresh SYNTHETIC test cohort (the model file is only read, never changed) -> report with sensitivity /
+    specificity at p >= 0.5, ROC and precision-recall points, calibration (10 bins + slope), the confusion matrix over object kinds and the
+    false positives / negatives. data_kind: synthetic."""
+    from .image_model import load
+    model, h = load(model_path)
+    work = workdir or tempfile.mkdtemp(prefix="uengine_image_eval_"); base = os.path.join(work, "test"); C.write_cohort(base, n=n, seed=seed)
+    rows, _ = cohort_rows(base); X = IM.matrix(rows); P = model.proba(X); ci = model.classes.index("css"); pc = P[:, ci]
+    y = np.array([r["truth"] == "css" for r in rows]); pred = np.array(model.classes)[P.argmax(1)]
+    tp = int(((pc >= 0.5) & y).sum()); fp = int(((pc >= 0.5) & ~y).sum()); fn = int(((pc < 0.5) & y).sum()); tn = int(((pc < 0.5) & ~y).sum())
+    order = np.argsort(-pc); roc, pr = [[0.0, 0.0]], []
+    for k in range(1, len(order) + 1):
+        sel = order[:k]; t = y[sel].sum(); f = k - t
+        roc.append([round(float(f / max((~y).sum(), 1)), 4), round(float(t / max(y.sum(), 1)), 4)]); pr.append([round(float(t / max(y.sum(), 1)), 4), round(float(t / k), 4)])
+    bins = np.linspace(0, 1, 11); cal = []
+    for a, b in zip(bins[:-1], bins[1:]):
+        m = (pc >= a) & (pc < b if b < 1 else pc <= b)
+        if m.any(): cal.append(dict(p_mean=round(float(pc[m].mean()), 4), observed=round(float(y[m].mean()), 4), n=int(m.sum())))
+    kinds = sorted(set(r["truth"] for r in rows) | set(model.classes)); cm = {t: {p_: int(((np.array([r["truth"] for r in rows]) == t) & (pred == p_)).sum()) for p_ in kinds} for t in kinds}
+    errs = [dict(study_id=r["study_id"], list=r["list"], obj_id=int(r["obj_id"]), truth=r["truth"], p_css=round(float(q), 4), kind="false_positive" if q >= 0.5 else "false_negative")
+            for r, q in zip(rows, pc) if (q >= 0.5) != (r["truth"] == "css")]
+    rep = dict(schema="css-image-eval/1.0", data_kind="synthetic", model=dict(path=model_path, name=h.get("name"), version=h.get("version"), model_hash=h.get("model_hash")),
+               cohort=dict(generator=C.COHORT_SCHEMA, n_studies=n, seed=seed, n_objects=len(rows), n_css=int(y.sum())), split="independent synthetic cohort (patients never seen in training)",
+               threshold=0.5, sensitivity=round(tp / max(tp + fn, 1), 4), specificity=round(tn / max(tn + fp, 1), 4), confusion_binary=dict(tp=tp, fp=fp, fn=fn, tn=tn),
+               metrics=metrics([r["truth"] for r in rows], P, [r["study_id"] for r in rows], model.classes), auc_ci95=auc_ci([r["truth"] for r in rows], pc, [r["study_id"] for r in rows]),
+               roc=roc, pr=pr, calibration=cal, confusion_kinds=dict(labels=kinds, matrix=cm), errors=errs[:200], created=IM.now(),
+               note="synthetic generator only - not an estimate of clinical performance")
+    with open(out_path, "w") as f: json.dump(rep, f, indent=1, default=float)
+    return rep
