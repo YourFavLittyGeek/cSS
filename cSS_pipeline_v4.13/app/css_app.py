@@ -1020,6 +1020,16 @@ def id_post(op, d):
         if op == "mode": return IDG.set_mode(SET, d.get("mode"), str(d.get("passphrase", "")), save=lambda: jsave("settings.json", SET))
         if op.startswith("vault/"): return IDG.vault(op[6:], d, SET, names=names, verify_dest=verify_local_dest)
         if op == "edit": return IDG.edit(d, SET, by)
+        if op == "template/save":                       # v5.18: the app window (pywebview) does not handle browser downloads - save via a chosen folder
+            import manifest as MF
+            dest = os.path.realpath(os.path.expanduser(str(d.get("dest", ""))))
+            okd, why = verify_local_dest(dest)
+            if not okd: return dict(ok=False, error=f"folder refused: {why} (the filled-in template holds patient identifiers - keep it on local, non-synced storage)")
+            out = os.path.join(dest, "Percival_Import_Template.xlsx"); n = 2
+            while os.path.exists(out): out = os.path.join(dest, f"Percival_Import_Template ({n}).xlsx"); n += 1
+            with open(out, "wb") as f_: f_.write(MF.template_bytes())
+            if d.get("open") and mac(): subprocess.run(["open", out])
+            return dict(ok=True, path=out)
         if op == "import/plan": return IDG.plan(d, SET, [p["code"] for p in PAT], verify_dest=verify_local_dest, hooks=dict(pathway=check_pathway, looks_like_name=(looks_like_name if SET["features"].get("name_warning") else None)))
         if op == "import/update": return IDG.plan_update(d, [p["code"] for p in PAT], verify_dest=verify_local_dest)
         if op == "import/commit":

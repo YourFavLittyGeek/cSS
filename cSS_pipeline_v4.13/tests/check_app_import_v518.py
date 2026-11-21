@@ -138,6 +138,15 @@ try:
     check("Add studies: one screen, two tabs (From folders / From another project)", 'data-id="addtabs"' in D and "From folders" in D and "From another project" in D, "")
     check("no separate guided import and no 'Store names' option", "Open guided import" not in D and "Store names" not in D and "From image folders" not in D)
     check("folder-name choices: patient name / MRN / accession number / code / irrelevant", all(x in D for x in ('data-v="name"', 'data-v="mrn"', 'data-v="accession"', 'data-v="code"', 'data-v="none"')))
+    # template: the app window (pywebview) ignores browser downloads, so the GUI saves it into a chosen folder (regression: "Download template" did nothing)
+    check("GUI: no browser-download link for the template; a Save template button instead", 'href="/api/id/template.xlsx"' not in D and 'data-iw="template"' in D and "Save template" in D)
+    TD = os.path.join(T, "templates"); os.makedirs(TD)
+    r1 = post(U, "/api/id/template/save", dict(dest=TD)); r2 = post(U, "/api/id/template/save", dict(dest=TD))
+    import pandas as _pd
+    cols = list(_pd.read_excel(r1.get("path", "/nonexistent"), dtype=str).columns) if r1.get("ok") else []
+    check("template saved into the chosen folder (4 columns + optional columns)", r1.get("ok") and cols[:4] == MF.COLUMNS and cols[4:] == MF.OPTIONAL, str(r1))
+    check("a second save never overwrites (numbered copy)", r2.get("ok") and r2["path"].endswith("Percival_Import_Template (2).xlsx") and os.path.exists(r1["path"]))
+    check("template save to Desktop refused (it will hold identifiers)", post(U, "/api/id/template/save", dict(dest=os.path.join(HOME, "Desktop"))).get("ok") is False)
     # vault (Standard needs it; Incognito import stores the key in it)
     r = post(U, "/api/id/vault/create", dict(passphrase=PW)); check("identity vault created", r.get("ok"), str(r))
     post(U, "/api/id/mode", dict(mode="standard", passphrase=PW))

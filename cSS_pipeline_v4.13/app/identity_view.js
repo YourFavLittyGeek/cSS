@@ -61,8 +61,8 @@ async function openVault(){const s=IDV.st||await api("/api/id/state");
     <div>Studies / patients</div><div>${s.n_studies} / ${s.n_patients}</div><div>Missing accession numbers</div><div>${s.accession_missing}</div></div>
    <div class="row" style="flex-wrap:wrap;margin-top:10px">${s.vault_exists?"":'<button class="b pri" id="iv-new">Set up vault</button>'}
     ${s.unlocked?'<button class="b" id="iv-lock">Lock now</button><button class="b" id="iv-bk">Back up (encrypted)…</button><button class="b" id="iv-pw">Change passphrase…</button>':""}
-    <button class="b" id="iv-rs">Validate / restore a backup…</button><a class="b" href="/api/id/template.xlsx" data-id="template">Download Percival_Import_Template.xlsx</a><button class="b" id="iv-x">Close</button></div><p class="bad" id="iv-err"></p>`);
-  const E=m=>$("#iv-err").textContent=m;$("#iv-x").onclick=()=>o.remove();$("#iv-new")&&($("#iv-new").onclick=()=>{o.remove();idCreateVault()});
+    <button class="b" id="iv-rs">Validate / restore a backup…</button><button class="b" id="iv-tpl" data-id="template">Save Percival_Import_Template.xlsx…</button><button class="b" id="iv-x">Close</button></div><p class="bad" id="iv-err"></p>`);
+  const E=m=>$("#iv-err").textContent=m;$("#iv-x").onclick=()=>o.remove();$("#iv-tpl").onclick=()=>typeof saveTemplate==="function"&&saveTemplate();$("#iv-new")&&($("#iv-new").onclick=()=>{o.remove();idCreateVault()});
   $("#iv-lock")&&($("#iv-lock").onclick=async()=>{await api("/api/id/vault/lock",{});o.remove();await idRefresh();render()});
   $("#iv-bk")&&($("#iv-bk").onclick=async()=>{const d=await pick("folder","Choose a LOCAL folder for the encrypted vault backup");if(!d)return;const r=await api("/api/id/vault/backup",{dest:d});r.ok?toast("backup written: "+esc(r.path)):E(r.error)});
   $("#iv-pw")&&($("#iv-pw").onclick=async()=>{const a=prompt("Current passphrase");if(a===null)return;const b=prompt("New passphrase (10+ characters)");if(!b)return;const r=await api("/api/id/vault/change",{old:a,new:b});r.ok?toast("passphrase changed"):E(r.error)});

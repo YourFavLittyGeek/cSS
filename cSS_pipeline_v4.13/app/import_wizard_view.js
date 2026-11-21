@@ -32,7 +32,7 @@ async function importWizardView(v){
        ${IW.folder_is==="none"?"<b>Needed</b>, with the <code>folder</code> column filled on every row: the folder names mean nothing, so each row must say which folder holds its examination.":
          IW.mode==="incognito"?"<b>Needed</b>: this is the key (MRN, name, accession number, code). The <code>folder</code> column is not needed - the folder names fill in what they hold.":
          "Needed unless the folder names give both the MRN and the accession number (e.g. MRN folders with accession-number sub-folders). The <code>folder</code> column is not needed."}</p>
-     <div class="row" style="flex-wrap:wrap"><a class="b" href="/api/id/template.xlsx" data-iw="template">Download template</a><input id="iw-x" style="width:min(460px,100%)" value="${esc(IW.manifest)}" placeholder="completed Percival_Import_Template.xlsx"><button class="b" id="iw-xb">Choose file…</button>${IW.manifest?'<button class="b" id="iw-xc">Remove</button>':""}</div>
+     <div class="row" style="flex-wrap:wrap"><button class="b" id="iw-tpl" data-iw="template">Save template…</button><input id="iw-x" style="width:min(460px,100%)" value="${esc(IW.manifest)}" placeholder="completed Percival_Import_Template.xlsx"><button class="b" id="iw-xb">Choose file…</button>${IW.manifest?'<button class="b" id="iw-xc">Remove</button>':""}</div>
 `,!!IW.manifest)}
    ${step(5,"Study library (a verified copy of your MRI)",`<label class="note" style="display:block"><input type="checkbox" id="iw-le" ${IW.lib.enabled?"checked":""}> Copy each imported examination into the study library - your original folders are never renamed, moved or changed</label>
      ${IW.lib.enabled?`<div class="row" style="flex-wrap:wrap"><input id="iw-lr" style="width:min(520px,100%)" value="${esc(IW.lib.root)}" placeholder="where to keep the library, e.g. /Volumes/LabDisk/Percival_library"><button class="b" id="iw-lb">Choose folder…</button></div>
@@ -50,6 +50,7 @@ async function importWizardView(v){
   bindSeg("iw-fi",x=>{IW.folder_is=x;IW.sub_is="";inval();re()});bindSeg("iw-si",x=>{IW.sub_is=x;iwPlan(v)});bindSeg("iw-m",x=>{IW.mode=x;inval();re()});
   $("#iw-f").onchange=e=>{IW.folder=e.target.value.trim();inval();re()};$("#iw-x").onchange=e=>{IW.manifest=e.target.value.trim();inval();re()};
   $("#iw-xc")&&($("#iw-xc").onclick=()=>{IW.manifest="";inval();re()});
+  $("#iw-tpl").onclick=()=>saveTemplate(p=>{IW.manifest=p;inval();re()});
   $("#iw-pwb")&&($("#iw-pwb").onclick=async()=>{const pw=$("#iw-pw").value;const r=await api(s.vault_exists?"/api/id/vault/unlock":"/api/id/vault/create",{passphrase:pw});
     if(r.ok===false||r.error)return toast(esc(r.error||"not unlocked"),1);IDV.st=await api("/api/id/state");if(IW.plan)await iwPlan(v);re()});
   $("#iw-fb").onclick=async()=>{const p=await pick("folder","Choose the data folder (one examination, or a folder holding many)");if(p){IW.folder=p.replace(/\/$/,"");inval();re()}};
@@ -71,6 +72,9 @@ async function iwPlan(v){IW.busy=true;const m=$("#iw-msg");if(m)m.textContent="c
   if(r.ok===false&&r.error){const m2=$("#iw-msg");if(m2)m2.innerHTML=`<span class="bad">${esc(r.error)}</span>`;return}
   const m3=$("#iw-msg");if(m3)m3.textContent="";const had=!!(IW.plan&&IW.plan.has_subfolders);IW.plan=r;if(r.has_subfolders!==had)return importWizardView(v);iwPreview()}
 async function iwUpdate(ch){const P=IW.plan;if(!P)return;const r=await api("/api/id/import/update",{plan:P.id,changes:ch});if(r.ok===false&&r.error){toast(esc(r.error),1);return}IW.plan=r;iwPreview()}
+async function saveTemplate(then){const d=await pick("folder","Choose where to save Percival_Import_Template.xlsx (a local folder)");if(!d)return;
+  const r=await api("/api/id/template/save",{dest:d,open:true});if(!r.ok)return toast(esc(r.error),1);
+  toast(`template saved: ${esc(r.path)} - it opens in Excel; fill it in, save it, then it is already chosen as the Excel file`);if(then)then(r.path)}
 function iwPatient(e,std){if(!std)return INCOG_ICON;const v=[e.patient_name,e.mrn?`MRN ${e.mrn}`:""].filter(Boolean).join(" · ");return v?`${esc(v)}${e.mrn_source?` <span class="note">(${esc(e.mrn_source)})</span>`:""}`:'<span class="bad">MRN missing</span>'}
 function iwPreview(){const P=IW.plan,el=$("#iw-prev");if(!el||!P)return;const std=P.mode==="standard";
   const rowOpt=e=>P.rows.length?`<select data-iwr="${esc(e.eid)}"><option value="">— no row —</option>${P.rows.map(r=>`<option value="${r.row}" ${e.row===r.row?"selected":""}>row ${r.row}${std?` · ${esc(r.accession||"no accession")}`:` · ${esc(r.code||"no code")}`}</option>`).join("")}</select><div class="note">${esc(e.matched_by||"")}</div>`:'<span class="mut">no Excel file</span>';
