@@ -48,6 +48,26 @@ opened, nothing was pushed, merged or deployed, and the model weights were not r
    Pipeline"). Found by launching the final build on a fresh synthetic project. The fallback is removed, and check_app_setup now asserts
    both the missing and the present case.
 
-## 3. Phase G regression run
+## 3. Phase G regression run (executed 2026-11-20, commit 63470ff)
+- App suite (`tests/run_uscore_tests.sh`, run without `set -e`): 675 PASS / 0 FAIL. Only `check_ui_poll` was not run (no Node / npm).
+  `check_app_identity` passed (the intermittent failure did not recur).
+- Engine suite (`unified_engine/run_tests.sh`): 0 failing stages.
+- Pipeline suite (`tests/run_tests.sh`): ALL TESTS PASSED (28 min).
 
-See the end-of-phase report in HANDOVER.md §8 for the executed counts.
+## 4. v5.18 (after Phase G, on your request): one import pathway, study library, export with files
+- **Add studies** = From folders + From another project. The guided import and the batch table are merged, and "Store names" is gone.
+- **Folder names:** patient name / MRN / accession number / code / irrelevant, plus optional sub-folder meaning (accession / code).
+  Bug fixed: code folder names were replaced by generated PCV codes; they are now the study codes.
+- **Rules:**
+  - Standard: MRN and accession are required from the user; the name is optional; a blank code is generated; grouped by MRN.
+  - Incognito: the key is required and stored in the vault (the passphrase is asked, the screens stay de-identified, the vault is
+    relocked afterwards); the code is required; no grouping.
+  - Irrelevant folder names: every Excel row needs `folder`.
+  - The DICOM header only cross-checks.
+- **Series:** automatic SWI / T1 with reasons; **Series…** dialog with thumbnails for a manual choice ("chosen by you").
+- **Study library:** a verified copy (sha256) at `<MRN>/<accession>/` or `<code>/`; never overwrites; originals untouched.
+- **Export:** "Studies with files…" to a chosen local folder; results always, plus processed / FreeSurfer / MRI / logs as chosen.
+  Incognito exports use code folders, contain no DICOM, and hide paths in the logs.
+- **Patient column** in Studies: name · MRN (Standard) or an incognito icon (Incognito).
+- **Tests:** `check_app_import_v518.py` (new). `check_app_add_layout.py` replaces `check_app_batch_layout.py`. `check_app_identity.py`
+  was updated: its old expectations encoded the code-folder bug and the key-less Incognito import.

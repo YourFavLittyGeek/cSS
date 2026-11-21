@@ -2,8 +2,8 @@
 not readable at rest, backups), permanent uuids / file keys, unique study identifiers, generated de-identified codes (unique, persistent),
 audited patient- and study-level edits (uuid / file key never change, patient edit covers all examinations), Standard / Incognito views
 (no MRN / name / accession in Incognito or while locked), examination-level duplicate classification, additive migration of existing
-studies, Excel template (four columns, order), manifest validation, import wizard (multi-examination patient, missing codes generated
-once, re-import recognised, Incognito preview without identifiers or folder names).
+studies, Excel template (four columns, order, v5.18 optional columns), manifest validation, import wizard (multi-examination patient, re-import
+recognised; v5.18 Incognito rules: key required, vault required, code required, preview without identifiers or folder names).
 usage: python tests/check_identity.py   (exit 1 on any FAIL)"""
 import json, os, shutil, sys, tempfile
 import numpy as np, nibabel as nib
@@ -80,7 +80,7 @@ xl = os.path.join(T, "Percival_Import_Template.xlsx")
 with open(xl, "wb") as f: f.write(MF.template_bytes())
 import pandas as pd
 df = pd.read_excel(xl, dtype=str)
-check("template: exactly the four columns, in order", list(df.columns) == MF.COLUMNS and len(df) == 3)
+check("template: the four columns in order, then the v5.18 optional columns", list(df.columns)[:4] == MF.COLUMNS and list(df.columns)[4:] == MF.OPTIONAL and len(df) == 3)
 rows, prob = MF.read(xl); check("template reads back", not prob and rows[1]["accession"] == "ACC-002")
 v = MF.validate(rows, "standard"); check("example manifest valid in Standard; one patient with two examinations",
                                          v["ok"] and any(p["n_exams"] == 2 for p in v["patients"]))
@@ -111,17 +111,33 @@ check("commit: three studies, two patients, accessions in the vault", len(I4.R["
 check("file keys are not accession numbers", not any(it["code"].startswith("ACC") for it in Q))
 plan2 = IW.new_plan(D, "mrn", "standard", xl, ID=I4)
 check("re-import of the same folder: every examination recognised and left out", all(not e["include"] and "re-import" in e.get("excluded_why", "") for e in plan2["exams"]) and not plan2["ok"])
-# incognito with missing codes
+# Incognito (v5.18 rules): the key is required; every examination needs its code; the key goes to the vault; no generated codes
 B4 = os.path.join(T, "base4"); os.makedirs(B4); I5 = IDM.Identity(B4)
-pi = IW.new_plan(D, "mrn", "incognito", "", generate_codes=True, ID=I5); vv = IW.view(pi)
-txt = json.dumps(vv)
-check("Incognito preview: no folder names, MRN, names, accession or paths", "123456" not in txt and "789012" not in txt and D not in txt and "John" not in txt, txt[:200])
-check("Incognito preview marks codes to be generated", all(e["code_generated"] for e in vv["exams"]) and pi["ok"])
+try: IW.new_plan(D, "mrn", "incognito", "", generate_codes=True, ID=I5); refused = False
+except ValueError as e: refused = "key" in str(e)
+check("Incognito without the key refused", refused)
+from openpyxl import load_workbook
+def key(path, codes):
+    with open(path, "wb") as f: f.write(MF.template_bytes(example=False))
+    wb = load_workbook(path); ws = wb["examinations"]
+    for r, c in zip((("123456", "John Smith", "ACC-101"), ("123456", "John Smith", "ACC-102"), ("789012", "Mary Jones", "ACC-103")), codes): ws.append(list(r) + [c])
+    wb.save(path)
+k0 = os.path.join(T, "key_nocodes.xlsx"); key(k0, ["STUDY-001", "STUDY-002", ""])
+k1 = os.path.join(T, "key.xlsx"); key(k1, ["STUDY-001", "STUDY-002", "SYN-789"])
+pi = IW.new_plan(D, "mrn", "incognito", k0, ID=I5)
+check("Incognito: the vault is required to store the key", not pi["ok"] and any("vault passphrase" in e["msg"] for e in pi["errors"]))
+I5.create_vault(PW)
+pi = IW.new_plan(D, "mrn", "incognito", k0, ID=I5)
+check("Incognito: a missing code blocks (never generated in Incognito)", not pi["ok"] and any("code missing" in e["msg"] for e in pi["errors"]))
+pi = IW.new_plan(D, "mrn", "incognito", k1, ID=I5); vv = IW.view(pi); txt = json.dumps(vv)
+check("Incognito preview: no folder names, MRN, names, accession or paths", "123456" not in txt and "789012" not in txt and D not in txt and "John" not in txt and "ACC-10" not in txt, txt[:200])
+check("Incognito plan valid with the key", pi["ok"], str(pi["errors"])[:300])
 r = IW.commit(pi["id"], I5, lambda it, st: dict(ok=True, added=[x["code"] for x in it]), {}, by="t")
-gen = [x["deid_code"] for x in r["imported"]]
-check("codes generated once, unique, persisted", len(set(gen)) == 3 and all(I5.by_deid(c) for c in gen) and IDM.Identity(B4).by_deid(gen[0]))
-pi2 = IW.new_plan(D, "mrn", "incognito", "", generate_codes=True, ID=IDM.Identity(B4))
-check("re-import keeps the codes (examinations recognised, no new codes)", all(not e["include"] for e in pi2["exams"]) and not any(e.get("generated_code") for e in pi2["exams"]))
-check("Incognito import without a vault stored no identifiers", not os.path.exists(os.path.join(B4, "private", "identity_vault.enc")))
+codes = sorted(x["deid_code"] for x in r["imported"])
+check("Incognito: codes from the key; MRN / accession stored in the vault", codes == ["STUDY-001", "STUDY-002", "SYN-789"] and not any(x["generated"] for x in r["imported"])
+      and sorted(I5.view(x["study_uuid"], "standard")["accession"] for x in r["imported"]) == ["ACC-101", "ACC-102", "ACC-103"])
+pi2 = IW.new_plan(D, "mrn", "incognito", k1, ID=IDM.Identity(B4))
+check("re-import recognised (no new records)", all(not e["include"] for e in pi2["exams"]))
+check("the registry holds no MRN / name / accession", not any(x in open(os.path.join(B4, "app_data", "identity", "registry.json")).read() for x in ("123456", "John Smith", "ACC-101")))
 shutil.rmtree(T, ignore_errors=True)
 print(("ALL PASS" if not F else f"{len(F)} FAILED: {F}") + f" ({__file__})"); sys.exit(1 if F else 0)

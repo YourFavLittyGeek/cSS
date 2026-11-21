@@ -51,12 +51,14 @@ studies.
    - Incognito (the default) shows only de-identified study codes.
    - Standard shows MRN, name and accession number from the encrypted vault on this Mac. It asks for the vault passphrase after each
      start; keep the passphrase somewhere separate.
-2. **Add studies › Open guided import**: choose the data folder and say what the patient folder names are.
-   - Fill in **Percival_Import_Template.xlsx** (MRN · patient_name · accession_number · code; one row per examination). Download it
-     from the wizard.
-   - Check the preview (duplicates, conflicts, missing identifiers), then confirm.
-   - Every examination needs an accession number (Standard) or a de-identified code (Incognito). Percival never makes up accession
-     numbers.
+2. **Add studies › From folders**: choose the data folder, say what the folder names are (patient name · MRN · accession number · code
+   · irrelevant), and choose the mode.
+   - **Standard:** MRN and accession number are required; the name is optional; a blank code is generated.
+   - **Incognito:** the key is required (Excel file with MRN, name, accession number and code), and every examination needs its code.
+   - The Excel file is **Percival_Import_Template.xlsx**. When the folder names are irrelevant, fill its `folder` column.
+   - Optionally turn on the **study library** (a verified copy of your MRI; your folders are never renamed). Check the preview; SWI and
+     T1 are chosen automatically, and **Series…** lets you choose another. Then press **Import and start**.
+   - To export: **Studies › Export ▾ › Studies with files…** saves results, processed files and MRI to a folder you choose.
 3. **Activity**: processing runs from the queue.
 4. **Review**: give your call per candidate.
    - Calls are grouped as cSS / mimics / other, with subtype chips. Keys: Y V N B A U H; Shift+1..6 picks a subtype; Z undoes.

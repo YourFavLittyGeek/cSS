@@ -5,12 +5,19 @@ Template Percival_Import_Template.xlsx ALWAYS has these four columns, in this or
 Standard mode: accession_number is the required, unique study identifier; MRN (+ name) group the examinations into patients.
 Incognito mode: code (de-identifier) is the study identifier: required unless Percival may generate it; it must be unique. Identifiable
 columns are NOT shown in Incognito screens and are never copied into the de-identified registry (only into the encrypted vault, when
-it is unlocked). Validation never merges records on a patient name or an MRN alone."""
+it is unlocked). Validation never merges records on a patient name or an MRN alone.
+v5.18: OPTIONAL columns after the four: folder (the examination's folder, relative to the data folder - used when the folder names
+mean nothing), study_date (YYYY-MM-DD or YYYYMMDD - helps to match an examination by MRN + date), radiologist, grade_R and grade_L
+(the radiologist's cSS grades 0-2, previously a separate grades file). Older files with four columns
+still work."""
 import io, re
 
 COLUMNS = ["MRN", "patient_name", "accession_number", "code (de-identifier)"]
 KEY = {"MRN": "mrn", "patient_name": "patient_name", "accession_number": "accession", "code (de-identifier)": "code"}
-EXAMPLE = [("123456", "John Smith", "ACC-001", "STUDY-001"), ("123456", "John Smith", "ACC-002", "STUDY-002"), ("789012", "Mary Jones", "ACC-003", "STUDY-003")]
+OPTIONAL = ["folder", "study_date", "radiologist", "grade_R", "grade_L"]
+OKEY = {"folder": "folder", "study_date": "study_date", "radiologist": "radiologist", "grade_R": "grade_R", "grade_L": "grade_L"}
+EXAMPLE = [("123456", "John Smith", "ACC-001", "STUDY-001", "", "", "", "", ""), ("123456", "John Smith", "ACC-002", "STUDY-002", "", "", "", "", ""),
+           ("789012", "Mary Jones", "ACC-003", "STUDY-003", "", "", "", "", "")]
 CODE_RE = re.compile(r"[A-Za-z0-9_\-]{1,32}")
 
 
@@ -18,19 +25,25 @@ def template_bytes(example=True):
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill
     from openpyxl.comments import Comment
-    wb = Workbook(); ws = wb.active; ws.title = "examinations"; ws.append(COLUMNS)
+    wb = Workbook(); ws = wb.active; ws.title = "examinations"; ws.append(COLUMNS + OPTIONAL)
     for c in ws[1]: c.font = Font(bold=True); c.fill = PatternFill("solid", fgColor="DDE7F7")
     notes = ["patient MRN (Standard mode; groups examinations of one patient)", "patient name (Standard mode)",
              "accession number of THIS examination - required and unique in Standard mode", "de-identified study code of THIS examination - required "
-             "and unique in Incognito mode (Percival can generate missing codes once)"]
+             "and unique in Incognito mode (Percival can generate missing codes once)",
+             "OPTIONAL: folder of THIS examination, relative to the data folder (e.g. folder_07 or batch2/exam_3) - use it when the folder names "
+             "mean nothing", "OPTIONAL: study date of THIS examination (YYYY-MM-DD) - helps to match it by MRN + date",
+             "OPTIONAL: radiologist who graded this examination", "OPTIONAL: radiologist's right-hemisphere cSS grade (0, 1 or 2)",
+             "OPTIONAL: radiologist's left-hemisphere cSS grade (0, 1 or 2)"]
     for c, n in zip(ws[1], notes): c.comment = Comment(n, "Percival")
     if example:
         for r in EXAMPLE: ws.append(list(r))
-    for col, w in zip("ABCD", (14, 24, 20, 26)): ws.column_dimensions[col].width = w
+    for col, w in zip("ABCDEFGHI", (14, 24, 20, 26, 26, 14, 16, 10, 10)): ws.column_dimensions[col].width = w
     info = wb.create_sheet("read me")
     for line in ("One row = one MRI examination. Repeat MRN and name on every row of the same patient.",
                  "Standard mode: accession_number is required and must be unique. Incognito mode: code (de-identifier) must be unique.",
-                 "The example rows are illustrative - replace them.", "Keep all four columns, in this order, in both modes.",
+                 "The example rows are illustrative - replace them.", "Keep the first four columns, in this order, in both modes.",
+                 "folder and study_date are optional: fill them when the folder names do not tell which examination a row describes.",
+                 "radiologist, grade_R and grade_L are optional: the radiologist's cSS grades (0-2 per hemisphere) for the agreement statistics.",
                  "This file holds identifiable data: store it only on this computer, never in cloud folders, e-mail or chat."):
         info.append([line])
     info.column_dimensions["A"].width = 120
@@ -49,8 +62,18 @@ def read(path):
     for i, r in df.iterrows():
         v = {KEY[c]: ("" if c not in df.columns or str(r.get(c)) in ("nan", "None") else str(r.get(c)).strip()) for c in COLUMNS}
         if not any(v.values()): continue
+        for c in OPTIONAL: v[OKEY[c]] = "" if c not in df.columns or str(r.get(c)) in ("nan", "None", "NaT") else str(r.get(c)).strip()
+        v["study_date"] = norm_date(v["study_date"])
+        for g in ("grade_R", "grade_L"):
+            x = re.sub(r"\.0$", "", v[g]); v[g] = x if x in ("0", "1", "2") else ""
         rows.append(dict(row=int(i) + 2, **v))                      # Excel row number (header = row 1)
     return rows, probs
+
+
+def norm_date(x):
+    """YYYY-MM-DD / YYYYMMDD / an Excel date -> YYYYMMDD (DICOM StudyDate form); '' when not a date"""
+    m = re.match(r"^\s*(\d{4})-?(\d{2})-?(\d{2})", str(x or ""))
+    return "".join(m.groups()) if m else ""
 
 
 def validate(rows, mode, generate_codes=False, existing_codes=(), existing_accessions=()):

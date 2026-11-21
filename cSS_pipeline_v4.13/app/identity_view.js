@@ -29,9 +29,13 @@ function idCreateVault(){const o=idModal(`<h2>Set up the identity vault</h2><p c
     const m=await api("/api/id/mode",{mode:"standard"});o.remove();toast(`vault created${r.names_copied?` · ${r.names_copied} names copied in`:""}`);await idRefresh();render()}}
 function idCell(x){const r=x.r||{},i=r.ident||(x.p&&x.p.ident)||{},s=IDV.st||{};
   const id=i.study_id||x.code,kind=i.id_kind||"study code";
-  const pat=s.mode==="standard"&&!i.locked?[i.patient_name,i.mrn?`MRN ${i.mrn}`:""].filter(Boolean).join(" · "):(i.patient_pseudonym||"");
   return `<span class="code" title="${esc(kind)}">${esc(id||"—")}</span>${i.accession_missing?' <span class="pill bad" data-id="acc-missing" title="Standard mode: enter the accession number">accession missing</span>':""}
-   ${i.display_name?`<span class="sub2">${esc(i.display_name)}</span>`:""}${pat?`<span class="sub2">${esc(pat)}${i.n_exams_of_patient>1?` · ${i.n_exams_of_patient} exams`:""}</span>`:""}`}
+   ${i.display_name?`<span class="sub2">${esc(i.display_name)}</span>`:""}`}
+// v5.18 Patient column: Standard shows name · MRN (examinations grouped by MRN); Incognito shows only the incognito icon (no grouping)
+function patCell(x){const r=x.r||{},i=r.ident||(x.p&&x.p.ident)||{},s=IDV.st||{};
+  if(s.mode!=="standard"||i.locked)return typeof INCOG_ICON!=="undefined"?INCOG_ICON:'<span class="mut" title="hidden in Incognito">hidden</span>';
+  const pat=[i.patient_name,i.mrn?`MRN ${i.mrn}`:""].filter(Boolean).join(" · ");
+  return pat?`${esc(pat)}${i.n_exams_of_patient>1?`<span class="sub2">${i.n_exams_of_patient} examinations</span>`:""}`:'<span class="bad">MRN missing</span>'}
 async function openIdEdit(code){const v=await api(`/api/id/study?code=${encodeURIComponent(code)}`),s=IDV.st||{},std=s.mode==="standard"&&!v.locked;
   const H=await api(`/api/id/history?code=${encodeURIComponent(code)}`);
   const f=(k,l,val,note)=>`<label style="display:block;margin:6px 0"><span class="note" style="display:inline-block;width:190px">${l}</span><input data-f="${k}" value="${esc(val||"")}" style="width:300px">${note?` <span class="note">${note}</span>`:""}</label>`;

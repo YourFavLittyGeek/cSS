@@ -2,7 +2,7 @@
 default Incognito without a vault (existing studies keep working); template download (4 columns in order); vault set-up copies legacy
 names; Standard mode shows names / MRN / accession and flags a missing accession (re-processing and export refused until entered);
 audited accession / MRN / name / code edits keep uuids, file keys and the existing review; guided Standard import with a two-examination
-patient; re-import recognised; guided Incognito import with generated codes (kept after a restart); mode switch; Incognito: no MRN /
+patient; re-import recognised; Incognito import with the key (codes from the folder names; kept after a restart); mode switch; Incognito: no MRN /
 name / accession / source path in any API response, the GUI, log views or exports; restart: vault locked, wrong passphrase refused;
 no identifier in the registry, patients.json or the logs.
 usage: python tests/check_app_identity.py [--shots DIR]   (exit 1 on any FAIL)"""
@@ -14,7 +14,7 @@ F = []
 def check(n, ok, info=""): print(f"{'PASS' if ok else 'FAIL'}  {n}  {info}"); (None if ok else F.append(n))
 SHOTS = sys.argv[sys.argv.index("--shots") + 1] if "--shots" in sys.argv else None
 PW = "synthetic test passphrase 42"
-SECRETS = ["Legacy Personname", "Johnathan Smithfield", "Maryanne Jonesworth", "55177301", "88204612", "ACCX-0001", "ACCX-0002", "ACCX-0003", "ACCX-0900"]
+SECRETS = ["Alpha Synthperson", "Beta Synthperson", "77100001", "ACCI-0001", "Legacy Personname", "Johnathan Smithfield", "Maryanne Jonesworth", "55177301", "88204612", "ACCX-0001", "ACCX-0002", "ACCX-0003", "ACCX-0900"]
 
 T = tempfile.mkdtemp(prefix="ident_app_"); HOME = os.path.join(T, "home"); B = os.path.join(HOME, "syn_project"); SRC = os.path.join(T, "incoming_55177301_src")
 for d in ("app_data", "private", "review"): os.makedirs(os.path.join(B, d))
@@ -38,6 +38,11 @@ from openpyxl import load_workbook
 wb = load_workbook(man); ws = wb["examinations"]
 for r in (("55177301", "Johnathan Smithfield", "ACCX-0001", "EXAM_A"), ("55177301", "Johnathan Smithfield", "ACCX-0002", "EXAM_B"), ("88204612", "Maryanne Jonesworth", "ACCX-0003", "")): ws.append(list(r))
 wb.save(man)
+inc_key = os.path.join(T, "inc_key.xlsx")
+with open(inc_key, "wb") as f: f.write(MF.template_bytes(example=False))
+wb = load_workbook(inc_key); ws = wb["examinations"]
+for r in (("77100001", "Alpha Synthperson", "ACCI-0001", "PT-ALPHA"), ("77100002", "Beta Synthperson", "ACCI-0002", "PT-BETA")): ws.append(list(r))
+wb.save(inc_key)
 
 def free_port():
     s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close(); return p
@@ -84,7 +89,7 @@ try:
     tb = raw(U, "/api/id/template.xlsx")
     if tb[:2] != b"PK": print("DIAG template response was not an xlsx:", tb[:300])      # intermittent failure seen once (2026-11-20): keep the evidence
     xl = pd.read_excel(io.BytesIO(tb), dtype=str) if tb[:2] == b"PK" else pd.DataFrame()
-    check("template: the four columns in order, example rows", list(xl.columns) == MF.COLUMNS and len(xl) == 3)
+    check("template: the four columns in order (+ v5.18 optional columns after them), example rows", list(xl.columns)[:4] == MF.COLUMNS and list(xl.columns)[4:] == MF.OPTIONAL and len(xl) == 3)
     check("vault: short passphrase refused", post(U, "/api/id/vault/create", dict(passphrase="short")).get("ok") is False)
     r = post(U, "/api/id/vault/create", dict(passphrase=PW)); check("vault created; legacy names copied in", r.get("ok") and r["names_copied"] == 1)
     check("names.csv unchanged", open(os.path.join(B, "private", "names.csv")).read() == "code,name\nP001,Legacy Personname\n")
@@ -106,7 +111,7 @@ try:
     check("audit history (Standard, unlocked): accession old -> new with reason", any(x["field"] == "accession" and x["new"] == "ACCX-0900" and x["reason"] == "enter accession" for x in h))
     check("Standard export allowed once every study has an accession", raw(U, "/api/export.xlsx")[:2] == b"PK")
     # guided Standard import (two examinations of one patient)
-    pv = post(U, "/api/id/import/plan", dict(folder=SRC, folder_is="mrn", mode="standard", manifest=man))
+    pv = post(U, "/api/id/import/plan", dict(folder=SRC, folder_is="mrn", mode="standard", manifest=man, processing=dict(cohort="C2")))
     check("Standard plan: 2 patients, 3 examinations, all matched, valid", len(pv["patients"]) == 2 and pv["n_exams"] == 3 and pv["ok"], str(pv.get("errors"))[:300])
     check("Standard preview shows accession numbers", sorted(e["accession"] for e in pv["exams"]) == ["ACCX-0001", "ACCX-0002", "ACCX-0003"])
     check("commit without confirmation refused", post(U, "/api/id/import/commit", dict(plan=pv["id"])).get("needs_confirm") is True)
@@ -116,17 +121,21 @@ try:
     R = res(U)
     check("one patient with two examinations", sorted(R[k]["ident"]["n_exams_of_patient"] for k in keys) == [1, 2, 2]
           and {R[k]["ident"]["mrn"] for k in keys} == {"55177301", "88204612"})
-    pv2 = post(U, "/api/id/import/plan", dict(folder=SRC, folder_is="mrn", mode="standard", manifest=man))
+    pv2 = post(U, "/api/id/import/plan", dict(folder=SRC, folder_is="mrn", mode="standard", manifest=man, processing=dict(cohort="C2")))
     check("re-import: every examination recognised and left out", all(not e["include"] and e["duplicate"]["kind"] == "same_exam" for e in pv2["exams"]) and not pv2["ok"])
     shot(U, "studies_standard", "#studies"); shot(U, "import_preview_standard", "#import")
     D = dom(U, "#studies")
     check("browser Standard: names / MRN / accession on the Studies screen", "Johnathan Smithfield" in D and "ACCX-0001" in D and 'data-id="mode"' in D)
-    # Incognito import with generated codes
-    pi = post(U, "/api/id/import/plan", dict(folder=INC, folder_is="deid", mode="incognito", generate_codes=True))
-    check("Incognito plan valid with generated codes", pi["ok"] and all(e["code_generated"] for e in pi["exams"]))
+    gen = [x["deid_code"] for x in cm["imported"] if x["generated"]]
+    check("Standard import: the blank Excel code was generated (unique PCV code, usable in Incognito)", len(gen) == 1 and gen[0].startswith("PCV-"))
+    # Incognito import: the key is required; v5.18 fix - code folder names become the study codes (they were replaced by generated codes)
+    pi0 = post(U, "/api/id/import/plan", dict(folder=INC, folder_is="deid", mode="incognito", generate_codes=True))
+    check("Incognito import without the key refused", pi0.get("ok") is False and "key" in pi0.get("error", ""))
+    pi = post(U, "/api/id/import/plan", dict(folder=INC, folder_is="code", mode="incognito", manifest=inc_key, processing=dict(cohort="C3")))
+    check("Incognito plan valid; codes taken from the folder names", pi["ok"] and sorted(e["code"] for e in pi["exams"]) == ["PT-ALPHA", "PT-BETA"], str(pi.get("errors"))[:300])
     ci = post(U, "/api/id/import/commit", dict(plan=pi["id"], confirm=True, cohort="C3", by="tester"))
-    gen = [x["deid_code"] for x in ci["imported"]]
-    check("generated codes: unique PCV codes", len(set(gen)) == 2 and all(c.startswith("PCV-") for c in gen) and wait_done(U, [x["file_key"] for x in ci["imported"]]))
+    gen += [x["deid_code"] for x in ci["imported"]]
+    check("Incognito import committed under the folder codes", sorted(x["deid_code"] for x in ci["imported"]) == ["PT-ALPHA", "PT-BETA"] and wait_done(U, [x["file_key"] for x in ci["imported"]]))
     # Incognito
     r = post(U, "/api/id/mode", dict(mode="incognito")); check("switch to Incognito locks the vault", r.get("ok") and not r["unlocked"])
     bodies = []

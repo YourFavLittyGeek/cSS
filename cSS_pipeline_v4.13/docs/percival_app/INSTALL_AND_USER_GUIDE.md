@@ -35,14 +35,31 @@ Header switch **Standard | Incognito**. Incognito (default until a vault exists)
 MRN, patient name and accession number from the encrypted identity vault and asks for the vault passphrase after each start. Set up the
 vault the first time you choose Standard; back it up (encrypted) from the vault dialog; keep the passphrase separately.
 Every MRI examination needs its identifier: accession number (Standard) or de-identified study code (Incognito).
-Studies › select a study › **Edit identifiers** changes patient-level fields (all examinations of the patient) or examination-level
+Studies shows a **Patient** column: name · MRN in Standard, an incognito icon in Incognito. Studies › select a study › **Edit identifiers** changes patient-level fields (all examinations of the patient) or examination-level
 fields (this examination only); every change is audited; internal ids and file names never change.
 
-## 3. Import studies
-**Add studies › Open guided import** (recommended): data folder → what the patient folder names are (MRN / patient name /
-de-identified patient code) → mode → `Percival_Import_Template.xlsx` (MRN · patient_name · accession_number · code (de-identifier); one row
-per examination) → validated preview (duplicates, conflicts, missing identifiers) → confirm. Re-imports are recognised and left out.
-The older "From image folders" table is still available; it now shows explained duplicate warnings and no longer scrolls sideways.
+## 3. Add studies (one pathway) and export
+**Add studies** has two tabs, **From folders** and **From another project**. From folders:
+1. Choose the data folder: one examination, or a folder holding many.
+2. Say what the folder names are: patient name · MRN · accession number · code · irrelevant. This is a helper that fills in values
+   automatically.
+3. Choose the mode, Standard or Incognito:
+   - **Standard:** MRN and accession number are required (Excel file or folder names); the name is optional; a blank code is
+     generated. Studies are grouped by MRN.
+   - **Incognito:** the key is required (Excel file with MRN, name, accession number and code), and every examination needs its code.
+     The key is stored only in the encrypted vault, and studies are listed by code.
+4. Choose the Excel file `Percival_Import_Template.xlsx`. When the folder names are irrelevant, every row must fill the `folder` column.
+   Optional columns: `study_date`, `radiologist`, `grade_R` and `grade_L`.
+5. Optionally turn on the **study library**: a verified copy of each examination at `library/<MRN>/<accession>/` (Standard) or
+   `library/<code>/` (Incognito). Your original folders are never renamed or changed.
+6. Set the processing options: cohort, anatomy and mode.
+7. Check the **preview**. SWI and T1 are chosen automatically with the reason shown; **Series…** lets you pick another series, shown
+   with thumbnails.
+8. Press **Import and start**.
+
+**Studies › Export ▾ › Studies with files…** exports results plus, as chosen, processed files, FreeSurfer, the original MRI and logs, to a
+local folder you choose. Every file is verified with sha256. In Incognito the folders are named by code and DICOM files are left out.
+Full details: `IMPORT_WORKFLOW.md`.
 
 ## 4. Process, review, re-process
 - Processing runs from the queue (Activity). Each run is archived (Studies › study › **Compare runs**).

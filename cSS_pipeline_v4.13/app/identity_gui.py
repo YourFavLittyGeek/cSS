@@ -112,14 +112,23 @@ def history(code, SET):
 
 
 # ------------------------------------------------------------------ import wizard
-def plan(d, SET, file_keys):
+def plan(d, SET, file_keys, verify_dest=None, hooks=None):
+    lib = d.get("library")
+    if lib is None: lib = dict(enabled=bool(SET.get("library_dir")), root=SET.get("library_dir", ""), whole_exam=bool(SET.get("library_whole_exam")))
     p = IW.new_plan(str(d.get("folder", "")), str(d.get("folder_is", "")), str(d.get("mode", "")), str(d.get("manifest", "") or ""),
-                    bool(d.get("generate_codes")), ID(), file_keys)
+                    bool(d.get("generate_codes")), ID(), file_keys, library=lib, verify_dest=verify_dest, sub_is=str(d.get("sub_is", "") or ""),
+                    hooks=hooks, processing=d.get("processing") or {})
     return IW.view(p)
 
 
-def plan_update(d, file_keys):
-    return IW.view(IW.update(str(d.get("plan", "")), d.get("changes", []), ID(), file_keys))
+def plan_update(d, file_keys, verify_dest=None):
+    return IW.view(IW.update(str(d.get("plan", "")), d.get("changes", []), ID(), file_keys, verify_dest=verify_dest))
+
+
+def library_of(code):
+    """where the examination's library copy is (Standard layout only while the vault is unlocked)"""
+    u = ID().by_file_key(code)
+    return ID().library(u) if u else {}
 
 
 def plan_commit(d, add_to_queue, settings, by, import_src=""):

@@ -184,6 +184,23 @@ class Identity:
             V = self._need(); V["studies"][su] = dict(accession=norm(accession), institution=norm(institution), dicom_study_uid=dicom_study_uid)
         return su
 
+    # ------------------------------------------------------------------ v5.18 study library place (copy of the original examination)
+    def set_library(self, study_uuid, root, rel, identifiable):
+        """identifiable (Standard layout MRN/accession): the relative folder goes to the vault only; Incognito layout (codes): registry"""
+        s = self.R["studies"][study_uuid]; s["library_root"] = root; s["library_layout"] = "standard" if identifiable else "incognito"
+        if identifiable:
+            V = self._need(); V["studies"].setdefault(study_uuid, {})["library_rel"] = rel; s.pop("library_rel", None)
+        else: s["library_rel"] = rel
+
+    def library(self, study_uuid):
+        """-> dict(root, rel, layout, locked) of the examination's library copy ({} when it has none)"""
+        s = self.R["studies"].get(study_uuid) or {}
+        if not s.get("library_root"): return {}
+        if s.get("library_layout") == "standard":
+            if self._key is None: return dict(root=s["library_root"], rel="", layout="standard", locked=True)
+            return dict(root=s["library_root"], rel=self._vault["studies"].get(study_uuid, {}).get("library_rel", ""), layout="standard", locked=False)
+        return dict(root=s["library_root"], rel=s.get("library_rel", ""), layout="incognito", locked=False)
+
     def commit(self):
         with LOCK:
             self._save_registry()
@@ -218,7 +235,8 @@ class Identity:
         """what a screen may show for one examination in the given mode. In Incognito or while locked: never MRN / name / accession."""
         s = self.R["studies"][study_uuid]; p = self.R["patients"].get(s["patient_uuid"], {})
         out = dict(study_uuid=study_uuid, file_key=s["file_key"], deid_code=s["deid_code"], display_name=s["display_name"], patient_uuid=s["patient_uuid"],
-                   patient_pseudonym=p.get("pseudonym", ""), n_exams_of_patient=sum(1 for x in self.R["studies"].values() if x["patient_uuid"] == s["patient_uuid"]))
+                   patient_pseudonym=p.get("pseudonym", ""), n_exams_of_patient=sum(1 for x in self.R["studies"].values() if x["patient_uuid"] == s["patient_uuid"]),
+                   in_library=bool(s.get("library_root")))
         if mode == "standard":
             if self._key is None: out.update(locked=True, study_id=s["deid_code"], id_kind="de-identified code (vault locked)")
             else:

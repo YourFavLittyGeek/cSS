@@ -1008,6 +1008,10 @@ def id_get(op, q):
         if op == "state": return IDG.state(SET, PAT)
         if op == "study": return IDG.ident(q.get("code", ""), SET)
         if op == "history": return dict(history=IDG.history(q.get("code", ""), SET))
+        if op == "import/series": return IDG.IW.series_view(q.get("plan", ""), q.get("eid", ""))
+        if op == "library/job":
+            import study_library as SLB
+            return SLB.job(q.get("id", "")) or dict(error="unknown library job")
         return dict(error=f"unknown {op}")
     except Exception as e: return dict(error=f"{type(e).__name__}: {e}"[-300:])
 def id_post(op, d):
@@ -1016,11 +1020,52 @@ def id_post(op, d):
         if op == "mode": return IDG.set_mode(SET, d.get("mode"), str(d.get("passphrase", "")), save=lambda: jsave("settings.json", SET))
         if op.startswith("vault/"): return IDG.vault(op[6:], d, SET, names=names, verify_dest=verify_local_dest)
         if op == "edit": return IDG.edit(d, SET, by)
-        if op == "import/plan": return IDG.plan(d, SET, [p["code"] for p in PAT])
-        if op == "import/update": return IDG.plan_update(d, [p["code"] for p in PAT])
-        if op == "import/commit": return IDG.plan_commit(d, add_to_queue, dict(cohort=d.get("cohort", ""), mode="semi"), by, import_src=f"{AD}/import_src")
+        if op == "import/plan": return IDG.plan(d, SET, [p["code"] for p in PAT], verify_dest=verify_local_dest, hooks=dict(pathway=check_pathway, looks_like_name=(looks_like_name if SET["features"].get("name_warning") else None)))
+        if op == "import/update": return IDG.plan_update(d, [p["code"] for p in PAT], verify_dest=verify_local_dest)
+        if op == "import/commit":
+            pl = IDG.IW.PLANS.get(str(d.get("plan", ""))); lib = dict(pl["library"]) if pl else {}
+            r = IDG.plan_commit(d, add_to_queue, dict(cohort=d.get("cohort", ""), mode="semi"), by, import_src=f"{AD}/import_src")
+            if r.get("ok") and lib.get("enabled") and lib.get("root"):              # remember the library place for the next import
+                SET["library_dir"] = lib["root"]; SET["library_whole_exam"] = bool(lib.get("whole_exam")); jsave("settings.json", SET)
+            if r.get("ok"): notify_c("done", "imports", f"{len(r.get('imported', []))} examination(s) added", "queued for processing" + (" · library copy running" if r.get("library_job") else ""))
+            if r.get("ok") and IDG.mode(SET) == "incognito" and pl and pl["mode"] == "incognito": IDG.ID().lock()      # the key was stored; Incognito keeps the vault locked
+            return r
         return dict(ok=False, error=f"unknown {op}")
     except Exception as e: return dict(ok=False, error=IDG.redact_text(f"{e}", SET, B)[-400:], kind=type(e).__name__)
+# ------------------------------------------------------------------ v5.18 export of studies with their files - app/study_export.py
+def xs_args(d):
+    import study_export as XS
+    codes = [c for c in d.get("codes", []) if any(p["code"] == c for p in PAT)]
+    parts = dict(XS.DEFAULT); parts.update({k: bool(v) for k, v in (d.get("parts") or {}).items() if k in XS.PARTS}); parts["results"] = True
+    return XS, codes, parts, IDG.mode(SET)
+def xs_post(op, d):
+    try:
+        XS, codes, parts, mode = xs_args(d)
+        dest = os.path.realpath(os.path.expanduser(str(d.get("dest", "") or SET.get("export_files_dir", "") or SET.get("export_dir", ""))))
+        okd, why = verify_local_dest(dest) if d.get("dest") or SET.get("export_files_dir") or SET.get("export_dir") else (False, "choose where to save the export")
+        if mode == "standard":
+            miss = [c for c in codes if IDG.requires_accession(c, SET)]
+            if miss: return dict(ok=False, error=f"Standard mode: {len(miss)} studies need their accession number first (Studies › Edit identifiers) - or export in Incognito")
+        P = XS.plan(B, AD, codes, parts, mode, lambda c: IDG.ident(c, SET), IDG.library_of)
+        view = dict(n_studies=len(codes), n_files=P["n_files"], bytes=P["bytes"], problems=P["problems"], dest=dest if okd else "", dest_ok=bool(okd), dest_why="" if okd else why,
+                    mode=mode, parts=parts, free=shutil.disk_usage(dest).free if okd else 0, warning=EXPORT_WARNING,
+                    studies=[dict(study_id=x["study_id"], folder=x["rel"], files=x["n"], bytes=x["bytes"], why=x["why"]) for x in P["studies"]])
+        if op == "plan": return dict(ok=True, **view)
+        if op == "start":
+            if d.get("confirm_clinical") is not True: return dict(ok=False, needs_confirm=True, warning=EXPORT_WARNING, error="confirm the clinical-data warning")
+            if not okd: return dict(ok=False, error=f"export folder refused: {why}")
+            r = XS.start(B, AD, dest, codes, parts, mode, lambda c: IDG.ident(c, SET), IDG.library_of,
+                         results_frame=lambda cs: export_frame([x for x in results() if x["code"] in cs]), redact=lambda t: IDG.redact_text(t, SET, B), version=version())
+            if r.get("ok"):
+                SET["export_files_dir"] = dest; jsave("settings.json", SET)
+                notify_c("done", "exports", f"Export of {len(codes)} studies started", "files are copied and verified in the background")
+            return dict(ok=r["ok"], job=r.get("job", ""), folder=r.get("folder", ""), error=r.get("error", ""))
+        return dict(ok=False, error=f"unknown {op}")
+    except Exception as e: return dict(ok=False, error=IDG.redact_text(f"{type(e).__name__}: {e}", SET, B)[-400:])
+def xs_get(op, q):
+    import study_export as XS
+    if op == "job": return XS.job(q.get("id", "")) or dict(error="unknown export job")
+    return dict(error=f"unknown {op}")
 # ------------------------------------------------------------------ candidate lineage between runs (v5.17)
 def lineage_get(op, q):
     try:
@@ -1475,7 +1520,7 @@ class H(BaseHTTPRequestHandler):
             if u.path in ("/icon_dark.png", "/icon_light.png"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="image/png")
             if u.path == "/unified_view.js": return self.send(open(f"{HERE}/unified_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/shadow_view.js": return self.send(open(f"{HERE}/shadow_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
-            if u.path in ("/identity_view.js", "/import_wizard_view.js", "/lineage_view.js", "/training_view.js", "/setup_view.js"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="text/javascript; charset=utf-8")
+            if u.path in ("/identity_view.js", "/import_wizard_view.js", "/lineage_view.js", "/training_view.js", "/setup_view.js", "/export_view.js"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/qc_view.js": return self.send(open(f"{HERE}/qc_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/calls_view.js": return self.send(open(f"{HERE}/calls_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/image_ml_view.js": return self.send(open(f"{HERE}/image_ml_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
@@ -1518,6 +1563,11 @@ class H(BaseHTTPRequestHandler):
             if u.path.startswith("/api/lineage/"): return self.send(lineage_get(u.path[13:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/train/"): return self.send(train_get(u.path[11:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/setup/"): return self.send(setup_get(u.path[11:], {k: v[0] for k, v in parse_qs(u.query).items()}))
+            if u.path == "/api/id/import/thumb":
+                q_ = {k: v[0] for k, v in parse_qs(u.query).items()}
+                try: return self.send(IDG.IW.thumb(q_.get("plan", ""), q_.get("eid", ""), q_.get("i", "0")), ctype="image/png")
+                except Exception as e_: return self.send(dict(error=f"{type(e_).__name__}"), 404)
+            if u.path.startswith("/api/xs/"): return self.send(xs_get(u.path[8:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/id/") and u.path != "/api/id/template.xlsx": return self.send(id_get(u.path[8:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path == "/api/id/template.xlsx":
                 import manifest as MF
@@ -1542,7 +1592,7 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/grades": return self.send(read_grades(d["path"]))
             if u.path == "/api/queue": return self.send(add_to_queue(d["patients"], d["settings"]))
             if u.path == "/api/settings":
-                for k_ in ("backup_dir", "export_dir"):
+                for k_ in ("backup_dir", "export_dir", "library_dir"):
                     if d.get(k_):
                         okd, why = verify_local_dest(d[k_])
                         if not okd: return self.send(dict(ok=False, error=f"{k_.replace('_dir', '')} folder refused: {why}. Clinical-derived data stays on this Mac - choose a local or external-disk folder."))
@@ -1667,6 +1717,7 @@ class H(BaseHTTPRequestHandler):
             if u.path.startswith("/api/train/"): return self.send(train_post(u.path[11:], d))
             if u.path.startswith("/api/setup/"): return self.send(setup_post(u.path[11:], d))
             if u.path.startswith("/api/id/"): return self.send(id_post(u.path[8:], d))
+            if u.path.startswith("/api/xs/"): return self.send(xs_post(u.path[8:], d))
             if u.path in ("/api/share", "/api/export"):           # explicit warning + confirmation, verified local folder only
                 if d.get("confirm_clinical") is not True: return self.send(dict(ok=False, needs_confirm=True, warning=EXPORT_WARNING,
                                                                      error="export needs your confirmation of the clinical-data warning (dialog pending design approval)"))
