@@ -1,9 +1,10 @@
 // import_wizard_view.js - v5.18 Add studies › From folders: THE import pathway (the v5.16 guided import and the earlier batch table, merged).
 // 1 data folder · 2 what the folder names are (patient name · MRN · accession number · code · irrelevant) · 3 Standard / Incognito ·
 // 4 Excel file (identifiers, optional folder / date / grades) · 5 study library (verified COPY; originals untouched) · 6 processing ·
-// 7 preview (identifiers with their source, series chosen automatically or by you, pathway, library place) · import and start.
+// 7 preview: (1) series review - thumbnail + choice of SWI / T1 / FLAIR / phase with warnings and recommendations per examination,
+//   (2) identifiers (patient name, MRN, accession, code in separate columns; Incognito: icon + code), pathway, library place · import and start.
 // The server builds and validates the plan; in Incognito the preview holds no MRN, name, accession, folder names or file paths.
-const IW={folder:"",folder_is:"",sub_is:"",mode:"",manifest:"",gen:false,plan:null,busy:false,done:null,job:null,
+const IW={tab:"series",folder:"",folder_is:"",sub_is:"",mode:"",manifest:"",gen:false,plan:null,busy:false,done:null,job:null,
   lib:null,proc:{cohort:"",anatomy:"synthseg",run_mode:"semi",results_dir:""}};
 const INCOG_ICON=`<span class="incog" title="hidden in Incognito" data-id="incog"><svg width="18" height="14" viewBox="0 0 24 18" fill="currentColor" aria-label="Incognito"><path d="M3 7h18l-2-6c-.2-.6-.8-.9-1.4-.7L12 2 6.4.3C5.8.1 5.2.4 5 1L3 7zm-2 1.5h22v1.6H1z"/><circle cx="6.5" cy="14" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="17.5" cy="14" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9.7 13.6c1.4-.8 3.2-.8 4.6 0" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></span>`;
 const FI_HELP={name:"each folder is named after the patient · a de-identified study code is given to each examination",mrn:"each folder is a patient's MRN · the examinations inside get their accession number from accession-number sub-folders or the Excel file",
@@ -36,7 +37,7 @@ async function importWizardView(v){
 `,!!IW.manifest)}
    ${step(5,"Study library (a verified copy of your MRI)",`<label class="note" style="display:block"><input type="checkbox" id="iw-le" ${IW.lib.enabled?"checked":""}> Copy each imported examination into the study library - your original folders are never renamed, moved or changed</label>
      ${IW.lib.enabled?`<div class="row" style="flex-wrap:wrap"><input id="iw-lr" style="width:min(520px,100%)" value="${esc(IW.lib.root)}" placeholder="where to keep the library, e.g. /Volumes/LabDisk/Percival_library"><button class="b" id="iw-lb">Choose folder…</button></div>
-     <div class="row">${seg("iw-lw",[["sel","Chosen series (T1, SWI, phase)"],["all","Whole examination (every series)"]],IW.lib.whole_exam?"all":"sel")}</div>
+     <div class="row">${seg("iw-lw",[["sel","Chosen series (SWI, T1, FLAIR, phase)"],["all","Whole examination (every series)"]],IW.lib.whole_exam?"all":"sel")}</div>
      <p class="note" data-iw="liblayout">Layout: ${IW.mode==="standard"?"<code>library / MRN / accession number / T1, SWI …</code> - folder names hold identifiers: keep the library on an encrypted local disk":"<code>library / code / T1, SWI …</code> (one folder per study code, no grouping)"}. Every file is checked (sha256) after copying; an existing folder is never overwritten.</p>`:""}`,IW.lib.enabled&&!!IW.lib.root)}
    ${step(6,"Processing",`<div class="row" style="flex-wrap:wrap"><span class="lab" style="width:auto">Cohort</span><select id="iw-c">${coh.map(c=>`<option ${c===IW.proc.cohort?"selected":""}>${esc(c)}</option>`).join("")}<option value="__new" ${IW.proc.cohort&&!coh.includes(IW.proc.cohort)?"selected":""}>+ New cohort…</option></select>
        <input id="iw-cn" placeholder="new cohort name" value="${IW.proc.cohort&&!coh.includes(IW.proc.cohort)?esc(IW.proc.cohort):""}" class="${(IW.proc.cohort&&!coh.includes(IW.proc.cohort))||!coh.length?"":"hide"}" style="width:180px">
@@ -76,38 +77,52 @@ async function saveTemplate(then){const d=await pick("folder","Choose where to s
   const r=await api("/api/id/template/save",{dest:d,open:true});if(!r.ok)return toast(esc(r.error),1);
   toast(`template saved: ${esc(r.path)} - it opens in Excel; fill it in, save it, then it is already chosen as the Excel file`);if(then)then(r.path)}
 function iwPatient(e,std){if(!std)return INCOG_ICON;const v=[e.patient_name,e.mrn?`MRN ${e.mrn}`:""].filter(Boolean).join(" · ");return v?`${esc(v)}${e.mrn_source?` <span class="note">(${esc(e.mrn_source)})</span>`:""}`:'<span class="bad">MRN missing</span>'}
-function iwPreview(){const P=IW.plan,el=$("#iw-prev");if(!el||!P)return;const std=P.mode==="standard";
-  const rowOpt=e=>P.rows.length?`<select data-iwr="${esc(e.eid)}"><option value="">— no row —</option>${P.rows.map(r=>`<option value="${r.row}" ${e.row===r.row?"selected":""}>row ${r.row}${std?` · ${esc(r.accession||"no accession")}`:` · ${esc(r.code||"no code")}`}</option>`).join("")}</select><div class="note">${esc(e.matched_by||"")}</div>`:'<span class="mut">no Excel file</span>';
+function iwPreview(){const P=IW.plan,el=$("#iw-prev");if(!el||!P)return;const std=P.mode==="standard";if(!IW.tab)IW.tab="series";
+  const lbl=e=>std?(e.accession||"accession missing"):(e.code||"code missing");
   const dup=d=>!d.kind||d.kind==="new"?'<span class="ok">new</span>':d.kind==="same_patient_new_exam"?'<span class="ok">new exam of an existing patient</span>':d.kind==="same_exam"?`<span class="warn" title="${esc(d.why)}">already imported</span>`:`<span class="bad" title="${esc(d.why)}">conflict</span>`;
-  const ser=e=>["SWI","T1"].map(t=>e.chosen[t]!=null?`<span class="ok" title="${esc((e.auto_why||{})[t]||"")}">${t} ✓</span>`:`<span class="${t==="SWI"?"bad":"warn"}">${t} ✗</span>`).join(" · ")+(e.chosen.PHASE!=null?' · <span class="mut">phase</span>':"")+
-    `${e.user_series?' <span class="pill" data-iw="byyou">chosen by you</span>':""}<div><button class="b sm" data-iws="${esc(e.eid)}">Series… (${e.n_series})</button></div>`;
-  const ident=e=>`${std?`<div>${e.accession?`<b>${esc(e.accession)}</b> <span class="note">(${esc(e.accession_source)})</span>`:'<span class="bad">accession missing</span>'}</div>`:""}
-     <input data-iwk="${esc(e.eid)}" value="${esc(e.code)}" placeholder="${e.code_generated?"generated at import":"code (required)"}" style="width:150px" title="de-identified study code">${e.code_source&&e.code_source!=="you"?` <span class="note">(${esc(e.code_source)})</span>`:""}`;
-  el.innerHTML=`<div class="card" data-iw="preview"><div class="row" style="flex-wrap:wrap"><h2 style="margin:0">Preview</h2><span class="pill">${P.layout==="one"?"one examination folder":`${P.patients.length} folder(s)`}</span><span class="pill">${P.n_exams} examination(s)</span>
+  const head=`<div class="row" style="flex-wrap:wrap"><h2 style="margin:0">Preview</h2><span class="pill">${P.layout==="one"?"one examination folder":`${P.patients.length} folder(s)`}</span><span class="pill">${P.n_exams} examination(s)</span>
      <span class="pill ${P.ok?"ok":P.errors.length?"bad":""}" data-iw="state">${P.ok?`ready: ${P.n_include} to import`:P.errors.length?`${P.errors.length} problem(s)`:P.n_include?"not ready":"nothing to import (all already imported or unticked)"}</span>${!std?'<span class="pill">Incognito: identifiers hidden</span>':""}${P.library.enabled?`<span class="pill ${P.library.root_ok?"ok":"bad"}">library ${P.library.root_ok?"✓":"✗"}</span>`:""}</div>
+   <div class="subtabs" data-iw="tabs" style="margin-top:10px"><button data-iwt="series" class="${IW.tab==="series"?"on":""}">1 · Series review</button><button data-iwt="ids" class="${IW.tab==="ids"?"on":""}">2 · Identifiers and import</button></div>
    ${P.errors.length?`<div class="banner e" style="display:block" data-iw="errors">${P.errors.slice(0,30).map(e=>`<div>✗ ${esc(e.msg)}</div>`).join("")}${P.errors.length>30?`<div>… ${P.errors.length-30} more</div>`:""}</div>`:""}
-   ${P.warnings.length?`<div class="banner w" style="display:block">${P.warnings.map(e=>`<div>⚠ ${esc(e.msg)}</div>`).join("")}</div>`:""}
-   <table data-iw="exams" class="iwt"><colgroup><col style="width:62px"><col style="width:15%"><col style="width:66px"><col style="width:17%"><col style="width:15%"><col style="width:13%"><col style="width:15%"><col></colgroup>
-    <tr><th>Include</th><th>Patient</th><th>Exam</th><th>${std?"Accession · study code":"Study code"}</th><th>Series</th><th>Excel row</th><th>Pathway</th><th>Library · status</th></tr>
-    ${P.exams.map(e=>`<tr data-iwe="${esc(e.eid)}"><td><input type="checkbox" data-iwi="${esc(e.eid)}" ${e.include?"checked":""}></td><td data-iw="patient">${iwPatient(e,std)}</td>
-     <td class="mono">${esc(e.eid)}${std&&e.study_date?`<div class="note">${esc(e.study_date)}</div>`:""}</td>
-     <td>${ident(e)}${e.has_grades?'<div class="note">grades from Excel</div>':""}</td><td>${ser(e)}</td><td>${rowOpt(e)}</td>
+   ${P.warnings.length?`<div class="banner w" style="display:block">${P.warnings.map(e=>`<div>⚠ ${esc(e.msg)}</div>`).join("")}</div>`:""}`;
+  const thumb=(e,i)=>i==null?'<div class="th0">none</div>':`<img loading="lazy" class="th" src="/api/id/import/thumb?plan=${encodeURIComponent(P.id)}&eid=${encodeURIComponent(e.eid)}&i=${i}" alt="">`;
+  const vox=s=>(s.voxel||[]).filter(Boolean).map(x=>(+x).toFixed(1)).join("×");
+  const pickCell=(e,t)=>{const cur=e.chosen[t];return `<td class="sv">${thumb(e,cur)}<select data-iwss="${esc(e.eid)}" data-t="${t}"><option value="">— none —</option>${e.all_series.map(s=>`<option value="${s.i}" ${cur===s.i?"selected":""}>${esc(s.type)} · ${esc(s.description||"series "+(s.i+1))} · ${vox(s)} mm${(e.auto_why||{})[t]&&cur===s.i&&!e.user_series?" ✓":""}</option>`).join("")}</select></td>`};
+  const adv=e=>(e.advice||[]).map(a=>`<div class="${a.level==="warn"?"warn":"note"}">${a.level==="warn"?"⚠ ":"• "}${esc(a.msg)}</div>`).join("")||'<span class="ok">✓ series look complete</span>';
+  const series=`<p class="note">Check the series Percival chose for each examination. Each picture is the middle slice of the chosen series (made on this Mac). Choose another series from the list where needed; the recommendations are on the right.</p>
+   <table class="iwt svt" data-iw="series-review"><colgroup><col style="width:64px"><col style="width:13%"><col><col><col><col><col style="width:22%"></colgroup>
+    <tr><th>Include</th><th>${std?"Accession number":"Code"}</th><th>SWI</th><th>T1</th><th>FLAIR</th><th>Phase</th><th>Warnings and recommendations</th></tr>
+    ${P.exams.map(e=>`<tr data-iwe="${esc(e.eid)}"><td><input type="checkbox" data-iwi="${esc(e.eid)}" ${e.include?"checked":""}></td><td><b>${esc(lbl(e))}</b>${e.user_series?'<div><span class="pill" data-iw="byyou">chosen by you</span></div>':""}${!e.include&&e.excluded_why?`<div class="note">${esc(e.excluded_why)}</div>`:""}</td>
+      ${["SWI","T1","FLAIR","PHASE"].map(t=>pickCell(e,t)).join("")}<td data-iw="advice">${adv(e)}</td></tr>`).join("")}</table>
+   <div class="row" style="margin-top:10px"><button class="b pri" id="iw-next" data-iw="next">Series look right · next: identifiers ▸</button></div>`;
+  const rowOpt=e=>P.rows.length?`<select data-iwr="${esc(e.eid)}"><option value="">— no row —</option>${P.rows.map(r=>`<option value="${r.row}" ${e.row===r.row?"selected":""}>row ${r.row}${std?` · ${esc(r.accession||"no accession")}`:` · ${esc(r.code||"no code")}`}</option>`).join("")}</select><div class="note">${esc(e.matched_by||"")}</div>`:'<span class="mut">no Excel file</span>';
+  const src=x=>x?` <span class="note">(${esc(x)})</span>`:"";
+  const ids=`<table data-iw="exams" class="iwt"><colgroup><col style="width:52px">${std?'<col style="width:12%"><col style="width:10%"><col style="width:12%">':'<col style="width:6%">'}<col style="width:14%"><col style="width:12%"><col style="width:14%"><col></colgroup>
+    <tr><th>Include</th>${std?"<th>Patient name</th><th>MRN</th><th>Accession number</th>":"<th>Patient</th>"}<th>Code</th><th>Excel row</th><th>Pathway</th><th>Library · status</th></tr>
+    ${P.exams.map(e=>`<tr data-iwe="${esc(e.eid)}"><td><input type="checkbox" data-iwi="${esc(e.eid)}" ${e.include?"checked":""}></td>
+     ${std?`<td data-iw="patient">${e.patient_name?esc(e.patient_name)+src(e.patient_name&&e.mrn_source==="Excel"?"Excel":""):'<span class="mut">—</span>'}</td><td>${e.mrn?`<span class="mono">${esc(e.mrn)}</span>${src(e.mrn_source)}`:'<span class="bad">missing</span>'}</td>
+       <td>${e.accession?`<b>${esc(e.accession)}</b>${src(e.accession_source)}`:'<span class="bad">missing</span>'}${e.study_date?`<div class="note">${esc(e.study_date)}</div>`:""}</td>`:`<td data-iw="patient">${INCOG_ICON}</td>`}
+     <td><input data-iwk="${esc(e.eid)}" value="${esc(e.code)}" placeholder="${e.code_generated?"generated at import":"code (required)"}" style="width:100%" title="de-identified study code">${e.code_source&&e.code_source!=="you"?src(e.code_source):""}${e.has_grades?'<div class="note">grades from Excel</div>':""}</td>
+     <td>${rowOpt(e)}</td>
      <td>${e.check==="cannot"?'<span class="bad">cannot run</span>':(typeof pwSel==="function"&&S.pathways?pwSel(e.pathway,e.pathway_rec,`data-iwp="${esc(e.eid)}" style="width:100%"`):esc(e.pathway))}${e.pathway_reason&&e.check!=="ok"?`<div class="note warn">${esc(e.pathway_reason)}</div>`:""}</td>
      <td>${P.library.enabled?`<div class="mono note" style="overflow-wrap:anywhere" data-iw="lib">${e.library?esc(e.library):`<span class="${std?"bad":"mut"}">${esc(e.library_why||"—")}</span>`}${e.library_state?` · ${esc(e.library_state)}`:""}</div>`:""}
        ${dup(e.duplicate||{})}${e.excluded_why?`<div class="note">${esc(e.excluded_why)}</div>`:""}${e.problems.length&&e.include?`<div class="bad">${e.problems.map(esc).join("<br>")}</div>`:""}${(e.notes||[]).length?`<div class="note">${e.notes.map(esc).join("<br>")}</div>`:""}
        <input data-iwn="${esc(e.eid)}" value="${esc(e.display_name)}" placeholder="display name (optional)" style="width:100%;margin-top:4px"></td></tr>`).join("")}</table>
-   <div class="row" style="margin-top:10px"><button class="b pri" id="iw-imp" ${P.ok?"":"disabled"} data-iw="confirm">Import ${P.n_include} examination(s) and start ▶</button><span class="note">${P.ok?`cohort ${esc(P.processing.cohort)} · ${P.processing.run_mode==="semi"?"semi-automatic":"automatic"}${P.library.enabled?" · library copy after import":""}`:(P.errors.length?"fix the problems above (assign rows, choose series, correct the Excel file, or untick examinations)":"tick at least one examination")}</span></div></div>`;
+   <div class="row" style="margin-top:10px"><button class="b" data-iwt="series">◂ Series review</button><button class="b pri" id="iw-imp" ${P.ok?"":"disabled"} data-iw="confirm">Import ${P.n_include} examination(s) and start ▶</button><span class="note">${P.ok?`cohort ${esc(P.processing.cohort||"—")} · ${P.processing.run_mode==="semi"?"semi-automatic":"automatic"}${P.library.enabled?" · library copy after import":""}`:(P.errors.length?"fix the problems above (assign rows, choose series, correct the Excel file, or untick examinations)":"tick at least one examination")}</span></div>`;
+  el.innerHTML=`<div class="card" data-iw="preview">${head}${IW.tab==="series"?series:ids}</div>`;
   setTimeout(iwMeasure,60);
+  el.querySelectorAll("[data-iwt]").forEach(b=>b.onclick=()=>{IW.tab=b.dataset.iwt;iwPreview()});
+  $("#iw-next")&&($("#iw-next").onclick=()=>{IW.tab="ids";iwPreview()});
+  el.querySelectorAll("[data-iwss]").forEach(s=>s.onchange=()=>iwUpdate([{eid:s.dataset.iwss,series:{[s.dataset.t]:s.value}}]));
   el.querySelectorAll("[data-iwr]").forEach(s=>s.onchange=()=>iwUpdate([{eid:s.dataset.iwr,row:s.value}]));
   el.querySelectorAll("[data-iwi]").forEach(c=>c.onchange=()=>iwUpdate([{eid:c.dataset.iwi,include:c.checked}]));
   el.querySelectorAll("[data-iwn]").forEach(c=>c.onchange=()=>iwUpdate([{eid:c.dataset.iwn,display_name:c.value}]));
   el.querySelectorAll("[data-iwk]").forEach(c=>c.onchange=()=>iwUpdate([{eid:c.dataset.iwk,code:c.value.trim()}]));
-  el.querySelectorAll("[data-iws]").forEach(b=>b.onclick=()=>iwSeries(b.dataset.iws));
   el.querySelectorAll("[data-iwp]").forEach(s=>s.onchange=async()=>{const e=P.exams.find(x=>x.eid===s.dataset.iwp),r=typeof confirmPath==="function"?await confirmPath(e.code||e.eid,s.value,e.pathway_rec,e.pathway_reason):true;
     iwUpdate([{eid:e.eid,pathway:r===true?s.value:r==="rec"?e.pathway_rec:e.pathway}])});
-  $("#iw-imp").onclick=async()=>{if(!confirm(`Import ${P.n_include} examination(s) as shown in the preview and start processing?`))return;
-    const r=await api("/api/id/import/commit",{plan:P.id,confirm:true,cohort:P.processing.cohort});if(!r.ok)return toast(esc(r.error),1);IW.done=r;IW.plan=null;iwDone()}}
-function iwMeasure(){const c=$('[data-iw="preview"]'),t=$('[data-iw="exams"]');if(!c||!t)return;      // layout self-check (tests read these)
+  $("#iw-imp")&&($("#iw-imp").onclick=async()=>{if(!confirm(`Import ${P.n_include} examination(s) as shown in the preview and start processing?`))return;
+    const r=await api("/api/id/import/commit",{plan:P.id,confirm:true,cohort:P.processing.cohort});if(!r.ok)return toast(esc(r.error),1);IW.done=r;IW.plan=null;IW.tab="series";iwDone()})}
+function iwMeasure(){const c=$('[data-iw="preview"]'),t=$('[data-iw="exams"]')||$('[data-iw="series-review"]');if(!c||!t)return;      // layout self-check (tests read these)
   c.dataset.overflow=t.scrollWidth>c.clientWidth+2?"yes":"no";const bad=[];
   t.querySelectorAll("td").forEach(td=>{const r=td.getBoundingClientRect();td.querySelectorAll("input,select,button").forEach(x=>{const q=x.getBoundingClientRect();if(q.width&&(q.right>r.right+1||q.left<r.left-1))bad.push(x.tagName.toLowerCase()+(x.type?":"+x.type:""))})});
   c.dataset.clipped=bad.length?"yes":"no";c.dataset.clipwhat=[...new Set(bad)].join(",")}
@@ -116,7 +131,7 @@ async function iwSeries(eid){const P=IW.plan,r=await api(`/api/id/import/series?
   const opt=t=>`<label style="display:inline-block;margin-right:18px"><b>${t}</b> <select data-ss="${t}"><option value="">— none —</option>${r.series.map(s=>`<option value="${s.i}" ${cur(t)===s.i?"selected":""}>#${s.i+1} ${esc(s.type||"?")} · ${esc((s.description||s.name||"series").slice(0,40))} · ${vox(s)} mm${s.auto_as.includes(t)?" ✓ automatic":""}</option>`).join("")}</select></label>`;
   const o=idModal(`<h2>Series of examination ${esc(eid)}</h2><p class="note">Percival chose automatically: ${Object.entries(r.auto_why||{}).map(([k,w])=>`<b>${esc(k)}</b> - ${esc(w)}`).join(" · ")||"nothing usable"}.
       You can choose any other series; your choice is marked "chosen by you".</p>
-    <div class="row" style="flex-wrap:wrap">${opt("SWI")}${opt("T1")}${opt("PHASE")}</div>
+    <div class="row" style="flex-wrap:wrap">${opt("SWI")}${opt("T1")}${opt("FLAIR")}${opt("PHASE")}</div>
     <div style="max-height:52vh;overflow:auto"><table data-iw="series"><tr><th></th><th>#</th><th>Detected</th><th>Description</th><th>Voxel (mm)</th><th>Files / slices</th><th>TE</th><th>Why</th></tr>
      ${r.series.map(s=>`<tr><td style="width:96px"><img loading="lazy" src="/api/id/import/thumb?plan=${encodeURIComponent(P.id)}&eid=${encodeURIComponent(eid)}&i=${s.i}" style="width:88px;height:88px;object-fit:contain;background:#000;border-radius:4px" alt=""></td>
        <td class="mono">${s.i+1}${s.chosen_as.length?`<div class="ok">${s.chosen_as.join(", ")}</div>`:""}</td><td>${esc(s.type||"?")}</td><td style="overflow-wrap:anywhere">${esc(s.description||"")}${s.name?`<div class="note">${esc(s.name)}</div>`:""}</td>

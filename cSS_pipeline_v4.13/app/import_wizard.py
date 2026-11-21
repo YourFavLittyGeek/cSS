@@ -452,6 +452,29 @@ def thumb(plan_id, eid, i):
     return bio.getvalue()
 
 
+def advice(e):
+    """warnings (warn) and recommendations (info) about the chosen series of one examination"""
+    out = []; ser = {s["path"]: s for s in e["series"]}; ch = e["chosen"]
+    sw, t1, fl = ser.get(ch.get("SWI")), ser.get(ch.get("T1")), ser.get(ch.get("FLAIR"))
+    n_swi = sum(1 for s in e["series"] if s.get("ok") and s.get("type") == "SWI")
+    if not sw: out.append(("warn", "no SWI chosen - pick the SWI series, or untick the examination"))
+    elif sw.get("type") != "SWI": out.append(("warn", f"the chosen SWI was detected as {sw.get('type') or 'unknown'} - check that it is the susceptibility magnitude"))
+    if n_swi > 1 and sw: out.append(("info", f"{n_swi} SWI series - the highest resolution was chosen; check it is the full-brain magnitude"))
+    if not t1: out.append(("warn", "no usable T1 - the SWI-only pathway runs (alone, less accurate anatomy); choose a T1 if there is one"))
+    else:
+        u, _, why = SD.t1_quality(t1)
+        if not u: out.append(("warn", f"the chosen T1 is not usable for anatomy: {why}"))
+        elif "2-D" in why: out.append(("warn", f"the chosen T1 is 2-D ({why}) - a 3-D T1 gives more accurate anatomy"))
+    for s in [s for s in e["series"] if s.get("ok") and s.get("type") == "T1" and s["path"] != ch.get("T1")][:2]:
+        u, _, why = SD.t1_quality(s)
+        out.append(("info", f"another T1 was not chosen: {why}" + ("" if not u else " - the chosen one ranks higher (3-D, finer, whole brain)")))
+    if e.get("overlap", "").startswith("different"): out.append(("warn", f"T1 and SWI: {e['overlap']} - check the T1 is from the same visit"))
+    if not fl: out.append(("info", "no FLAIR chosen (optional)" + (" - one is available" if any(s.get("type") == "FLAIR" for s in e["series"]) else "")))
+    if ch.get("PHASE") is None and any(s.get("type") == "PHASE" for s in e["series"]): out.append(("info", "a phase series is available (optional)"))
+    if e.get("user_series"): out.append(("info", "series chosen by you"))
+    return [dict(level=l, msg=m) for l, m in out]
+
+
 def view(plan):
     """what the browser may see. Incognito: no MRN / name / accession / folder names / paths."""
     inc = plan["mode"] == "incognito"
@@ -468,7 +491,9 @@ def view(plan):
                  code=i["code"], code_source=i["code_src"], code_generated=not i["code"] and plan["mode"] == "standard",
                  library=e.get("library_rel", "") if plan["library"]["enabled"] else "", library_state=e.get("library_state", ""), library_why=e.get("library_why", ""),
                  check=e.get("check", ""), pathway=e.get("pathway", ""), pathway_rec=e.get("pathway_rec", ""), pathway_reason=e.get("pathway_reason", ""), overlap=e.get("overlap", ""),
-                 has_grades=bool(i["grade_R"] or i["grade_L"]))
+                 has_grades=bool(i["grade_R"] or i["grade_L"]), advice=advice(e),
+                 all_series=[dict(i=k, type=s.get("type") or "?", description=(s.get("description") or "")[:60], voxel=s.get("voxel"), files=s.get("files"))
+                             for k, s in enumerate(e["series"]) if s.get("ok")])
         if not inc:
             x.update(patient_folder=e["patient_folder"], sub=e["sub"], mrn=i["mrn"], mrn_source=i["mrn_src"], patient_name=i["name"], accession=i["accession"],
                      accession_source=i["accession_src"], study_date=e.get("study_date", ""), radiologist=i["radiologist"], grade_R=i["grade_R"], grade_L=i["grade_L"])

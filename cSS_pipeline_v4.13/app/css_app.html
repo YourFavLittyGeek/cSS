@@ -98,7 +98,11 @@ tr.sel td{background:var(--acc2)}
 .empty{padding:22px 16px;color:var(--mut);font-size:13px}
 .subtabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:18px}.subtabs button{background:none;border:0;border-bottom:2px solid transparent;color:var(--mut);font:inherit;padding:9px 12px;cursor:pointer;font-size:14px}.subtabs button.on{color:var(--ink);border-bottom-color:var(--acc);font-weight:600}
 .menu{position:absolute;right:0;top:40px;background:var(--panel);border:1px solid var(--line2);border-radius:10px;box-shadow:var(--sh);padding:6px;z-index:12;min-width:230px}.menu button{display:block;width:100%;text-align:left;background:none;border:0;color:var(--ink);font:inherit;padding:7px 10px;border-radius:7px;cursor:pointer}.menu button:hover{background:var(--panel2)}
+.fbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 10px}.fbar input{width:130px}.fbar select{max-width:200px}
+th.sortable{cursor:pointer;user-select:none;white-space:nowrap}.sarrow{opacity:.35;font-size:10px}.sarrow.on{opacity:1;color:var(--acc)}
+tr.sgroup td{background:color-mix(in srgb,var(--acc) 7%,transparent);cursor:pointer;padding-top:7px;padding-bottom:7px}tr.sgroup .caret{display:inline-block;width:12px}
 table.iwt{table-layout:fixed;width:100%}table.iwt td{vertical-align:top;overflow-wrap:anywhere}table.iwt td select{width:100%;max-width:100%;min-width:0!important}table.iwt td input:not([type=checkbox]){max-width:100%;min-width:0!important}table.iwt td input[type=checkbox]{min-width:0;padding:0}
+table.svt td.sv{text-align:center}table.svt img.th,table.svt .th0{display:block;width:96px;height:96px;margin:0 auto 6px;object-fit:contain;background:#000;border-radius:6px}table.svt .th0{line-height:96px;color:var(--mut);font-size:12px;background:color-mix(in srgb,var(--mut) 12%,transparent)}
 .incog{display:inline-flex;align-items:center;gap:4px;color:var(--mut);opacity:.85}
 </style></head><body>
 <div id="app"><aside id="side"><div class="brand"><img id="logo" src="/icon_dark.png" alt=""><b>Percival</b></div>
@@ -493,37 +497,76 @@ async function loadStudies(){const [R,D]=await Promise.all([api("/api/results"),
   rows.sort((a,b)=>a.code.localeCompare(b.code,undefined,{numeric:true}));W.data={rows,recovered:D.recovered,rolled:D.imports_rolled_back};return W.data}
 const FIL=[["all","Studies",r=>true],["proc","Processing",r=>["Processing","Paused","Waiting"].includes(r.st.l)],["att","Need attention",r=>["Needs attention","Needs your decision"].includes(r.st.l)],
   ["ready","Ready for review",r=>["Ready for review","Review in progress","Needs re-review"].includes(r.st.l)],["done","Reviewed",r=>r.st.l==="Reviewed"]];
+// v5.19 Studies list: separate code / accession / patient name / MRN columns (Incognito: code + incognito icon), filters on every field
+// and every status, sorting on every column, grouping by MRN or patient name (Standard) or a plain list
+const ST_ORDER=["Needs attention","Needs your decision","Processing","Paused","Waiting","Not processed","Ready for review","Review in progress","Needs re-review","Reviewed"];
+Object.assign(W,{sort:W.sort||{k:"code",d:1},grp:W.grp||"mrn",flt:W.flt||{status:"",mrn:"",name:"",acc:"",code:""},closed:W.closed||new Set()});
+function sIdent(x){const i=(x.r&&x.r.ident)||(x.p&&x.p.ident)||{},s=IDV.st||{},std=s.mode==="standard"&&!i.locked;
+  return {std,code:i.deid_code||x.code,acc:std?(i.accession||""):"",mrn:std?(i.mrn||""):"",name:std?(i.patient_name||""):"",disp:i.display_name||"",accMissing:!!i.accession_missing,n:i.n_exams_of_patient||1,pu:i.patient_uuid||""}}
+const SKEY={code:x=>sIdent(x).code,acc:x=>sIdent(x).acc,name:x=>sIdent(x).name.toLowerCase(),mrn:x=>sIdent(x).mrn,cohort:x=>x.cohort||"",status:x=>ST_ORDER.indexOf(x.st.l),
+  cand:x=>x.r&&x.r.candidates!=null?x.r.candidates:-1,rev:x=>x.r&&x.r.reviewed!=null?x.r.reviewed:-1,score:x=>x.r&&x.r.score_total!=null?x.r.score_total:-1};
+function sCmp(a,b){const k=SKEY[W.sort.k]||SKEY.code,x=k(a),y=k(b);const c=typeof x==="number"&&typeof y==="number"?x-y:String(x).localeCompare(String(y),undefined,{numeric:true});return (c||SKEY.code(a).localeCompare(SKEY.code(b),undefined,{numeric:true}))*W.sort.d}
 async function studiesView(v){const D=await loadStudies();if(V!=="studies")return;
+  const hq=location.hash.match(/^#studies\?(.+)$/);if(hq&&W._hq!==hq[1]){W._hq=hq[1];const q=new URLSearchParams(hq[1]);   // #studies?grp=mrn|name|none&sort=<col>&dir=asc|desc&status=…&cohort=…&q=…&mrn=…&name=…&acc=…&code=…
+    if(q.get("grp"))W.grp=q.get("grp");if(q.get("sort"))W.sort={k:q.get("sort"),d:q.get("dir")==="desc"?-1:1};if(q.get("cohort"))W.coh=q.get("cohort");if(q.get("q")!==null)W.q=q.get("q");
+    ["status","mrn","name","acc","code"].forEach(k=>{if(q.get(k)!==null)W.flt[k]=q.get(k)})}
   if(!W.pf)W.pf=await api("/api/preflight").catch(()=>[]);const bad=(W.pf||[]).filter(x=>!x.ok&&!/Own app window|Disk space/.test(x.item));
-  const coh=["all",...new Set(D.rows.map(r=>r.cohort).filter(Boolean))];
-  const vis=D.rows.filter(FIL.find(f=>f[0]===W.f)[2]).filter(r=>W.coh==="all"||r.cohort===W.coh).filter(r=>!W.q||(r.code+" "+r.name+" "+r.cohort).toLowerCase().includes(W.q.toLowerCase()));
+  const coh=["all",...new Set(D.rows.map(r=>r.cohort).filter(Boolean))],std=(IDV.st||{}).mode==="standard"&&(IDV.st||{}).unlocked,F=W.flt,lc=s=>String(s||"").toLowerCase();
+  const has=(a,b)=>!b||lc(a).includes(lc(b));
+  const vis=D.rows.filter(FIL.find(f=>f[0]===W.f)[2]).filter(r=>W.coh==="all"||r.cohort===W.coh).filter(r=>!F.status||r.st.l===F.status)
+    .filter(r=>{const i=sIdent(r);return has(i.code,F.code)&&(!std||(has(i.mrn,F.mrn)&&has(i.name,F.name)&&has(i.acc,F.acc)))&&(!W.q||lc([i.code,i.acc,i.mrn,i.name,i.disp,r.cohort,r.st.l].join(" ")).includes(lc(W.q)))}).sort(sCmp);
   const agr=agreement(D.rows.map(r=>r.r).filter(Boolean));
+  const cols=std?[["code","Code"],["acc","Accession number"],["name","Patient name"],["mrn","MRN"],["cohort","Cohort"],["status","Status"],["cand","Candidates"],["rev","Reviewed"],["score","Score <span class=\"note\">reader · AI</span>"]]
+                 :[["code","Code"],["pat","Patient"],["cohort","Cohort"],["status","Status"],["cand","Candidates"],["rev","Reviewed"],["score","Score <span class=\"note\">reader · AI</span>"]];
+  const th=([k,l])=>k==="pat"?`<th data-id="patcol">${l}</th>`:`<th data-sk="${k}" ${k==="name"?'data-id="patcol"':""} class="sortable" title="sort ascending / descending">${l} <span class="sarrow ${W.sort.k===k?"on":""}">${W.sort.k===k?(W.sort.d>0?"▲":"▼"):"↕"}</span></th>`;
+  const row=x=>{const r=x.r||{},i=sIdent(x);return `<tr data-st="${esc(x.code)}" class="${W.cur===x.code?"cur":""}"><td><input type="checkbox" data-sc="${esc(x.code)}" ${W.sel.has(x.code)?"checked":""}></td>
+    <td><span class="code">${esc(i.code)}</span>${i.disp?`<span class="sub2">${esc(i.disp)}</span>`:""}</td>
+    ${std?`<td>${i.acc?esc(i.acc):i.accMissing?'<span class="pill bad" data-id="acc-missing" title="enter the accession number (Edit identifiers)">accession missing</span>':'<span class="mut">—</span>'}</td><td>${i.name?esc(i.name):'<span class="mut">—</span>'}</td><td>${i.mrn?`<span class="mono">${esc(i.mrn)}</span>`:'<span class="bad">MRN missing</span>'}</td>`
+         :`<td>${typeof INCOG_ICON!=="undefined"?INCOG_ICON:""}</td>`}
+    <td class="mut">${esc(x.cohort||"—")}</td><td><span class="st ${x.st.k}"><i></i>${esc(x.st.l)}</span>${x.st.s?`<span class="sub2">${esc(x.st.s)}</span>`:""}</td>
+    <td>${r.candidates??'<span class="mut">—</span>'}</td><td>${r.reviewed!=null?`${r.reviewed}${r.css_called!=null?` <span class="mut">· ${r.css_called} cSS</span>`:""}`:'<span class="mut">—</span>'}</td>
+    <td>${r.score_total!=null?`<b>${r.score_total}</b>`:'<span class="mut">—</span>'} <span class="mut">·</span> ${r.ai_total!=null?`<span title="AI only, not validated">${r.ai_total}</span>`:'<span class="mut">—</span>'}</td></tr>`};
+  let body="";
+  if(std&&W.grp!=="none"){const g=new Map();vis.forEach(x=>{const i=sIdent(x),k=W.grp==="mrn"?(i.mrn||"(no MRN)"):(i.name||"(no name)");if(!g.has(k))g.set(k,[]);g.get(k).push(x)});
+    body=[...g.entries()].map(([k,L])=>{const i=sIdent(L[0]),open=!W.closed.has(k);
+      return `<tr class="sgroup" data-grp="${esc(k)}"><td colspan="${cols.length+1}"><span class="caret">${open?"▾":"▸"}</span> ${W.grp==="mrn"?`<b class="mono">MRN ${esc(k)}</b>${i.name?` <span class="mut">${esc(i.name)}</span>`:""}`:`<b>${esc(k)}</b>${i.mrn?` <span class="mono mut">MRN ${esc(i.mrn)}</span>`:""}`} <span class="pill">${L.length} ${L.length>1?"examinations":"examination"}</span></td></tr>`+(open?L.map(row).join(""):"")}).join("")}
+  else body=vis.map(row).join("");
   v.innerHTML=`${bad.length?`<div class="banner w"><b>Setup needs attention</b><span class="mut">${bad.map(x=>esc(x.item)).join(" · ")}</span><span class="sp"></span><button class="b sm" onclick="W.setTab='system';go('set')">Open setup</button></div>`:""}
    ${S.queue.hold?`<div class="banner e"><b>Processing is paused</b><span>${esc(S.queue.hold)}</span><span class="sp"></span><button class="b sm" onclick="go('act')">Open Activity</button></div>`:""}
    <div class="tiles">${FIL.map(([k,t,f])=>`<div class="tile ${W.f===k?"on":""}" data-fl="${k}"><div class="n ${k==="att"&&D.rows.filter(f).length?"bad":""}">${D.rows.filter(f).length}</div><div class="t">${t}</div></div>`).join("")}</div>
-   <div class="tbar"><input type="search" id="sq" placeholder="Search studies" value="${esc(W.q)}">${coh.length>2?`<select id="scoh">${coh.map(c=>`<option value="${esc(c)}" ${c===W.coh?"selected":""}>${c==="all"?"All cohorts":esc(c)}</option>`).join("")}</select>`:""}
-<span class="sp"></span>
+   <div class="tbar"><input type="search" id="sq" placeholder="Search everything" value="${esc(W.q)}">
+    <span class="sp"></span>
     <button class="b" id="scalls" onclick="openCalls()" title="every reviewer's calls are kept; choose whose calls are used">Reviewer calls</button><button class="b" id="srev">${W.sel.size?`Review ${W.sel.size} selected`:"Review"}</button>
     <span style="position:relative"><button class="b" id="sexp">Export ▾</button><div class="menu hide" id="sexpm">${[["xlsx","Excel workbook (.xlsx)"],["csv","CSV (.csv)"],["docx","Word report (.docx)"],["pdf","PDF report (.pdf)"]].map(([f,l])=>`<button data-fmt="${f}">${l}</button>`).join("")}<button id="sxf" data-id="export-files">Studies with files…</button><button id="spkg">Share package (.zip)</button><div class="divider" style="margin:6px 0"></div><button id="sopx">Open results workbook</button><button id="sai">Update AI scores</button><div class="note" style="padding:4px 10px">Written only to a local folder you choose, after a warning</div></div></span>
     <button class="b pri" onclick="go('add')">Add studies</button></div>
-   <div class="list"><table><thead><tr><th style="width:34px"><input type="checkbox" id="sall"></th><th>Study</th><th data-id="patcol">Patient</th><th>Cohort</th><th>Status</th><th style="width:110px">Candidates</th><th style="width:110px">Reviewed</th><th style="width:150px">Score <span class="note">reader · AI</span></th></tr></thead><tbody>
-   ${vis.map(x=>{const r=x.r||{};return `<tr data-st="${esc(x.code)}" class="${W.cur===x.code?"cur":""}"><td><input type="checkbox" data-sc="${esc(x.code)}" ${W.sel.has(x.code)?"checked":""}></td>
-    <td>${typeof idCell==="function"?idCell(x):`<span class="code">${esc(x.code)}</span>`}</td><td>${typeof patCell==="function"?patCell(x):""}</td><td class="mut">${esc(x.cohort||"—")}</td>
-    <td><span class="st ${x.st.k}"><i></i>${esc(x.st.l)}</span>${x.st.s?`<span class="sub2">${esc(x.st.s)}</span>`:""}</td>
-    <td>${r.candidates??'<span class="mut">—</span>'}</td><td>${r.reviewed!=null?`${r.reviewed}${r.css_called!=null?` <span class="mut">· ${r.css_called} cSS</span>`:""}`:'<span class="mut">—</span>'}</td>
-    <td>${r.score_total!=null?`<b>${r.score_total}</b>`:'<span class="mut">—</span>'} <span class="mut">·</span> ${r.ai_total!=null?`<span title="AI only, not validated">${r.ai_total}</span>`:'<span class="mut">—</span>'}</td></tr>`}).join("")||`<tr><td colspan="8" class="empty">${D.rows.length?"No study matches this filter.":`No studies yet. <a href="#" onclick="go('add');return false" style="color:var(--acc)">Add studies</a> to begin.`}</td></tr>`}
+   <div class="fbar" data-id="filters"><span class="note">Filter</span>
+    <select id="fst" title="status"><option value="">All statuses</option>${ST_ORDER.map(s=>`<option ${F.status===s?"selected":""}>${s}</option>`).join("")}</select>
+    <select id="scoh" title="cohort">${coh.map(c=>`<option value="${esc(c)}" ${c===W.coh?"selected":""}>${c==="all"?"All cohorts":esc(c)}</option>`).join("")}</select>
+    <input data-ff="code" placeholder="code" value="${esc(F.code)}">${std?`<input data-ff="acc" placeholder="accession" value="${esc(F.acc)}"><input data-ff="mrn" placeholder="MRN" value="${esc(F.mrn)}"><input data-ff="name" placeholder="patient name" value="${esc(F.name)}">`:""}
+    ${Object.values(F).some(Boolean)||W.coh!=="all"||W.q?'<button class="b sm" id="fclr">Clear filters</button>':""}
+    <span class="sp"></span>${std?`<span class="note">Group by</span>${seg("sgrp",[["mrn","MRN"],["name","Patient name"],["none","No grouping"]],W.grp)}`:'<span class="note" title="Incognito shows no patient grouping">Incognito: list by code</span>'}
+    <span class="note">${vis.length} of ${D.rows.length}</span></div>
+   <div class="list"><table data-id="studies"><thead><tr><th style="width:34px"><input type="checkbox" id="sall"></th>${cols.map(th).join("")}</tr></thead><tbody>
+   ${body||`<tr><td colspan="${cols.length+1}" class="empty">${D.rows.length?"No study matches these filters.":`No studies yet. <a href="#" onclick="go('add');return false" style="color:var(--acc)">Add studies</a> to begin.`}</td></tr>`}
    </tbody></table></div><div class="note" style="margin-top:10px">${agr} · AI scores are rule-based and not validated.</div>`;
-  v.querySelectorAll("[data-fl]").forEach(t=>t.onclick=()=>{W.f=t.dataset.fl;studiesView(v)});
-  $("#sq").oninput=e=>{W.q=e.target.value;clearTimeout(W.qt);W.qt=setTimeout(()=>{studiesView(v).then(()=>{const q=$("#sq");q.focus();q.setSelectionRange(q.value.length,q.value.length)})},200)};
-  $("#scoh")&&($("#scoh").onchange=e=>{W.coh=e.target.value;studiesView(v)});
+  const re=()=>studiesView(v);
+  v.querySelectorAll("[data-fl]").forEach(t=>t.onclick=()=>{W.f=t.dataset.fl;re()});
+  const keep=(sel,fn)=>e=>{fn(e);clearTimeout(W.qt);W.qt=setTimeout(()=>{re().then(()=>{const q=$(sel);if(q){q.focus();q.setSelectionRange(q.value.length,q.value.length)}})},250)};
+  $("#sq").oninput=keep("#sq",e=>W.q=e.target.value);
+  v.querySelectorAll("[data-ff]").forEach(i=>i.oninput=keep(`[data-ff="${i.dataset.ff}"]`,e=>F[i.dataset.ff]=e.target.value));
+  $("#fst").onchange=e=>{F.status=e.target.value;re()};$("#scoh").onchange=e=>{W.coh=e.target.value;re()};
+  $("#fclr")&&($("#fclr").onclick=()=>{Object.keys(F).forEach(k=>F[k]="");W.coh="all";W.q="";W.f="all";re()});
+  bindSeg("sgrp",x=>{W.grp=x;re()});
+  v.querySelectorAll("[data-sk]").forEach(h=>h.onclick=()=>{const k=h.dataset.sk;W.sort=W.sort.k===k?{k,d:-W.sort.d}:{k,d:1};re()});
+  v.querySelectorAll("[data-grp]").forEach(g=>g.onclick=()=>{const k=g.dataset.grp;W.closed.has(k)?W.closed.delete(k):W.closed.add(k);re()});
   v.querySelectorAll("[data-sc]").forEach(c=>{c.onclick=e=>e.stopPropagation();c.onchange=()=>{c.checked?W.sel.add(c.dataset.sc):W.sel.delete(c.dataset.sc);$("#srev").textContent=W.sel.size?`Review ${W.sel.size} selected`:"Review"}});
-  $("#sall").onchange=e=>{vis.forEach(x=>e.target.checked?W.sel.add(x.code):W.sel.delete(x.code));studiesView(v)};
+  $("#sall").onchange=e=>{vis.forEach(x=>e.target.checked?W.sel.add(x.code):W.sel.delete(x.code));re()};
   v.querySelectorAll("[data-st]").forEach(tr=>tr.onclick=()=>openSheet(tr.dataset.st));
   $("#srev").onclick=()=>{const c=W.sel.size?[...W.sel]:vis.filter(x=>x.r&&x.r.candidates!=null).map(x=>x.code);if(!c.length)return toast("no processed study to review",1);review(c,W.coh==="all"?"":W.coh)};
   $("#sexp").onclick=e=>{e.stopPropagation();$("#sexpm").classList.toggle("hide")};document.addEventListener("click",()=>$("#sexpm")&&$("#sexpm").classList.add("hide"),{once:true});
   v.querySelectorAll("[data-fmt]").forEach(b=>b.onclick=()=>clinicalExport("/api/export",{fmt:b.dataset.fmt,cohort:W.coh}));
   $("#spkg").onclick=()=>clinicalExport("/api/share",{codes:vis.filter(x=>x.r&&x.r.candidates!=null).map(x=>x.code)});
-  $("#sxf").onclick=()=>typeof openFileExport==="function"&&openFileExport(W.sel.size?[...W.sel]:vis.map(x=>x.code),W.sel.size?"selected":W.coh!=="all"?`cohort ${W.coh}`:"all shown");
+  $("#sxf").onclick=()=>typeof openFileExport==="function"&&openFileExport(W.sel.size?[...W.sel]:vis.map(x=>x.code),W.sel.size?"selected":"filtered list");
   $("#sopx").onclick=async()=>{const r=await api("/api/open_results",{});toast(r.ok?`opened ${esc(r.path)}`:esc(r.error),!r.ok)};
   $("#sai").onclick=async()=>{await api("/api/ai_scores",{});toast("AI scores are being updated — they fill in within a minute")}}
 // ---------- study panel
@@ -611,19 +654,22 @@ function pathwayDialog(p,isRetry,isRerun){const rec=isRetry?(p.next_rec||"coreg_
     const res=await api("/api/control",body);if(res.error)toast(esc(res.error),1);else toast(`${esc(p.code)}: ${esc(PW()[ch])}`);render();if(W.cur)openSheet(W.cur)})}
 // ---------- Activity (Process Manager)
 const AC={capOpen:false};
+// v5.19 the processing list names a study like the Studies list: code (+ accession · name · MRN in Standard)
+function actName(code){const p=(S.patients||[]).find(x=>x.code===code)||{},i=p.ident||{},st=IDV&&IDV.st||{},std=st.mode==="standard"&&!i.locked;
+  return `${esc(i.deid_code||code)}${std?`<span class="mut" style="font-weight:400"> · ${esc([i.accession||"accession missing",i.patient_name,i.mrn?`MRN ${i.mrn}`:""].filter(Boolean).join(" · "))}</span>`:""}`}
 async function activityView(v){const [U,D]=await Promise.all([api("/api/u/state").catch(()=>({jobs:{}})),api("/api/proc/studies").catch(()=>({studies:[]}))]);if(V!=="act")return;
   const P=S.patients,sy=S.sys,z=S.mem_zones,par=S.settings.parallel||1,rec=S.rec,now=Date.now()/1000;const att=[],run=[],wait=[],done=[];
   const btn=(c,l,cls)=>`<button class="b sm ${cls||""}" ${c}>${l}</button>`;
   P.forEach(p=>{const s=p.status,k=Math.max(1,S.steps.indexOf(p.step)+1),log=btn(`data-lgc="${esc(p.code)}"`,"Details","q"),open=`data-op="${esc(p.code)}"`;
-    if(["running","starting","paused"].includes(s))run.push({t:`<b ${open} style="cursor:pointer">${esc(p.code)}</b><span class="kind">pipeline</span>`,m:`${s==="paused"?"Paused · ":""}step ${k} of 5 · ${STEPN[p.step]||"starting"} · ${hms(p.elapsed)} elapsed${p.remaining?` · ≈ ${hms(p.remaining)} left (estimate)`:""}${p.stalled?` · <span class="warn">no progress for ${p.stalled} min</span>`:""}`,
+    if(["running","starting","paused"].includes(s))run.push({t:`<b ${open} style="cursor:pointer">${actName(p.code)}</b><span class="kind">pipeline</span>`,m:`${s==="paused"?"Paused · ":""}step ${k} of 5 · ${STEPN[p.step]||"starting"} · ${hms(p.elapsed)} elapsed${p.remaining?` · ≈ ${hms(p.remaining)} left (estimate)`:""}${p.stalled?` · <span class="warn">no progress for ${p.stalled} min</span>`:""}`,
       g:(k-1)/5,a:(s==="running"?btn(`data-pc="pause" data-cd="${esc(p.code)}"`,"Pause"):"")+(s==="paused"?btn(`data-pc="resume" data-cd="${esc(p.code)}"`,"Resume"):"")+btn(`data-pc="stop" data-cd="${esc(p.code)}"`,"Stop","danger")+log});
-    else if(s==="waiting")wait.push({t:`<b ${open} style="cursor:pointer">${esc(p.code)}</b><span class="kind">pipeline</span>`,m:`${esc(PW()[p.pathway]||p.pathway)}${p.solo?" · runs alone":""}${p.remaining?` · ≈ ${hms(p.remaining)} (estimate)`:""}`,a:btn(`data-pc="pathway" data-cd="${esc(p.code)}"`,"Method…","q")+btn(`data-pc="remove" data-cd="${esc(p.code)}"`,"Remove","q danger")});
-    else if(s==="decision")att.push({t:`<b ${open} style="cursor:pointer">${esc(p.code)}</b><span class="kind">needs your decision</span>`,m:esc(p.path_note||"choose the anatomy method"),a:btn(`data-pc="pathway" data-cd="${esc(p.code)}"`,"Choose…","pri")+btn(`data-pc="accept" data-cd="${esc(p.code)}"`,"Accept as is")});
-    else if(["failed","stopped"].includes(s))att.push({t:`<b ${open} style="cursor:pointer">${esc(p.code)}</b><span class="kind">pipeline ${s}</span>`,m:esc(plainErr(p.error)||s),a:btn(`data-pc="retry" data-cd="${esc(p.code)}"`,"Retry…","pri")+btn(`data-pc="remove" data-cd="${esc(p.code)}"`,"Remove","q danger")+log});
-    else if(s==="done"&&p.path_note&&!p.path_ack)att.push({t:`<b ${open} style="cursor:pointer">${esc(p.code)}</b><span class="kind">method changed</span>`,m:esc(p.path_note),a:btn(`data-pc="accept" data-cd="${esc(p.code)}"`,"OK")});
-    else if(s==="done"&&p.started&&now-p.started<86400)done.push({t:`<b ${open} style="cursor:pointer">${esc(p.code)}</b><span class="kind">pipeline</span>`,m:`finished · ${hms(p.elapsed)}`,a:log})});
+    else if(s==="waiting")wait.push({t:`<b ${open} style="cursor:pointer">${actName(p.code)}</b><span class="kind">pipeline</span>`,m:`${esc(PW()[p.pathway]||p.pathway)}${p.solo?" · runs alone":""}${p.remaining?` · ≈ ${hms(p.remaining)} (estimate)`:""}`,a:btn(`data-pc="pathway" data-cd="${esc(p.code)}"`,"Method…","q")+btn(`data-pc="remove" data-cd="${esc(p.code)}"`,"Remove","q danger")});
+    else if(s==="decision")att.push({t:`<b ${open} style="cursor:pointer">${actName(p.code)}</b><span class="kind">needs your decision</span>`,m:esc(p.path_note||"choose the anatomy method"),a:btn(`data-pc="pathway" data-cd="${esc(p.code)}"`,"Choose…","pri")+btn(`data-pc="accept" data-cd="${esc(p.code)}"`,"Accept as is")});
+    else if(["failed","stopped"].includes(s))att.push({t:`<b ${open} style="cursor:pointer">${actName(p.code)}</b><span class="kind">pipeline ${s}</span>`,m:esc(plainErr(p.error)||s),a:btn(`data-pc="retry" data-cd="${esc(p.code)}"`,"Retry…","pri")+btn(`data-pc="remove" data-cd="${esc(p.code)}"`,"Remove","q danger")+log});
+    else if(s==="done"&&p.path_note&&!p.path_ack)att.push({t:`<b ${open} style="cursor:pointer">${actName(p.code)}</b><span class="kind">method changed</span>`,m:esc(p.path_note),a:btn(`data-pc="accept" data-cd="${esc(p.code)}"`,"OK")});
+    else if(s==="done"&&p.started&&now-p.started<86400)done.push({t:`<b ${open} style="cursor:pointer">${actName(p.code)}</b><span class="kind">pipeline</span>`,m:`finished · ${hms(p.elapsed)}`,a:log})});
   (D.studies||[]).forEach(d=>{const open=`data-op="${esc(d.code)}"`;
-    if(d.busy)run.push({t:`<b ${open} style="cursor:pointer">${esc(d.code)}</b><span class="kind">new detection run</span>`,m:"working (stage shown in the study's Processing tab)",a:btn(`data-ops="${esc(d.code)}"`,"Open","q")});
+    if(d.busy)run.push({t:`<b ${open} style="cursor:pointer">${actName(d.code)}</b><span class="kind">new detection run</span>`,m:"working (stage shown in the study's Processing tab)",a:btn(`data-ops="${esc(d.code)}"`,"Open","q")});
     else if(["failed","interrupted"].includes(d.last_status))att.push({t:`<b ${open} style="cursor:pointer">${esc(d.code)}</b><span class="kind">detection run ${d.last_status}</span>`,m:"previous results were restored · resume or start again from the study",a:btn(`data-ops="${esc(d.code)}"`,"Open…","pri")})});
   Object.entries(U.jobs||{}).forEach(([n,j])=>{const nm={audit:"Cohort audit",extract:"Feature extraction",train:"Model training",robustness:"Robustness suite",export:"Export",protocol:"Test protocol"}[n]||n;
     const last=(j.log||[]).slice(-1)[0]||"";

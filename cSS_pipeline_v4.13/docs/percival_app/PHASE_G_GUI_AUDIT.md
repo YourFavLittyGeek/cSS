@@ -71,3 +71,22 @@ opened, nothing was pushed, merged or deployed, and the model weights were not r
 - **Patient column** in Studies: name · MRN (Standard) or an incognito icon (Incognito).
 - **Tests:** `check_app_import_v518.py` (new). `check_app_add_layout.py` replaces `check_app_batch_layout.py`. `check_app_identity.py`
   was updated: its old expectations encoded the code-folder bug and the key-less Incognito import.
+
+## 5. v5.19 (on your request): Studies list and series review
+- **Studies:**
+  - Standard shows separate code / accession / patient name / MRN columns; Incognito shows the code and an icon.
+  - Sorting on every column.
+  - Filters for status (all 10 statuses), cohort, code, accession, MRN, name and free text.
+  - Grouping by MRN (default) or patient name, or none (Standard only; collapsible groups).
+  - The Activity list names studies the same way and stays a plain list.
+- **Import preview:**
+  - The meaningless exam number column is removed.
+  - Accession and code are separate columns.
+  - The new Series review tab opens first: a picture plus a choice list for SWI / T1 / FLAIR / phase, and warnings / recommendations
+    per examination.
+  - FLAIR is back in every series choice (it had been left out of the v5.18 Series dialog by mistake).
+- **Fix:** "Download template" did nothing in the app window (pywebview ignores browser downloads); it is now "Save template…" to a
+  chosen folder.
+- **Tests:** `check_app_import_v518.py` checks columns, status options, grouping, ungrouping, ascending / descending sort, MRN and
+  status filters, Incognito without grouping, FLAIR, series advice and the template save. `check_app_add_layout.py` checks the series
+  review layout.

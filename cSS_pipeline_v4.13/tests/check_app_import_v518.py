@@ -36,13 +36,14 @@ def nii(path, shape, vox, seed, desc, itype):
     os.makedirs(os.path.dirname(path), exist_ok=True); rng = np.random.default_rng(seed)
     v = rng.integers(50, 900, shape).astype(np.int16); nib.save(nib.Nifti1Image(v, np.diag(list(vox) + [1])), path)
     with open(path.replace(".nii", ".json"), "w") as f: json.dump(dict(SeriesDescription=desc, ImageType=itype, MRAcquisitionType="3D" if desc.startswith("T1_MPRAGE") else "2D"), f)
-def exam(folder, seed, t1=True, extra_swi=False, phase=False, minip=False, t1_2d=False):
+def exam(folder, seed, t1=True, extra_swi=False, phase=False, minip=False, t1_2d=False, flair=False):
     nii(os.path.join(folder, f"SWI_{NAMES[0].replace(' ', '_')}.nii"), (48, 48, 20), (0.8, 0.8, 1.2), seed, "SWI_Images", ["ORIGINAL", "PRIMARY", "M", "SWI"])
     if extra_swi: nii(os.path.join(folder, "SWI_lowres.nii"), (32, 32, 12), (1.2, 1.2, 2.5), seed + 100, "SWI_lowres", ["ORIGINAL", "PRIMARY", "M", "SWI"])
     if phase: nii(os.path.join(folder, "SWI_phase.nii"), (48, 48, 20), (0.8, 0.8, 1.2), seed + 200, "SWI_Pha_Images", ["ORIGINAL", "PRIMARY", "P", "SWI"])
     if minip: nii(os.path.join(folder, "mIP_Images.nii"), (48, 48, 20), (0.8, 0.8, 1.2), seed + 300, "mIP_Images(SW)", ["DERIVED", "SECONDARY", "MNIP"])
     if t1: nii(os.path.join(folder, "T1_MPRAGE.nii"), (112, 112, 112), (1.0, 1.0, 1.0), seed + 400, "T1_MPRAGE_SAG", ["ORIGINAL", "PRIMARY", "M"])
     if t1_2d: nii(os.path.join(folder, "T1_axial_2D.nii"), (64, 64, 24), (0.9, 0.9, 5.0), seed + 500, "T1_AX_SE", ["ORIGINAL", "PRIMARY", "M"])
+    if flair: nii(os.path.join(folder, "FLAIR_axial.nii"), (64, 64, 30), (0.9, 0.9, 4.0), seed + 600, "FLAIR_AX", ["ORIGINAL", "PRIMARY", "M"])
 def dicom_exam(folder, seed, acc, pid):
     import pydicom
     from pydicom.dataset import FileDataset, FileMetaDataset
@@ -75,7 +76,7 @@ def tree_hash(d):
     return out
 
 # ---- synthetic sources
-S1 = os.path.join(SRC, "std_mrn"); exam(os.path.join(S1, MRNS[0], ACCS[0]), 1, extra_swi=True, phase=True, minip=True, t1_2d=True); exam(os.path.join(S1, MRNS[0], ACCS[1]), 2); exam(os.path.join(S1, MRNS[1], ACCS[3]), 3)
+S1 = os.path.join(SRC, "std_mrn"); exam(os.path.join(S1, MRNS[0], ACCS[0]), 1, extra_swi=True, phase=True, minip=True, t1_2d=True, flair=True); exam(os.path.join(S1, MRNS[0], ACCS[1]), 2); exam(os.path.join(S1, MRNS[1], ACCS[3]), 3)
 S2 = os.path.join(SRC, "std_acc"); exam(os.path.join(S2, ACCS[4]), 4); exam(os.path.join(S2, ACCS[5]), 5)
 X2 = os.path.join(T, "std_acc.xlsx"); xlsx(X2, [(MRNS[2], NAMES[2], ACCS[4], ""), (MRNS[2], NAMES[2], ACCS[5], "SYNC-ACC5")])
 S3 = os.path.join(SRC, "std_none"); exam(os.path.join(S3, "batch_a", "x1"), 6); exam(os.path.join(S3, "batch_b"), 7)
@@ -118,7 +119,10 @@ def wait(cond, limit=60):
     return False
 def done_codes(U, codes): return wait(lambda: all({p["code"]: p["status"] for p in get(U, "/api/state")["patients"]}.get(c) == "done" for c in codes))
 chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-def dom(U, url): return subprocess.run([chrome, "--headless=new", "--disable-gpu", f"--user-data-dir={os.path.join(T, 'chrome')}", "--virtual-time-budget=9000", "--dump-dom", f"{U}/{url}"],
+def dom(U, url): return _noscript(_dom(U, url))
+def _noscript(D):                                        # the rendered page only: the app's own script source contains the same markup as text
+    import re as _re; return _re.sub(r"<script\b[^>]*>.*?</script>", "", D, flags=_re.S)
+def _dom(U, url): return subprocess.run([chrome, "--headless=new", "--disable-gpu", f"--user-data-dir={os.path.join(T, 'chrome')}", "--virtual-time-budget=9000", "--dump-dom", f"{U}/{url}"],
                                        capture_output=True, text=True, timeout=120).stdout if os.path.exists(chrome) else ""
 def shot(U, name, url, h=1300):
     if SHOTS and os.path.exists(chrome):
@@ -162,6 +166,10 @@ try:
     by = {s["description"]: s for s in sv["series"]}
     check("automatic SWI = the high-resolution magnitude (not phase, not minIP, not the low-resolution one)", "SWI" in by["SWI_Images ORIGINAL\\PRIMARY\\M\\SWI"]["chosen_as"] if "SWI_Images ORIGINAL\\PRIMARY\\M\\SWI" in by else any(s["chosen_as"] == ["SWI"] and "lowres" not in s["description"] and "Pha" not in s["description"] and "mIP" not in s["description"] for s in sv["series"]), str([(s["description"], s["chosen_as"]) for s in sv["series"]])[:300])
     check("automatic T1 = the 3-D MPRAGE (2-D T1 skipped)", any("MPRAGE" in s["description"] and "T1" in s["chosen_as"] for s in sv["series"]))
+    check("FLAIR detected and chosen (it is offered again)", any("FLAIR" in s["description"] and "FLAIR" in s["chosen_as"] for s in sv["series"]) and "FLAIR" in e0["chosen"])
+    check("series advice per examination (several SWI noted; skipped 2-D T1 explained)", any("SWI series" in a["msg"] for a in e0["advice"]) and any("another T1 was not chosen" in a["msg"] for a in e0["advice"]), str(e0["advice"])[:300])
+    e2 = E[ACCS[3]]
+    check("series advice: no FLAIR is an optional note, not a warning", any(a["level"] == "info" and "no FLAIR" in a["msg"] for a in e2["advice"]) and not any(a["level"] == "warn" for a in e2["advice"]))
     th = raw(U, f"/api/id/import/thumb?plan={pa['id']}&eid={e0['eid']}&i=0"); check("thumbnail of a series (PNG made locally)", th[:8] == b"\x89PNG\r\n\x1a\n")
     low = next(s["i"] for s in sv["series"] if "lowres" in s["description"])
     pu = post(U, "/api/id/import/update", dict(plan=pa["id"], changes=[dict(eid=e0["eid"], series=dict(SWI=low))]))
@@ -186,7 +194,18 @@ try:
     check("one patient (MRN) with two examinations, grouped by MRN", sorted(R[k]["ident"]["n_exams_of_patient"] for k in keyA) == [1, 2, 2] and {R[k]["ident"]["mrn"] for k in keyA} == {MRNS[0], MRNS[1]})
     check("generated codes stored (study usable in Incognito)", all(R[k]["ident"]["deid_code"].startswith("PCV-") for k in keyA))
     D = dom(U, "#studies")
-    check("Studies (Standard): Patient column with name / MRN", 'data-id="patcol"' in D and f"MRN {MRNS[0]}" in D)
+    check("Studies (Standard): separate Code / Accession / Patient name / MRN columns, each sortable", all(f'data-sk="{k}"' in D for k in ("code", "acc", "name", "mrn", "cohort", "status", "cand", "rev", "score")) and 'data-id="patcol"' in D)
+    check("Studies: status filter offers every status", all(f"<option>{x}</option>" in D or f"<option selected=\"\">{x}</option>" in D for x in ("Needs attention", "Needs your decision", "Processing", "Paused", "Waiting", "Not processed", "Ready for review", "Review in progress", "Needs re-review", "Reviewed")))
+    check("Studies (Standard): grouped by MRN by default (one header per patient, examination count)", D.count('class="sgroup"') == 2 and f"MRN {MRNS[0]}" in D and "2 examinations" in D)
+    D2 = dom(U, "#studies?grp=none&sort=mrn&dir=desc")
+    rows_m = [m for m in MRNS[:2] if m in D2]
+    check("Studies: no grouping on request; sort by MRN descending", 'class="sgroup"' not in D2 and D2.index(MRNS[1]) < D2.index(MRNS[0]), str(rows_m))
+    D3 = dom(U, "#studies?grp=none&sort=mrn&dir=asc")
+    check("Studies: sort by MRN ascending", D3.index(MRNS[0]) < D3.index(MRNS[1]))
+    D4 = dom(U, f"#studies?grp=name&mrn={MRNS[1]}")
+    check("Studies: filter by MRN; grouped by patient name", MRNS[1] in D4 and f">{ACCS[0]}<" not in D4 and 'class="sgroup"' in D4)
+    D5 = dom(U, "#studies?grp=none&status=Reviewed")
+    check("Studies: filter by status (none reviewed yet)", "No study matches these filters." in D5)
     shot(U, "v518_studies_standard", "#studies")
     pa2 = post(U, "/api/id/import/plan", dict(folder=S1, folder_is="mrn", sub_is="accession", mode="standard", library=LIBON, processing=PROC))
     check("re-import: recognised and left out", all(not e["include"] and e["duplicate"]["kind"] == "same_exam" for e in pa2["exams"]))
@@ -266,6 +285,7 @@ try:
     check("Incognito export: no identifier in file names or text files", not leaks(" ".join(allf) + txt), str(leaks(" ".join(allf) + txt))[:200])
     D = dom(U, "#studies")
     check("Studies (Incognito): Patient column shows the incognito icon, no identifiers", 'data-id="incog"' in D and not leaks(D), str(leaks(D))[:200])
+    check("Studies (Incognito): no grouping, no accession / name / MRN columns", 'class="sgroup"' not in D and 'data-sk="mrn"' not in D and 'data-sk="acc"' not in D and "Incognito: list by code" in D)
     shot(U, "v518_studies_incognito", "#studies")
     post(U, "/api/id/vault/unlock", dict(passphrase=PW))
     shot(U, "v518_add_incognito_preview", f"#add?folder={_up.quote(S4, safe='')}&folder_is=code&mode=incognito&cohort=C518&go=1&manifest={_up.quote(X4, safe='')}", 2300)

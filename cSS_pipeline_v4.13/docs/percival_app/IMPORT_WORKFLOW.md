@@ -49,15 +49,17 @@ accession number differs from the scan header's is not matched automatically.
    - Cloud-synced folders, Desktop and Documents are refused. Standard library folder names contain MRN and accession number, so keep
      the library on an encrypted local disk.
 6. **Processing:** cohort, anatomy (SynthSeg / recon-all), semi-automatic or automatic, and an optional extra results folder.
-7. **Preview**, one row per examination:
-   - **Patient:** Standard shows name · MRN with its source; Incognito shows an incognito icon.
-   - **Identifier**, with its source (Excel / folder name / you / generated).
-   - **Series:** SWI and T1 are chosen automatically, with the reason shown. **Series…** opens every series of the examination with a
-     thumbnail, description, voxel size, slice count and echo time, so you can choose another one (marked "chosen by you").
-   - **Excel row**, with how it was matched.
-   - **Pathway**, with the same check as before: missing or 2-D T1, different visit dates.
-   - **Library place**, duplicate status, problems and notes.
-
+7. **Preview** has two tabs.
+   - **1 · Series review** opens first. For each examination it shows SWI · T1 · FLAIR · Phase: a picture of the middle slice of the
+     chosen series, made on this Mac, and a list of every series of the examination to choose another one. Your choice is marked
+     "chosen by you".
+     - Beside each examination: **warnings and recommendations** - no or several SWI, no usable or 2-D T1, a T1 that was not chosen and
+       why, T1 and SWI from different dates, FLAIR or phase available (optional).
+     - SWI and T1 are chosen automatically. FLAIR and phase are chosen when present; they are optional, and the pipeline uses FLAIR when
+       it is given.
+   - **2 · Identifiers and import:** separate columns for patient name, MRN, accession number and code (each with its source), the Excel
+     row and how it was matched, the pathway with its check, and library place / duplicate status / problems. In Incognito the patient
+     column is an incognito icon and only the code is shown.
    Errors block the import.
 8. **Import and start:** creates the patient and examination records (identifiers only in the vault), makes neutral copies for
    processing, queues the examinations, then copies them into the library in the background and shows the progress.

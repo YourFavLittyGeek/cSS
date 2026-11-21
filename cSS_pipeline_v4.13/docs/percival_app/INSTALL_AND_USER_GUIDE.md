@@ -35,7 +35,16 @@ Header switch **Standard | Incognito**. Incognito (default until a vault exists)
 MRN, patient name and accession number from the encrypted identity vault and asks for the vault passphrase after each start. Set up the
 vault the first time you choose Standard; back it up (encrypted) from the vault dialog; keep the passphrase separately.
 Every MRI examination needs its identifier: accession number (Standard) or de-identified study code (Incognito).
-Studies shows a **Patient** column: name · MRN in Standard, an incognito icon in Incognito. Studies › select a study › **Edit identifiers** changes patient-level fields (all examinations of the patient) or examination-level
+**Studies:**
+- **Standard:** separate columns for code, accession number, patient name and MRN; the list is grouped by MRN, by patient name, or not
+  at all.
+- **Incognito:** only the code and an incognito icon, with no grouping.
+- Every column sorts ascending or descending (click its header).
+- Filters: status (every status: needs attention, needs your decision, processing, paused, waiting, not processed, ready for review,
+  review in progress, needs re-review, reviewed), cohort, code, accession, MRN and name, plus free search.
+- A link like `#studies?grp=none&sort=mrn&dir=desc&status=Reviewed` opens a saved view.
+
+Studies › select a study › **Edit identifiers** changes patient-level fields (all examinations of the patient) or examination-level
 fields (this examination only); every change is audited; internal ids and file names never change.
 
 ## 3. Add studies (one pathway) and export
@@ -53,8 +62,8 @@ fields (this examination only); every change is audited; internal ids and file n
 5. Optionally turn on the **study library**: a verified copy of each examination at `library/<MRN>/<accession>/` (Standard) or
    `library/<code>/` (Incognito). Your original folders are never renamed or changed.
 6. Set the processing options: cohort, anatomy and mode.
-7. Check the **preview**. SWI and T1 are chosen automatically with the reason shown; **Series…** lets you pick another series, shown
-   with thumbnails.
+7. Check the **preview**. It opens on **Series review**: a picture and a choice list for SWI, T1, FLAIR and phase in each examination,
+   with warnings and recommendations. Then go to **Identifiers and import**.
 8. Press **Import and start**.
 
 **Studies › Export ▾ › Studies with files…** exports results plus, as chosen, processed files, FreeSurfer, the original MRI and logs, to a

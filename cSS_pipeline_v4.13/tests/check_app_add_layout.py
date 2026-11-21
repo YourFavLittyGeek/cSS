@@ -48,8 +48,9 @@ try:
         check(f"{w} px: no horizontal scrolling in the preview", bool(m) and m.group(1) == "no", m.group(1) if m else "not measured")
         cb = re.search(r'data-clipped="(\w+)"', D)
         check(f"{w} px: no control clipped inside its cell", bool(cb) and cb.group(1) == "no", (cb.group(1) if cb else "not measured") + " " + ";".join(re.findall(r'data-clipwhat="([^"]*)"', D)))
-        check(f"{w} px: codes taken from the folder names", D.count('value="SYNTH-CODE-0') == 6)
-        check(f"{w} px: Incognito: icon in the Patient column, no name / MRN / accession shown", 'data-id="incog"' in D and "Synthetic Layout Person" not in D and "9100000" not in D and "ACCL-" not in D)
+        check(f"{w} px: series review opens first, one picture per chosen series (SWI; the 25 mm 'T1' is refused as not whole-brain)", 'data-iw="series-review"' in D and D.count('class="th"') == 6 and "covers only" in D, str(D.count('class="th"')))
+        check(f"{w} px: codes taken from the folder names", D.count("<b>SYNTH-CODE-0") == 6)
+        check(f"{w} px: Incognito: no name / MRN / accession shown", "Synthetic Layout Person" not in D and "9100000" not in D and "ACCL-" not in D)
         if SHOTS:
             os.makedirs(SHOTS, exist_ok=True)
             subprocess.run([chrome, "--headless=new", "--disable-gpu", f"--user-data-dir={os.path.join(T, f'chromes{w}')}", "--hide-scrollbars", f"--window-size={w},1100",
