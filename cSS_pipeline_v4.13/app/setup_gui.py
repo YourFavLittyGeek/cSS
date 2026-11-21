@@ -80,8 +80,9 @@ def checks(B, AD, SET, fs_env, find_license, which, engine_root, models_ok=None)
     md = os.path.join(engine_root, "models")
     out.append(_item("models_dir", "Model storage folder", True, os.path.isdir(md) and os.access(md, os.R_OK), md, group="Folders"))
     out.append(_item("project", "Project folder writable", True, _writable(os.path.join(B, "review")), B, group="Folders"))
-    out.append(_item("pipeline", "Pipeline installed", True, os.path.exists(os.path.join(B, "scripts", "run_css.sh")) or os.path.exists(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts", "run_css.sh")),
-                     "scripts/run_css.sh", group="Folders"))
+    rc = os.path.join(B, "scripts", "run_css.sh")    # the app runs the pipeline from <project>/scripts (css_app.SC); no fallback to the repository copy
+    out.append(_item("pipeline", "Pipeline installed", True, os.path.exists(rc), rc if os.path.exists(rc) else f"{rc} not found - processing cannot run in this project",
+                     fix="" if os.path.exists(rc) else "pipeline", group="Folders"))
     env = fs_env(); fh = SET.get("freesurfer_home") or env.get("FREESURFER_HOME", "")
     v = validate_fs(fh) if fh else dict(ok=False, error="no FreeSurfer folder set or found")
     out.append(_item("freesurfer", "FreeSurfer installation", True, v["ok"], (f"{v.get('home')} · {v.get('version') or 'version unknown'}" + (f" · {v['warning']}" if v.get("warning") else "")) if v["ok"] else v["error"],

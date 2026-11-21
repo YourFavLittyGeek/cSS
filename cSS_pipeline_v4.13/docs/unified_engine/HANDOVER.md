@@ -68,3 +68,10 @@ git checkout -- unified_score/output/      # the existing suite rewrites 3 track
 ## 7. Recommendation
 Ready for human code review; no blocking defect known. Review focus: the `css_app.py` routes / after-done hook, the registry apply
 policy (synthetic marker + SYN prefix), and the two test-harness fixes. Not ready for clinical use: no clinically trained model exists.
+
+## 8. Percival application build (Phases A-G, after the Stage 1 handover)
+Commits on this branch: `1f981ba` Phase B + v5.16 identification · `2a9706e` Phase C lineage · `787e99d` reviewer Quick Add / labels ·
+`d301a61` Training screen · `6804f23` batch Add layout · `3640081` setup wizard · Phase G commit (setup readiness fix, guide, audit).
+Documents: `docs/percival_app/` - PHASE_A_AUDIT, PHASE_B_REPORT, IDENTITY_SCHEMA_AND_MIGRATION, IMPORT_WORKFLOW, INSTALL_AND_USER_GUIDE,
+PHASE_G_GUI_AUDIT (screen-by-screen test coverage, remaining defects), screenshots/.
+Not done without approval: push / merge / release; migrating a clinical project; replacing model weights; clinical training.
