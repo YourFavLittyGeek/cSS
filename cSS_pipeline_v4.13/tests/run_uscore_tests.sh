@@ -28,4 +28,5 @@ python3 tests/check_app_identity.py        # v5.16: Standard / Incognito through
 python3 tests/check_gui_js_syntax.py      # every GUI script parses (a syntax error blanks the screen)
 python3 tests/check_lineage.py             # v5.17: re-processing keeps history; candidate lineage; calls move only on confident matches
 python3 tests/check_app_training.py        # v5.17: Training screen A-D; synthetic vs clinical apart; evaluation never changes the model
+python3 tests/check_app_batch_layout.py    # v5.17: batch Add studies: no horizontal scrolling or clipped controls at 1280 / 1500 px, long paths
 echo "unified-score tests: all passed"
