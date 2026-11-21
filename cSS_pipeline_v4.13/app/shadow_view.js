@@ -38,7 +38,7 @@ async function seStudy(){
   const el=$("#se-study");if(!el)return;const r=await api(`/api/se/result?study=${encodeURIComponent(SE.study)}`);
   if(!r.available){
     el.innerHTML=`<div class="card" data-se="fallback"><h2>${esc(SE.study)} — existing deterministic output</h2><p class="warn"><b>ML engine output not available</b> — ${esc(r.error)}. The existing deterministic values below come straight from the detector's lists.</p>
-     <table><tr><th>Ref</th><th>List</th><th>Region</th><th>score_v4</th><th>Evidence cSS / vein</th><th>Rule</th><th>Tier</th></tr>
+     <table><tr><th>Ref</th><th>List</th><th>Region</th><th>score_v4</th><th>Evidence cSS / vessel</th><th>Rule</th><th>Tier</th></tr>
      ${(r.deterministic_rows||[]).map(x=>`<tr><td>${esc(x.ref)}</td><td>${esc(x.list)}</td><td>${esc((x.region||"").replace(/ctx-[lr]h-/,""))}</td><td>${seF(+x.score_v4)}</td><td>${seF(+x.css_evidence)} / ${seF(+x.vein_evidence)}</td><td>${esc(x.rule_version)}</td><td>${esc(x.review_tier)}</td></tr>`).join("")}</table></div>`;return}
   const ps=r.deterministic_patient_score;
   el.innerHTML=`<div class="card" data-se="detail"><h2>${esc(r.study)} ${r.synthetic?'<span class="pill bad">SYNTHETIC</span>':""}</h2>

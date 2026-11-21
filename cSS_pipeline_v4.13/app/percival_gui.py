@@ -28,19 +28,27 @@ for p in (os.path.join(ROOT, "unified_engine"), os.path.join(ROOT, "unified_scor
 CTX = {}; LOCK = threading.Lock(); GLOCK = threading.RLock(); JOB = dict(state="idle", log=[], progress=0.0, error="")
 
 
+STORE = dict(ok=True, error="", migration=None)
 def init(**ctx):
-    CTX.update(ctx)
+    """v5.24: the Percival store is checked and, when needed, migrated (backup first) before anything reads it"""
+    CTX.update(ctx); _LCACHE.clear()
     if ctx.get("SC") and ctx["SC"] not in sys.path: sys.path.insert(0, ctx["SC"])
+    from uengine.percival import store as ST
+    try: STORE.update(ok=True, error="", migration=ST.migrate(B())); _interrupted_runs()
+    except Exception as e: STORE.update(ok=False, error=str(e), migration=None)
 def B(): return CTX["B"]
-def P(*a): return os.path.join(B(), "unified_engine", "percival", *a)
+def P(*a):
+    if not STORE["ok"]: raise RuntimeError("Percival data store unavailable: " + STORE["error"])
+    return os.path.join(B(), "percival", *a)
 def _jl(p, d):
     try:
         with open(p) as f: return json.load(f)
     except Exception: return d
 def _js(p, o):
     os.makedirs(os.path.dirname(p), exist_ok=True)
-    with open(p + ".tmp", "w") as f: json.dump(o, f, default=float)
-    os.replace(p + ".tmp", p)
+    tmp = f"{p}.{os.getpid()}.{threading.get_ident()}.tmp"           # v5.24: unique per writer (re-scoring after a promotion and a
+    with open(tmp, "w") as f: json.dump(o, f, default=float)          # reviewer's score request may write the same file at once)
+    os.replace(tmp, p)
 def log(msg, prog=None):
     with LOCK:
         JOB["log"] = (JOB["log"] + [f"{time.strftime('%H:%M:%S')} {msg}"])[-300:]
@@ -62,19 +70,105 @@ def may_read(sid): return authorized() or synthetic(sid)
 
 
 # ------------------------------------------------------------------ one study's candidates
+_LCACHE = {}
+def _ledger_mod():
+    import review_calls_gui as RCG
+    return RCG._ledger(B())
+
+
+def _kind(call):
+    import label_schema as LS
+    if not isinstance(call, str) or not call.strip(): return None
+    try: cls, _, _ = LS.from_call(call.strip())
+    except Exception: return "unrecognised"                           # v5.24: never silently dropped - reported (Data integrity)
+    return {"definite_css": "css", "definite_mimic": "mimic", "indeterminate": "uncertain", "out_of_scope": "out_of_scope"}.get(cls)
+
+
+def _historical(sid, cand):
+    """v5.24: expert calls of an EARLIER version / project for this examination (historical/ID/review/, written by 'bring in earlier
+    processing' and by the review recovery). Matched to the current candidates by fingerprint (centroid within 2 voxels, volume within
+    15 %), never by number. Per-reviewer files when present, else the shared calls file. -> {cand_id: [dict(call, reviewer, time, file)]}"""
+    import pandas as pd
+    from css_common import FP, norm_call
+    L = _ledger_mod()                                                   # fingerprint matching lives in the call ledger (one boundary)
+    if not hasattr(L, "match_one"):                                     # project scripts older than v5.24: use this package's ledger
+        import importlib.util
+        sp = importlib.util.spec_from_file_location("call_ledger_v524", os.path.join(ROOT, "scripts", "call_ledger.py"))
+        L = importlib.util.module_from_spec(sp); sp.loader.exec_module(L)
+    d = os.path.join(B(), "historical", sid, "review")
+    files = sorted(glob.glob(os.path.join(d, "*_calls_*.csv"))) or sorted(glob.glob(os.path.join(d, "*_calls.csv")))
+    out = {}
+    for f in files:
+        try: t = pd.read_csv(f, dtype=str)
+        except Exception: continue
+        if "call" not in t.columns or not all(c in t.columns for c in FP) or not len(cand): continue
+        rev = os.path.basename(f).split("_calls_", 1)[1][:-4] if "_calls_" in os.path.basename(f) else "earlier version"
+        for _, r in t.iterrows():
+            call = norm_call(r.get("call"))
+            if not isinstance(call, str) or not call.strip(): continue
+            cid = L.match_one(cand, r)
+            if cid is not None: out.setdefault(cid, []).append(dict(call=call.strip(), reviewer=str(r.get("reviewer")) if isinstance(r.get("reviewer"), str) else rev,
+                                                                    time=str(r.get("time", "")), file=os.path.relpath(f, B())))
+    return out
+
+
+def label_summary(sid):
+    """v5.24: the expert labels of one study.
+    Source 1 (current reviews): the reviewer's CALL LEDGER (scripts/call_ledger.py) - the effective calls the Review screen shows: every
+      reviewer file (or the legacy shared ID_calls.csv of older versions), old call names ('Vein' -> Vessel), calls re-attached by
+      fingerprint after re-detection, calls carried over through a confident lineage match, and the effective-call policy.
+    Source 2 (historical reviews, Settings percival_use_historical, default on): calls from an earlier version / project of the same
+      examination (historical/ID/review/), matched by fingerprint - used only for candidates without a current call.
+    Before v5.24 only review/ID_calls.csv was read by candidate NUMBER: 'Vein' calls were dropped, a re-detected study could attach a call
+    to the wrong lesion, and reviews brought in from an earlier project were never used.
+    -> dict(labels {cand_id: 1/0}, detail {cand_id: dict(kind, y, call, source, reviewer, conflict, calls)}, css, mimic, unused, stale,
+            conflicts, historical, state, state_label)"""
+    import label_schema as LS
+    files = sorted(glob.glob(os.path.join(B(), "review", f"{sid}_*"))) + sorted(glob.glob(os.path.join(B(), "historical", sid, "review", "*")))
+    key = [(os.path.relpath(f, B()), round(os.path.getmtime(f), 3)) for f in files if os.path.isfile(f)]
+    try: L = _ledger_mod(); pol = L.load_policy(B())
+    except Exception as e: return dict(labels={}, detail={}, css=0, mimic=0, unused=0, stale=0, conflicts=0, historical=0, state="error",
+                                       state_label="labels unavailable", error=f"{type(e).__name__}: {e}"[:200])
+    use_h = CTX["SET"].get("percival_use_historical", True)
+    key += [json.dumps(pol, sort_keys=True, default=str), use_h]
+    c = _LCACHE.get(sid)
+    if c and c[0] == key: return c[1]
+    det = {}
+    try:
+        cand = L.candidates(B(), sid); E = L.effective(B(), sid, "", pol, cand)
+        for r in E["rows"]:
+            call = r.get("effective_call") or ""
+            if not call: continue
+            last = {}
+            for e in r.get("history") or []: last[e["reviewer"]] = e["call"]
+            ks = {_kind(x) for x in last.values()} & {"css", "mimic"}
+            k = _kind(call)
+            det[int(r["cand_id"])] = dict(kind=k, y=1 if k == "css" else 0 if k == "mimic" else None, call=call, source="review",
+                                          reviewer=r.get("source_reviewer", ""), conflict=len(ks) > 1, calls=last)
+        n_hist = 0
+        if use_h:
+            for cid, H in _historical(sid, cand).items():
+                if cid in det: continue                                     # a current call always wins
+                last = {}
+                for e in H: last[e["reviewer"]] = e["call"]
+                ks = {_kind(x) for x in last.values()} & {"css", "mimic"}; call = H[-1]["call"]; k = _kind(call)
+                det[cid] = dict(kind=k, y=1 if k == "css" else 0 if k == "mimic" else None, call=call, source="historical",
+                                reviewer=H[-1]["reviewer"], conflict=len(ks) > 1, calls=last, file=H[-1]["file"]); n_hist += 1
+        out = {cid: d["y"] for cid, d in det.items() if d["y"] is not None}
+        st = L.review_state(B(), sid, "", pol)
+        res = dict(labels=out, detail=det, css=sum(out.values()), mimic=len(out) - sum(out.values()),
+                   unused=sum(1 for d in det.values() if d["y"] is None), stale=len(E.get("stale") or []),
+                   unrecognised=sorted({d["call"] for d in det.values() if d["kind"] == "unrecognised"}),
+                   conflicts=sum(1 for d in det.values() if d["conflict"]), historical=n_hist,
+                   state=st.get("state", ""), state_label=st.get("label", ""), reviewers=E.get("reviewers", []), n_candidates=len(cand))
+    except Exception as e:
+        res = dict(labels={}, detail={}, css=0, mimic=0, unused=0, stale=0, conflicts=0, historical=0, state="error",
+                   state_label="labels unavailable", error=f"{type(e).__name__}: {e}"[:200])
+    _LCACHE[sid] = (key, res); return res
+
+
 def _labels(sid):
-    import label_schema as LS, pandas as pd
-    p = os.path.join(B(), "review", f"{sid}_calls.csv")
-    if not os.path.exists(p): return {}, 0
-    d = pd.read_csv(p, dtype=str).fillna(""); out, unused = {}, 0
-    for _, r in d.iterrows():
-        try: cls, _, _ = LS.from_call(r.get("call", ""), r.get("fine_code", ""))
-        except Exception: unused += 1; continue
-        cid = int(float(r["cand_id"]))
-        if cls == "definite_css": out[cid] = 1
-        elif cls == "definite_mimic": out[cid] = 0
-        else: unused += 1
-    return out, unused
+    S = label_summary(sid); return S["labels"], S["unused"]
 
 
 def _conflicts(sid):
@@ -158,16 +252,133 @@ def _gather(sid, labelled=True):
 
 
 # ------------------------------------------------------------------ selection + integrity
-def selection():
-    S = CTX["SET"]; ex = set(S.get("learner_exclude", [])); arch_ok = S["features"].get("train_include_archived", True); out = []
+def _orphans(known):
+    """studies with a candidate list AND reviewer calls in review/ that are not in the app's study list (e.g. reviewed with an older
+    version and copied into this project) - listed so their labels are not silently ignored"""
+    out = []
+    for p in sorted(glob.glob(os.path.join(B(), "review", "*_candidates.csv"))):
+        c = os.path.basename(p)[:-len("_candidates.csv")]
+        if c in known or not c: continue
+        if glob.glob(os.path.join(B(), "review", f"{c}_calls*.csv")): out.append(c)
+    return out
+
+
+def _study_list():
+    pats = [dict(p, _orphan=False) for p in CTX["patients"]()]
+    return pats + [dict(code=c, cohort="", _orphan=True) for c in _orphans({p["code"] for p in pats})]
+
+
+def _cached_rows(sid):
+    """feature / patch cache of a study when it exists (the screen never extracts; training does) -> {cand_id: row} or None"""
+    C = _jl(P("cache", f"{sid}.json"), None)
+    return None if not C else {int(r["cand_id"]): r for r in C.get("rows", [])}
+
+
+def _examples(sid, meta, rows=None):
+    """every CALLED candidate of one study with its eligibility (eligibility.py). rows: gathered rows (training) or None (screen: cache)"""
+    from uengine.percival import eligibility as EL
     from uengine.percival.meta import test_assignment
-    for p in CTX["patients"]():
-        c = p["code"]; rev = CTX["is_reviewed"](c)
-        why = "excluded by you" if c in ex else ("archived (excluded in Settings)" if p.get("archived") and not arch_ok else "")
-        out.append(dict(code=c, label=CTX["label"](c), cohort=p.get("cohort", ""), reviewed=rev, archived=bool(p.get("archived")), retired=bool(p.get("retired")),
-                        included=rev and not why, excluded_why=why, why="" if rev else "review not finished",
+    S = CTX["SET"]; lab = label_summary(sid); det = lab.get("detail", {}); pat = CTX["patient_of"](sid)
+    test = test_assignment(pat, S.get("percival_test_fraction", 0.2)); cache = rows if rows is not None else (_cached_rows(sid) or {})
+    out = []
+    for cid, d in sorted(det.items()):
+        r = cache.get(cid)
+        has_img = None if r is None else bool(r.get("maps") is not None if rows is not None else r.get("has_maps"))
+        n_char = None if r is None else sum(v is not None for v in (r.get("char") or {}).values())
+        has_pred = None if r is None else any(v is not None for v in (r.get("pred") or {}).values())
+        ev = EL.evaluate(dict(label_kind=d["kind"], conflict=d["conflict"] and S.get("percival_conflicts", "exclude") == "exclude",
+                              historical=d["source"] == "historical", study_excluded=meta.get("excluded"), study_archived=meta.get("archived_out"),
+                              duplicate=meta.get("duplicate"), authorized=may_read(sid), has_image=has_img is not False, n_char=n_char is None or n_char > 0,
+                              has_predictors=has_pred is not False, test=test, qc=meta.get("qc")))
+        out.append(dict(study=sid, cand_id=cid, patient=pat, y=d["y"], call=d["call"], label_source=d["source"], reviewer=d.get("reviewer", ""),
+                        partition=ev["partition"], status=ev["status"], reasons=ev["reasons"], components={k: v["ok"] for k, v in ev["components"].items()},
+                        component_reasons={k: v["reasons"] for k, v in ev["components"].items() if v["reasons"]},
+                        missing=sorted({m for v in ev["components"].values() for m in v.get("missing", [])}),
+                        rules=EL.RULES_VERSION, evaluated=time.strftime("%Y-%m-%d %H:%M:%S"), checked=r is not None))
+    return out
+
+
+def selection():
+    """v5.24: every study of the project (and reviewed studies found on disk but missing from the study list) with the separate states
+    the Training Center shows: registered / processed (candidate list) / reviewed (state) / labelled candidates / eligible / used.
+    Eligibility per candidate comes from the Training Eligibility Engine (uengine/percival/eligibility.py)."""
+    S = CTX["SET"]; ex = set(S.get("learner_exclude", [])); arch_ok = S["features"].get("train_include_archived", True); out = []
+    mode = S.get("percival_learn_from", "labelled")
+    from uengine.percival.meta import test_assignment
+    for p in _study_list():
+        c = p["code"]; lab = label_summary(c); rev = lab.get("state") == "reviewed"
+        meta = dict(excluded=c in ex or (mode == "finished" and not rev), archived_out=bool(p.get("archived")) and not arch_ok)
+        E = _examples(c, meta); el = [e for e in E if e["status"] == "eligible"]
+        why = "excluded by you" if c in ex else ("archived (excluded in Settings)" if meta["archived_out"] else "")
+        if el: reason = ""
+        elif mode == "finished" and not rev and lab["css"] + lab["mimic"]: reason = "review not finished (Settings: learn from finished reviews only)"
+        elif not os.path.exists(os.path.join(B(), "review", f"{c}_candidates.csv")): reason = "not processed yet (no candidate list)"
+        elif not lab["detail"]: reason = "no expert call yet" + (f" ({lab['stale']} earlier call(s) need confirmation in Review)" if lab["stale"] else "")
+        else:
+            from uengine.percival.eligibility import REASONS
+            codes = sorted({x for e in E for x in e["reasons"][:1]}); reason = "; ".join(REASONS.get(x, x) for x in codes)[:200]
+        out.append(dict(code=c, label=CTX["label"](c) if not p["_orphan"] else c, cohort=p.get("cohort", ""), reviewed=rev,
+                        processed=os.path.exists(os.path.join(B(), "review", f"{c}_candidates.csv")), n_candidates=lab.get("n_candidates", 0),
+                        review_state=lab.get("state_label") or lab.get("state", ""), n_css=lab["css"], n_mimic=lab["mimic"], n_unused=lab["unused"],
+                        n_stale=lab["stale"], n_conflicts=lab.get("conflicts", 0), n_historical=lab.get("historical", 0), label_error=lab.get("error", ""),
+                        n_labelled=len(E), n_eligible=len(el), n_eligible_dev=sum(1 for e in el if e["partition"] == "development"),
+                        css_dev=sum(1 for e in el if e["partition"] == "development" and e["y"] == 1),
+                        mimic_dev=sum(1 for e in el if e["partition"] == "development" and e["y"] == 0),
+                        n_adjudication=sum(1 for e in E if e["status"] == "needs_adjudication"), unrecognised=lab.get("unrecognised", []),
+                        not_in_study_list=p["_orphan"], archived=bool(p.get("archived")), retired=bool(p.get("retired")),
+                        included=bool(el) and not why, excluded_why=why, why=reason,
                         partition="test" if test_assignment(CTX["patient_of"](c), S.get("percival_test_fraction", 0.2)) else "development"))
     return out
+
+
+def candidates_of(sid):
+    """Training Center drill-down: every called candidate of one study with its eligibility per component and the reasons in words"""
+    from uengine.percival.eligibility import explain
+    S = CTX["SET"]; ex = set(S.get("learner_exclude", [])); p = next((x for x in _study_list() if x["code"] == sid), {})
+    arch = bool(p.get("archived")) and not S["features"].get("train_include_archived", True)
+    E = _examples(sid, dict(excluded=sid in ex, archived_out=arch))
+    for e in E: e["reasons_text"] = explain(e["reasons"]); e["component_reasons_text"] = {k: explain(v) for k, v in e["component_reasons"].items()}
+    lab = label_summary(sid)
+    return dict(code=sid, candidates=E, stale=lab["stale"], rules="see uengine/percival/eligibility.py", checked=all(e["checked"] for e in E))
+
+
+def eligibility_record():
+    """v5.24: persist the eligibility of EVERY called candidate (all components, reasons, missing requirements, partition, dataset
+    membership, rules version, evaluation time) -> percival/eligibility/current.json; the previous one is kept as eligibility/<time>.json"""
+    from uengine.percival import eligibility as EL, datasets as DS
+    S = CTX["SET"]; ex = set(S.get("learner_exclude", [])); mem = {}
+    for d in DS.listing(P()):
+        m = DS.load(P(), d["id"]) or {}
+        for e in m.get("examples", []):
+            if e.get("partition"): mem.setdefault(f"{e['study']}#{e['cand_id']}", []).append(d["id"])
+    rec = []
+    for s_ in selection():
+        if not s_["n_labelled"]: continue
+        for e in candidates_of(s_["code"])["candidates"]:
+            rec.append(dict(study=e["study"], cand_id=e["cand_id"], patient=e["patient"], call=e["call"], y=e["y"], label_source=e["label_source"],
+                            status=e["status"], partition=e["partition"], components=e["components"], reasons=e["reasons"],
+                            component_reasons=e["component_reasons"], missing=e["missing"], datasets=mem.get(f"{e['study']}#{e['cand_id']}", []),
+                            evaluated=e["evaluated"]))
+    out = dict(schema="percival-eligibility-record/1.0", rules=EL.RULES_VERSION, evaluated=time.strftime("%Y-%m-%d %H:%M:%S"), n=len(rec),
+               by_component={k: sum(1 for r in rec if r["components"].get(k)) for k in EL.COMPONENTS},
+               by_status={k: sum(1 for r in rec if r["status"] == k) for k in sorted({r["status"] for r in rec})}, candidates=rec)
+    cur = P("eligibility", "current.json")
+    if os.path.exists(cur):
+        old = _jl(cur, {}) or {}; os.replace(cur, P("eligibility", f"{_slug(old.get('evaluated', 'earlier'))}.json"))
+    _js(cur, out); return {k: v for k, v in out.items() if k != "candidates"}
+
+
+def reproduce_dataset(did):
+    """rebuild dataset did from today's reviews and compare (dataset reproducibility)"""
+    from uengine.percival import datasets as DS, eligibility as EL
+    m = DS.load(P(), did)
+    if not m: return dict(ok=False, error="unknown dataset")
+    S = CTX["SET"]; ex = set(S.get("learner_exclude", [])); exs = []
+    for s_ in selection():
+        if s_["n_labelled"]:
+            exs += _examples(s_["code"], dict(excluded=s_["code"] in ex or bool(s_["excluded_why"]), archived_out="archived" in s_["excluded_why"]),
+                             rows={r["cand_id"]: r for r in gather(s_["code"], labelled=False)} if s_["included"] else None)
+    R = DS.reproduce(P(), did, exs, EL.RULES_VERSION); R["ok"] = True; return R
 
 
 def set_selection(codes, include):
@@ -208,11 +419,81 @@ def active():
     v = active_version(); return load(v) if v else None
 
 
-def promote(v, by="app user", why="made active by you"):
+STATUSES = ("experimental", "candidate", "active", "retired", "rejected")
+
+
+def status_all():
+    """v5.24 model status register (registry/status.json): experimental (did not pass the acceptance criteria / research),
+    candidate (passed, waiting for your approval), active (deployed), retired (was active, replaced), rejected (by you; cannot be made
+    active until restored). The active model is always the one in active.json."""
+    S = _jl(P("registry", "status.json"), {}) or {}; act = active_version(); out = {}
+    for v in versions():
+        e = dict(S.get(v) or {})
+        if v == act: e["status"] = "active"
+        elif e.get("status") in (None, "active"):
+            M = load(v) or {}; e["status"] = "retired" if e.get("status") == "active" else ("candidate" if (M.get("acceptance") or {}).get("passed") else "experimental")
+        out[v] = e
+    return out
+
+
+def _set_status(v, status, by, why):
+    S = _jl(P("registry", "status.json"), {}) or {}; e = S.get(v) or dict(history=[])
+    e.update(status=status, at=time.strftime("%Y-%m-%d %H:%M:%S"), by=by, why=why)
+    e.setdefault("history", []).append(dict(status=status, at=e["at"], by=by, why=why)); S[v] = e; _js(P("registry", "status.json"), S)
+
+
+def set_status(v, status, by="app user", why=""):
+    """reject / retire / restore a version (never the active one: roll back or make another version active first)"""
+    if v not in versions(): return dict(ok=False, error="unknown version")
+    if v == active_version(): return dict(ok=False, error="this is the active model - make another version active (or roll back) first")
+    if status == "restore":
+        M = load(v) or {}; status = "candidate" if (M.get("acceptance") or {}).get("passed") else "experimental"
+    if status not in ("rejected", "retired", "candidate", "experimental"): return dict(ok=False, error="unknown status")
+    if status in ("rejected", "retired") and not why.strip(): return dict(ok=False, error="give a reason")
+    _set_status(v, status, by, why or "restored"); return dict(ok=True, version=v, status=status)
+
+
+def registry():
+    """one entry per model version and per component inside it (identity, component, version, architecture, dataset, configuration,
+    feature schema, metrics, validation report, artifact location, status)"""
+    st = status_all(); out = []
+    for v in versions():
+        M = load(v) or {}; D = M.get("data") or {}; fam = (M.get("intelligence") or {}).get("families") or {}; t = M.get("test") or {}
+        comps = []
+        for k, name in (("char", "Characteristic ML"), ("image", "Image ML"), ("fusion", "Fusion")):
+            f = fam.get(k) or {}
+            comps.append(dict(component=k, name=name, architecture=f.get("chosen"), compared=sorted((f.get("results") or {}).keys()),
+                              cv=(f.get("results") or {}).get(f.get("chosen")) if isinstance(f.get("results"), dict) else None))
+        comps.append(dict(component="meta", name="Meta-model + calibration", architecture=(M.get("discovery") or {}).get("chosen"),
+                          compared=sorted(((M.get("discovery") or {}).get("results") or {}).keys())))
+        out.append(dict(id=f"percival-score/{v}", version=v, status=st[v]["status"], status_detail=st[v], created=M.get("created"), engine=M.get("engine"),
+                        dataset=D.get("dataset"), dataset_hash=D.get("dataset_hash_manifest"), eligibility_rules=D.get("eligibility_rules"),
+                        feature_schema=D.get("feature_schema"), patch_spec=D.get("patch_spec"), code_version=D.get("code_version"),
+                        configuration=dict(seed=M.get("seed", 0), cnn_epochs=M.get("cnn_epochs"), minimum=M.get("minimum"), reason=M.get("reason")),
+                        metrics=dict(test_auc=(t.get("percival") or {}).get("auc"), test_brier=(t.get("percival") or {}).get("brier"),
+                                     test_math_auc=(t.get("math") or {}).get("auc"), dev=(M.get("discovery") or {}).get("results", {}).get((M.get("discovery") or {}).get("chosen"))),
+                        validation=M.get("acceptance"), artifact=os.path.relpath(P("registry", v, "model.json"), B()), components=comps,
+                        run=M.get("run_id")))
+    return out
+
+
+def promote(v, by="app user", why="made active by you", override=False):
+    """EXPLICIT approval only (v5.24: no model becomes active automatically). A version that did not pass the acceptance criteria needs
+    override=True and a reason; a rejected version must be restored first."""
     if not os.path.exists(P("registry", v, "model.json")): return dict(ok=False, error="unknown version")
+    stv = status_all().get(v, {}).get("status")
+    if stv == "rejected": return dict(ok=False, error=f"{v} was rejected - restore it first (Model Center)")
+    M = load(v) or {}
+    if why != "rollback" and not (M.get("acceptance") or {}).get("passed") and not override:
+        return dict(ok=False, needs_override=True, error=f"{v} did not pass the acceptance criteria ({'; '.join((M.get('acceptance') or {}).get('reasons', []))}). "
+                    "Make it active anyway only with a reason (research use).")
+    if override and not (M.get("acceptance") or {}).get("passed") and (not why or why == "made active by you"):
+        return dict(ok=False, needs_override=True, error="give the reason for activating a model that did not pass")
     cur = _jl(P("active.json"), {}); prev = cur.get("version")
     if prev == v: prev = cur.get("previous")                 # re-promoting the active version keeps its rollback target (v5.23 fix)
     _js(P("active.json"), dict(version=v, previous=prev, at=time.strftime("%Y-%m-%d %H:%M:%S"), by=by, why=why))
+    _set_status(v, "active", by, why)
+    if cur.get("version") and cur["version"] != v: _set_status(cur["version"], "retired", by, f"replaced by {v}")
     R = _jl(P("registry", "promotions.json"), []); R.append(dict(version=v, previous=prev, at=time.strftime("%Y-%m-%d %H:%M:%S"), by=by, why=why)); _js(P("registry", "promotions.json"), R)
     threading.Thread(target=score_all, daemon=True).start(); return dict(ok=True, version=v, previous=prev)
 
@@ -220,6 +501,7 @@ def promote(v, by="app user", why="made active by you"):
 def rollback(by="app user"):
     a = _jl(P("active.json"), {})
     if not a.get("previous"): return dict(ok=False, error="no previous version to roll back to")
+    if status_all().get(a["previous"], {}).get("status") == "rejected": return dict(ok=False, error=f"the previous version {a['previous']} was rejected")
     return promote(a["previous"], by, "rollback")
 
 
@@ -237,36 +519,108 @@ def train_async(reason="manual"):
     threading.Thread(target=_train, args=(reason,), daemon=True).start(); return dict(ok=True, started=True)
 
 
+def _code_version():
+    """the engine code that trained a model: BUILD stamp of the installed pipeline + sha256 of the Percival engine sources"""
+    d = os.path.join(ROOT, "unified_engine", "uengine", "percival"); h = hashlib.sha256()
+    for f in sorted(glob.glob(os.path.join(d, "*.py"))):
+        with open(f, "rb") as fh: h.update(fh.read())
+    b = ""
+    for p in (os.path.join(B(), "scripts", "BUILD"), os.path.join(ROOT, "scripts", "BUILD")):
+        if os.path.exists(p): b = open(p).read().strip()[:80]; break
+    return dict(build=b, engine_sha256=h.hexdigest()[:16])
+
+
+RUN = {}
+def _run_start(reason):
+    os.makedirs(P("runs"), exist_ok=True)
+    rid = f"run{len(glob.glob(P('runs', 'run*.json'))) + 1:03d}"
+    RUN.clear(); RUN.update(id=rid, kind="training cycle", state="running", reason=reason, started=time.strftime("%Y-%m-%d %H:%M:%S"),
+                            code_version=_code_version(), settings={k: CTX["SET"].get(k) for k in ("percival_learn_from", "percival_conflicts",
+                            "percival_use_historical", "percival_test_fraction")}, epochs=int(os.environ.get("CSS_PERCIVAL_EPOCHS", "30")))
+    _js(P("runs", rid + ".json"), RUN)
+
+
+def _run_end(state_, **kw):
+    if not RUN: return
+    with LOCK: lg = list(JOB.get("log", []))
+    RUN.update(state=state_, finished=time.strftime("%Y-%m-%d %H:%M:%S"), log=lg[-200:], **kw); _js(P("runs", RUN["id"] + ".json"), RUN)
+
+
+def runs():
+    return [{k: v for k, v in (_jl(f, {}) or {}).items() if k != "log"} for f in sorted(glob.glob(P("runs", "run*.json")))]
+
+
+def _interrupted_runs():
+    """a run still 'running' on disk when the app starts was interrupted (app closed / crash): recorded as such, never left running"""
+    for f in glob.glob(P("runs", "run*.json")):
+        R = _jl(f, {}) or {}
+        if R.get("state") == "running": R.update(state="interrupted", finished=time.strftime("%Y-%m-%d %H:%M:%S"), note="the app stopped during this run"); _js(f, R)
+
+
 def _train(reason):
     from uengine.percival import meta as MT
+    _run_start(reason)
     try:
-        sel = [s["code"] for s in selection() if s["included"]]
-        if not sel: raise ValueError("no finished, selected study to learn from")
+        SL = selection(); sel = [s["code"] for s in SL if s["included"]]
+        if not sel: raise ValueError("no study has an eligible expert label yet - Training Center lists every study and the reason it is not used")
         if not all(may_read(c) for c in sel): raise ValueError("local learning is not switched on (Percival Intelligence › Switch on)")
-        log(f"cycle started ({reason}): {len(sel)} studies", 0.01); integ = integrity(sel); dup = set(integ["duplicates"]); rows = []
+        from uengine.percival import datasets as DS, eligibility as EL
+        integ = integrity([x["code"] for x in SL if x["n_labelled"]])     # v5.24: conflicts / duplicates over EVERY labelled study
+        dup = set(integ["duplicates"]) & set(sel); rows, exs = [], []
+        log(f"cycle started ({reason}): {len(sel)} studies with eligible labels", 0.01)
+        S = CTX["SET"]; ex = set(S.get("learner_exclude", []))
         for k, c in enumerate(sel):
-            if c in dup: continue
-            r = gather(c, labelled=True); rows += r; log(f"{CTX['label'](c)}: {len(r)} labelled candidates", 0.01 + 0.06 * (k + 1) / len(sel))
+            g = {r["cand_id"]: r for r in gather(c, labelled=False)}
+            E = _examples(c, dict(excluded=c in ex, duplicate=c in dup), rows=g); exs += E
+            for e in E:
+                if e["components"]["meta"]:
+                    r = dict(g[e["cand_id"]], y=e["y"])
+                    if not e["components"]["image"]: r["maps"] = None
+                    rows.append(r)
+            log(f"{CTX['label'](c)}: {sum(1 for e in E if e['components']['meta'])} eligible of {len(E)} called candidates", 0.01 + 0.06 * (k + 1) / len(sel))
+        for s_ in SL:                                   # labelled studies that are left out: recorded in the manifest with their reasons
+            if s_["code"] not in sel and s_["n_labelled"]:
+                exs += _examples(s_["code"], dict(excluded=s_["code"] in ex or bool(s_["excluded_why"]), archived_out="archived" in s_["excluded_why"]))
+        man = DS.build(exs, EL.RULES_VERSION, P(), extra=dict(settings=dict(learn_from=S.get("percival_learn_from", "labelled"),
+                       conflicts=S.get("percival_conflicts", "exclude"), use_historical=S.get("percival_use_historical", True),
+                       test_fraction=S.get("percival_test_fraction", 0.2))))
+        log(f"dataset {man['id']} (content {man['content_hash']}): {man['n_examples']} called candidates, meta-model development "
+            f"{man['components']['meta']['development']['n']} / locked test {man['components']['meta']['test']['n']}", 0.075)
+        dv = [r for r in rows if not r.get("test")]; tv = [r for r in rows if r.get("test")]
+        c1, c0 = sum(r["y"] for r in dv), sum(1 - r["y"] for r in dv); t1, t0 = sum(r["y"] for r in tv), sum(1 - r["y"] for r in tv)
+        if min(c1, c0) < 3 or len(dv) < 10:
+            raise ValueError(f"not enough expert labels to learn yet. The development cohort has {c1} cSS and {c0} not-cSS calls "
+                             f"(at least 3 of each and 10 in all are needed); the locked test cohort (patients set aside for testing, never "
+                             f"used to learn) holds {t1} cSS and {t0} not-cSS. Dataset {man['id']}: see Training Center for every study and "
+                             f"candidate that was left out and why. Review more studies that contain cSS (press Y on each cSS candidate) "
+                             f"and start the cycle again.")
         v = f"v{len(versions()) + 1:03d}"
         M = MT.train_cycle(rows, v, cnn_epochs=int(os.environ.get("CSS_PERCIVAL_EPOCHS", "30")), progress=lambda m, p: log(m, p), mins=_env_min())
-        M["integrity"] = integ; M["reason"] = reason; act = active(); acc = MT.acceptance(M, act); M["acceptance"] = acc
+        M["data"].update(dataset=man["id"], dataset_hash_manifest=man["content_hash"], eligibility_rules=EL.RULES_VERSION,
+                         feature_schema=DS.FEATURE_SCHEMA, patch_spec=DS.PATCH_SPEC, code_version=_code_version())
+        M["integrity"] = integ; M["reason"] = reason; M["run_id"] = RUN.get("id"); M["seed"] = 0; M["cnn_epochs"] = int(os.environ.get("CSS_PERCIVAL_EPOCHS", "30")); act = active(); acc = MT.acceptance(M, act); M["acceptance"] = acc
         M["previous_active"] = act["version"] if act else None
         _js(P("registry", v, "model.json"), M)
         H = _jl(P("history.json"), []); t = M["test"]
         H.append(dict(version=v, at=M["created"], reason=reason, studies=M["data"]["studies"], candidates=M["data"]["dev_candidates"] + M["data"]["test_candidates"],
                       css=M["data"]["css"], chosen=M["discovery"]["chosen"], dev={k: (x or {}).get("auc") for k, x in M["discovery"]["results"].items()},
                       test_auc=(t.get("percival") or {}).get("auc"), test_ci=(t.get("percival") or {}).get("auc_ci"), test_math_auc=(t.get("math") or {}).get("auc"),
-                      passed=acc["passed"], promoted=False))
-        if acc["passed"] or (act is None and os.environ.get("CSS_PERCIVAL_FIRST_ACTIVE") == "1"):
-            promote(v, by=f"automatic ({reason})", why="passed the acceptance criteria" if acc["passed"] else "first model (test setting)"); H[-1]["promoted"] = True
-            log(f"{v} promoted: {'passed the acceptance criteria' if acc['passed'] else 'first model'}", 0.95)
-        else: log(f"{v} kept as a candidate: {'; '.join(acc['reasons'])}", 0.95)
+                      passed=acc["passed"], promoted=False, dataset=man["id"]))
+        _set_status(v, "candidate" if acc["passed"] else "experimental", f"training run {RUN.get('id')}",
+                    "passed the acceptance criteria - waiting for your approval" if acc["passed"] else "; ".join(acc["reasons"]))
+        if act is None and os.environ.get("CSS_PERCIVAL_FIRST_ACTIVE") == "1":          # TEST HOOK only (synthetic tests / update test)
+            promote(v, by=f"test setting ({reason})", why="first model (CSS_PERCIVAL_FIRST_ACTIVE=1, tests only)", override=True); H[-1]["promoted"] = True
+            log(f"{v} made active (test setting)", 0.95)
+        else: log(f"{v} registered as {'a candidate (passed the acceptance criteria) - make it active in Model Center' if acc['passed'] else 'experimental: ' + '; '.join(acc['reasons'])}", 0.95)
         _js(P("history.json"), H); _js(P("last_cycle.json"), dict(at=time.strftime("%Y-%m-%d %H:%M:%S"), finished=sorted(sel)))
-        CTX["notify"](f"Percival Score model {v} trained", ("promoted" if H[-1]["promoted"] else "kept as a candidate") + f" · {M['data']['studies']} studies")
+        CTX["notify"](f"Percival Score model {v} trained", ("made active" if H[-1]["promoted"] else "waiting for your approval" if acc["passed"] else "experimental") + f" · {M['data']['studies']} studies")
         with LOCK: JOB.update(state="finished", progress=1.0)
+        _run_end("finished", version=v, dataset=man["id"], acceptance=acc, status=status_all().get(v, {}).get("status"))
+        try: eligibility_record()
+        except Exception as e_: log(f"eligibility record not written ({type(e_).__name__})")
     except Exception as e:
         with LOCK: JOB.update(state="failed", error=f"{type(e).__name__}: {str(e)[:300]}")
-        log(f"failed: {e}")
+        log(f"failed: {e}"); _run_end("failed", error=f"{type(e).__name__}: {str(e)[:500]}", dataset=locals().get("man", {}).get("id") if isinstance(locals().get("man"), dict) else None)
 
 
 def maybe_cycle():
@@ -302,7 +656,10 @@ def score_study(sid, M=None):
     in_tr = sid in set((M.get("data") or {}).get("trained_on") or [])
     rec = dict(study=sid, model=M["version"], run=_run_id(sid), created=time.strftime("%Y-%m-%d %H:%M:%S"), ready=M["ready"], thresholds=M["thresholds"],
                in_training=in_tr, in_training_note="this study's expert labels were used to train this model: its scores are in-sample (optimistic)" if in_tr else "",
-               candidates=S, study_score=study, note=M["note"], kind="AI prediction (Percival Score) - not a human review")
+               candidates=S, study_score=study, note=M["note"], kind="AI prediction (Percival Score) - not a human review",
+               provenance=dict(model=M["version"], engine=M.get("engine", ""), dataset=(M.get("data") or {}).get("dataset", "(trained before v5.24 - no manifest)"),
+                               feature_schema=(M.get("data") or {}).get("feature_schema", ""), code=(M.get("data") or {}).get("code_version", {}),
+                               processing_run=_run_id(sid)))
     lp = P("ledger", sid, f"{M['version']}__{rec['run']}.json")
     if not os.path.exists(lp): _js(lp, rec)                     # immutable: a later model writes a NEW file
     _js(P("scores", f"{sid}.json"), rec); return rec
@@ -318,7 +675,162 @@ def score_all():
 
 
 def history_of(sid):
-    return [_jl(f, {}) for f in sorted(glob.glob(P("ledger", sid, "*.json")))]
+    """every prediction ever made for this study (immutable ledger), each marked: current (active model on the current processing run),
+    historical (an earlier model) or earlier processing (made on a previous run of the pipeline)"""
+    a = active_version(); run = _run_id(sid); out = []
+    for f in sorted(glob.glob(P("ledger", sid, "*.json"))):
+        L = _jl(f, {})
+        L["status"] = ("earlier processing" if L.get("run") and L.get("run") != run else "current" if L.get("model") == a else "historical")
+        out.append(L)
+    return out
+
+
+# ------------------------------------------------------------------ v5.24 shadow mode (controlled experimental environment)
+SJOB = dict(state="idle", version="", progress=0.0, error="")
+
+
+def shadow_async(version):
+    """run a registry version IN SHADOW on every study: its predictions go to percival/shadow/<version>/ only - never to scores/ (what
+    reviewers see), never to the prediction ledger, never to active.json. Compared with the active model and, prospectively, with expert
+    calls the version never learned from. A shadow model replaces the active one only through Model Center › Make active."""
+    if not load(version): return dict(ok=False, error="unknown version")
+    with LOCK:
+        if SJOB["state"] == "running": return dict(ok=False, error=f"shadow run of {SJOB['version']} already running")
+        SJOB.update(state="running", version=version, progress=0.0, error="")
+    threading.Thread(target=_shadow, args=(version,), daemon=True).start(); return dict(ok=True, started=True)
+
+
+def _learned(M):
+    """(study, cand_id) a model learned from: its dataset manifest's development examples; models before v5.24: (study, None) per study"""
+    from uengine.percival import datasets as DS
+    if not M: return set()
+    man = DS.load(P(), (M.get("data") or {}).get("dataset", "")) if (M.get("data") or {}).get("dataset") else None
+    if man: return {(e["study"], int(e["cand_id"])) for e in man["examples"] if e.get("partition") == "development"}
+    return {(s, None) for s in (M.get("data") or {}).get("trained_on", [])}
+
+
+def _shadow(version):
+    from uengine.percival import meta as MT
+    try:
+        M = load(version); A = active(); learned = _learned(M)
+        learned_a = _learned(A) if A and A["version"] != version else set()
+        pats = [p["code"] for p in _study_list() if os.path.exists(os.path.join(B(), "review", f"{p['code']}_candidates.csv")) and may_read(p["code"])]
+        ys, ps, pa, gs, agree, diffs, n = [], [], [], [], 0, [], 0; fair = []
+        for k, sid in enumerate(pats):
+            rows = gather(sid, labelled=False)
+            if not rows: continue
+            S = MT.score_rows(M, rows); SA = {x["cand_id"]: x for x in MT.score_rows(A, rows)} if A and A["version"] != version else {}
+            _js(P("shadow", version, f"{sid}.json"), dict(study=sid, model=version, created=time.strftime("%Y-%m-%d %H:%M:%S"), candidates=S,
+                kind="SHADOW prediction - experimental; not shown to reviewers, not used for any result", active_model=A["version"] if A else None))
+            lab = label_summary(sid)["labels"]
+            for x in S:
+                a = SA.get(x["cand_id"])
+                if a and x["percival_score"] is not None and a["percival_score"] is not None:
+                    n += 1; diffs.append(abs(x["percival_score"] - a["percival_score"])); agree += int(x["band"] == a["band"])
+                cid = x["cand_id"]
+                if cid in lab and (sid, cid) not in learned and (sid, None) not in learned and x["percival_score"] is not None:
+                    ys.append(lab[cid]); ps.append(x["percival_score"] / 100); gs.append(CTX["patient_of"](sid))
+                    pa.append(a["percival_score"] / 100 if a and a["percival_score"] is not None else np.nan)
+                    fair.append((sid, cid) not in learned_a and (sid, None) not in learned_a)      # the ACTIVE model did not learn it either
+            with LOCK: SJOB["progress"] = (k + 1) / max(1, len(pats))
+        y, p = np.array(ys, float), np.array(ps, float); pa_ = np.array(pa, float); g_ = np.array(gs); f_ = np.array(fair, bool) if fair else np.zeros(0, bool)
+        ok_ = lambda yy: len(yy) >= 10 and 0 < yy.sum() < len(yy)
+        h = f_ & np.isfinite(pa_) if len(f_) else f_                    # head-to-head: calls NEITHER model learned from
+        pros = dict(n=len(y), css=int(y.sum()) if len(y) else 0,
+                    shadow=MT.metrics(y, p, g_) if ok_(y) else None,
+                    n_fair=int(h.sum()), css_fair=int(y[h].sum()) if h.any() else 0,
+                    fair_shadow=MT.metrics(y[h], p[h], g_[h]) if ok_(y[h]) else None,
+                    active=MT.metrics(y[h], pa_[h], g_[h]) if ok_(y[h]) else None,
+                    note="shadow: expert calls this version never learned from (prospective). Head-to-head (fair_shadow vs active): only calls "
+                         "that NEITHER model learned from - the active model's metrics on calls it was trained on would be in-sample and are not reported.")
+        _js(P("shadow", version, "summary.json"), dict(version=version, at=time.strftime("%Y-%m-%d %H:%M:%S"), studies=len(pats),
+            active=A["version"] if A else None, compared=n, band_agreement=agree / n if n else None,
+            mean_abs_difference=float(np.mean(diffs)) if diffs else None, prospective=pros,
+            rule="shadow predictions never change what reviewers see; Make active (Model Center) is the only way to deploy"))
+        with LOCK: SJOB.update(state="finished", progress=1.0)
+    except Exception as e:
+        with LOCK: SJOB.update(state="failed", error=f"{type(e).__name__}: {str(e)[:300]}")
+
+
+def shadow_summaries():
+    out = [_jl(f, {}) for f in sorted(glob.glob(P("shadow", "*", "summary.json")))]
+    with LOCK: j = dict(SJOB)
+    return dict(job=j, runs=out)
+
+
+# ------------------------------------------------------------------ v5.24 compatibility audit + review recovery
+def compat_report():
+    """read-only audit of this project for the Data integrity screen: store schema + migrations + backups, studies registered vs on disk,
+    processed / MRI present, reviews (current, legacy shared file, historical from earlier versions), calls that no longer match,
+    model versions and their engines, prediction ledger. Nothing is changed."""
+    from uengine.percival import store as ST
+    D = ST.detect(B()); pats = CTX["patients"](); codes = {p["code"] for p in pats}; rows = []
+    for p in _study_list():
+        c = p["code"]; lab = label_summary(c)
+        legacy = os.path.exists(os.path.join(B(), "review", f"{c}_calls.csv")) and not glob.glob(os.path.join(B(), "review", f"{c}_calls_*.csv"))
+        hist = glob.glob(os.path.join(B(), "historical", c, "review", "*_calls*.csv"))
+        mri = bool(glob.glob(os.path.join(B(), "data", f"{c}_swi.nii*")))
+        cand = os.path.exists(os.path.join(B(), "review", f"{c}_candidates.csv"))
+        issues = []
+        if p["_orphan"]: issues.append("reviewed study not in the study list (from an older version?) - its calls are used for learning")
+        if cand and not mri: issues.append("MRI (data/ID_swi.nii) missing - Image ML cannot use this study")
+        if not cand and p.get("status") == "done": issues.append("marked processed but the candidate list is missing")
+        if lab["stale"]: issues.append(f"{lab['stale']} earlier call(s) no longer match a current candidate - confirm them in Review")
+        if lab.get("error"): issues.append("labels unreadable: " + lab["error"])
+        rows.append(dict(code=c, label=CTX["label"](c) if not p["_orphan"] else c, registered=not p["_orphan"], processed=cand, mri=mri,
+                         review_format="per-reviewer files" if glob.glob(os.path.join(B(), "review", f"{c}_calls_*.csv")) else ("legacy shared file (before v5.7)" if legacy else "none"),
+                         historical_reviews=len(hist), labels_current=sum(1 for d in lab["detail"].values() if d["source"] == "review"),
+                         labels_historical=lab.get("historical", 0), stale=lab["stale"], predictions=len(glob.glob(P("ledger", c, "*.json"))) if STORE["ok"] else 0,
+                         issues=issues))
+    models = []
+    if STORE["ok"]:
+        for v in versions():
+            m = load(v) or {}
+            models.append(dict(version=v, engine=m.get("engine", "percival-engine/5.22"), created=m.get("created"), dataset=(m.get("data") or {}).get("dataset"),
+                               readable=bool(m.get("meta"))))
+    return dict(store=dict(D, ok=STORE["ok"], error=STORE["error"], last_migration=STORE["migration"], backups=ST.backups(B()), schema_supported=ST.SCHEMA,
+                           path=ST.root(B())),
+                studies=rows, n_registered=len(codes), n_orphans=sum(1 for r in rows if not r["registered"]),
+                n_with_issues=sum(1 for r in rows if r["issues"]), models=models)
+
+
+def recoverable_reviews():
+    """studies of THIS project whose examination (same image fingerprint) was reviewed in another project on this Mac (an earlier
+    Percival / production project) and whose reviews are not here yet. Only the other project's patients.json + file names are read."""
+    out = []
+    try: others = CTX["other_projects"]()
+    except Exception: return out
+    for p in CTX["patients"]():
+        c = p["code"]; fp = CTX["fingerprint_of"](c)
+        if not fp: continue
+        for o in others:
+            for q in o["patients"]:
+                if fp in {str(q.get("fingerprint", "")), str(q.get("fingerprint_v1", ""))} and q.get("code"):
+                    src = glob.glob(os.path.join(o["path"], "review", f"{q['code']}_calls*.csv"))
+                    have = {os.path.basename(x) for x in glob.glob(os.path.join(B(), "historical", c, "review", "*"))}
+                    new = [x for x in src if os.path.basename(x) not in have]
+                    if new: out.append(dict(code=c, label=CTX["label"](c), project=o["path"], kind=o["kind"], source_code=q["code"], files=len(new)))
+    return out
+
+
+def recover_reviews(by="app user"):
+    """copy the reviewer files of the matched examinations (calls, final saves, scores) into historical/ID/review/ - verified by sha256;
+    the other project is only read. They become a HISTORICAL label source (matched to the current candidates by fingerprint)."""
+    import shutil
+    done = []
+    for r in recoverable_reviews():
+        d = os.path.join(B(), "historical", r["code"], "review"); os.makedirs(d, exist_ok=True); n = 0
+        for f in glob.glob(os.path.join(r["project"], "review", f"{r['source_code']}_calls*.csv")) + glob.glob(os.path.join(r["project"], "review", f"{r['source_code']}_final*.json")):
+            t = os.path.join(d, os.path.basename(f))
+            if os.path.exists(t): continue
+            shutil.copy2(f, t + ".tmp")
+            if _sha(t + ".tmp") != _sha(f): os.remove(t + ".tmp"); continue
+            os.replace(t + ".tmp", t); n += 1
+        S = _jl(os.path.join(d, "SOURCE.json"), {"copies": []})
+        S["copies"].append(dict(project=r["project"], kind=r["kind"], source_code=r["source_code"], files=n, at=time.strftime("%Y-%m-%d %H:%M:%S"), by=by,
+                                match="same image fingerprint", verified="sha256"))
+        _js(os.path.join(d, "SOURCE.json"), S); done.append(dict(code=r["code"], files=n)); _LCACHE.pop(r["code"], None)
+    return dict(ok=True, recovered=done)
 
 
 # ------------------------------------------------------------------ v5.23 expert-review snapshots (the local learning dataset)
@@ -363,8 +875,13 @@ def snapshot_study(sid):
                                      vox=[int(r[k]) for k in ("vox_i", "vox_j", "vox_k") if k in d.columns and not pd.isna(r[k])],
                                      volume_mm3=None if pd.isna(r.get("volume_mm3", np.nan)) else float(r["volume_mm3"]), math=g.get("math"), char=g.get("char"), predictors=g.get("pred"),
                                      patch_sha256=None if mp is None else hashlib.sha256(np.ascontiguousarray(mp, np.float32).tobytes()).hexdigest()[:16],
-                                     patch_reference=f"unified_engine/percival/cache/{sid}.npz#{cid}" if mp is not None else None))
-        rec = dict(schema="percival-review-snapshot/1.0", kind="expert review (human) - original label, never overwritten", study=sid, reviewer=rev, saved=saved,
+                                     patch_reference=f"percival/cache/{sid}.npz#{cid}" if mp is not None else None,
+                                     image_reference=dict(swi=f"data/{sid}_swi.nii", candidates=f"review/{sid}_candidates.nii.gz", voxel=[int(r[k]) for k in ("vox_i", "vox_j", "vox_k") if k in d.columns and not pd.isna(r[k])])))
+        prior = sorted(glob.glob(P("reviews", sid, f"{_slug(rev)}__*.json")))
+        notes = [dict(cand_id=x.get("cand_id"), comment=x.get("comment")) for x in labels if str(x.get("comment", "")).strip()]
+        rec = dict(schema="percival-review-snapshot/1.1", revision=len(prior) + 1, revises=os.path.basename(prior[-1]) if prior else None,
+                   annotations=notes, missed_marks=os.path.exists(os.path.join(B(), "review", f"{sid}_missed.csv")),
+                   versions=_versions_now(), kind="expert review (human) - original label, never overwritten", study=sid, reviewer=rev, saved=saved,
                    read_mode=F.get("read_mode", ""), percival_visible_to_reviewer=F.get("meter_visible", ""), labels=labels,
                    percival_at_review=None if shown is None else dict(model=shown.get("model"), created=shown.get("created"), run=shown.get("run"),
                                                                       candidates=shown.get("candidates"), thresholds=shown.get("thresholds")),
@@ -375,6 +892,12 @@ def snapshot_study(sid):
                    identifiers="none - the study is named by its internal key")
         _js(out, rec); new += 1
     return new
+
+
+def _versions_now():
+    from uengine.percival.meta import ENGINE
+    from uengine.percival.eligibility import RULES_VERSION
+    return dict(engine=ENGINE, code=_code_version(), active_model=active_version(), eligibility_rules=RULES_VERSION)
 
 
 def snapshot_reviews():
@@ -389,15 +912,50 @@ def reviews_of(sid): return [_jl(f, {}) for f in sorted(glob.glob(P("reviews", s
 
 
 # ------------------------------------------------------------------ the Percival Intelligence screen
+def inputs(sel):
+    """v5.24: what each part of the Percival Score receives in this project (for the 'How Percival works' panel) - read-only counts of
+    files; nothing is computed here. Studies = the studies the cycle learns from."""
+    codes = [s["code"] for s in sel if s["included"]]; n = len(codes)
+    has = lambda f: sum(1 for c in codes if os.path.exists(f(c)))
+    img = 0
+    for c in codes:
+        C = _jl(P("cache", f"{c}.json"), {})
+        if any(r.get("has_maps") for r in C.get("rows", [])): img += 1
+    pc = pr = 0                                                     # candidates with >= 1 RELIABLE Unified predictor (unreliable = missing for Percival)
+    from uengine.percival.meta import PREDICTORS
+    for c in codes:
+        for r in (_jl(os.path.join(B(), "uscore", "features", f"{c}.json"), {}) or {}).get("records", []):
+            pc += 1; pr += int(any((r.get("F", {}).get(k) or {}).get("status") == "reliable" for k in PREDICTORS))
+    return dict(studies=n, candidates=has(lambda c: os.path.join(B(), "review", f"{c}_candidates.csv")),
+                predictors=has(lambda c: os.path.join(B(), "uscore", "features", f"{c}.json")), image=img,
+                predictor_candidates=pc, predictor_reliable=pr,
+                gathered=has(lambda c: P("cache", f"{c}.json")))
+
+
 def state():
-    from uengine.percival import meta as MT
+    from uengine.percival import meta as MT, datasets as DS
+    if not STORE["ok"]: return dict(store=STORE, authorized=authorized(), job=dict(state="idle"), selection=[], versions=[], history=[], log=[])
     with LOCK: job = {k: v for k, v in JOB.items() if k != "log"}; jlog = JOB["log"][-60:]      # job FIRST (v5.23): a cycle finishing while
     vs = versions(); latest = load(vs[-1]) if vs else None; M = active(); sel = selection()      # this runs must not look finished with old versions
     strip = lambda m: None if not m else {k: v for k, v in m.items() if k not in ("components", "meta_ensemble")}
     return dict(authorized=authorized(), autocycle=CTX["SET"].get("percival_autocycle", True), cycle_n=int(CTX["SET"].get("percival_cycle_n", 5)),
-                test_fraction=CTX["SET"].get("percival_test_fraction", 0.2), job=job, log=jlog,
+                test_fraction=CTX["SET"].get("percival_test_fraction", 0.2), learn_from=CTX["SET"].get("percival_learn_from", "labelled"), job=job, log=jlog,
                 active=strip(M), latest=strip(latest), versions=vs, history=_jl(P("history.json"), []), promotions=_jl(P("registry", "promotions.json"), []),
                 selection=sel, n_selected=sum(1 for s in sel if s["included"]),
+                labels=dict(css=sum(s["n_css"] for s in sel if s["included"]), mimic=sum(s["n_mimic"] for s in sel if s["included"]),
+                            css_dev=sum(s["css_dev"] for s in sel if s["included"]), mimic_dev=sum(s["mimic_dev"] for s in sel if s["included"]),
+                            stale=sum(s["n_stale"] for s in sel), not_in_study_list=sum(1 for s in sel if s["not_in_study_list"])),
                 minimum=dict(studies=MT.MIN_STUDIES, candidates=MT.MIN_CANDIDATES, per_class=MT.MIN_PER_CLASS),
                 since_last=len({s["code"] for s in sel if s["included"]} - set(_jl(P("last_cycle.json"), {}).get("finished", []))),
-                n_review_snapshots=len(glob.glob(P("reviews", "*", "*.json"))))
+                n_review_snapshots=len(glob.glob(P("reviews", "*", "*.json"))), inputs=inputs(sel), store=STORE,
+                runs=runs()[-30:], registry=registry(), status=status_all(),
+                eligibility_record={k: v for k, v in (_jl(P("eligibility", "current.json"), {}) or {}).items() if k != "candidates"},
+                unrecognised=sorted({c for x in sel for c in x.get("unrecognised", [])}),
+                datasets=DS.listing(P()), learn_settings=dict(learn_from=CTX["SET"].get("percival_learn_from", "labelled"),
+                    conflicts=CTX["SET"].get("percival_conflicts", "exclude"), use_historical=CTX["SET"].get("percival_use_historical", True)),
+                overview=dict(registered=sum(1 for x in sel if not x["not_in_study_list"]), on_disk_only=sum(1 for x in sel if x["not_in_study_list"]),
+                              processed=sum(1 for x in sel if x["processed"]), candidates=sum(x["n_candidates"] for x in sel),
+                              reviewed_studies=sum(1 for x in sel if x["reviewed"]), called=sum(x["n_labelled"] for x in sel),
+                              eligible=sum(x["n_eligible"] for x in sel), eligible_dev=sum(x["n_eligible_dev"] for x in sel),
+                              adjudication=sum(x["n_adjudication"] for x in sel), historical=sum(x["n_historical"] for x in sel),
+                              excluded=sum(x["n_labelled"] - x["n_eligible"] - x["n_adjudication"] for x in sel)))

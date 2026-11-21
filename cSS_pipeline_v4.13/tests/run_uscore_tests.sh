@@ -37,6 +37,10 @@ run tests/check_app_setup.py   # v5.17: first-run setup wizard, FreeSurfer / lic
 run tests/check_app_import_v518.py   # v5.18: one Add-studies pathway, identification rules, series choice, study library, export with files
 run tests/check_app_study_admin.py   # v5.20: identifier rule, study panel, edit checkpoint, archive, remove / purge, import duplicates, previous-version reuse
 run tests/check_percival.py              # v5.22/v5.23: Percival Score engine - families, fusion, intelligence, calibration, ledger, rollback
+run tests/check_percival_learning.py     # v5.24: review-to-learning, eligibility, datasets, store migration, older-version reviews
+run tests/check_unified_prerequisites.py   # v5.24: Unified predictors reliable / unreliable / unavailable by prerequisite; never misleading evidence
+run tests/check_image_ml_integration.py    # v5.24: Image ML learns from reviewed patches (vs shuffled control), consumed by Fusion + score, image OOD
+run tests/trace_candidate.py             # v5.24: one synthetic candidate through every ML component (real code paths)
 run tests/check_app_percival.py          # v5.22/v5.23: Percival Intelligence screen + reviewer score through the real app
 echo; echo "checks passed: $PASSED  failed: ${#FAILED[@]}  skipped: ${#SKIPPED[@]}"
 for s in "${SKIPPED[@]}"; do echo "  SKIPPED $s"; done

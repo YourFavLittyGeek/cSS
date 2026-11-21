@@ -593,3 +593,18 @@ Reviewer viewer rebuilt (docs/CHANGELOG_v5.6.md): single un-zoomed image, layout
   /api/percival/state must read JOB first. Tests: tests/run_uscore_tests.sh runs every check (SKIPPED != passed), check_percival.py,
   check_app_percival.py (CSS_KEEP_TMP=1 keeps the temp project on failure). The user's own reviewer sessions on clinical projects may be
   listening on 8765-8773 - never kill them.
+- v5.24 (docs/percival_app/ARCHITECTURE_AUDIT_v5.24.md, IMPLEMENTATION_REPORT_v5.24.md): learning rebuilt around ONE label source - the call
+  ledger (scripts/call_ledger.py: Vein->Vessel, fingerprint re-attachment, lineage, policy) + earlier-version reviews in historical/ID/review/
+  (fingerprint-matched; a current call always wins); Training Eligibility Engine uengine/percival/eligibility.py (per component, reason codes);
+  dataset manifests percival/datasets/dsNNN.json (content-hashed; model.data.dataset); Percival store moved to <project>/percival/ with
+  STORE.json schema 3 + migrations (uengine/percival/store.py; backup to backups/percival/, sha256-verified, old folder renamed, newer schema
+  refused); review recovery from earlier projects only on the user's button (reads their patients.json + review file names). GUI: Training
+  Center / Model Center / Data integrity tabs; older prototype screens hidden (Settings features.show_prototypes). Tests: check_percival_learning.py
+  (temp projects only). Pitfall: tests must never read the user's real projects - app tests run with a temporary HOME.
+- v5.24 learning engine (Milestone 2; docs/percival_app/IMPLEMENTATION_REPORT_v5.24.md, ML_ARCHITECTURE_INVESTIGATION_v5.24.md): NO automatic
+  promotion (candidate / experimental until approved in Model Center; override needs a reason; reject / restore / retire; registry/status.json),
+  training runs percival/runs/runNNN.json (failed + interrupted recorded), eligibility rules 1.1 (+ predictor, shadow components, missing
+  requirements, 'unrecognised' calls never dropped) persisted in percival/eligibility/current.json, dataset manifest 1.1 (patient-level split +
+  validation folds, leakage / duplicate refusal, reproduce()), store schema 4 (backup, derived status + runs). tests/trace_candidate.py runs one
+  synthetic candidate through every component. Pitfall: the app's Unified step re-extracts uscore/features after switch-on, so a dataset can
+  change without a review change (reproduce reports it as 'input availability changed').

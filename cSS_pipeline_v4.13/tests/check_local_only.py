@@ -18,7 +18,7 @@ for p in files:
 ok(not bad, "static scan: no network code or external host" + ("" if not bad else " -> " + "; ".join(sorted(set(bad))[:10])))
 ok(all(re.search(r'ThreadingHTTPServer\(\("127\.0\.0\.1"', open(f"{ROOT}/{p}").read()) for p in ("app/css_app.py", "scripts/review_web.py")), "servers bind to 127.0.0.1 only")
 log = tempfile.mktemp(); env = dict(os.environ, PYTHONPATH=os.path.join(ROOT, "tests", "netguard") + os.pathsep + os.environ.get("PYTHONPATH", ""), CSS_NETGUARD_LOG=log)
-for t in ("check_processing_manager.py", "check_app_unified.py", "check_percival.py", "check_app_percival.py"):      # v5.23: Percival training + scoring + GUI
+for t in ("check_processing_manager.py", "check_app_unified.py", "check_percival.py", "check_percival_learning.py", "check_app_percival.py"):      # v5.23-5.24: Percival training, learning data, store, GUI
     r = subprocess.run([sys.executable, os.path.join(ROOT, "tests", t)], env=env, capture_output=True, text=True, timeout=3000)
     ok(r.returncode == 0, f"{t} passes with the network blocked" + ("" if r.returncode == 0 else ": " + (r.stdout + r.stderr)[-300:]))
 ok(not os.path.exists(log) or not open(log).read().strip(), "no process attempted a non-loopback connection" + ("" if not os.path.exists(log) else ": " + open(log).read()[:300]))

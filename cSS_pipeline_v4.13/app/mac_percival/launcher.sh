@@ -1,5 +1,5 @@
 #!/bin/bash
-# Percival DEVELOPMENT build launcher (branch feature/unified-score-ml-integration; v5.16-v5.23). Double-click start - no Terminal needed.
+# Percival DEVELOPMENT build launcher (branch feature/unified-score-ml-integration; v5.16-v5.24). Double-click start - no Terminal needed.
 # Kept SEPARATE from both the production app and the Percival RC app:
 #   project folder  chosen on first start (default ~/Percival_project; remembered in ~/Library/Application Support/Percival Dev/);
 #                   ~/css_project and ~/cSS_experimental are refused and write-protected; PERCIVAL_BASE still overrides

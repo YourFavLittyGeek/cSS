@@ -96,25 +96,37 @@ Full details: `IMPORT_WORKFLOW.md`.
 **Anatomy QC**: FreeSurfer installation, per-study FreeSurfer / SynthSeg / registration outputs (missing files listed), QC metrics,
 the QC image (labels + brain mask on the SWI; can be made for imported studies), Freeview.
 
-## 6. Research screens (experimental)
+## 6. Older research prototypes (hidden by default since v5.24 - Settings › Show the older research prototypes)
+They are separate prototypes and do **not** feed the Percival Score (which has its own Characteristic ML, Image ML and Fusion).
 - **Training**: A Image ML (model card, weights, synthetic performance) · B Characteristic ML / Unified Score · C expert labels
   (css-labels/2.0) · D evaluation (synthetic and clinical results in separate panels; run a new synthetic evaluation).
 - **Model** (Unified Score: study selection, training, validation), **Shadow ML** (Stage 1 engine, shadow mode), **Image ML**
   (synthetic studies only).
 
-## 6b. Percival Score and Percival Intelligence (v5.22 / v5.23)
+## 6b. Percival Score and Percival Intelligence (v5.22 - v5.24)
 How it works: `PERCIVAL_ARCHITECTURE.md`. Local-only design and its verification: `LOCAL_AI_ARCHITECTURE.md`.
 1. **Research › Percival Intelligence › Switch on local learning** (once per project; synthetic projects do not need it).
-2. Review studies as usual and save the final review. Each final review is stored with the model outputs that existed when you saved it.
-3. **Start a training cycle** (or let one start automatically after 5 newly finished studies - Training tab). A cycle compares model
+2. Review studies as usual. Every candidate you call (cSS, Vessel, Normal, Artifact, Microbleed) can become a training example; Unsure
+   and Near ICH are kept but not used; uncalled candidates are never examples. Each final review is stored with the model outputs that
+   existed when you saved it.
+3. **Training Center** shows, per study and per candidate, whether a call can be used by Characteristic ML, Image ML, Fusion and the
+   Percival meta-model, and why not (not reviewed, Unsure, reviewers disagree, left out, duplicate, no MRI patch, no measurements, locked
+   test). Settings there: learn from every study with calls or finished reviews only; reviewer conflicts left out until adjudicated or the
+   effective call used; reviews from earlier versions on / off.
+4. **Start a training cycle** (or let one start automatically after 5 newly reviewed studies). The cycle first writes a dataset version
+   (`percival/datasets/dsNNN.json`) that the new model records. A cycle compares model
    families, chooses the combination by cross-validation, calibrates, sets thresholds, evaluates once on the locked test patients and
-   promotes the new model **only if it passes the acceptance criteria**; otherwise it is kept as a candidate (Registry: Make active /
-   Roll back).
-4. In the reviewer each candidate shows **one Percival Score 0-100** with red / yellow / green; open **Why this score** for the sources,
+   registers the new model as **candidate** (passed the acceptance criteria) or **experimental** (did not pass). **No model becomes
+   active by itself:** in the **Model Center** you press *Make active* (a model that did not pass needs a written reason), *Reject*,
+   *Restore* or *Roll back*; every training run, including failed ones, is listed in the Training Center.
+5. In the reviewer each candidate shows **one Percival Score 0-100** with red / yellow / green; open **Why this score** for the sources,
    contributions, disagreement pattern, uncertainty and reasons. It is hidden during a validation (blind) read. A study whose labels
    trained the model is marked *in-sample*.
-5. **Evidence & reliability** (`#intel?tab=evidence`) shows whether each source adds information, where sources share inputs, whether
+6. **Evidence & reliability** (`#intel?tab=evidence`) shows whether each source adds information, where sources share inputs, whether
    fusion helps, what disagreements meant in your reviewed cases, and the calibration plot.
+
+7. **Data integrity** shows the data format version, migrations, backups and a compatibility line per study; *Find reviews in
+   earlier projects* brings in the reviews of the same examinations from an earlier project (verified copy; the other project is only read).
 
 The score is an experimental assessment calibrated on this project's reviews - not a probability of cSS and not clinically validated.
 

@@ -1,4 +1,4 @@
-# Percival Dev - read me first (development build v5.23-dev)
+# Percival Dev - read me first (development build v5.24-dev)
 
 **Research software, not a diagnostic device.** Percival learns only on this Mac, from your own MRI and expert reviews. The models it
 comes with were tested on SYNTHETIC data only; nothing in this build is clinically validated. No internet and no external AI service
@@ -35,9 +35,38 @@ Double-clicking Percival again while it runs just brings its window back.
 Double-click **Percival Demo**. It creates synthetic studies in `~/Percival_demo` and opens on them (port 8831), so it never mixes with
 your project.
 
+## What is new in v5.24
+- **You decide which model is used.** A newly trained model is never switched on by itself. It is listed in Percival Intelligence ›
+  Model Center as *candidate* (passed the acceptance checks) or *experimental* (did not pass). Press *Make active* to use it. A model
+  that did not pass can only be made active with a written reason. *Reject*, *Restore* and *Roll back* are there too, and every change
+  is logged.
+- **Training Center shows the whole learning process:** every training run (including failed ones), which reviewed candidates each
+  part of Percival may learn from and why others are left out, the dataset versions, and a check that a dataset can be rebuilt
+  exactly from your reviews.
+- **Older reviews count for learning.** Reviews made with earlier versions (including the old call name *Vein*, now *Vessel*), partly
+  reviewed studies, studies re-detected after review and reviews brought in from an earlier project are all used. Only candidates you
+  actually called become examples; uncalled candidates are never treated as "not cSS".
+- **Training Center** (Percival Intelligence) shows every study's states separately (processed / reviewed / called / eligible / used) and
+  for every called candidate whether it can be used by each part of Percival and why not.
+- **Data integrity** shows where your data is, its format version, every migration and backup, and a compatibility line per study.
+  *Find reviews in earlier projects* brings in reviews of the same examinations from your earlier Percival / production project
+  (verified copy; the other project is only read).
+- The older research screens (Training, Predictor model, Shadow ML, Image ML) are hidden from the menu; Settings can show them again.
+  They never fed the Percival Score.
+
+## Your data, updates, backups and recovery
+- Everything you create stays in your **project folder** (default `~/Percival_project`): studies, reviews, results, Percival models and
+  predictions (`percival/`). The app itself contains program files only.
+- **Updating**: replace the app. On the next start Percival checks the format of your data; if it must be converted it first copies it to
+  `<project>/backups/percival/`, converts it, verifies every file and keeps the old copy. Nothing is deleted.
+- If a newer Percival created your data, an older app refuses to change it and says so - open it with the newer app.
+- **Restore** an earlier state: quit Percival, rename `<project>/percival` (e.g. `percival_broken`), copy the wanted folder from
+  `<project>/backups/percival/` to `<project>/percival`, start Percival.
+- Back up the whole project folder regularly (e.g. Time Machine or an encrypted external disk). Never put it in a cloud-synced folder.
+
 ## Using the Percival Score
 1. Research › **Percival Intelligence** › **Switch on local learning** (once per project).
-2. Review studies as usual and press **Save final**.
+2. Review studies as usual (every candidate you call counts; **Save final** marks the study finished).
 3. **Start a training cycle** (or let one start after every 5 newly finished studies). A new model is used only if it passes the
    acceptance tests on patients it never learned from; otherwise it is kept as a candidate (Registry: Make active / Roll back).
 4. In the reviewer each candidate has **one Percival Score (0-100)** with red / yellow / green; **Why this score** shows the evidence.

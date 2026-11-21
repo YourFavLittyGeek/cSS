@@ -78,12 +78,23 @@ try:
     check("a controlled training cycle ran from the app", s["job"]["state"] == "finished" and L and L["version"] == "v001", f"latest={None if not L else L.get('version')} versions={s.get('versions')} " + str(s["job"]) + " | " + " / ".join(s.get("log", [])[-4:]))
     if L:
         check("locked test cohort used for evaluation only", L["data"]["test_candidates"] > 0 and L["test"].get("percival", {}).get("auc") is not None, json.dumps(L["data"]))
+        ds = L["data"].get("dataset")
+        check("v5.24 model traceable to its dataset version (manifest with eligibility per component) and code version",
+              ds and os.path.exists(os.path.join(B, "percival", "datasets", f"{ds}.json")) and L["data"].get("feature_schema") and L["data"].get("code_version", {}).get("engine_sha256"),
+              json.dumps({k: L["data"].get(k) for k in ("dataset", "feature_schema", "code_version")}))
+        st = json.load(open(os.path.join(B, "percival", "STORE.json")))
+        check("v5.24 Percival store in the project folder (not in the engine code folder), schema recorded",
+              st.get("schema") == 4 and os.path.exists(os.path.join(B, "percival", "registry", "v001", "model.json")) and not os.path.exists(os.path.join(B, "unified_engine", "percival", "registry")), str(st))
         check("meta-model chosen by the documented rule", L["discovery"]["chosen"] in L["discovery"]["results"] and "1-SE" in L["discovery"]["rule"], L["discovery"]["chosen"])
         acc = L["acceptance"]
-        if not s["active"]:
-            r = post("/api/percival/promote", dict(version="v001")); s = get("/api/percival/state")
-            check("not auto-promoted (acceptance not passed) - promoted by the user instead", r.get("ok") and s["active"]["version"] == "v001" and not acc["passed"], json.dumps(acc))
-        else: check("auto-promoted because the acceptance criteria passed", acc["passed"])
+        check("v5.24 never made active automatically: v001 registered as candidate / experimental, waiting for approval",
+              not s["active"] and s["status"]["v001"]["status"] == ("candidate" if acc["passed"] else "experimental"), json.dumps(s.get("status")))
+        r = post("/api/percival/promote", dict(version="v001"))
+        if not r.get("ok"):
+            check("v5.24 a version that did not pass needs an override with a reason", r.get("needs_override") and not acc["passed"], str(r))
+            r = post("/api/percival/promote", dict(version="v001", override=True, why="test: research use"))
+        s = get("/api/percival/state")
+        check("promoted by the user (explicit approval) -> active", r.get("ok") and s["active"]["version"] == "v001" and s["status"]["v001"]["status"] == "active", str(r))
     time.sleep(6)
     sc = get(f"/api/percival/score?code={studies[2]}")
     check("every study assessed: Percival Score 0-100, band, status, components", sc.get("candidates") and all((c["percival_score"] is None or 0 <= c["percival_score"] <= 100) for c in sc["candidates"]) and set(sc["candidates"][0]["components"]) == {"math", "unified", "char", "image", "fusion"})
@@ -95,6 +106,27 @@ try:
     check("v5.23 Evidence & reliability tab: model families, fusion benefit, shared inputs, incremental value, disagreement, calibration, review snapshots",
           all(f'data-pv="{k}"' in De for k in ("family-char", "family-image", "family-fusion", "overlap", "ablation", "disagreement", "calibration")) and "Expert-review snapshots" in De and "Does fusion help?" in De)
     shot("v523_intelligence_evidence", "#intel?tab=evidence", 2600)
+    Dc = dom("#intel?tab=center", 15000)
+    check("v5.24 Training Center: separate states (studies / processed / candidates / called / eligible), datasets per component, study table",
+          all(f'data-pv="{k}"' in Dc for k in ("center", "center-tiles", "datasets", "selection")) and "Percival meta-model" in Dc and "Image ML" in Dc)
+    shot("v524_training_center", "#intel?tab=center", 2600)
+    Di = dom("#intel?tab=integrity", 15000)
+    check("v5.24 Data integrity: store schema, migration history, studies compatibility table", 'data-pv="integrity"' in Di and 'data-pv="compat"' in Di and "schema" in Di)
+    shot("v524_data_integrity", "#intel?tab=integrity", 2600)
+    Dm = dom("#intel?tab=models", 15000)
+    check("v5.24 Model Center: registry with dataset per version", "Model Center" in Dm and 'data-pv="registry"' in Dm and "ds0" in Dm)
+    check("v5.24 Model Center: status per version (active / candidate / experimental), registry details", ">active<" in Dm and 'data-pv="registry-detail"' in Dm
+          and "No model becomes active by itself" in Dm)
+    shot("v524_model_center", "#intel?tab=models", 2600)
+    post("/api/percival/eligibility", {}); Dc = dom("#intel?tab=center", 15000); R = get("/api/percival/runs")["runs"]
+    check("v5.24 Training Center: training runs, persisted eligibility record, reproducibility check", 'data-pv="runs"' in Dc and 'data-pv="eligibility-record"' in Dc
+          and "is reproducible" in Dc and R and R[0]["state"] == "finished" and R[0]["version"] == "v001", json.dumps(R)[:300])
+    rp = post("/api/percival/reproduce", dict(id=get("/api/percival/state")["datasets"][-1]["id"]))
+    check("v5.24 dataset reproducibility check: identical, or every difference explained (here the Unified step re-extracts predictors after switch-on)",
+          rp.get("ok") and (rp.get("identical") is True or (rp["n_differences"] > 0 and set(rp["changes"]) <= {"input availability changed (predictor)"})), json.dumps(rp)[:1500])
+    shot("v524_training_runs", "#intel?tab=center", 2600)
+    cc = get(f"/api/percival/candidates?code={studies[0]}")
+    check("v5.24 candidate drill-down: eligibility per component with reasons in words", cc.get("candidates") and all(set(c["components"]) == {"char", "image", "fusion", "meta", "predictor", "shadow"} and "reasons_text" in c and "missing" in c for c in cc["candidates"]), str(cc)[:300])
     Dx = dom("#intel?tab=explore", 15000)
     check("v5.23 candidate explorer lists why a candidate is uncertain", "why uncertain" in Dx)
     # the ordinary viewer: ONE primary score
@@ -108,6 +140,20 @@ try:
         if not meta: print("viewer meta not received:", last)
         Dv = dom(r["url"], 15000)
     check("viewer receives the Percival assessment", meta.get("percival") and meta["percival"]["model"] == "v001", str(r)[:150])
+    # v5.24 older research prototypes: hidden by default, still working, and the old Unified Score model cannot change the Percival Score
+    st_ = get("/api/state"); feats = (st_.get("settings") or {}).get("features") or {}
+    proto = {p_: get(p_) for p_ in ("/api/u/state", "/api/se/state", "/api/im/state", "/api/train/overview")}
+    check("v5.24 older prototypes hidden by default but their back ends still answer (records, outputs, history kept)",
+          not feats.get("show_prototypes") and all(isinstance(v_, dict) and not v_.get("error") for v_ in proto.values()),
+          json.dumps({k: (v_ or {}).get("error") for k, v_ in proto.items()}))
+    sc0 = post("/api/percival/score", dict(code=studies[2]))
+    os.makedirs(os.path.join(B, "uscore", "reports"), exist_ok=True)
+    json.dump(dict(study=studies[2], probability=0.99, category="likely cSS", note="planted by the test"), open(os.path.join(B, "uscore", "reports", f"{studies[2]}.json"), "w"))
+    json.dump(dict(kind="planted Unified Score model", coef=[9, 9, 9, 9, 9]), open(os.path.join(B, "uscore", "model_frozen.json"), "w"))
+    sc1 = post("/api/percival/score", dict(code=studies[2]))
+    strip_ = lambda R: [(c["cand_id"], c["percival_score"], c["components"]) for c in (R.get("candidates") or [])]
+    check("v5.24 the old Unified Score model / reports never change the Percival Score (only the 5 predictors are read)",
+          sc0.get("candidates") and strip_(sc0) == strip_(sc1), str(strip_(sc0))[:200])
     for k_, v_ in (("pscore", 'data-id="percival-score"' in Dv), ("/100", "/ 100" in Dv), ("no Unified card", "Unified score" not in Dv), ("no AI evidence card", "AI evidence for cSS" not in Dv)): print("viewer DOM", k_, v_)
     check("viewer: one primary score - Percival Score with its band, no competing score cards", 'data-id="percival-score"' in Dv and "/ 100" in Dv and "Unified score" not in Dv and "AI evidence for cSS" not in Dv)
     check("v5.23 viewer: the note under the score is Percival's (not the legacy rule-based meter text)", "rule-based evidence" not in Dv.split('id="aisrc"')[1][:300] if 'id="aisrc"' in Dv else False)
@@ -119,8 +165,31 @@ try:
     n1_all = L["data"]["studies"] if L else None                   # cycle 1 learned the studies that have labelled candidates (not every study does)
     check("second cycle on the selection -> v002 in the registry", s["versions"] == ["v001", "v002"] and s["latest"]["data"]["studies"] == n1_all - 2,
           f"versions {s['versions']} studies {(s.get('latest') or {}).get('data', {}).get('studies')} of {len(studies)} job {s['job']}")
-    post("/api/percival/promote", dict(version="v002")); r = post("/api/percival/rollback", {})
+    post("/api/percival/promote", dict(version="v002", override=True, why="test")); r = post("/api/percival/rollback", {})
     check("rollback to the previous model", r.get("version") == "v001" and get("/api/percival/state")["active"]["version"] == "v001")
+    def scores_now(): return {f: open(f).read() for f in glob.glob(os.path.join(B, "percival", "scores", "*.json"))}
+    prev, still = None, 0                                           # wait until the re-scoring after the rollback has finished (stable 8 s)
+    for _ in range(180):
+        cur = {f: os.path.getmtime(f) for f in glob.glob(os.path.join(B, "percival", "scores", "*.json"))}
+        still = still + 1 if cur == prev else 0; prev = cur
+        if still >= 8: break
+        time.sleep(1)
+    before = scores_now()
+    led = sorted(glob.glob(os.path.join(B, "percival", "ledger", "*", "*.json")))
+    r = post("/api/percival/shadow", dict(version="v002"))
+    for _ in range(240):
+        SH = get("/api/percival/shadow")
+        if SH["job"]["state"] in ("finished", "failed"): break
+        time.sleep(1)
+    run = next((x for x in SH["runs"] if x["version"] == "v002"), None)
+    check("v5.24 shadow mode: candidate version v002 scored every study apart (percival/shadow/), compared with the active model and prospectively",
+          r.get("ok") and SH["job"]["state"] == "finished" and run and run["active"] == "v001" and run["compared"] > 0 and "prospective" in run
+          and len(glob.glob(os.path.join(B, "percival", "shadow", "v002", "SYN*.json"))) >= 20, json.dumps(SH)[:400])
+    check("v5.24 shadow mode changes nothing reviewers see: active model, current scores and prediction ledger unchanged",
+          get("/api/percival/state")["active"]["version"] == "v001" and scores_now() == before and len(before) >= 20
+          and sorted(glob.glob(os.path.join(B, "percival", "ledger", "*", "*.json"))) == led)
+    Dm = dom("#intel?tab=models", 15000)
+    check("v5.24 Model Center shows the shadow run and the Run in shadow action", 'data-pv="shadow"' in Dm and "Run in shadow" in Dm)
     n = len(get("/api/percival/state")["versions"]); time.sleep(6)
     check("controlled cycles: no new cycle without N newly finished studies", len(get("/api/percival/state")["versions"]) == n)
 finally:

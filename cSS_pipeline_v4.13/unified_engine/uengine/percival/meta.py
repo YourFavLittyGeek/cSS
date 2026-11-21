@@ -105,6 +105,9 @@ def sens_spec(y, p, t):
 
 
 # ------------------------------------------------------------------ patient partitions
+ENGINE = "percival-engine/5.24"
+
+
 def folds(groups, k=5, seed=0):
     g = np.asarray(groups).astype(str); u = np.unique(g); r = np.random.default_rng(seed); u = u[r.permutation(len(u))]
     k = max(2, min(k, len(u))); parts = [u[i::k] for i in range(k)]
@@ -126,6 +129,15 @@ def patient_weights(rows, cap=20):
 # ------------------------------------------------------------------ inputs
 def X_of(rows, cols, key):
     return np.array([[(r.get(key) or {}).get(c, np.nan) if (r.get(key) or {}).get(c) is not None else np.nan for c in cols] for r in rows], float)
+
+
+def patch_stats(M):
+    """v5.24 image out-of-distribution descriptor: per channel mean, SD and mean absolute gradient along each patch axis (structure)"""
+    M = np.asarray(M, np.float32)
+    if M.ndim == 3: M = M[None]
+    ax = tuple(range(2, M.ndim)); f = [M.mean(ax), M.std(ax)]
+    for a in range(2, M.ndim): f.append(np.abs(np.diff(M, axis=a)).mean(ax))
+    return np.concatenate(f, axis=1)
 
 
 def maps_of(rows):
@@ -172,7 +184,7 @@ class Components:
     v5.23: the model family of Characteristic ML (logistic / gbt / forest), Image ML (pixel_logistic / cnn) and Fusion (late / feature /
     hybrid) is chosen by component_oof() on patient-grouped CV and passed in; the defaults reproduce v5.22."""
     def __init__(self, char_kind="logistic", image_kind="cnn", fusion_kind="feature"):
-        self.char_kind, self.image_kind, self.fusion_kind = char_kind, image_kind, fusion_kind; self.ood = None
+        self.char_kind, self.image_kind, self.fusion_kind = char_kind, image_kind, fusion_kind; self.ood = None; self.image_ood = None
 
     def fit(self, rows, seed=0, image_logit_oof=None, char_logit_oof=None, cnn_epochs=30):
         y = np.array([r["y"] for r in rows], float); g = [r["patient"] for r in rows]; w = patient_weights(rows)
@@ -189,6 +201,7 @@ class Components:
         if np.isfinite(il).sum() >= 10:
             self.fusion = _pl_fit(_fusion_X(self.fusion_kind, Xc, il, cl), y, g, w, _fusion_cols(self.fusion_kind))
         self.ood = IN.OOD().fit(np.c_[Xc, X_of(rows, PREDICTORS, "pred")])
+        self.image_ood = IN.OOD().fit(patch_stats(M[have])) if have.sum() >= 20 else None      # v5.24: patches unlike the training patches
         return self
 
     def _char(self, Xc):
@@ -220,13 +233,18 @@ class Components:
         Z["fusion"] = out
         if not extras: return Z
         ood = self.ood.distance(np.c_[Xc, X]) if self.ood is not None else np.full(len(rows), np.nan)
-        return Z, dict(image_spread=spread, ood=ood, ood_limit=self.ood.limit if self.ood is not None else None)
+        iood = np.full(len(rows), np.nan)
+        if self.image_ood is not None:
+            Mm, have = maps_of(rows)
+            if have.any(): iood[have] = self.image_ood.distance(patch_stats(Mm[have]))
+        return Z, dict(image_spread=spread, ood=ood, ood_limit=self.ood.limit if self.ood is not None else None, image_ood=iood,
+                       image_ood_limit=self.image_ood.limit if self.image_ood is not None else None)
 
     def to_json(self):
         return dict(kinds=dict(char=self.char_kind, image=self.image_kind, fusion=self.fusion_kind),
                     math=dict(a=self.math.a, b=self.math.b, eps=self.math.eps), unified=LR.tab_json(self.unified), char=LR.tab_json(self.char),
                     image=None if self.image is None else self.image.to_json(), fusion=LR.tab_json(self.fusion),
-                    ood=None if self.ood is None else self.ood.to_json())
+                    ood=None if self.ood is None else self.ood.to_json(), image_ood=None if self.image_ood is None else self.image_ood.to_json())
 
     @classmethod
     def from_json(cls, d):
@@ -235,7 +253,8 @@ class Components:
         c.char = LR.tab_from(d["char"]); c.image = LR.image_model_from(d.get("image"))
         f = d.get("fusion"); c.fusion = c.char if f == "char" else LR.tab_from(f)
         if f == "char": c.fusion = None                                       # v5.22 stored 'char' when no image model existed
-        c.ood = IN.OOD.from_json(d["ood"]) if d.get("ood") else None; return c
+        c.ood = IN.OOD.from_json(d["ood"]) if d.get("ood") else None
+        c.image_ood = IN.OOD.from_json(d["image_ood"]) if d.get("image_ood") else None; return c          # models before v5.24: none
 
 
 def _select(oofs, y, g, order):
@@ -484,7 +503,7 @@ def train_cycle(rows, version, seed=0, cnn_epochs=30, progress=None, mins=None):
     model = dict(schema="percival-score-model/1.0", version=version, created=now(), local_only=True, seed=seed,
                  components=C.to_json(), meta=M.to_json(), meta_ensemble=ens, calibration=cal, thresholds=th,
                  discovery=D, component_metrics=comp_metrics, agreement=agreement(Z, y), intelligence=intel,
-                 engine="percival-engine/5.23",
+                 engine=ENGINE,
                  data=dict(dev_candidates=len(dev), dev_patients=int(len(u)), dev_studies=len({r["study"] for r in dev}), test_candidates=len(test),
                            test_patients=len({r["patient"] for r in test}), css=int(sum(r["y"] for r in rows)), not_css=int(sum(1 - r["y"] for r in rows)),
                            studies=len({r["study"] for r in rows}), with_image=int(sum(r.get("maps") is not None for r in rows)),
@@ -519,12 +538,15 @@ def score_rows(model, rows):
         if spread > 2.5: reasons.append("the components disagree strongly")
         if lim is not None and ood is not None and ood > lim: reasons.append("measurements outside the training data (out-of-distribution)")
         if np.isfinite(isp) and isp > 1.0: reasons.append("image model unstable under mirroring")
+        io = X.get("image_ood"); ilim = X.get("image_ood_limit")
+        iood = float(io[i]) if io is not None and np.isfinite(io[i]) else None; img_ood = ilim is not None and iood is not None and iood > ilim
+        if img_ood: reasons.append("MRI patch unlike the training patches (image out-of-distribution)")
         missing = [c for c in INDEP if c not in avail]
         if missing and learned: reasons.append("missing: " + ", ".join(missing))
         if qc == "low_confidence_review": reasons.append("study image quality: low confidence")
         if not learned: status = "insufficient"; reasons.insert(0, "no learned source of evidence for this candidate")
         elif qc == "insufficient_quality": status = "review"; reasons.insert(0, "study image quality insufficient - expert review required")
-        elif sd[i] > 15 or spread > 2.5 or (lim is not None and ood is not None and ood > lim) or qc == "low_confidence_review" or (np.isfinite(isp) and isp > 1.0): status = "uncertain"
+        elif sd[i] > 15 or spread > 2.5 or (lim is not None and ood is not None and ood > lim) or qc == "low_confidence_review" or (np.isfinite(isp) and isp > 1.0) or img_ood: status = "uncertain"
         else: status = "reliable"
         sc = None if status == "insufficient" else float(np.clip(100 * p[i], 0, 100))
         band = None if sc is None else ("red" if sc / 100 < th["red_below"] else "green" if sc / 100 >= th["green_from"] else "yellow")
@@ -533,6 +555,7 @@ def score_rows(model, rows):
                         uncertainty_sd=round(float(sd[i]), 1), missing=missing, disagreement=round(spread, 2),
                         ood_distance=None if ood is None else round(ood, 2), ood_limit=None if lim is None else round(float(lim), 2),
                         image_tta_spread=None if not np.isfinite(isp) else round(float(isp), 2), qc=qc or None, pattern=pat,
+                        image_ood_distance=None if iood is None else round(iood, 2), image_ood_limit=None if ilim is None else round(float(ilim), 2),
                         components={c: (None if not np.isfinite(Z[c][i]) else round(float(sigmoid(Z[c][i])) * 100, 1)) for c in COMPONENTS},
                         contributions=None if contrib is None else {k: round(float(v[i]), 3) for k, v in contrib.items()}, baseline=base))
     return out

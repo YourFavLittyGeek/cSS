@@ -210,8 +210,8 @@ def extract(cand, img, vox, raw=None, ves=None, psd=None, brain=None, reg="unver
 FEATURE_SPEC = {
     "x1_vessel_continuity_mm": dict(unit="mm", range="0 .. 2 x crop margin", inputs="candidate, vessel map",
         reliable_if="vessel map present; registration ok/marginal (map is restricted by labels); censoring at the crop border is noted (lower bound)",
-        missing="unavailable without a vessel map", failure_modes="vessel map is a Hessian product (tubes only) and misses flat veins; "
-        "a cSS lying next to a vein reads as contact; gaps in the map break continuity"),
+        missing="unavailable without a vessel map", failure_modes="vessel map is a Hessian product (tubes only) and misses flat vessels; "
+        "a cSS lying next to a vessel reads as contact; gaps in the map break continuity"),
     "x2_core_contrast_nu": dict(unit="noise units", range="0 .. ~40", inputs="candidate, SWI",
         reliable_if="decomposition available, a core exists, <= 50 % of core voxels unstable",
         missing="unavailable if the 2-5 mm shell has < 20 voxels", failure_modes="shell mixes tissues on real SWI (sigma inflated); "
@@ -221,10 +221,10 @@ FEATURE_SPEC = {
         failure_modes="a 3-4 mm shift gives 1.3-2.4 mm median error (synthetic test); SWI-only anatomy is coarse"),
     "x4_sulcal_alignment": dict(unit="0..1", range="0 (crosses the surface) .. 1 (conforms to it: tangent line / sheet in the surface); not alignment along a sulcus", name="surface conformity", inputs="core/candidate, pial distance map",
         reliable_if="T1 anatomy, label shift <= 0.5 mm, line or sheet shape (axis ratio >= 2.25), normal coherence >= 0.5", missing="unavailable without anatomy",
-        failure_modes="surface veins running along a sulcus also score 1; direction errors 13-48 deg at 3-4 mm shift"),
+        failure_modes="surface vessels running along a sulcus also score 1; direction errors 13-48 deg at 3-4 mm shift"),
     "x5_extracranial_mm": dict(unit="mm", range="0 .. crop margin", inputs="candidate, unmasked SWI, brain mask",
         reliable_if="unmasked SWI on the same grid; registration ok/marginal (mask from labels); censoring noted (lower bound)",
-        missing="unavailable without the unmasked SWI", failure_modes="dark scalp / diploic veins next to the brain read as continuation; "
+        missing="unavailable without the unmasked SWI", failure_modes="dark scalp / diploic vessels next to the brain read as continuation; "
         "the brain-mask boundary moves with registration; continuation ACROSS a signal void (bone) is not followed - only "
         "continuation through non-void tissue is measured; blooming / noise at the end adds ~1-1.5 mm (unit test)"),
 }

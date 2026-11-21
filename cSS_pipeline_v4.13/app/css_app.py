@@ -38,7 +38,7 @@ SET = dict(dict(awake=True, theme="dark", backup_dir="", freesurfer_home=os.envi
 import notify_centre as NC, study_split as SS      # v5.14.2-rc4: notification centre + user study selection / training gate
 SET.setdefault("notif", dict(NC.DEFAULTS)); [SET["notif"].setdefault(k, v) for k, v in NC.DEFAULTS.items()]
 SET.setdefault("autotrain", dict(on=False, threshold=3))
-SET["features"].setdefault("train_include_archived", True)      # v5.20: archived studies stay in model training unless switched off
+SET["features"].setdefault("train_include_archived", True); SET["features"].setdefault("show_prototypes", False)   # v5.24: older ML prototypes hidden from the menu by default      # v5.20: archived studies stay in model training unless switched off
 PAT = jload("patients.json", [])
 for p in PAT:                                            # resume after a restart: interrupted runs go back to the queue
     if p.get("status") in ("running", "paused"): p.update(status="waiting", step="", note="restarted after the app was closed")
@@ -50,8 +50,10 @@ def save_pat(): jsave("patients.json", PAT)
 import processing_manager as PM                       # v5.14-gui Previous Processing Manager
 import identity_gui as IDG                            # v5.16 patient / examination identification (Standard / Incognito, encrypted vault)
 IDG.init(B, PAT, SET)
-SET.setdefault("percival_autocycle", True); SET.setdefault("percival_cycle_n", 5); SET.setdefault("percival_test_fraction", 0.2)
+SET.setdefault("percival_autocycle", True); SET.setdefault("percival_cycle_n", 5); SET.setdefault("percival_test_fraction", 0.2); SET.setdefault("percival_learn_from", "labelled")
 import percival_gui as PG                             # v5.22 Percival Score (local)
+try: import openpyxl, openpyxl.workbook, openpyxl.styles, openpyxl.comments   # v5.24: imported once at start-up - a first import from two
+except Exception: pass                                                       # server threads at once raised "partially initialized module"
 def pname(code): return IDG.ident(code, SET).get("patient_name", "")       # only in Standard mode with the vault unlocked
 try: PM_RECOVERED = PM.recover_all(B)                 # runs left "running" by a closed app become "interrupted" (previous outputs restored)
 except Exception as _e: PM_RECOVERED = {"error": str(_e)}
@@ -1078,8 +1080,11 @@ def pg_init():
         u = IDG.ID().by_file_key(c); return (IDG.ID().R["studies"].get(u) or {}).get("patient_uuid") or c
     def fingerprint_of(c):
         u = IDG.ID().by_file_key(c); return (IDG.ID().R["studies"].get(u) or {}).get("fingerprint", "") or (pget(c) or {}).get("fingerprint", "")
+    def other_projects():                                  # v5.24 review recovery: enabled earlier projects on this Mac (patients.json only)
+        import known_projects as KP
+        return [dict(path=c["path"], kind=c["kind"], patients=KP._pats(c["path"])) for c in KP.candidates(B, SET, PM.studies_on_disk) if c["enabled"]]
     PG.init(B=B, SC=SC, SET=SET, patients=lambda: list(PAT), is_reviewed=reviewed, label=study_label, patient_of=patient_of, fingerprint_of=fingerprint_of,
-            save_settings=lambda: jsave("settings.json", SET), notify=lambda t, x: notify_c("done", "training", t, x))
+            save_settings=lambda: jsave("settings.json", SET), notify=lambda t, x: notify_c("done", "training", t, x), other_projects=other_projects)
 def pg_get(op, q):
     if op == "state": return PG.state()
     if op == "score":
@@ -1088,6 +1093,17 @@ def pg_get(op, q):
         m = PG.load(q.get("version", "")) or {}; return {k: v for k, v in m.items() if k not in ("components", "meta_ensemble")}
     if op == "history": return dict(ledger=PG.history_of(q.get("code", "")))
     if op == "reviews": return dict(reviews=PG.reviews_of(q.get("code", "")))
+    if op == "candidates": return PG.candidates_of(q.get("code", ""))                        # v5.24 Training Center drill-down
+    if op == "compat": return PG.compat_report()                                             # v5.24 Data integrity
+    if op == "recoverable": return dict(items=PG.recoverable_reviews())
+    if op == "runs": return dict(runs=PG.runs())                                               # v5.24 training runs
+    if op == "run": return PG._jl(PG.P("runs", os.path.basename(q.get("id", "")) + ".json"), dict(error="unknown run"))
+    if op == "registry": return dict(registry=PG.registry())
+    if op == "eligibility": return PG._jl(PG.P("eligibility", "current.json"), dict(error="not evaluated yet"))
+    if op == "shadow": return PG.shadow_summaries()                                          # v5.24 Percival shadow mode                        # only on request: reads other projects' patients.json
+    if op == "dataset":
+        from uengine.percival import datasets as DS
+        return DS.load(PG.P(), q.get("id", "")) or dict(error="unknown dataset")
     return dict(error=f"unknown {op}")
 def pg_post(op, d):
     try:
@@ -1096,12 +1112,21 @@ def pg_post(op, d):
             if d.get("on", True): SET["features"]["unified_score"] = True; jsave("settings.json", SET)
             return r
         if op == "train": return PG.train_async("started by you")
-        if op == "promote": return PG.promote(str(d.get("version", "")), by=str(d.get("by") or "app user"))
+        if op == "promote": return PG.promote(str(d.get("version", "")), by=str(d.get("by") or "app user"), why=str(d.get("why") or "made active by you"),
+                                              override=bool(d.get("override")))
+        if op == "status": return PG.set_status(str(d.get("version", "")), str(d.get("status", "")), why=str(d.get("why") or ""))     # v5.24 reject / retire / restore
+        if op == "eligibility": return PG.eligibility_record()                                    # v5.24 re-evaluate + record eligibility
+        if op == "reproduce": return PG.reproduce_dataset(str(d.get("id", "")))                   # v5.24 dataset reproducibility
         if op == "rollback": return PG.rollback()
+        if op == "recover": return PG.recover_reviews()
+        if op == "shadow": return PG.shadow_async(str(d.get("version", "")))
         if op == "select": return PG.set_selection(d.get("codes", []), bool(d.get("include", True)))
         if op == "settings":
             for k in ("percival_autocycle", "percival_cycle_n", "percival_test_fraction"):
                 if k in d: SET[k] = d[k]
+            if "percival_learn_from" in d: SET["percival_learn_from"] = "finished" if d["percival_learn_from"] == "finished" else "labelled"
+            if "percival_conflicts" in d: SET["percival_conflicts"] = "effective" if d["percival_conflicts"] == "effective" else "exclude"
+            if "percival_use_historical" in d: SET["percival_use_historical"] = bool(d["percival_use_historical"])
             jsave("settings.json", SET); return dict(ok=True)
         if op == "score": return PG.score_study(str(d.get("code", ""))) or dict(ok=False, error="no active model or no candidates")
         return dict(ok=False, error=f"unknown {op}")

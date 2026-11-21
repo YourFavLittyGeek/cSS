@@ -89,7 +89,7 @@ def ai_opinion(r):
     else:
         ce, ve = f("css_evidence", 0.5), f("vein_evidence", 0.5)
         s = ce / max(ce + ve, 1e-6); src = "rule-based evidence (not a probability)"
-    tier = int(f("review_priority_rank", 1)); treason = str(r.get("review_priority_reason", "") or "")
+    tier = int(f("review_priority_rank", 1)); treason = str(r.get("review_priority_reason", "") or "").replace("vein", "vessel")   # v5.24 display: 'Vessel' wording (stored text unchanged)
     mimic = ""
     if f("skull_frac", 0) >= 0.5: mimic = "artifact (dark skull band)"; s *= 0.4
     elif f("midline_frac", 0) >= 0.5 and f("pial_dist_mm", -1) > 0: mimic = "a midline structure (falx / sinus)"; s *= 0.4
@@ -630,7 +630,8 @@ def meta(sid, reviewer, mode=""):
                           feat={k: g(k) for k in ("darkness_z", "pial_dist_mm", "tube_ratio", "tram_frac", "extent_mm", "n_slices",
                                                   "css_evidence", "vein_evidence", "score")}))
     if audit: cands += s.audit_cands(reviewer)
-    up = f"{B}/unified_engine/percival/scores/{sid}.json"                # v5.22 Percival Score of the app's local model (display only, an AI prediction)
+    up = f"{B}/percival/scores/{sid}.json"                                # v5.24 store (before: unified_engine/percival/, migrated by the app)
+    if not os.path.exists(up): up = f"{B}/unified_engine/percival/scores/{sid}.json"                # v5.22 Percival Score of the app's local model (display only, an AI prediction)
     try: percival = json.load(open(up)) if os.path.exists(up) else None
     except Exception: percival = None
     return dict(study=sid, studies=IDS, labels={k: STUDY_LABELS[k] for k in IDS if k in STUDY_LABELS}, percival=percival, groups=GROUPS, shape=list(s.shape), vox=s.vox, cands=cands, calls=calls, mode="validation" if audit else "", open_read=OPEN_READ, note=note, qc=s.qc,

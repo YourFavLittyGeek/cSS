@@ -847,7 +847,7 @@ const M3DEF={volume:"voxel count x voxel volume (mm3)",surface:"area of the marc
  skel:"curve skeleton (Lee thinning); shown only for curve-like objects - the medial set of a sheet is a surface",local:"per voxel, spread of the mask within 3x its local thickness: tube = thin and round across and elongated; sheet = thin in one direction; blob = solid in all three",
  hess:"image intensity Hessian at 0.8 / 1.6 mm (detect_css.py convention: |l1|<=|l2|<=|l3|, dark structure -> l3 > 0): curvature of the SWI signal, independent of the mask",
  surf:"share of candidate voxels within 1 mm of the pial surface (signed distance of the T1 labels); footprint = cortex-surface voxels within 1.5 mm",
- ves:"the detector's vessel map (work/ID_vessels): a connection is evidence of vascular anatomy, not proof that the candidate is a vein"};
+ ves:"the detector's vessel map (work/ID_vessels): a connection is evidence of vascular anatomy, not proof that the candidate is a vessel"};
 function m3Defaults(){return {mode:"isolated",rep:"surface",color:"geometry",layers:{vessel:false,dark:false,cortex:false,skeleton:false,pca:false,footprint:false,contact:true,core:false,support:false,mri:{axial:false,coronal:false,sagittal:false}},comp:null,slab:-1,margin:8,light:document.documentElement.dataset.theme==="light"}}
 async function m3Open(){const c=M&&M.cands[ci];if(!c||c.audit){status("3-D analysis: choose a shown candidate",true);return}
   $("#m3d").classList.add("show");m3open=true;if(!m3o)m3o=m3Defaults();m3o.light=document.documentElement.dataset.theme==="light";
@@ -936,7 +936,7 @@ window.addEventListener("mousedown",e=>{if(!e.target.closest(".menu")&&!e.target
 // v5.17 Quick Add: grouped calls (cSS | mimics | other) with optional subtype chips; the call keys are unchanged (Y V N B A U H),
 // Shift+1..6 picks a subtype of the current call, Z undoes, Delete clears. A subtype never changes the call's meaning.
 const QA=[["cSS","cSS",[]],["Mimic","Vessel",["VS","VC","VT","VX","TV"]],["Mimic","Normal",["NI","CA","SAH","LN","HI"]],["Mimic","Microbleed",[]],["Mimic","Artifact",["A","AM"]],["Other","Unsure",[]],["Other","Near ICH",[]]];
-const FINELBL={VS:"surface vein",VC:"sulcal vein",VT:"transcortical vein",VX:"sinus-adjacent vein",TV:"thrombosed vein",NI:"iron-rich cortex",CA:"calcification",SAH:"acute cSAH",LN:"laminar necrosis",HI:"haemorrhagic infarct",A:"air-bone",AM:"motion"};
+const FINELBL={VS:"surface vessel",VC:"sulcal vessel",VT:"transcortical vessel",VX:"sinus-adjacent vessel",TV:"thrombosed vessel",NI:"iron-rich cortex",CA:"calcification",SAH:"acute cSAH",LN:"laminar necrosis",HI:"haemorrhagic infarct",A:"air-bone",AM:"motion"};
 const KEYOF=Object.fromEntries(Object.entries(CALLKEYS).map(([k,c])=>[c,k.toUpperCase()]));
 $("#dec").innerHTML=["cSS","Mimic","Other"].map(g=>`<div class="qag"><div class="qah">${g==="cSS"?"cSS":g==="Mimic"?"Mimics (not cSS)":"Other"}</div>${QA.filter(x=>x[0]===g).map(([_,c,subs])=>
   `<div class="qai"><button class="b qa" data-call="${c}" title="${CALLLBL[c]} (key ${KEYOF[c]})"><kbd>${KEYOF[c]}</kbd>${c==="Normal"?"Normal / other":CALLLBL[c]}</button>${subs.length?`<div class="qas">${subs.map((f,i)=>`<button class="chip" data-call="${c}" data-fine="${f}" title="${FINELBL[f]} · Shift+${i+1} after ${KEYOF[c]}">${FINELBL[f]}</button>`).join("")}</div>`:""}</div>`).join("")}</div>`).join("")+

@@ -41,6 +41,16 @@ def candidates(base, sid):
     return _read(p) if os.path.exists(p) else pd.DataFrame(columns=["cand_id"] + FP)
 
 
+def match_one(cand, row):
+    """v5.24: attach ONE call row (from any calls file, e.g. a review made by an earlier version / project) to the current candidates by
+    fingerprint (centroid within 2 voxels, volume within 15 %) - never by number. -> cand_id or None. The single place outside this module's
+    own readers where calls are matched (Percival's earlier-version reviews use it)."""
+    if not len(cand) or not all(c in row for c in FP): return None
+    try: m, _ = match_calls(cand, pd.DataFrame([row]))
+    except Exception: return None
+    return int(next(iter(m))) if m else None
+
+
 def sources(base, sid):
     """-> [dict(reviewer, file, origin, rows DataFrame)] (per-reviewer files; the legacy shared file only when none exist)"""
     out = []

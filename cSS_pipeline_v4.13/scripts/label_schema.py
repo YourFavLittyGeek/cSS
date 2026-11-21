@@ -18,7 +18,7 @@ Every v2 row keeps its source (file, schema, original code / call, reviewer, tim
 import glob, os, sys
 import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from css_common import LABELS
+from css_common import LABELS, norm_call
 
 SCHEMA = "css-labels/2.0"
 CLASSES = ("definite_css", "definite_mimic", "indeterminate", "insufficient_quality", "out_of_scope")
@@ -68,12 +68,20 @@ def build(base):
             rows.append(dict(study_id=r.get("study_id"), list=r.get("list"), obj_id=r.get("obj_id"), cand_uid=r.get("cand_uid"), reviewer_id=r.get("reviewer_id"),
                              session=r.get("session"), primary_class=cls, mimic_subtype=sub, confidence=r.get("confidence") or "", scope_reason=scope, quality_reason="",
                              time=r.get("timestamp", ""), source=os.path.relpath(p, base), source_schema="css-labels/1.0", source_value=r.get("code")))
-    for p in sorted(glob.glob(os.path.join(base, "review", "*_calls_*.csv"))):
-        sid = os.path.basename(p).split("_calls_")[0]
+    files = [(p, os.path.basename(p).split("_calls_")[0]) for p in sorted(glob.glob(os.path.join(base, "review", "*_calls_*.csv")))]
+    have = {sid for _, sid in files}
+    # v5.24: studies reviewed with versions before the per-reviewer files (v5.7) only have the shared review/ID_calls.csv - read it for
+    # those studies (reviewer 'earlier version'), never in addition to per-reviewer files (it is their derived effective copy)
+    for p in sorted(glob.glob(os.path.join(base, "review", "*_calls.csv"))):
+        sid = os.path.basename(p)[:-len("_calls.csv")]
+        if sid and sid not in have: files.append((p, sid))
+    for p, sid in files:
         try: d = pd.read_csv(p, dtype=str)
         except Exception: continue
+        legacy = not os.path.basename(p).startswith(f"{sid}_calls_")
         for _, r in d.iterrows():
-            call = r.get("call")
+            call = norm_call(r.get("call")); call = call.strip() if isinstance(call, str) else call
+            if legacy and not isinstance(r.get("reviewer"), str): r = r.copy(); r["reviewer"] = "earlier version (shared calls file)"
             if not isinstance(call, str) or call not in CALL_MAP: continue
             cls, sub, scope = from_call(call, r.get("fine_code") if isinstance(r.get("fine_code"), str) else "")
             uid = f"{sid}:{int(float(r['vox_i']))}:{int(float(r['vox_j']))}:{int(float(r['vox_k']))}:{float(r['volume_mm3']):g}" if all(

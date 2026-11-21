@@ -81,8 +81,10 @@ if M:
     check("v5.23 reliability (calibration) table on development out-of-fold scores", len(I["reliability"]) >= 2 and all(0 <= r["observed"] <= 1 for r in I["reliability"]))
     check("v5.23 Platt calibration is ridge-penalised (no runaway slope on separable data)", M["calibration"].get("ridge", 0) > 0 and abs(M["calibration"]["b"]) < 5, json.dumps(M["calibration"]))
     acc = M["acceptance"]; act = PG.active()
-    check("acceptance evaluated; promoted only if passed", ("passed" in acc) and ((act is not None and act["version"] == M["version"]) == acc["passed"]), json.dumps(acc))
-    if act is None: PG.promote(M["version"], why="test")
+    check("acceptance evaluated; never made active automatically (v5.24: explicit approval)", ("passed" in acc) and act is None, json.dumps(acc))
+    r_ = PG.promote(M["version"])
+    check("a version that did not pass needs an override with a reason", acc["passed"] or (not r_["ok"] and r_.get("needs_override")), str(r_))
+    if not r_["ok"]: PG.promote(M["version"], why="test: research use", override=True)
     sc = json.load(open(PG.P("scores", f"{studies[0]}.json"))) if os.path.exists(PG.P("scores", f"{studies[0]}.json")) else (time.sleep(3) or json.load(open(PG.P("scores", f"{studies[0]}.json"))))
     S0 = sc["candidates"]
     check("every candidate scored 0-100 with band, status, uncertainty, components and contributions", all((s["percival_score"] is None or 0 <= s["percival_score"] <= 100) and s["status"] in ("reliable", "uncertain", "insufficient", "review") and set(s["components"]) == set(MT.COMPONENTS) for s in S0))
@@ -113,8 +115,12 @@ if M:
     # second cycle -> new version; ledger keeps the old prediction
     led0 = sorted(glob.glob(PG.P("ledger", studies[0], "*.json")))
     PG.set_selection(studies[-4:], include=False); PG._train("test cycle 2"); vs = PG.versions()
-    check("second cycle: new registry version; selection respected", len(vs) == 2 and PG.load(vs[-1])["data"]["studies"] == len(studies) - 4)
-    PG.promote(vs[-1], why="test"); time.sleep(4); led1 = sorted(glob.glob(PG.P("ledger", studies[0], "*.json")))
+    from uengine.percival import datasets as DS_
+    used = lambda v: {e["study"] for e in DS_.load(PG.P(), PG.load(v)["data"]["dataset"])["examples"] if e.get("partition") and e["components"].get("meta")}
+    u1, u2 = (used(vs[0]), used(vs[-1])) if len(vs) == 2 else (set(), set())
+    check("second cycle: new registry version; selection respected", len(vs) == 2 and u2 == u1 - set(studies[-4:]) and PG.load(vs[-1])["data"]["studies"] == len(u2),
+          f"versions {vs} cycle1 {len(u1)} cycle2 {len(u2)} left out {sorted(set(studies[-4:]) & u2)} job {PG.JOB.get('error')}")
+    PG.promote(vs[-1], why="test", override=True); time.sleep(4); led1 = sorted(glob.glob(PG.P("ledger", studies[0], "*.json")))
     check("prediction ledger: the old model's assessment is kept unchanged, the new one added", len(led1) == len(led0) + 1 and all(json.load(open(p))["model"] for p in led1))
     # v5.23 expert-review snapshot: label + the prediction that existed at review time, immutable
     json.dump(dict(study=studies[0], reviewer="Dr A", saved=time.strftime("%Y-%m-%d %H:%M:%S"), meter_visible=1, read_mode="second look"), open(os.path.join(B, "review", f"{studies[0]}_final_Dr_A.json"), "w"))
