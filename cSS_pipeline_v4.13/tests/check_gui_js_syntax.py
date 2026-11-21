@@ -7,11 +7,12 @@ def check(n, ok, info=""): print(f"{'PASS' if ok else 'FAIL'}  {n}  {info}"); (N
 if sys.platform != "darwin": print("SKIP  not macOS (JavaScriptCore via osascript)"); print("ALL PASS"); sys.exit(0)
 t = open(os.path.join(ROOT, "app", "css_app.html")).read()
 tmp = tempfile.mkdtemp(); inline = os.path.join(tmp, "inline.js"); open(inline, "w").write("\n".join(re.findall(r"<script>(.*?)</script>", t, re.S)))
-for f in [inline] + sorted(glob.glob(os.path.join(ROOT, "app", "*.js"))) + [os.path.join(ROOT, "scripts", "morph3d_view.js")]:
+rw = os.path.join(tmp, "review_web_inline.js"); open(rw, "w").write("\n".join(re.findall(r"<script>(.*?)</script>", open(os.path.join(ROOT, "scripts", "review_web.html")).read(), re.S)))
+for f in [inline, rw] + sorted(glob.glob(os.path.join(ROOT, "app", "*.js"))) + [os.path.join(ROOT, "scripts", "morph3d_view.js")]:
     if not os.path.exists(f): continue
     js = f"var s=$.NSString.stringWithContentsOfFileEncodingError({f!r},4,null).js; try{{new Function(s); 'ok'}}catch(e){{'SYNTAX: '+e}}"
     r = subprocess.run(["osascript", "-l", "JavaScript", "-e", js], capture_output=True, text=True, timeout=60)
-    name = "css_app.html inline script" if f == inline else os.path.relpath(f, ROOT)
+    name = "css_app.html inline script" if f == inline else "review_web.html inline script" if f == rw else os.path.relpath(f, ROOT)
     check(f"parses: {name}", r.stdout.strip() == "ok", (r.stdout + r.stderr).strip()[:200])
 for js in re.findall(r'<script src="/([\w.]+)"></script>', t):
     check(f"script tag has a file: {js}", os.path.exists(os.path.join(ROOT, "app", js)))

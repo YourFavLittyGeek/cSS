@@ -30,11 +30,14 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 from scipy import ndimage as ndi
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
-from css_common import base as _base, save_calls, FP, norm_call
+from css_common import base as _base, save_calls, FP, norm_call, LABELS
 import call_ledger as CL      # v5.15: every reviewer kept; shared ID_calls.csv / ID_score.json = EFFECTIVE calls (policy, default newest)
 
 B = _base()
 CALLS = ["cSS", "Vessel", "Normal", "Artifact", "Unsure", "Near ICH", "Microbleed"]   # v5.7: Microbleed (fine code MB) = not cSS
+# v5.17 Quick Add: optional fine label (css_common.LABELS code) recorded WITH a call; it never changes the call's meaning (see label_schema.py)
+FINE = {"cSS": ("C",), "Vessel": ("V", "VS", "VC", "VT", "VX", "TV"), "Normal": ("N", "NI", "CA", "SAH", "LN", "HI"), "Artifact": ("A", "AM"),
+        "Microbleed": ("MB",), "Unsure": ("U",), "Near ICH": ("H",)}
 SEQ_NAMES = {"swi": "SWI", "flair": "FLAIR", "t1": "T1", "t2": "T2", "phase": "Phase (filtered)"}
 LOCK = threading.Lock()
 slug = lambda s: re.sub(r"[^A-Za-z0-9]+", "_", s.strip()).strip("_") or "reviewer"
@@ -427,15 +430,25 @@ class Study:
             cm = r.get("comment", ""); call = r.get("call", "")
             out[int(C[ok[d[ok].argmin()], 0])] = dict(call=norm_call(call) if isinstance(call, str) else "",
                                                      comment=cm if isinstance(cm, str) else "",
-                                                     time=r.get("time") if isinstance(r.get("time"), str) else "")
+                                                     time=r.get("time") if isinstance(r.get("time"), str) else "",
+                                                     fine=r.get("fine_code") if isinstance(r.get("fine_code"), str) else "")
         if lost: note += f" {lost} earlier call(s) match no current candidate (detector re-run) and were left out."
         return out, note.strip()
 
     def save(self, reviewer, calls, cand_id=None, action="call", ai=None):
         c = self.df.set_index("cand_id")
         rows = [dict(cand_id=k, call=v["call"], comment=v.get("comment", ""), reviewer=reviewer, time=v.get("time", ""),
-                     **{f: c.loc[k, f] for f in FP}) for k, v in sorted(calls.items()) if v.get("call") or v.get("comment")]
-        pd.DataFrame(rows, columns=["cand_id", "call", "comment", "reviewer", "time"] + FP).to_csv(self.rpath(reviewer), index=False)
+                     **{f: c.loc[k, f] for f in FP}, fine_code=v.get("fine", "")) for k, v in sorted(calls.items()) if v.get("call") or v.get("comment")]
+        # v5.17: calls made on candidates of an EARLIER run (no current candidate matches them) are kept unchanged - they are the human
+        # history that candidate lineage carries forward or asks you to confirm; before v5.17 the next save dropped them
+        old = pd.read_csv(self.rpath(reviewer)) if os.path.exists(self.rpath(reviewer)) else pd.DataFrame()
+        if len(old) and all(k in old.columns for k in FP):
+            C = self.df[FP].to_numpy(float); keep = []
+            for _, r in old.iterrows():
+                dd = np.sqrt(((C[:, :3] - r[FP[:3]].to_numpy(float)) ** 2).sum(1)); dv = np.abs(C[:, 3] - float(r.volume_mm3)) / max(float(r.volume_mm3), 1.0)
+                if not ((dd <= 2.0) & (dv <= 0.15)).any(): keep.append(r.to_dict())
+            rows += keep
+        pd.DataFrame(rows, columns=["cand_id", "call", "comment", "reviewer", "time"] + FP + ["fine_code"]).to_csv(self.rpath(reviewer), index=False)
         primary(self.sid, reviewer, if_missing=True)                              # kept for display / the "use this reviewer" choice
         CL.materialize(B, self.sid, by=reviewer, rescore=False)                  # v5.15: shared ID_calls.csv = effective calls (no re-score per click)
         if cand_id is not None:
@@ -619,7 +632,7 @@ def meta(sid, reviewer, mode=""):
                 final=load_final(sid, reviewer) if reviewer else None, primary=primary(sid), calls_rule=CL.effective(B, sid)["rule_text"],
                 import_sources=s.import_sources(reviewer) if reviewer else [],
                 ref=dict(mu=s.mu, sd=s.sd, src=s.ref_src), missed=s.missed().to_dict("records"), reviewers=reviewers(),
-                call_names=CALLS, side_check=side_check(s), snapdir=f"{B}/review/snapshots/{sid}", acq=acq_info(sid))
+                call_names=CALLS, fine_labels={k: [[c, LABELS[c][0]] for c in v] for k, v in FINE.items()}, side_check=side_check(s), snapdir=f"{B}/review/snapshots/{sid}", acq=acq_info(sid))
 
 
 class H(BaseHTTPRequestHandler):
@@ -734,7 +747,9 @@ class H(BaseHTTPRequestHandler):
                     calls, _ = s.load_calls(rev); cid = int(d["cand_id"]); cur = calls.get(cid, dict(call="", comment=""))
                     if "call" in d:
                         if d["call"] not in CALLS + [""]: return self._send(dict(error="unknown call"), code=400)
-                        cur["call"] = d["call"]; cur["time"] = now()
+                        fine = str(d.get("fine") or "")
+                        if fine and fine not in FINE.get(d["call"], ()): return self._send(dict(error=f"label {fine} does not belong to the call {d['call']}"), code=400)
+                        cur["call"] = d["call"]; cur["time"] = now(); cur["fine"] = fine
                         if d["call"] and isinstance(cur.get("comment"), str):      # an explicit call confirms an inherited call / answers a hint
                             cur["comment"] = re.sub(r"^\[(inherited|old calls|imported)[^\]]*\]\s*", "", cur["comment"])
                     if "comment" in d: cur["comment"] = str(d["comment"])[:500]

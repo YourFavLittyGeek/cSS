@@ -173,6 +173,19 @@ try:
 finally: srv3.kill()
 print(f"--show-excluded: {len(_ex)} excluded objects listed with their rule; calls kept apart from the score")
 print(f"default (no --audit): a new reviewer's validation read lists only the {n} shown candidates")
+# v5.17: Quick Add fine labels are stored with the call and mapped to css-labels/2.0; calls on candidates of an EARLIER run survive a save
+sys.argv = sys.argv[:1]; sys.path.insert(0, S); import review_web as rw, label_schema as LS
+rw.IDS[:] = ["PH3"]; st_ = rw.study("PH3"); ids_ = list(st_.df.cand_id.astype(int)); pq = f"{B}/review/PH3_calls_Reader_Q.csv"
+pd.DataFrame([dict(cand_id=999, call="cSS", comment="earlier run", reviewer="Reader Q", time="2026-01-01 09:00:00", vox_i=1, vox_j=1, vox_k=1, volume_mm3=1.0)]).to_csv(pq, index=False)
+st_.save("Reader Q", {ids_[0]: dict(call="Vessel", comment="", time="2026-02-02 10:00:00", fine="VS")})
+q_ = pd.read_csv(pq)
+if not ((q_.cand_id == 999) & (q_.comment == "earlier run")).any(): fail("a call on an earlier run's candidate was dropped by a save")
+if q_[q_.cand_id == ids_[0]].fine_code.tolist() != ["VS"]: fail(f"fine label not stored with the call: {q_.to_dict('records')}")
+if "CA" in rw.FINE["Vessel"] or "VS" not in rw.FINE["Vessel"]: fail("fine labels must belong to their call")
+v2 = LS.build(B); r_ = v2[(v2.reviewer_id == "Reader Q") & (v2.obj_id == str(ids_[0]))]
+if r_.primary_class.tolist() != ["definite_mimic"] or r_.mimic_subtype.tolist() != ["vein_surface"]: fail(f"css-labels/2.0 conversion: {r_.to_dict('records')}")
+if LS.from_v1("C", 3)[0] != "indeterminate" or LS.from_v1("VS", 5)[1] != "vein_surface" or LS.from_v1("H", None)[0] != "out_of_scope": fail("1.0 -> 2.0 conversion rules")
+os.remove(pq); print("Quick Add fine labels stored and mapped to css-labels/2.0; earlier-run calls survive saves")
 for f in ("PH3_calls.csv", "PH3_calls_Reader_A.csv", "PH3_review_log.csv", "PH3_missed.csv", "reviewers.json"): os.remove(f"{B}/review/{f}")
 print(f"review_web: {n} candidates with meter, name required, calls / comment / missed mark stored with the reviewer, re-loaded per reviewer;\n"
       f"   final score {rs['multifocality_0_4']}/4 ({rs['category']}), AI score {ai['multifocality_0_4']}/4 in its own file, final record + cohort report written")

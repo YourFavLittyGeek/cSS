@@ -64,7 +64,10 @@ select,input[type=text]{background:var(--bg);border:1px solid var(--line);border
 #gauge{display:block;width:176px;margin:0 auto}.panel .btn,.panel .b{font-size:13px;padding:6px 7px}
 .band{display:flex;justify-content:space-between;font-size:12px;font-weight:600;margin-top:-4px}
 .say{margin:8px 0 5px;padding:7px 9px;border-left:3px solid var(--mut);background:var(--bg);border-radius:4px;user-select:text}
-.dec{display:flex;flex-wrap:wrap;gap:6px}.dec .b{flex:1 1 auto;justify-content:center;text-align:center;white-space:nowrap;gap:6px;padding:6px 8px}.b{border:1px solid var(--line);border-radius:8px;display:flex;gap:8px;align-items:center;background:var(--bg);cursor:pointer;text-align:left}
+.dec{display:flex;flex-direction:column;gap:8px}.qag{border:1px solid var(--line);border-radius:10px;padding:6px}.qah{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--mut);margin:0 0 4px 2px}
+.qai{margin:4px 0}.dec .b.qa{width:100%;justify-content:flex-start;font-size:14.5px;padding:9px 10px;gap:10px}.qas{display:flex;flex-wrap:wrap;gap:4px;margin:4px 0 2px 30px}
+.chip{border:1px solid var(--line);border-radius:999px;background:var(--bg);color:var(--text);font-size:12px;padding:3px 9px;cursor:pointer}.chip.on{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 25%,transparent);font-weight:700}
+.qaf{display:flex;gap:6px;align-items:center}.b{border:1px solid var(--line);border-radius:8px;display:flex;gap:8px;align-items:center;background:var(--bg);cursor:pointer;text-align:left}
 .b:hover{border-color:var(--acc)}.b.on{font-weight:700}
 kbd{font:600 12px Menlo,Consolas,monospace;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:1px 6px;background:var(--panel);color:var(--text);white-space:nowrap}
 #comment{width:100%;margin-top:8px;height:30px;border-radius:15px;padding:4px 14px;font-size:12.5px}#comment::placeholder{color:var(--mut);opacity:.8}
@@ -129,7 +132,7 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
   <div class="phdr"><label><input type="checkbox" id="ahchk"> Auto-hide panel</label><span class="sp"></span><span class="hb" id="hideb" title="hide the panel (Space)">Hide &#9656;</span></div>
   <div class="tabs" id="tabs"><button data-tab="viewer" title="F1">Viewer</button><button data-tab="cands" title="F2">Candidates</button><button data-tab="calls" title="F3">Calls summary</button></div>
   <div class="tab" id="tab-viewer">
-   <div class="card" id="aicard"><div class="h"><span>AI evidence for cSS</span><span class="mut sm">hide <kbd>K</kbd></span></div>
+   <div class="card" id="aicard"><div class="h"><span title="Automated pipeline output - NOT a human review and never saved as one">AI evidence for cSS <span class="mut sm" id="aiwho">· automated: rule-based detector, not a reviewer</span></span><span class="mut sm">hide <kbd>K</kbd></span></div>
     <div id="aibody"><svg id="gauge" viewBox="0 0 220 122"></svg>
     <div class="band"><span style="color:#d64545">not cSS</span><span style="color:#c99a1c">uncertain</span><span style="color:#3aa655">cSS likely</span></div>
     <div class="say" id="aisay"></div><div class="mut sm" id="aisrc"></div><div class="mut sm" id="aiconf" style="margin-top:4px"></div></div></div>
@@ -138,7 +141,7 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
     <div class="mut sm">drag = rotate · wheel = zoom · double-click = reset · <span style="color:#e04b4b">red</span> structure, <span style="color:#ffd25a">yellow</span> detector object, <span style="color:#7d8590">grey</span> cortex</div>
     <div class="say" id="s3say"></div><div class="mut sm" id="s3meas"></div></div></div>
    <div class="card" id="ucard"><div class="h"><span>Unified score (experimental)</span><span class="mut sm">research only</span></div><div id="ubody" class="sm"><span class="mut">—</span></div></div>
-   <div class="card" id="deccard"><div class="h"><span>Your decision</span><span class="mut sm" id="curcall"></span></div>
+   <div class="card" id="deccard"><div class="h"><span title="Your call as the human reviewer. AI values are shown separately and never become your call.">Your call (human reviewer)</span><span class="mut sm" id="curcall"></span></div>
     <div class="dec" id="dec"></div>
     <input type="text" id="comment" placeholder="Add a comment…  (C)" maxlength="500" autocomplete="off">
     <div class="saved" id="saved"></div></div>
@@ -527,18 +530,20 @@ function go(i,keepView){if(!M.cands.length){paintLists();draw();return}ci=Math.m
   $("#candinfo").textContent=(c.audit&&c.rule?`EXCLUDED OBJECT (rule: ${c.rule}) · `:"")+`Candidate ${ci+1} of ${M.cands.length} · #${did(c)} · ${c.hemi==="L"?"left":"right"} ${c.region} · ${Math.round(c.volume)} mm³`;
   gauge(c.ai);$("#aiconf").innerHTML=(c.conf===null||c.conf===undefined)?"":`<b>Confidence model: ${Math.round(c.conf)} %</b>${c.conf_why?" · "+esc(c.conf_why):""} · fitted on 10 patients, not a validated probability`;
   paintDecision();paintLists();draw();s3Bind();s3Load()}
-function paintDecision(){const c=cand();if(!c)return;const st=calls[c.id]||{};$$("#dec .b").forEach(b=>{const on=b.dataset.call===st.call;b.classList.toggle("on",on);b.style.borderColor=on?CALLCOL[st.call]:"";b.style.background=on?CALLCOL[st.call]+"33":""});
-  $("#curcall").textContent=st.call?("saved: "+CALLLBL[st.call]):"not read yet";if(document.activeElement!==$("#comment"))$("#comment").value=st.comment||""}
+function paintDecision(){const c=cand();if(!c)return;const st=calls[c.id]||{};$$("#dec .b.qa").forEach(b=>{const on=b.dataset.call===st.call;b.classList.toggle("on",on);b.style.borderColor=on?CALLCOL[st.call]:"";b.style.background=on?CALLCOL[st.call]+"33":""});
+  $$("#dec .chip").forEach(b=>{const on=b.dataset.call===st.call&&b.dataset.fine===st.fine;b.classList.toggle("on",on);b.style.display=b.dataset.call===st.call||!st.call?"":"none"});
+  $("#qaWho").textContent=reviewer()?`human reviewer: ${reviewer()}`:"enter your name to call";
+  $("#curcall").textContent=st.call?("your call: "+CALLLBL[st.call]+(st.fine&&FINELBL[st.fine]?" · "+FINELBL[st.fine]:"")):"not read yet";if(document.activeElement!==$("#comment"))$("#comment").value=st.comment||""}
 const firstUnread=from=>{const n=M.cands.findIndex((x,j)=>j>from&&!isDone(x));return n<0?M.cands.findIndex(x=>!isDone(x)):n};
-async function decide(call,isUndo){const c=cand();if(!c)return;if(!reviewer()){status("Enter your name (upper right) first.",true);$("#reviewer").focus();return}
-  const prev=callOf(c);if(!isUndo)undo.push({i:ci,prev});
-  try{const r=await api("/api/call",{study:M.study,reviewer:reviewer(),cand_id:c.id,mode:vmode?"validation":"",call,action:isUndo?"undo":(revoteMode&&call?"revote":(call?"call":"clear")),meter:showAI&&!vmode?c.ai.score:""});calls=r.calls;status("✓ Saved automatically · "+r.saved.slice(11));
+async function decide(call,isUndo,fine){const c=cand();if(!c)return;if(!reviewer()){status("Enter your name (upper right) first.",true);$("#reviewer").focus();return}
+  const prev=callOf(c),prevFine=(calls[c.id]||{}).fine||"";if(!isUndo)undo.push({i:ci,prev,prevFine});
+  try{const r=await api("/api/call",{study:M.study,reviewer:reviewer(),cand_id:c.id,mode:vmode?"validation":"",call,fine:fine||"",action:isUndo?"undo":(revoteMode&&call?"revote":(call?"call":"clear")),meter:showAI&&!vmode?c.ai.score:""});calls=r.calls;status("✓ Saved automatically · "+r.saved.slice(11));
     paintDecision();paintLists();
     if(call&&!isUndo&&autoNext){const m=firstUnread(ci);if(m>=0)setTimeout(()=>go(m),180);else if(!revoteMode)setTimeout(summary,250)}}
   catch(e){status("NOT SAVED: "+e.message,true)}}
 async function saveComment(){const c=cand();if(!c)return;const t=$("#comment").value;if(((calls[c.id]||{}).comment||"")===t)return;if(!reviewer()){status("Enter your name first.",true);return}
   try{const r=await api("/api/call",{study:M.study,reviewer:reviewer(),cand_id:c.id,mode:vmode?"validation":"",comment:t,action:"comment"});calls=r.calls;status("✓ Comment saved · "+r.saved.slice(11));paintLists()}catch(e){status("NOT SAVED: "+e.message,true)}}
-function doUndo(){const u=undo.pop();if(!u){status("Nothing to undo.");return}go(u.i,false);decide(u.prev,true)}
+function doUndo(){const u=undo.pop();if(!u){status("Nothing to undo.");return}go(u.i,false);decide(u.prev,true,u.prevFine)}
 function nextUnread(){const m=firstUnread(ci);if(m>=0)go(m);else status("All candidates are read.")}
 const differIdx=()=>M.cands.map((c,i)=>!c.audit&&verdict(c)==="differ"?i:-1).filter(i=>i>=0);
 function auditHtml(r){const A=(r.audit||[]);if(!A.length)return "";
@@ -592,7 +597,7 @@ function exportCsv(){if(vmode){status("Export is switched off during a validatio
 
 // ---------- v5.7 validation read, primary reviewer, import ----------
 function paintMode(){const b=$("#vsym");if(b)b.style.display=vmode?"flex":"none";
-  const h=$("#aicard .h span:last-child");if(h)h.innerHTML=vmode?"hidden in a validation read 🔒":'hide <kbd>K</kbd>';tog()}
+  const h=$("#aicard .h > span:last-child");if(h)h.innerHTML=vmode?"hidden in a validation read 🔒":'hide <kbd>K</kbd>';tog()}
 function nextAudit(){const L=M.cands.map((c,i)=>c.audit?i:-1).filter(i=>i>=0);
   if(!L.length){status("No excluded objects in this read (validation read off, or none sampled).",true);return}
   if(!M.cands.some(c=>c.audit&&c.rule)){status("The excluded objects are revealed after your final save (press Q).",true);return}
@@ -899,8 +904,17 @@ $$("#mbar span").forEach(s=>{const open=()=>{closeMenus();s.classList.add("on");
 window.addEventListener("mousedown",e=>{if(!e.target.closest(".menu")&&!e.target.closest("#mbar"))closeMenus()});
 
 // ---------- controls ----------
-$("#dec").innerHTML=Object.entries(CALLKEYS).map(([k,c])=>`<button class="b" data-call="${c}" title="${CALLLBL[c]}"><kbd>${k.toUpperCase()}</kbd>${c==="Normal"?"Normal":CALLLBL[c]}</button>`).join("");
-$("#dec").addEventListener("click",e=>{const b=e.target.closest(".b");if(b)decide(b.dataset.call)});
+// v5.17 Quick Add: grouped calls (cSS | mimics | other) with optional subtype chips; the call keys are unchanged (Y V N B A U H),
+// Shift+1..6 picks a subtype of the current call, Z undoes, Delete clears. A subtype never changes the call's meaning.
+const QA=[["cSS","cSS",[]],["Mimic","Vessel",["VS","VC","VT","VX","TV"]],["Mimic","Normal",["NI","CA","SAH","LN","HI"]],["Mimic","Microbleed",[]],["Mimic","Artifact",["A","AM"]],["Other","Unsure",[]],["Other","Near ICH",[]]];
+const FINELBL={VS:"surface vein",VC:"sulcal vein",VT:"transcortical vein",VX:"sinus-adjacent vein",TV:"thrombosed vein",NI:"iron-rich cortex",CA:"calcification",SAH:"acute cSAH",LN:"laminar necrosis",HI:"haemorrhagic infarct",A:"air-bone",AM:"motion"};
+const KEYOF=Object.fromEntries(Object.entries(CALLKEYS).map(([k,c])=>[c,k.toUpperCase()]));
+$("#dec").innerHTML=["cSS","Mimic","Other"].map(g=>`<div class="qag"><div class="qah">${g==="cSS"?"cSS":g==="Mimic"?"Mimics (not cSS)":"Other"}</div>${QA.filter(x=>x[0]===g).map(([_,c,subs])=>
+  `<div class="qai"><button class="b qa" data-call="${c}" title="${CALLLBL[c]} (key ${KEYOF[c]})"><kbd>${KEYOF[c]}</kbd>${c==="Normal"?"Normal / other":CALLLBL[c]}</button>${subs.length?`<div class="qas">${subs.map((f,i)=>`<button class="chip" data-call="${c}" data-fine="${f}" title="${FINELBL[f]} · Shift+${i+1} after ${KEYOF[c]}">${FINELBL[f]}</button>`).join("")}</div>`:""}</div>`).join("")}</div>`).join("")+
+  `<div class="qaf"><button class="b sm" id="qaUndo" title="undo the last change (Z)">↶ Undo</button><button class="b sm" id="qaClear" title="remove your call (Delete)">Clear</button><span class="mut sm" id="qaWho"></span></div>`;
+$("#dec").addEventListener("click",e=>{const ch=e.target.closest(".chip");if(ch){decide(ch.dataset.call,false,ch.dataset.fine);return}const b=e.target.closest(".b.qa");if(b)decide(b.dataset.call)});
+$("#qaUndo").onclick=()=>doUndo();$("#qaClear").onclick=()=>decide("");
+function pickFine(n){const c=cand();if(!c)return;const st=calls[c.id]||{};const g=QA.find(x=>x[1]===st.call);if(!g||!g[2][n-1]){status("Choose a call with subtypes first (V, N or A).",true);return}decide(st.call,false,g[2][n-1])}
 $("#strip").addEventListener("click",e=>{const d=e.target.dataset.i;if(d!==undefined)go(+d)});
 for(const id of ["#candtable","#cmptable"])$(id).addEventListener("click",e=>{const r=e.target.closest("tr.r");if(r)go(+r.dataset.i)});
 (()=>{const sw=$("#themes");let dr=false;
@@ -945,7 +959,7 @@ window.addEventListener("keydown",e=>{const tag=(e.target.tagName||"").toLowerCa
   if($(".modal.show")&&e.key!=="?")return;
   const k=e.key.length===1?e.key.toLowerCase():e.key;let used=true;
   if(tool==="miss"&&k==="Enter")saveDraft();else if(tool==="miss"&&k==="w")setShape(shape==="rect"?"pen":"rect");else if(tool==="miss"&&(k==="Backspace"||k==="Delete"))undoStroke();
-  else if(k==="h"&&e.shiftKey)setMirror(!mir);else if(CALLKEYS[k])decide(CALLKEYS[k]);
+  else if(k==="h"&&e.shiftKey)setMirror(!mir);else if(e.shiftKey&&/^Digit[1-6]$/.test(e.code))pickFine(+e.code.slice(5));else if(CALLKEYS[k])decide(CALLKEYS[k]);
   else if(k==="ArrowRight")go(ci+1);else if(k==="ArrowLeft")go(ci-1);else if(k==="j")nextUnread();
   else if(k==="ArrowUp")step(panes[act],1);else if(k==="ArrowDown")step(panes[act],-1);else if(k==="PageUp")step(panes[act],5);else if(k==="PageDown")step(panes[act],-5);
   else if(k==="="||k==="+"||e.code==="NumpadAdd")zoomBy(1.2);else if(k==="-"||k==="_"||e.code==="NumpadSubtract")zoomBy(1/1.2);else if(k==="0")fitView();else if(k==="9")actualSize();
