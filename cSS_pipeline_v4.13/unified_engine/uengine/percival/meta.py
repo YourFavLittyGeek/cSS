@@ -309,27 +309,41 @@ def component_oof(rows, k=5, seed=0, cnn_epochs=30, progress=None, char_kinds=No
     final_char = LR.fit_tabular(ck, Xc, y, g, w, CHAR, seed)
     rep["char"] = dict(chosen=ck, results=cres, importance=LR.importance(final_char), rule="simplest model within one bootstrap SE of the lowest CV log loss (logistic < gbt < forest)",
                        feature_auc={c: auc(y, (Xc[:, j] if np.isfinite(Xc[:, j]).sum() >= 5 else np.full(len(y), np.nan))) for j, c in enumerate(CHAR)})
-    # 3. every component out-of-fold + Fusion families (late / hybrid need the Characteristic log-odds of the TRAINING rows out-of-sample:
-    #    an inner patient-grouped CV inside each training fold)
+    # 3. every component out-of-fold + Fusion families. Fusion is a second-level model: it is trained on the Characteristic and Image
+    #    log-odds of the TRAINING rows, which must themselves be out-of-sample AND must never come from a model that saw the held-out
+    #    fold. v5.25 fix (indirect validation leakage): before, the training rows' image log-odds were img_oof[tr] - produced by image
+    #    models fitted on the other outer folds, i.e. INCLUDING the held-out fold te. Now both the Characteristic and the Image inputs of
+    #    the training rows come from an inner patient-grouped CV restricted to tr; the held-out rows get the outputs of models fitted on
+    #    tr only (char: the fold model; image: an image model refitted on tr). No row of te influences anything fitted for fold i.
     Z = {c: np.full(len(rows), np.nan) for c in COMPONENTS}; fu = {kd: np.full(len(rows), np.nan) for kd in fusion_kinds}
+    fold_prov = []
     for i, (tr, te) in enumerate(F):
+        assert not set(g[tr]) & set(g[te]), "patient in both the training and the held-out fold"
         R = [rows[j] for j in tr]; T = [rows[j] for j in te]
         if len(np.unique(y[tr])) < 2: continue
-        c = Components(ck, ik, fusion_kinds[0]).fit(R, seed, image_logit_oof=img_oof[tr], char_logit_oof=np.zeros(len(tr)), cnn_epochs=0)
+        c = Components(ck, ik, fusion_kinds[0]).fit(R, seed, image_logit_oof=np.full(len(tr), np.nan), char_logit_oof=np.zeros(len(tr)), cnn_epochs=0)
         P = c.predict(T)
         for k_ in ("math", "unified", "char"): Z[k_][te] = P[k_]
-        inner = np.full(len(tr), np.nan)
+        inner = np.full(len(tr), np.nan); inner_img = np.full(len(tr), np.nan); htr_all = have[tr]
         for itr, ite in folds(g[tr], 3, seed + 31 + i):
             if len(np.unique(y[tr][itr])) < 2: continue
             mi = LR.fit_tabular(ck, Xc[tr][itr], y[tr][itr], g[tr][itr], w[tr][itr], CHAR, seed)
             if mi is not None: inner[ite] = mi.logit(Xc[tr][ite])
+            a, b = itr[htr_all[itr]], ite[htr_all[ite]]                  # inner image model: inner-training patients of tr only
+            if len(a) >= 20 and len(np.unique(y[tr][a])) == 2 and len(b):
+                try: inner_img[b] = _fit_image(ik, M[tr][a], y[tr][a], g[tr][a], seed + 31 + i, cnn_epochs).logit_tta(M[tr][b])[0]
+                except ValueError: pass
         inner = np.where(np.isfinite(inner), inner, np.nanmedian(inner) if np.isfinite(inner).any() else 0.0)
-        hte = np.isfinite(img_oof[te])
-        if np.isfinite(img_oof[tr]).sum() >= 10 and hte.any():
+        hte = np.isfinite(img_oof[te])                                      # img_oof[te]: image model fitted on tr only (step 1)
+        if np.isfinite(inner_img).sum() >= 10 and hte.any():
+            fin = np.isfinite(inner_img)
             for kd in fusion_kinds:
-                f = _pl_fit(_fusion_X(kd, Xc[tr], img_oof[tr], inner), y[tr], g[tr], w[tr], _fusion_cols(kd))
+                f = _pl_fit(_fusion_X(kd, Xc[tr][fin], inner_img[fin], inner[fin]), y[tr][fin], g[tr][fin], w[tr][fin], _fusion_cols(kd))
                 if f is not None: fu[kd][te[hte]] = f.logit(_fusion_X(kd, Xc[te][hte], img_oof[te][hte], P["char"][hte]))
+        fold_prov.append(dict(fold=i, n_train=int(len(tr)), n_heldout=int(len(te)), train_patients=int(len(set(g[tr]))), heldout_patients=sorted(set(map(str, g[te]))),
+                              fusion_trained_on=int(np.isfinite(inner_img).sum()), fusion_inputs="inner patient-grouped CV within the training fold"))
         say(f"components and fusion fold {i + 1}/{len(F)}", 0.5 + 0.12 * (i + 1) / len(F))
+    rep["folds"] = fold_prov
     Z["image"] = img_oof
     mf = _common(fu) & np.isfinite(Z["char"]) & np.isfinite(img_oof)
     fk, fres = _select({kd: np.where(mf, v, np.nan) for kd, v in fu.items()}, y, g, FUSION_KINDS)
@@ -471,9 +485,21 @@ def agreement(Z, y):
     return out
 
 
-def train_cycle(rows, version, seed=0, cnn_epochs=30, progress=None, mins=None):
+def check_partitions(rows):
+    """v5.25: every examination of a patient must be in the same partition, and every row must carry a patient identity"""
+    no_pat = sorted({r.get("study") for r in rows if not r.get("patient")})
+    if no_pat: raise ValueError(f"no verified patient identity for {len(no_pat)} studies ({', '.join(map(str, no_pat[:5]))}) - patient-level validation refused")
+    side = {}
+    for r in rows:
+        side.setdefault(str(r["patient"]), set()).add(bool(r.get("test")))
+    split = sorted(p for p, s in side.items() if len(s) > 1)
+    if split: raise ValueError(f"patient(s) in both the development and the locked test cohort: {split[:5]} - refused")
+
+
+def train_cycle(rows, version, seed=0, cnn_epochs=30, progress=None, mins=None, nested=True):
     """one complete, reproducible training cycle -> model dict (components + meta + calibration + thresholds + full report)"""
     mins = mins or dict(studies=MIN_STUDIES, candidates=MIN_CANDIDATES, per_class=MIN_PER_CLASS)
+    check_partitions(rows)
     test = [r for r in rows if r.get("test")]; dev = [r for r in rows if not r.get("test")]
     if len(dev) < 10: raise ValueError(f"too few development candidates ({len(dev)})")
     y = np.array([r["y"] for r in dev], float); g = np.array([r["patient"] for r in dev]); w = patient_weights(dev)
@@ -514,6 +540,15 @@ def train_cycle(rows, version, seed=0, cnn_epochs=30, progress=None, mins=None):
                                 "not a validated probability of cSS: calibration is checked on the locked test cohort and only on this project's data.")
     model["ready"] = model["data"]["studies"] >= mins["studies"] and len(rows) >= mins["candidates"] and min(model["data"]["css"], model["data"]["not_css"]) >= mins["per_class"]
     model["minimum"] = mins
+    # v5.25: the development threshold figures above are IN-SAMPLE for the calibration and the threshold choice (both fitted on the same
+    # out-of-fold scores); they are labelled as such. Honest development estimates come from the nested procedure below.
+    th["dev_basis"] = "in-sample for calibration and threshold selection (fitted on the same development out-of-fold scores) - see nested"
+    model["level0_cv_basis"] = ("single-level patient-grouped CV after family selection on the same folds: optimistic, used for model "
+                                "selection only; nested cross-fitting gives the development estimate")
+    if nested:
+        say("nested cross-fitting of the whole procedure (development cohort)", 0.72)
+        from . import nested as NS
+        model["nested"], _ = NS.nested_crossfit(dev, seed=seed, cnn_epochs=cnn_epochs, progress=lambda m, p: say(m, 0.72 + 0.12 * p))
     say("evaluation on the locked test cohort", 0.85)
     model["test"] = evaluate_test(model, test)
     return model
@@ -567,9 +602,13 @@ def evaluate_test(model, test):
     p = np.array([np.nan if s["percival_score"] is None else s["percival_score"] / 100 for s in S])
     C = Components.from_json(model["components"]); Z = C.predict(test)
     th = model["thresholds"]; out_ext = {c: metrics(y, sigmoid(Z[c]), g) for c in COMPONENTS if np.isfinite(Z[c]).sum() >= 5}; m = np.isfinite(p)
+    pos = {str(q) for q, t in zip(g, y) if t == 1}
     out = dict(percival=metrics(y[m], p[m], np.asarray(g)[m]) if m.sum() >= 5 else dict(n=int(m.sum())),
                math=metrics(y, sigmoid(Z["math"]), g), insufficient=int((~m).sum()), n=len(test), components=out_ext,
-               patients=len(set(g)), reliability=IN.reliability(y[m], p[m]) if m.sum() >= 10 else None)
+               patients=len(set(g)), patient_classes=dict(with_css=len(pos), without_css=len(set(map(str, g)) - pos)),
+               reliability=IN.reliability(y[m], p[m]) if m.sum() >= 10 else None,
+               basis="locked test cohort: patients assigned permanently by a hash of the patient id, never used for fitting, selection, "
+                     "calibration or thresholds; internal held-out evaluation on this project, not a clinical validation")
     if m.sum() >= 5 and len(np.unique(y[m])) == 2:
         out["at_red"] = sens_spec(y[m], p[m], th["red_below"]); out["at_green"] = sens_spec(y[m], p[m], th["green_from"])
         comp = np.array([not s["missing"] for s in S]); hi = np.array([s["disagreement"] > 1.5 for s in S])
@@ -590,5 +629,31 @@ def acceptance(model, active):
             reasons.append("Brier score worse than the active model by more than 0.01")
         sl = pc.get("calib_slope")
         if sl is not None and not (0.6 <= sl <= 1.6): reasons.append(f"calibration slope {sl:.2f} outside 0.6-1.6")
+        if pc.get("auc_ci") is None: reasons.append("no confidence interval on the locked test cohort (too few patients for the patient bootstrap)")
+    # v5.25 evidence gates (component-specific numbers are reported, never a universal AUC bar)
+    tp_pos, tp_neg = _patient_classes(t.get("patient_classes"))
+    if tp_pos is not None and (tp_pos < MIN_TEST_PATIENTS_PER_CLASS or tp_neg < MIN_TEST_PATIENTS_PER_CLASS):
+        reasons.append(f"locked test cohort has {tp_pos} patients with cSS and {tp_neg} without (at least {MIN_TEST_PATIENTS_PER_CLASS} of each are required)")
+    ns = model.get("nested")
+    if not ns: reasons.append("no nested (leakage-free) development evaluation recorded")
+    else:
+        sup = ns.get("support") or {}
+        if (sup.get("evaluable_folds") or 0) < 3: reasons.append(f"nested evaluation: only {sup.get('evaluable_folds', 0)} evaluable outer folds")
+        np_ = (ns.get("percival") or {}).get("auc"); nm = ((ns.get("ablation") or {}).get("MATH alone") or {}).get("auc")
+        if np_ is None: reasons.append("nested evaluation produced no AUC")
+        elif nm is not None and np_ + 1e-9 < nm: reasons.append(f"nested development AUC {np_:.3f} below MATH alone {nm:.3f}")
+    iden = (model.get("data") or {}).get("identity") or {}
+    if iden.get("assumed"): reasons.append(f"patient identity is assumed (one patient per study, not verified) for {iden['assumed']} studies")
     return dict(passed=not reasons, reasons=reasons,
-                criteria="minimum data; locked test: AUC >= MATH alone, AUC >= active - 0.01, Brier <= active + 0.01, calibration slope 0.6-1.6")
+                criteria=f"minimum data; locked test: >= {MIN_TEST_PATIENTS_PER_CLASS} patients per class, AUC >= MATH alone, AUC >= active - 0.01, "
+                         "Brier <= active + 0.01, calibration slope 0.6-1.6, patient-bootstrap CI available; nested development evaluation "
+                         ">= 3 evaluable folds and not below MATH alone; verified patient identity. Passing makes a model a CANDIDATE only - "
+                         "activation always needs explicit human approval.")
+
+
+MIN_TEST_PATIENTS_PER_CLASS = 5
+
+
+def _patient_classes(pc):
+    if not pc: return None, None
+    return pc.get("with_css"), pc.get("without_css")
