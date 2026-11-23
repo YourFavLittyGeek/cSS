@@ -128,11 +128,19 @@ class FileManager:
 
         # 2. Inspect External Data Vault if configured
         vault_connected = self.is_vault_connected()
+        EXCLUDED_VAULT_DIRS = {"derivatives", "normalized", "preprocessing", "manifest", "checkpoints", "quarantine", "database", "backups", "reports"}
         if self.vault_root and os.path.isdir(self.vault_root):
             for sub in ("studies", "archive", "processed_mri"):
                 sub_dir = os.path.join(self.vault_root, sub)
                 if os.path.isdir(sub_dir):
                     for entry in os.listdir(sub_dir):
+                        if entry.startswith(".") or entry.lower() in EXCLUDED_VAULT_DIRS:
+                            continue
+                        ep = os.path.join(sub_dir, entry)
+                        if os.path.isdir(ep):
+                            has_files = any(f.endswith((".nii", ".nii.gz", ".csv", ".json")) for f in os.listdir(ep))
+                            if not has_files:
+                                continue
                         code = entry.replace(".nii.gz", "").replace(".nii", "").replace("_candidates.csv", "")
                         st = studies.setdefault(code, {
                             "study_code": code,

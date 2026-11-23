@@ -24,28 +24,77 @@ import subprocess
 from typing import Dict, List, Optional, Tuple, Any
 
 VAULT_DIRS = [
+    # Metadata & Manifest
     "manifest",
+    "Manifests",
     "database",
+    # Pensieve Core Memory
     "PENSIEVE",
     "PENSIEVE/snapshots",
+    "Pensieve",
+    "Pensieve/Database_Backups",
+    "Pensieve/Journals",
+    "Pensieve/Snapshots",
+    # MRI Data
+    "MRI",
+    "MRI/Originals",
+    "MRI/Imported",
+    "MRI/Metadata",
     "studies",
     "original_mri",
+    # Processed MRI
+    "Processed_MRI",
+    "Processed_MRI/Preprocessing",
+    "Processed_MRI/Normalized",
+    "Processed_MRI/Derivatives",
     "processed_mri",
     "segmentations",
+    # Candidates
+    "Candidates",
+    "Candidates/ALBUS",
+    "Candidates/LUMOS",
+    "Candidates/NOX",
     "candidates",
+    # Expert Annotations
+    "Expert_Annotations",
+    "Expert_Annotations/Candidates",
+    "Expert_Annotations/Missed_Lesions",
+    "Expert_Annotations/Adjudication",
+    # Training Datasets
+    "Training_Datasets",
+    "Training_Datasets/Manifests",
+    "Training_Datasets/Splits",
+    "Training_Datasets/Exports",
+    "training",
+    # Models
+    "Models",
+    "Models/Released",
+    "Models/Historical",
+    "Models/Experimental",
     "models",
     "models/ALBUS",
     "models/LUMOS",
     "models/NOX",
     "models/PERCIVAL_CORE",
-    "training",
+    # Experiments
+    "Experiments",
+    "Experiments/Shadow_ML",
+    "Experiments/Governance",
     "SHADOW_ML",
     "experiments",
     "checkpoints",
+    # Collections & Exports
+    "Cohorts",
     "reports",
+    "Reports",
     "exports",
+    "Exports",
     "archive",
     "backups",
+    "Backups",
+    "Legacy_Projects",
+    "Audit_Logs",
+    "Quarantine",
 ]
 
 VAULT_CONFIG_FILE = os.path.expanduser("~/.percival_vault_config.json")
@@ -456,6 +505,39 @@ class PercivalDataVault:
             json.dump(bmanifest, f, indent=2)
 
         return True, f"Backup created successfully at {stage_dir}"
+
+    def open_in_finder(self) -> Tuple[bool, str]:
+        """Reveal Data Vault root folder in macOS Finder."""
+        if not self.root_path or not os.path.exists(self.root_path):
+            return False, "Vault path does not exist on disk"
+        try:
+            subprocess.run(["open", self.root_path], check=True)
+            return True, f"Opened {self.root_path} in Finder"
+        except Exception as e:
+            return False, f"Failed to open in Finder: {e}"
+
+    def rebuild_index(self) -> Dict[str, Any]:
+        """Non-destructively scans existing vault contents and refreshes manifest statistics."""
+        if not self.is_connected() or not self.root_path:
+            return {"ok": False, "error": "Vault is disconnected"}
+        counts = {}
+        for d in VAULT_DIRS:
+            dp = os.path.join(self.root_path, d)
+            if os.path.isdir(dp):
+                try:
+                    c = len(os.listdir(dp))
+                    counts[d] = c
+                except Exception:
+                    counts[d] = 0
+        self._manifest["file_counts"] = counts
+        self._manifest["last_index_time"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        try:
+            man_path = os.path.join(self.root_path, "manifest", "vault_manifest.json")
+            with open(man_path, "w") as f:
+                json.dump(self._manifest, f, indent=2)
+        except Exception:
+            pass
+        return {"ok": True, "vault_id": self._manifest.get("vault_id"), "file_counts": counts}
 
 # Global Singleton Helper
 _DEFAULT_VAULT: Optional[PercivalDataVault] = None

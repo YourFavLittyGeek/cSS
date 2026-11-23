@@ -4,16 +4,16 @@
   "mission_id": "PERCIVAL-FINAL-MASTER-DELIVERY-2026",
   "build_timestamp": "2026-11-22T21:35:11-05:00",
   "canonical_release_package": {
-    "filename": "Percival_v5.25-dev_wt4dbbc24.zip",
-    "relative_path": "dist/Percival_v5.25-dev_wt4dbbc24.zip",
-    "sha256": "c6b6f6127fb9854898ef040c7ea05e6061d554804cb71c325fa382d5d98784ce",
-    "sha256_file": "dist/Percival_v5.25-dev_wt4dbbc24.zip.sha256",
-    "working_tree_hash": "4dbbc24ba40e28166454f8a358c68c826cbc9dc5",
-    "base_git_commit": "ff401f289bf4bcfbdc77ccc350dc11291fb2b17a",
+    "filename": "Percival_v5.25-dev_26568a1.zip",
+    "relative_path": "dist/Percival_v5.25-dev_26568a1.zip",
+    "sha256": "5c2431fdd74bfcb46bef3bb6057975ffdb2b4ae9141e263e7695400d73e5a5c5",
+    "sha256_file": "dist/Percival_v5.25-dev_26568a1.zip.sha256",
+    "working_tree_hash": "26568a1fc12f6196f9c9229b778035b97c7372c1",
+    "base_git_commit": "26568a1fc12f6196f9c9229b778035b97c7372c1",
     "git_branch": "feature/v5.25-final-master-delivery",
     "platform": "macOS Darwin arm64 (Apple Silicon M1/M2/M3/M4 & Intel x86_64)",
     "python_environment": "Python 3.11 / Miniforge conda 'css'",
-    "file_count": 452
+    "file_count": 456
   },
   "previous_preserved_baseline": {
     "filename": "Percival_v5.25-dev_wt7c7c46d.zip",

@@ -1,0 +1,9 @@
+{
+  "groups": {
+    "A": ["General", "Appearance", "Shortcuts"],
+    "B": ["Storage", "Vault", "External Drives"],
+    "C": ["Training", "Eligibility", "Pipeline"],
+    "D": ["Security", "Privacy", "Access Control"],
+    "E": ["Advanced", "Developer", "Experimental"]
+  }
+}

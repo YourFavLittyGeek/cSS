@@ -59,6 +59,37 @@ try: PM_RECOVERED = PM.recover_all(B)                 # runs left "running" by a
 except Exception as _e: PM_RECOVERED = {"error": str(_e)}
 try: PM_IMPORTS_ROLLED_BACK = PM.recover_imports(B)  # imports cut off by a crash / quit are rolled back (nothing half-imported stays)
 except Exception as _e: PM_IMPORTS_ROLLED_BACK = [f"error: {_e}"]
+
+def reconcile_studies_on_disk():
+    """Auto-discover and register any studies physically present in workspace or data folders."""
+    existing_codes = set(p["code"] for p in PAT)
+    added = 0
+    try:
+        for code in PM.studies_on_disk(B):
+            if code and code not in existing_codes:
+                anatomy = "recon" if os.path.isdir(os.path.join(B, "subjects", code, "surf")) else "synthseg"
+                PAT.append(dict(
+                    code=code,
+                    cohort="local_workspace",
+                    anatomy=anatomy,
+                    mode="semi",
+                    pathway=anatomy,
+                    series={},
+                    step="",
+                    steps_done={},
+                    added=time.time(),
+                    status="done" if os.path.exists(f"{B}/review/{code}_candidates.csv") else "waiting",
+                    note="Discovered from workspace"
+                ))
+                existing_codes.add(code)
+                added += 1
+        if added > 0:
+            save_pat()
+            IDG.ensure(PAT)
+    except Exception as _err:
+        sys.stderr.write(f"[Startup] Reconcile error: {_err}\n")
+
+reconcile_studies_on_disk()
 PM_JOBS = {}                                          # code -> {"run_id", "stage", "started"} while a Processing Manager run works
 def _pm_code(c): return c if re.fullmatch(r"[A-Za-z0-9_\-]{1,32}", c or "") else None
 def proc_get(op, q):
@@ -1114,6 +1145,9 @@ def pg_get(op, q):
     if op == "pensieve": return PG.pensieve_state()                                          # v5.25 PENSIEVE Core Memory
     if op == "pensieve_query": return PG.pensieve_query(q.get("component", "albus"))
     if op == "vault": return PG.vault_status()                                               # v5.25 PERCIVAL DATA VAULT status
+    if op == "missed_lesions":
+        from uengine.pensieve import get_pensieve
+        return dict(ok=True, missed_lesions=get_pensieve().get_missed_lesions(q.get("study_id") or q.get("code")))
     if op == "shadow_lab": return PG.shadow_lab_state()                                      # v5.25 SHADOW ML Research Lab
     if op == "dataset":
         from uengine.percival import datasets as DS
@@ -1157,6 +1191,31 @@ def pg_post(op, d):
         if op == "vault_create": return PG.vault_create(str(d.get("destination", "")), name=str(d.get("name", "PERCIVAL_VAULT")))
         if op == "vault_eject": return PG.vault_eject()
         if op == "vault_backup": return PG.vault_backup(str(d.get("destination", "")))
+        if op == "missed_lesion":
+            study_id = str(d.get("study_id") or d.get("code") or "")
+            missed_id = str(d.get("missed_id") or int(time.time()))
+            reviewer_id = str(d.get("reviewer_id") or "reviewer")
+            vx = int(d.get("vox_i", 0)); vy = int(d.get("vox_j", 0)); vz = int(d.get("vox_k", 0))
+            mx = float(d.get("x_mm", 0.0)); my = float(d.get("y_mm", 0.0)); mz = float(d.get("z_mm", 0.0))
+            plane = str(d.get("plane", "axial"))
+            slice_idx = int(d.get("slice_idx", 0))
+            shape = str(d.get("shape", "contour"))
+            pts = d.get("points") or []
+            pts_json = json.dumps(pts) if not isinstance(pts, str) else pts
+            comm = str(d.get("comment", ""))
+            from uengine.pensieve import get_pensieve
+            muid = get_pensieve().record_missed_lesion(
+                study_id, missed_id, reviewer_id,
+                (vx, vy, vz), (mx, my, mz),
+                slice_idx, plane, shape, pts_json, comm, "unproposed"
+            )
+            missed_csv = os.path.join(B, "review", f"{study_id}_missed.csv")
+            os.makedirs(os.path.dirname(missed_csv), exist_ok=True)
+            hdr = not os.path.exists(missed_csv)
+            with open(missed_csv, "a") as mf:
+                if hdr: mf.write("missed_id,reviewer,time,slice,plane,shape,vox_i,vox_j,vox_k,x_mm,y_mm,z_mm,comment\n")
+                mf.write(f"{missed_id},{reviewer_id},{time.strftime('%Y-%m-%d %H:%M:%S')},{slice_idx},{plane},{shape},{vx},{vy},{vz},{mx},{my},{mz},{comm}\n")
+            return dict(ok=True, missed_uid=muid, study_id=study_id, missed_id=missed_id)
         if op == "shadow_run": return PG.shadow_run_trial(str(d.get("target", "ALBUS")), str(d.get("hypothesis", "")), d.get("config", {}))
         if op == "score_unified": return PG.score_study_unified(str(d.get("study_id", "")))
         return dict(ok=False, error=f"unknown {op}")
@@ -1214,14 +1273,23 @@ def storage_get(op, q):
     try:
         from uengine.file_manager import FileManager
         from uengine.storage_advisor import StorageAdvisor
+        from uengine.storage_service import StorageService
         vault_root = SET.get("vault_mount")
         fm = FileManager(B, vault_root=vault_root)
         sa = StorageAdvisor(B, vault_mount=vault_root)
-        if op == "overview": return fm.get_storage_overview()
+        if op == "overview":
+            force = str(q.get("force", "")).lower() in ("1", "true")
+            ov = StorageService.get_overview(B, vault_root=vault_root, force_refresh=force)
+            ov["fm_overview"] = fm.get_storage_overview()
+            return ov
         if op == "studies": return dict(studies=fm.list_studies(filter_status=q.get("status")))
         if op == "tree": return fm.browse_study_tree(q.get("code", ""))
         if op == "advisor": return sa.generate_recommendations()
         if op == "capacity": return sa.evaluate_capacity()
+        if op == "free_space_preview":
+            from uengine.transfer_manager import TransferManager
+            tm = TransferManager(B, vault_root=vault_root)
+            return tm.free_up_mac_space_preview()
         return dict(error=f"unknown storage op {op}")
     except Exception as e: return dict(error=f"{type(e).__name__}: {e}")
 
@@ -1238,6 +1306,10 @@ def storage_post(op, d):
         if op == "clean": return fm.clean_staging(d.get("code", ""))
         if op == "prune": return sa.execute_prune(d.get("action", ""), int(d.get("days", 7)))
         if op == "delete": return fm.delete_study(d.get("code", ""), target=d.get("target", "local"))
+        if op == "free_space_execute":
+            from uengine.transfer_manager import TransferManager
+            tm = TransferManager(B, vault_root=vault_root)
+            return tm.execute_free_up_mac_space()
         if op == "migrate_plan":
             from uengine.working_dir_migration import WorkingDirMigrationEngine
             engine = WorkingDirMigrationEngine(B)
@@ -1253,6 +1325,144 @@ def storage_post(op, d):
             return res
         return dict(ok=False, error=f"unknown storage post op {op}")
     except Exception as e: return dict(ok=False, error=f"{type(e).__name__}: {e}")
+
+def vault_get(op, q):
+    try:
+        from uengine.vault import get_vault
+        v = get_vault(SET.get("vault_mount"))
+        if op == "status":
+            return dict(ok=True, status=v.get_connection_status(), stats=v.get_storage_stats(), integrity=v.verify_integrity() if v.is_connected() else {"ok": False})
+        if op == "manifest":
+            return dict(ok=True, manifest=v._manifest)
+        return dict(ok=False, error=f"unknown vault op {op}")
+    except Exception as e: return dict(ok=False, error=str(e))
+
+def vault_post(op, d):
+    try:
+        from uengine.vault import get_vault, PercivalDataVault
+        v = get_vault(SET.get("vault_mount"))
+        if op == "connect":
+            p = str(d.get("path", "")).strip()
+            ok, msg = v.connect(p)
+            if ok:
+                with LOCK:
+                    SET["vault_mount"] = v.root_path
+                    jsave("settings.json", SET)
+            return dict(ok=ok, message=msg, stats=v.get_storage_stats())
+        if op == "create":
+            dest = str(d.get("destination", "")).strip()
+            name = str(d.get("name", "PERCIVAL_VAULT")).strip()
+            nv = PercivalDataVault.create_vault(dest, name=name)
+            with LOCK:
+                SET["vault_mount"] = nv.root_path
+                jsave("settings.json", SET)
+            return dict(ok=True, path=nv.root_path, stats=nv.get_storage_stats())
+        if op == "open_finder":
+            ok, msg = v.open_in_finder()
+            return dict(ok=ok, message=msg)
+        if op == "verify":
+            return dict(ok=True, integrity=v.verify_integrity())
+        if op == "reindex":
+            return v.rebuild_index()
+        return dict(ok=False, error=f"unknown vault post op {op}")
+    except Exception as e: return dict(ok=False, error=str(e))
+
+def transfer_get(op, q):
+    try:
+        from uengine.transfer_manager import TransferManager
+        tm = TransferManager(B, vault_root=SET.get("vault_mount"))
+        if op == "queue": return dict(ok=True, queue=tm.get_queue())
+        if op == "policies": return dict(ok=True, policies=tm.get_policies())
+        return dict(ok=False, error=f"unknown transfer op {op}")
+    except Exception as e: return dict(ok=False, error=str(e))
+
+def transfer_post(op, d):
+    try:
+        from uengine.transfer_manager import TransferManager
+        tm = TransferManager(B, vault_root=SET.get("vault_mount"))
+        if op == "enqueue":
+            return tm.enqueue_study(str(d.get("study_code", "")), action=str(d.get("action", "archive")))
+        if op == "process_next":
+            return tm.process_next()
+        if op == "policies":
+            return tm.update_policies(d.get("policies", {}))
+        return dict(ok=False, error=f"unknown transfer post op {op}")
+    except Exception as e: return dict(ok=False, error=str(e))
+
+def clean_get(op, q):
+    try:
+        from uengine.cleaning_manager import CleaningManager
+        cm = CleaningManager(B, vault_root=SET.get("vault_mount"))
+        if op == "dashboard": return cm.get_dashboard()
+        if op == "preview": return cm.preview_clean(q.get("categories", "").split(",") if q.get("categories") else None)
+        if op == "quarantine": return dict(ok=True, items=cm.list_quarantine())
+        if op == "history": return dict(ok=True, history=cm.get_history())
+        if op == "policies": return dict(ok=True, policies=cm.get_policies())
+        return dict(ok=False, error=f"unknown clean op {op}")
+    except Exception as e: return dict(ok=False, error=str(e))
+
+def clean_post(op, d):
+    try:
+        from uengine.cleaning_manager import CleaningManager
+        cm = CleaningManager(B, vault_root=SET.get("vault_mount"))
+        if op == "execute":
+            return cm.execute_clean(category_ids=d.get("categories"), use_quarantine=bool(d.get("use_quarantine", True)))
+        if op == "policies":
+            return cm.update_policies(d.get("policies", {}))
+        if op == "quarantine_restore":
+            return cm.restore_quarantine(str(d.get("quarantine_id", "")))
+        if op == "quarantine_purge":
+            return cm.purge_quarantine(d.get("quarantine_id"))
+        if op == "delete_study":
+            return cm.delete_by_study(str(d.get("study_code", "")), target=str(d.get("target", "staging")))
+        return dict(ok=False, error=f"unknown clean post op {op}")
+    except Exception as e: return dict(ok=False, error=str(e))
+
+def legacy_get(op, q):
+    try:
+        from uengine.legacy_migration import LegacyMigrationEngine
+        lme = LegacyMigrationEngine(B)
+        search_dirs = [B, os.path.expanduser("~/cSS_pipeline"), os.path.expanduser("~/cSS_pipeline_v4.13"), os.path.expanduser("~/Percival_demo"), os.path.expanduser("~/css_project")]
+        v = SET.get("vault_mount")
+        if v and os.path.isdir(v): search_dirs.append(v)
+        if os.path.isdir("/Volumes"):
+            for ent in os.listdir("/Volumes"):
+                vp = os.path.join("/Volumes", ent, "PERCIVAL_VAULT")
+                if os.path.isdir(vp) and vp not in search_dirs: search_dirs.append(vp)
+        if op == "discover": return lme.discover_legacy_data(search_roots=search_dirs)
+        if op == "history": return dict(history=lme.get_migration_history())
+        return dict(ok=False, error=f"unknown legacy op {op}")
+    except Exception as e: return dict(ok=False, error=str(e))
+
+def legacy_post(op, d):
+    try:
+        if op == "register":
+            codes = d.get("codes", [])
+            registered = []
+            for code in codes:
+                if not pget(code):
+                    anatomy = "recon" if os.path.isdir(os.path.join(B, "subjects", code, "surf")) else "synthseg"
+                    PAT.append(dict(
+                        code=code,
+                        cohort=d.get("cohort", "legacy_recovered"),
+                        anatomy=anatomy,
+                        mode="semi",
+                        pathway=anatomy,
+                        series={},
+                        step="",
+                        steps_done={},
+                        added=time.time(),
+                        status="done" if os.path.exists(f"{B}/review/{code}_candidates.csv") else "waiting",
+                        note="Legacy study recovered and registered"
+                    ))
+                    registered.append(code)
+            if registered:
+                save_pat()
+                IDG.ensure(PAT)
+                write_grades_file()
+            return dict(ok=True, registered_count=len(registered), registered=registered)
+        return dict(ok=False, error=f"unknown legacy post op {op}")
+    except Exception as e: return dict(ok=False, error=str(e))
 
 def wizard_get(op, q):
     try:
@@ -1946,6 +2156,7 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/vset":
                 f = f"{B}/review/viewer_settings.json"; return self.send(json.load(open(f)) if os.path.exists(f) else {})
             if u.path in ("/icon_dark.png", "/icon_light.png"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="image/png")
+            if u.path.endswith(".js") and os.path.isfile(f"{HERE}{u.path}"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/unified_view.js": return self.send(open(f"{HERE}/unified_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/shadow_view.js": return self.send(open(f"{HERE}/shadow_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path in ("/identity_view.js", "/import_wizard_view.js", "/lineage_view.js", "/training_view.js", "/setup_view.js", "/export_view.js", "/study_admin_view.js", "/percival_view.js"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="text/javascript; charset=utf-8")
@@ -1999,6 +2210,10 @@ class H(BaseHTTPRequestHandler):
             if u.path.startswith("/api/kp/"): return self.send(kp_get(u.path[8:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/percival/"): return self.send(pg_get(u.path[14:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/storage/"): return self.send(storage_get(u.path[13:], {k: v[0] for k, v in parse_qs(u.query).items()}))
+            if u.path.startswith("/api/vault/"): return self.send(vault_get(u.path[11:], {k: v[0] for k, v in parse_qs(u.query).items()}))
+            if u.path.startswith("/api/transfer/"): return self.send(transfer_get(u.path[14:], {k: v[0] for k, v in parse_qs(u.query).items()}))
+            if u.path.startswith("/api/clean/"): return self.send(clean_get(u.path[11:], {k: v[0] for k, v in parse_qs(u.query).items()}))
+            if u.path.startswith("/api/legacy/"): return self.send(legacy_get(u.path[12:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/files/"): return self.send(files_get(u.path[11:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/wizard/"): return self.send(wizard_get(u.path[12:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path == "/api/health": return self.send(health_get())
@@ -2158,6 +2373,10 @@ class H(BaseHTTPRequestHandler):
             if u.path.startswith("/api/kp/"): return self.send(kp_post(u.path[8:], d))
             if u.path.startswith("/api/percival/"): return self.send(pg_post(u.path[14:], d))
             if u.path.startswith("/api/storage/"): return self.send(storage_post(u.path[13:], d))
+            if u.path.startswith("/api/vault/"): return self.send(vault_post(u.path[11:], d))
+            if u.path.startswith("/api/transfer/"): return self.send(transfer_post(u.path[14:], d))
+            if u.path.startswith("/api/clean/"): return self.send(clean_post(u.path[11:], d))
+            if u.path.startswith("/api/legacy/"): return self.send(legacy_post(u.path[12:], d))
             if u.path.startswith("/api/files/"): return self.send(files_post(u.path[11:], d))
             if u.path.startswith("/api/wizard/"): return self.send(wizard_post(u.path[12:], d))
             if u.path.startswith("/api/recovery/"): return self.send(recovery_post(u.path[14:], d))

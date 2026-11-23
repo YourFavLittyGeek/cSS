@@ -1,0 +1,942 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Percival</title><link rel="icon" id="fav" href="/icon_dark.png">
+<style>
+/* ---------- Percival design system (redesign 2026-11) ---------- */
+:root{color-scheme:dark;--bg:#0f1115;--side:#13161b;--panel:#171a20;--panel2:#1d2128;--line:#262b33;--line2:#323843;--ink:#e8eaed;--ink2:#c5cad1;--mut:#8b939e;--in:#0c0e12;
+ --acc:#4c8dff;--acc2:color-mix(in srgb,var(--acc) 16%,transparent);--ok:#3fb96f;--warn:#e0a52b;--bad:#ef5b5b;--r:10px;--sh:0 10px 34px #0008}
+:root[data-theme=light]{color-scheme:light;--bg:#f6f7f9;--side:#eef0f3;--panel:#ffffff;--panel2:#f7f8fa;--line:#e3e6ea;--line2:#d4d8de;--ink:#15181c;--ink2:#2c3138;--mut:#68717c;--in:#ffffff;
+ --acc:#2563d9;--ok:#1f8f4e;--warn:#a86d00;--bad:#cf3a3a;--sh:0 10px 30px #0002}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+.sp{flex:1}.mut{color:var(--mut)}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}.hide{display:none!important}
+#app{display:flex;min-height:100vh}
+#side{width:216px;flex:none;background:var(--side);border-right:1px solid var(--line);display:flex;flex-direction:column;position:sticky;top:0;height:100vh;padding:14px 10px}
+#side .brand{display:flex;align-items:center;gap:10px;padding:4px 8px 16px}#side .brand img{width:30px;height:30px;border-radius:8px}#side .brand b{font-size:17px;letter-spacing:.3px}
+nav{display:flex;flex-direction:column;gap:2px}
+nav button{display:flex;align-items:center;gap:11px;background:none;border:0;color:var(--ink2);font:inherit;font-size:14px;padding:8px 10px;border-radius:8px;cursor:pointer;text-align:left;width:100%}
+nav button svg{width:18px;height:18px;flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;opacity:.85}
+nav button:hover{background:var(--panel2)}nav button.on{background:var(--acc2);color:var(--ink);font-weight:600}nav button.on svg{opacity:1;stroke:var(--acc)}
+nav button .cnt{margin-left:auto;font-size:11px;font-weight:600;border-radius:9px;padding:0 6px;background:var(--panel2);color:var(--mut)}nav button .cnt.att{background:var(--bad);color:#fff}nav button .cnt:empty{display:none}
+nav .grp{font-size:11px;color:var(--mut);letter-spacing:.5px;text-transform:uppercase;padding:14px 10px 4px}
+#side .foot{margin-top:auto;padding:10px 8px 2px;border-top:1px solid var(--line);font-size:12px;color:var(--mut)}#side .foot .proj{color:var(--ink2);font-weight:600;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+main{flex:1;min-width:0;display:flex;flex-direction:column}
+#hdr{display:flex;align-items:center;gap:12px;padding:14px 28px;position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+#hdr h1{font-size:19px;margin:0;font-weight:650;letter-spacing:.1px}#hdr .sub{color:var(--mut);font-size:13px}
+.wrap{padding:22px 28px 60px;max-width:1440px;width:100%}
+@media(max-width:1100px){#side{width:62px;padding:12px 7px}#side .brand b,nav button span.l,nav .grp,#side .foot,nav button .cnt{display:none}nav button{justify-content:center}.wrap{padding:18px}#hdr{padding:12px 18px}}
+h2{margin:0 0 12px;font-size:15px;font-weight:650}h3{margin:0 0 8px;font-size:13px;font-weight:650;color:var(--ink2)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px;margin-bottom:14px}
+.sect{margin:0 0 26px}.sect>h2{display:flex;align-items:center;gap:8px}.divider{height:1px;background:var(--line);margin:18px 0}
+.row{display:flex;align-items:center;gap:10px;margin:8px 0;flex-wrap:wrap}.lab{width:200px;color:var(--mut)}
+input,select,textarea{background:var(--in);color:var(--ink);border:1px solid var(--line2);border-radius:8px;padding:7px 10px;font:inherit;outline:none}input:focus,select:focus{border-color:var(--acc);box-shadow:0 0 0 3px var(--acc2)}
+select{-webkit-appearance:none;appearance:none;background:var(--in) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238b939e'/%3E%3C/svg%3E") no-repeat right 10px center;padding-right:28px;cursor:pointer}
+select option{background:var(--panel);color:var(--ink)}input[type=checkbox]{accent-color:var(--acc);width:15px;height:15px;vertical-align:-2px}
+button.b{background:var(--panel);color:var(--ink);border:1px solid var(--line2);border-radius:8px;padding:7px 13px;font:inherit;font-size:13.5px;cursor:pointer;white-space:nowrap}button.b:hover{border-color:var(--mut)}
+button.pri{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}button.pri:hover{filter:brightness(1.08);border-color:var(--acc)}
+button.wb{background:var(--warn);border-color:var(--warn);color:#111}button.q{background:none;border-color:transparent;color:var(--ink2)}button.q:hover{background:var(--panel2)}
+button.danger{color:var(--bad)}button:disabled{opacity:.45;cursor:not-allowed}button.b.sm{padding:4px 10px;font-size:12.5px}
+.seg{display:inline-flex;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:2px}.seg button{background:none;border:0;color:var(--ink2);font:inherit;font-size:13px;padding:5px 12px;border-radius:7px;cursor:pointer}
+.seg button.on{background:var(--panel);color:var(--ink);box-shadow:0 1px 3px #0003;font-weight:600}:root[data-theme=light] .seg button.on{box-shadow:0 1px 3px #0002}.seg.ico button{font-size:15px;padding:3px 10px}
+.pill{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line2);border-radius:999px;padding:1px 9px;font-size:12px;white-space:nowrap}
+.rec{color:var(--ok);font-size:12px;white-space:nowrap}
+.note{font-size:12.5px;color:var(--mut)}.mono{font:12px ui-monospace,Menlo,monospace;color:var(--mut)}
+.g{display:inline-block;border-radius:6px;padding:1px 7px;font-weight:700;font-size:12px}.gA{background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok)}.gB{background:color-mix(in srgb,var(--warn) 18%,transparent);color:var(--warn)}.gC{background:color-mix(in srgb,var(--bad) 18%,transparent);color:var(--bad)}
+button.b.bang{background:var(--bad);border-color:var(--bad);color:#fff;font-weight:800;padding:4px 8px}
+.notice{border-color:color-mix(in srgb,var(--acc) 40%,transparent);background:color-mix(in srgb,var(--acc) 7%,var(--panel))}.notice.w{border-color:color-mix(in srgb,var(--warn) 45%,transparent);background:color-mix(in srgb,var(--warn) 7%,var(--panel))}
+.banner{display:flex;align-items:center;gap:12px;border-radius:var(--r);padding:11px 14px;margin-bottom:16px;border:1px solid}.banner.w{border-color:color-mix(in srgb,var(--warn) 45%,transparent);background:color-mix(in srgb,var(--warn) 8%,transparent)}.banner.e{border-color:color-mix(in srgb,var(--bad) 45%,transparent);background:color-mix(in srgb,var(--bad) 8%,transparent)}
+#shade{position:fixed;inset:0;background:#0009;display:none;z-index:40;align-items:center;justify-content:center}#shade .card{width:540px;max-width:92vw;box-shadow:var(--sh);padding:20px 22px}
+.acts{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;align-items:center}
+.tip{border:1px solid var(--line);border-radius:8px;padding:9px 12px;font-size:12.5px;margin-top:8px;background:var(--panel2)}input.wide{min-width:380px}
+table{width:100%;border-collapse:collapse}td,th{border-bottom:1px solid var(--line);padding:9px 10px;text-align:left;font-size:13.5px;vertical-align:middle}th{color:var(--mut);font-weight:500;font-size:12.5px}
+table.fix{table-layout:fixed}table.fix td{overflow:hidden;text-overflow:ellipsis}td input{padding:4px 8px;min-width:80px;max-width:160px}td input[type=checkbox]{min-width:0;padding:0}td select{padding:4px 26px 4px 8px;max-width:100%}#tbl{overflow-x:auto}table.addt{table-layout:fixed;width:100%}table.addt td,table.addt th{white-space:normal;vertical-align:top;overflow:hidden;padding:8px 6px}table.addt select{min-width:0}table.addt input[type=checkbox]{width:18px;height:18px;padding:0;margin:4px auto;display:block}table.addt td.wrap{overflow-wrap:anywhere;word-break:break-word}
+table.addt select,table.addt input{max-width:100%;box-sizing:border-box;text-overflow:ellipsis}.pathv{overflow-wrap:anywhere;font:12px ui-monospace,Menlo,monospace;color:var(--ink2)}
+@media (max-width:1100px){table.addt,table.addt tbody,table.addt tr,table.addt td{display:block;width:100%!important}table.addt tr:first-child{display:none}table.addt tr{border-bottom:1px solid var(--line);padding:6px 0}table.addt colgroup{display:none}}td.note{min-width:180px}
+.bar{height:6px;background:var(--line);border-radius:4px;overflow:hidden;min-width:120px}.bar i{display:block;height:100%;background:var(--acc);border-radius:4px}
+.tag{font-size:11px;background:var(--acc2);color:var(--acc);border-radius:5px;padding:1px 6px;font-weight:600}.tag.ai{background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn)}
+.ram{position:relative;height:10px;border-radius:6px;margin:8px 0 4px;background:linear-gradient(90deg,color-mix(in srgb,var(--ok) 20%,transparent) 0 70%,color-mix(in srgb,var(--warn) 20%,transparent) 70% 85%,color-mix(in srgb,var(--bad) 20%,transparent) 85%)}
+.ram i{position:absolute;left:0;top:0;bottom:0;border-radius:6px}.ram s{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--mut);opacity:.6}
+#log{position:fixed;left:0;right:0;bottom:0;height:36%;background:#07090b;color:#b7c0c9;border-top:1px solid var(--line);display:none;z-index:30;font:12px ui-monospace,Menlo,monospace}
+#log pre{margin:0;padding:8px 14px;height:calc(100% - 38px);overflow:auto;white-space:pre-wrap}#log .h{display:flex;gap:8px;align-items:center;padding:5px 12px;background:#11161b;color:#ddd}
+.err{color:var(--bad)}.steps span{margin-right:12px;font-size:12px}
+#toast{position:fixed;right:20px;bottom:20px;background:var(--panel);border:1px solid var(--line2);padding:11px 15px;border-radius:10px;display:none;z-index:50;max-width:520px;box-shadow:var(--sh)}
+.cat{display:inline-block;border-radius:999px;padding:1px 9px;font-size:12px;white-space:nowrap;font-weight:600}
+.cat.compatible,.cat.completed,.cat.done{background:color-mix(in srgb,var(--ok) 16%,transparent);color:var(--ok)}
+.cat.compatible_with_limitations,.cat.adopted{background:color-mix(in srgb,var(--ok) 10%,transparent);color:color-mix(in srgb,var(--ok) 70%,var(--warn))}
+.cat.incomplete,.cat.interrupted,.cat.running,.cat.pending{background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn)}
+.cat.incompatible,.cat.failed,.cat.corrupted{background:color-mix(in srgb,var(--bad) 16%,transparent);color:var(--bad)}
+.cat.unknown,.cat.missing,.cat.upstream_rerun,.cat.reused,.cat.not_applicable{background:color-mix(in srgb,var(--mut) 16%,transparent);color:var(--mut)}
+.opt{border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin:6px 0;cursor:pointer;display:block}.opt.on{border-color:var(--acc);background:var(--acc2)}.opt.dis{opacity:.45;cursor:not-allowed}
+tr.sel td{background:var(--acc2)}
+/* notification bell + curtain */
+.ibtn{position:relative;display:inline-flex;align-items:center;justify-content:center;width:36px;height:34px;border-radius:9px;border:1px solid var(--line2);background:var(--panel);cursor:pointer;color:var(--ink2)}
+.ibtn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+#bell b{position:absolute;top:-6px;right:-7px;background:var(--bad);color:#fff;border-radius:9px;font-size:10px;padding:1px 5px;min-width:16px;text-align:center;font-weight:700}#bell b:empty{display:none}#bell.urg{border-color:var(--bad);color:var(--bad)}
+#drawer{position:fixed;top:0;right:0;bottom:0;width:420px;max-width:92vw;background:var(--panel);border-left:1px solid var(--line);box-shadow:var(--sh);z-index:35;transform:translateX(105%);transition:transform .18s ease;display:flex;flex-direction:column}
+#drawer.open{transform:none}#drawer .dh{display:flex;align-items:center;gap:8px;padding:14px 16px;border-bottom:1px solid var(--line)}#drawer .db{overflow:auto;padding:4px 16px 20px}
+.nsec{font-size:11px;letter-spacing:.5px;color:var(--mut);margin:14px 0 4px;text-transform:uppercase}.nit{border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin:6px 0;font-size:13px;position:relative;background:var(--panel2)}
+.nit.urgent{border-color:color-mix(in srgb,var(--bad) 60%,transparent)}.nit.action{border-color:color-mix(in srgb,var(--warn) 60%,transparent)}.nit .nt{font-weight:600;padding-right:60px}.nit .nx{position:absolute;right:9px;top:7px;font-size:11.5px;color:var(--mut);cursor:pointer}.nit .nx:hover{color:var(--ink)}
+.nit .na{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}.nit .na button,.nit .na select{font-size:12px;padding:3px 9px}.nbar{height:5px;background:var(--line);border-radius:3px;margin-top:6px}.nbar i{display:block;height:5px;background:var(--acc);border-radius:3px}
+/* studies workspace */
+.tiles{display:flex;gap:0;border:1px solid var(--line);border-radius:var(--r);background:var(--panel);margin-bottom:18px;overflow:hidden}
+.tile{flex:1;padding:14px 18px;border-right:1px solid var(--line);cursor:pointer;min-width:0}.tile:last-child{border-right:0}.tile:hover{background:var(--panel2)}.tile.on{background:var(--acc2)}
+.tile .n{font-size:24px;font-weight:650;line-height:1.1}.tile .t{font-size:12.5px;color:var(--mut);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tbar{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}.tbar input[type=search]{width:240px}
+.list{border:1px solid var(--line);border-radius:var(--r);background:var(--panel);overflow:hidden}.list table td,.list table th{padding:11px 14px}.list tr:last-child td{border-bottom:0}
+.list tbody tr{cursor:pointer}.list tbody tr:hover td{background:var(--panel2)}.list tbody tr.cur td{background:var(--acc2)}
+.st{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}.st i{width:8px;height:8px;border-radius:50%;flex:none;background:var(--mut)}.st.ok i{background:var(--ok)}.st.warn i{background:var(--warn)}.st.bad i{background:var(--bad)}.st.acc i{background:var(--acc);box-shadow:0 0 0 3px var(--acc2)}
+.st small{color:var(--mut);font-size:12px}
+.code{font-weight:650}.sub2{display:block;font-size:12px;color:var(--mut);font-weight:400}
+/* study panel (sheet) */
+#sheet{position:fixed;top:0;right:0;bottom:0;width:560px;max-width:96vw;background:var(--panel);border-left:1px solid var(--line);box-shadow:var(--sh);z-index:25;transform:translateX(105%);transition:transform .2s ease;display:flex;flex-direction:column}
+#sheet.open{transform:none}#sheet .sh{padding:18px 22px 0;border-bottom:1px solid var(--line)}#sheet .sb{overflow:auto;padding:18px 22px 40px;flex:1}
+.tabs{display:flex;gap:4px;margin-top:14px}.tabs button{background:none;border:0;border-bottom:2px solid transparent;color:var(--mut);font:inherit;font-size:13.5px;padding:8px 10px;cursor:pointer}.tabs button.on{color:var(--ink);border-bottom-color:var(--acc);font-weight:600}
+.kv{display:grid;grid-template-columns:170px 1fr;gap:9px 14px;font-size:13.5px}.kv>div:nth-child(odd){color:var(--mut)}
+.alist .ar{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line)}.alist .ar:last-child{border-bottom:0}.alist .ar .at{flex:1;min-width:0}
+/* activity */
+.act{border:1px solid var(--line);border-radius:var(--r);background:var(--panel);margin-bottom:18px}.act>.ah{display:flex;align-items:center;gap:8px;padding:11px 16px;border-bottom:1px solid var(--line);font-weight:650;font-size:13.5px}
+.act .pr{display:flex;align-items:center;gap:14px;padding:12px 16px;border-bottom:1px solid var(--line)}.act .pr:last-child{border-bottom:0}.act .pr .pt{flex:1;min-width:0}.act .pr .pt b{font-weight:600}.act .pr .pm{font-size:12.5px;color:var(--mut);margin-top:2px}
+.act .pr .pg{width:180px;flex:none}.act .pr .pa{display:flex;gap:6px;flex:none}.kind{font-size:11px;color:var(--mut);border:1px solid var(--line2);border-radius:5px;padding:0 6px;margin-left:6px;font-weight:500}
+.empty{padding:22px 16px;color:var(--mut);font-size:13px}
+.subtabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:18px}.subtabs button{background:none;border:0;border-bottom:2px solid transparent;color:var(--mut);font:inherit;padding:9px 12px;cursor:pointer;font-size:14px}.subtabs button.on{color:var(--ink);border-bottom-color:var(--acc);font-weight:600}
+.menu{position:absolute;right:0;top:40px;background:var(--panel);border:1px solid var(--line2);border-radius:10px;box-shadow:var(--sh);padding:6px;z-index:12;min-width:230px}.menu button{display:block;width:100%;text-align:left;background:none;border:0;color:var(--ink);font:inherit;padding:7px 10px;border-radius:7px;cursor:pointer}.menu button:hover{background:var(--panel2)}
+.fbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 10px}.fbar input{width:130px}.fbar select{max-width:200px}
+th.sortable{cursor:pointer;user-select:none;white-space:nowrap}.sarrow{opacity:.35;font-size:10px}.sarrow.on{opacity:1;color:var(--acc)}
+tr.sgroup td{background:color-mix(in srgb,var(--acc) 7%,transparent);cursor:pointer;padding-top:7px;padding-bottom:7px}tr.sgroup .caret{display:inline-block;width:12px}
+table.iwt{table-layout:fixed;width:100%}table.iwt td{vertical-align:top;overflow-wrap:anywhere}table.iwt td select{width:100%;max-width:100%;min-width:0!important}table.iwt td input:not([type=checkbox]){max-width:100%;min-width:0!important}table.iwt td input[type=checkbox]{min-width:0;padding:0}
+table.svt td.sv{text-align:center}table.svt img.th,table.svt .th0{display:block;width:96px;height:96px;margin:0 auto 6px;object-fit:contain;background:#000;border-radius:6px}table.svt .th0{line-height:96px;color:var(--mut);font-size:12px;background:color-mix(in srgb,var(--mut) 12%,transparent)}
+.sef{display:flex;flex-direction:column;gap:3px;margin:0 10px 6px 0}.sef input{width:190px}.sh-ex{display:flex;gap:8px;align-items:center;padding:5px 8px;border-radius:6px;cursor:pointer}.sh-ex:hover,.sh-ex.on{background:color-mix(in srgb,var(--acc) 10%,transparent)}
+.rmopt{display:block;padding:8px 10px;border:1px solid var(--line,#333);border-radius:8px;margin:6px 0;cursor:pointer}
+.dupbox{border:1px solid color-mix(in srgb,var(--warn,#d9a400) 50%,transparent);border-radius:8px;padding:6px 8px;margin-bottom:4px}.dupbox select{width:100%;margin:4px 0}
+.reuse{display:block;border:1px solid color-mix(in srgb,var(--ok,#3c9) 45%,transparent);border-radius:8px;padding:5px 8px;margin-bottom:4px}
+.lv-svg{width:100%;max-width:900px;height:auto;display:block}.lv-grid{stroke:var(--line);stroke-width:1}.lv-ax{fill:var(--mut);font-size:11px}.lv-lab{fill:var(--ink2);font-size:11.5px}
+.lv-line{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}.lv-dash{stroke-dasharray:5 4}.lv-dot{stroke:var(--panel);stroke-width:2}.lv-band{fill:var(--lv-1);opacity:.16}.lv-hit{fill:transparent;cursor:crosshair}
+.lv-legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--ink2);margin:4px 0 6px}.lv-legend i{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:6px;vertical-align:middle}.lv-legend i.dash{background:repeating-linear-gradient(90deg,var(--lv-math) 0 4px,transparent 4px 7px)!important}.lv-legend i.band{height:10px;background:var(--lv-1);opacity:.25}
+.lv-tip{position:absolute;background:var(--panel);border:1px solid var(--line2);border-radius:8px;padding:8px 10px;font-size:12px;color:var(--ink);box-shadow:0 4px 14px #0004;pointer-events:none;width:220px}
+.lv-sw{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.lv-bar{position:relative;height:10px;background:color-mix(in srgb,var(--mut) 14%,transparent);border-radius:4px}.lv-bar i{position:absolute;left:50%;top:-2px;bottom:-2px;width:1px;background:var(--mut)}.lv-bar span{position:absolute;top:0;bottom:0;border-radius:4px}.lv-bar .pos{background:var(--lv-1)}.lv-bar .neg{background:var(--lv-2)}
+:root{--lv-1:#3987e5;--lv-2:#d95926;--lv-3:#199e70;--lv-math:#c3c2b7}:root[data-theme=light]{--lv-1:#2a78d6;--lv-2:#eb6834;--lv-3:#1baf7a;--lv-math:#52514e}
+.pvb{display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:-1px}.pvb.red{background:#d64545}.pvb.yellow{background:#e0b030}.pvb.green{background:#3aa655}tr.pv-chosen td{background:color-mix(in srgb,var(--lv-1) 10%,transparent)}
+.incog{display:inline-flex;align-items:center;gap:4px;color:var(--mut);opacity:.85}
+</style></head><body>
+<div id="app"><aside id="side"><div class="brand"><img id="logo" src="/icon_dark.png" alt=""><b>Percival</b></div>
+<nav><button data-v="studies"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v16"/></svg><span class="l">Studies</span><b class="cnt" id="cnt_studies"></b></button><button data-v="add"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span class="l">Add studies</span><b class="cnt" id="cnt_add"></b></button><button data-v="act"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><span class="l">Activity</span><b class="cnt" id="cnt_act"></b></button><button data-v="read"><svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><span class="l">Review</span><b class="cnt" id="cnt_read"></b></button><button data-v="qc"><svg viewBox="0 0 24 24"><path d="M12 3c-4 0-7 3-7 7 0 2.5 1.2 4.2 2.6 5.4.8.7 1.4 1.7 1.4 2.8V20h6v-1.8c0-1.1.6-2.1 1.4-2.8C17.8 14.2 19 12.5 19 10c0-4-3-7-7-7z"/><path d="M9 13l2 2 4-4"/></svg><span class="l">Anatomy QC</span><b class="cnt" id="cnt_qc"></b></button><div class="grp">Research</div><button data-v="intel"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M8 13l3 3 5-7"/></svg><span class="l">Percival Intelligence</span><b class="cnt" id="cnt_intel"></b></button><div class="grp" data-proto style="padding-top:6px" title="Separate research prototypes; they do not feed the Percival Score">Older prototypes</div><button data-v="train" data-proto><svg viewBox="0 0 24 24"><path d="M3 20h18M6 16l4-5 4 3 5-7"/><circle cx="19" cy="7" r="1.5"/></svg><span class="l">Labels &amp; image eval</span><b class="cnt" id="cnt_train"></b></button><button data-v="uni" data-proto><svg viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg><span class="l">Unified Score model</span><b class="cnt" id="cnt_uni"></b></button><button data-v="shadow" data-proto><svg viewBox="0 0 24 24"><path d="M3 12h18M12 3v18"/><circle cx="12" cy="12" r="8"/></svg><span class="l">Stage-1 engine</span><b class="cnt" id="cnt_shadow"></b></button><button data-v="imageml" data-proto><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 15l5-5 4 4 3-3 6 6"/><circle cx="16" cy="8" r="1.5"/></svg><span class="l">Synthetic image model</span><b class="cnt" id="cnt_imageml"></b></button><div class="grp">&nbsp;</div><button data-v="setup"><svg viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg><span class="l">Setup Wizard</span><b class="cnt" id="cnt_setup"></b></button><button data-v="set"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span class="l">Settings</span><b class="cnt" id="cnt_set"></b></button></nav>
+<div class="foot"><div>Project</div><div class="proj" id="projname">—</div><div id="awakebox" style="margin-top:8px"></div></div></aside>
+<main><header id="hdr"><div><h1 id="ttl">Studies</h1><div class="sub" id="ttls"></div></div><span class="sp"></span><span id="idmode" style="display:flex;gap:6px;align-items:center;margin-right:8px"></span><span id="ver" class="hide"></span>
+<span class="ibtn" id="bell" title="Notifications (hover = preview, click = keep open)"><svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg><b id="bb"></b></span>
+<span class="seg ico" id="theme"><button data-t="light" title="Light theme">☀</button><button data-t="dark" title="Dark theme">☾</button></span></header>
+<div class="wrap" id="view"></div></main></div>
+<div id="sheet"></div>
+<div id="log"><div class="h"><b>Log</b><select id="logcode"></select><span class="sp"></span><button class="b" id="logcopy">Copy log</button><button class="b" id="logclose">Close</button></div><pre id="logtext"></pre></div>
+<div id="drawer"><div class="dh"><b style="font-size:15px">Notifications</b><span class="sp"></span><button class="b" id="nread" style="font-size:11px;padding:3px 8px">mark all read</button><button class="b" id="nclose" style="font-size:11px;padding:3px 8px">✕</button></div><div class="db" id="nbody"></div></div>
+<div id="toast"></div><div id="shade"><div class="card" id="dlg"></div></div>
+<script>
+const $=s=>document.querySelector(s),esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let S=null,V="studies",ADD={};
+const api=async(u,b)=>{const r=await fetch(u,b?{method:"POST",headers:{"Content-Type":"application/json","X-CSS-App":"1"},body:JSON.stringify(b)}:{});const j=await r.json();if(j&&j.error&&r.status>=400)throw new Error(j.error);return j};
+const toast=(t,bad)=>{const e=$("#toast");e.innerHTML=t;e.style.borderColor=bad?"var(--bad)":"var(--line)";e.style.display="block";clearTimeout(e._t);e._t=setTimeout(()=>e.style.display="none",6000)};
+// confirmation box: ask(title, html, [[value,label,class]...]) -> value of the button pressed
+const ask=(title,html,btns)=>new Promise(res=>{$("#dlg").innerHTML=`<h2 class="warn">⚠ ${title}</h2><p>${html}</p><div class="acts">${btns.map(([v,l,c])=>`<button class="b ${c||""}" data-v="${v}">${l}</button>`).join("")}</div>`;
+  $("#shade").style.display="flex";$("#dlg").querySelectorAll("button").forEach(b=>b.onclick=()=>{$("#shade").style.display="none";res(b.dataset.v)})});
+const PW=()=>S.pathways;const auto=()=>S.settings.auto_retry!==false;
+const grade=(g,tip)=>g?`<span class="g g${g[0]==="A"?"A":g[0]==="B"?"B":"C"}" title="${esc(tip)}">${g}</span>`:'<span class="mut">—</span>';
+const pwSel=(cur,rec,attrs,tried)=>{const t={};(tried||[]).forEach(x=>t[x.pathway]=x.shift);const ord=Object.keys(PW()).sort((a,b)=>(a in t)-(b in t));
+  return `<select ${attrs}>${ord.map(k=>`<option value="${k}" ${k===cur?"selected":""}>${PW()[k]}${["swi_only","synthmorph"].includes(k)?" (runs alone)":""} · ${S.pw_time[k]}${k===rec?"  ✓ recommended":""}${k in t?`  · tried ✗ ${t[k]} mm`:""}</option>`).join("")}</select>`};
+const recTag=(sel,rec)=>sel===rec?'<span class="rec">✓ recommended</span>':"";
+async function openWin(url,name){const r=await api("/api/window",{url,title:name});if(r.open)window.open(url,name,"width=1150,height=560")}
+async function confirmPath(code,chosen,rec,why){if(chosen===rec)return true;
+  if(auto()){toast(`${sidH(code)}: ${esc(PW()[chosen])} chosen instead of the recommended ${esc(PW()[rec])} (automatic mode - no confirmation)`);return true}
+  const r=await ask("Not the recommended pathway",`${sidH(code)}: you chose <b>${esc(PW()[chosen])}</b>, but the recommended pathway is <b>${esc(PW()[rec])}</b>${why?` (${esc(why)})`:""}. It may fail or give less accurate anatomy for this patient.`,[["back","Back"],["rec","Use recommended","pri"],["go","Continue anyway","wb"]]);
+  return r==="go"?true:r==="rec"?"rec":false}
+const hms=s=>{s=Math.max(0,Math.round(s||0));const h=Math.floor(s/3600),m=Math.floor(s%3600/60);return h?`${h} h ${String(m).padStart(2,"0")} min`:m?`${m} min`:`${s % 60} s`};
+// v5.20 ONE identifier rule: Standard (vault unlocked) = accession number everywhere; Incognito = de-identified code everywhere.
+// The code is shown only on the Add studies and Studies screens. Internal file keys are never shown as identifiers.
+function sidOf(code){const p=((typeof S!=="undefined"&&S&&S.patients)||[]).find(x=>x.code===code);return (p&&p.ident)||{}}
+function sidStd(){const st=(typeof IDV!=="undefined"&&IDV.st)||{};return st.mode==="standard"}
+function sid(code){const i=sidOf(code);if(sidStd()&&!i.locked&&i.accession)return i.accession;return i.deid_code||code}
+function sidH(code){const i=sidOf(code);if(sidStd()){if(i.locked)return `${esc(i.deid_code||code)} <span title="identity vault locked - unlock to see the accession number">🔒</span>`;
+    if(!i.accession)return `${esc(i.deid_code||code)} <span class="pill bad" title="enter the accession number (Edit)">accession missing</span>`;return esc(i.accession)}
+  return esc(i.deid_code||code)}
+const seg=(id,opts,cur,cb)=>`<span class="seg" data-seg="${id}">${opts.map(([v,l])=>`<button data-v="${v}" class="${v===cur?"on":""}">${l}</button>`).join("")}</span>`;
+function bindSeg(id,cb){document.querySelectorAll(`[data-seg="${id}"] button`).forEach(b=>b.onclick=()=>cb(b.dataset.v))}
+async function pick(kind,prompt){const r=await api("/api/pick",{kind,prompt});if(!r.path){if(r.error&&r.error!=="cancelled")toast(esc(r.error),1);return null}return r.path}
+const TITLES={files:["Settings — File Manager","Explore, copy, move, archive, and verify files across Mac SSD and Data Vault"],setup:["Setup","Installation check, FreeSurfer and licence configuration, readiness report"],train:["Labels & image evaluation (prototype)","Older prototype (formerly \"Training\"): label overview and evaluation of the separate engines - the Percival Score is trained in Percival Intelligence"],import:["Add studies","From folders or from another project"],archive:["Archive","Archived studies and removed studies kept for machine learning"],intel:["Percival Intelligence","How the single Percival Score is produced and how well it performs - learned on this Mac"],qc:["Anatomy QC","FreeSurfer / SynthSeg labels, registration and image quality per study"],imageml:["Synthetic image model (prototype)","Older prototype on synthetic data only - the Percival Score has its own Image ML, trained on your project (Percival Intelligence)"],shadow:["Stage-1 engine (prototype)","Older prototype (formerly \"Shadow ML\"): the Unified Score engine run in shadow mode (predictions computed next to the pipeline for comparison; changes nothing, not used by the Percival Score)"],studies:["Studies","Your project's studies, their status and results"],add:["Add studies","From folders (one examination or many, with the Excel file) or from another project"],act:["Activity","Everything running, waiting, finished or needing attention"],
+  read:["Review","Read candidates in the reviewer, or run a blind read"],uni:["Unified Score model (prototype)","Older prototype (formerly \"Predictor model\"): the separate Unified Score model (nested CV, freeze) - not used by the Percival Score; its 5 predictors are fed to Percival automatically"],set:["Settings & System Control Centre","Storage overview, File Manager, Data Vault, transfers, cleanups, processing, and system administration"]};
+const VMAP={home:"studies",pts:"act",res:"studies",proc:"studies",files:"set"};
+async function refresh(){S=await api("/api/state");$("#ver").textContent=`pipeline ${S.version}`;{const sp=!!((S.settings||{}).features||{}).show_prototypes;document.querySelectorAll("[data-proto]").forEach(e=>e.style.display=sp?"":"none")}
+  document.documentElement.dataset.theme=S.settings.theme||"dark";{const ic=`/icon_${S.settings.theme==="light"?"light":"dark"}.png`;if(!$("#logo").src.endsWith(ic)){$("#logo").src=ic;$("#fav").href=ic}}document.querySelectorAll("#theme button").forEach(b=>b.classList.toggle("on",b.dataset.t===(S.settings.theme||"dark")));
+  $("#projname").textContent=(S.project||{}).name||"—";$("#projname").title=(S.project||{}).path||"";
+  $("#awakebox").innerHTML=`<label style="display:flex;gap:7px;align-items:center;cursor:pointer" title="Keep the Mac awake while studies are processing"><input type="checkbox" id="awk" ${S.settings.awake?"checked":""}> Keep Mac awake</label>`;
+  $("#awk").onchange=async e=>{await api("/api/settings",{awake:e.target.checked});await refresh()};
+  const P=S.patients.filter(p=>!p.archived&&!p.retired),att=P.filter(p=>["failed","stopped","decision"].includes(p.status)).length,run=P.filter(p=>["running","paused","starting","waiting"].includes(p.status)).length;
+  $("#cnt_act").textContent=att?String(att):run?String(run):"";$("#cnt_act").classList.toggle("att",!!att);$("#cnt_studies").textContent=P.length?String(P.length):"";
+  const lc=$("#logcode"),cur=lc.value;lc.innerHTML=S.patients.filter(p=>!p.retired).map(p=>`<option value="${esc(p.code)}">${esc(sid(p.code))}</option>`).join("");if(cur)lc.value=cur;else if(S.queue.running)lc.value=S.queue.running}
+function nav(v, sec){if(v==="files"){v="set";if(window.SV)window.SV.currentSection="c_filemanager"}if(sec&&window.SV)window.SV.currentSection=sec;V=VMAP[v]||v;document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on",x.dataset.v===V));const t=TITLES[V]||[V,""];$("#ttl").textContent=t[0];$("#ttls").textContent=t[1];closeSheet();window.scrollTo(0,0);render()}
+document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>nav(b.dataset.v));
+document.querySelectorAll("#theme button").forEach(b=>b.onclick=async()=>{await api("/api/settings",{theme:b.dataset.t});await refresh()});
+$("#logclose").onclick=()=>$("#log").style.display="none";$("#logcode").onchange=loadLog;
+$("#logcopy").onclick=()=>{navigator.clipboard.writeText($("#logtext").textContent);toast("log copied")};
+function openLog(code){$("#logcode").value=code;$("#log").style.display="block";loadLog()}
+async function loadLog(){const c=$("#logcode").value;if(!c){$("#logtext").textContent="(no patient yet)";return}const r=await api("/api/log?code="+encodeURIComponent(c));const t=$("#logtext"),bot=t.scrollTop+t.clientHeight>=t.scrollHeight-20;t.textContent=r.text;if(bot)t.scrollTop=t.scrollHeight}
+// ---------------- views
+async function render(){await refresh();const v=$("#view");
+  if(V==="files")return typeof settingsControlCentre==="function"?settingsControlCentre(v,"c_filemanager"):(typeof filesView==="function"?filesView(v):(v.innerHTML='<div class="card">File Manager screen not loaded.</div>'));
+  if(V==="studies")return studiesView(v);if(V==="add")return addHost(v);if(V==="act")return activityView(v);if(V==="read")return readView(v);
+  if(V==="set")return typeof settingsControlCentre==="function"?settingsControlCentre(v):(typeof setHost==="function"?setHost(v):(v.innerHTML='<div class="card">Settings screen not loaded.</div>'));
+  if(V==="uni")return uniView(v);if(V==="shadow")return typeof shadowView==="function"?shadowView(v):(v.innerHTML='<div class="card">Shadow ML screen not loaded - the existing pipeline is unaffected.</div>');if(V==="setup")return typeof setupView==="function"?setupView(v):(v.innerHTML='<div class="card">Setup wizard not loaded.</div>');if(V==="train")return typeof trainingView==="function"?trainingView(v):(v.innerHTML='<div class="card">Training screen not loaded.</div>');if(V==="import"){W.addTab="folders";location.hash="#add";return}if(V==="archive")return typeof archiveView==="function"?archiveView(v):null;if(V==="intel")return typeof intelView==="function"?intelView(v):null;if(V==="qc")return typeof qcView==="function"?qcView(v):(v.innerHTML='<div class="card"><b class="bad">Anatomy QC screen not loaded</b> (qc_view.js missing) - the QC data on disk is unaffected.</div>');if(V==="imageml")return typeof imageMlView==="function"?imageMlView(v):(v.innerHTML='<div class="card">Image ML screen not loaded - the existing pipeline is unaffected.</div>')}
+async function homeView(v){const pf=await api("/api/preflight");const q=S.queue;
+  v.innerHTML=`<div class="card"><h2>Setup check</h2><table>${pf.map(x=>`<tr><td style="width:30px" class="${x.ok?"ok":"bad"}">${x.ok?"✓":"✗"}</td><td style="width:220px">${esc(x.item)}</td><td class="mut">${esc(x.detail)} ${x.fix==="dcm2niix"?`<button class="b pri" data-fix="dcm2niix">Install dcm2niix</button>`:""}${x.fix==="pywebview"?`<button class="b pri" data-fix="pywebview">Install (own window + Dock icon)</button>`:""}${x.fix==="licence"?`${x.fix_path?`<button class="b pri" data-lic="perm" data-p="${esc(x.fix_path)}">Make it readable (asks for your Mac password)</button> `:""}<button class="b" data-lic="choose">Choose licence file…</button>`:""}</td></tr>`).join("")}</table>
+   ${pf.some(x=>!x.ok)?'<p class="note">Fix ✗ items in <b>Settings</b> (FreeSurfer folder, licence) before processing.</p>':""}</div>
+  <div class="card"><h2>Pipeline version</h2><div class="row"><span>Installed: <b>${esc(S.version)}</b></span><button class="b" id="inst">Install / update from zip…</button><button class="b" id="rb">Roll back to the previous version</button></div>
+   <div class="note">Installing keeps a backup of the current code; your patients, calls and results are never touched.</div></div>
+  <div class="card"><h2>Queue</h2><div class="row">${q.n?`${q.n} patient(s) waiting or running · remaining ≈ ${hms(q.remaining)} · finish ≈ ${new Date(Date.now()+q.remaining*1000).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}`:"empty"}</div>
+   <div class="row"><button class="b pri" onclick="go('add')">+ Add patients</button><button class="b" onclick="go('pts')">Patients (${S.patients.length})</button><button class="b" onclick="go('res')">Results</button><button class="b" onclick="go('read')">Review / Blind read</button></div></div>`;
+  v.querySelectorAll("[data-fix]").forEach(b=>b.onclick=async()=>{b.disabled=true;b.textContent="installing…";const r=await api("/api/fix",{what:b.dataset.fix});
+    toast(r.ok?(b.dataset.fix==="pywebview"?"installed - quit the app (Settings) and open it again to get its own window and Dock icon":`${esc(b.dataset.fix)} installed - go to Patients and press "Retry all failed"`):`install failed: ${esc(r.error)}`,!r.ok);render()});
+  v.querySelectorAll("[data-lic]").forEach(b=>b.onclick=async()=>{const r=await api("/api/fix",b.dataset.lic==="perm"?{what:"licence_permission",path:b.dataset.p}:{what:"licence_choose"});
+    toast(r.ok?'licence OK - go to Patients and press "Retry all failed"':`not fixed: ${esc(r.error)}`,!r.ok);render()});
+  $("#inst").onclick=async()=>{const p=await pick("file","Choose the cSS pipeline zip");if(!p)return;const r=await api("/api/install",{path:p});toast(r.ok?`installed ${esc(r.version)} (${r.files} files; backup kept)`:esc(r.error),!r.ok);render()};
+  $("#rb").onclick=async()=>{if(!confirm("Restore the previous pipeline version?"))return;const r=await api("/api/rollback",{});toast(r.ok?`restored ${esc(r.version)}`:esc(r.error),!r.ok);render()}}
+window.go=x=>nav(x);
+// ---------------- add studies: v5.18 one pathway - app/import_wizard_view.js (From folders) + bringInView (From another project)
+// ---------------- patients
+const ACT_HELP={
+ "Fast re-registration":"Try this first. The T1 is cut down to the brain using its own SynthSeg labels, then the SWI is registered to it again with mri_coreg. Skull, neck and fat can no longer pull the fit off. A few minutes, low memory. The 1.5 mm check still decides.",
+ "SynthMorph":"FreeSurfer 8's learned rigid registration - works across contrasts (SWI vs T1) where mutual information can fail. A few minutes. Memory use on this Mac not confirmed yet: run it with nothing else running. The 1.5 mm check still decides.",
+ "recon-all":"Most accurate: builds the full cortical surfaces from the T1, then registers with bbregister (boundary-based). About 2-3 hours per patient. Use when the faster options are refused.",
+ "SWI-only":"Skips the T1 completely: anatomy from SynthSeg on the SWI itself. Less accurate cortex labels, and SynthStrip on the SWI needed 30-64 GB of memory on this Mac before. Last resort, run it alone.",
+ "Retry":"Run this patient again from the start with the same settings.","Retry all failed":"Put every failed or stopped patient back in the queue.",
+ "Remove":"Take this patient out of the list (its result files are kept).","Pause":"Pause processing of this patient; Resume continues where it stopped.",
+ "Resume":"Continue the paused patient.","Stop":"Stop this patient now; Retry starts it again from the beginning.","Re-run":"Process this patient again from the start (e.g. after an update).",
+ "Log":"Show the live output of this patient's processing (Copy log to send it).","QC":"Snapshot of the cortex labels (cyan) and brain mask (yellow) on the SWI - they should follow the anatomy.",
+ "Review":"Open the reviewer for this patient with the AI meter, AI score and 3-D view visible."};
+function memBar(sy,z){const c=sy.mem_pct>=z[1]?"var(--bad)":sy.mem_pct>=z[0]?"var(--warn)":"var(--ok)";
+  return `<div class="ram"><i style="width:${Math.min(100,sy.mem_pct)}%;background:${c}"></i><s style="left:${z[0]}%"></s><s style="left:${z[1]}%"></s></div>`}
+function ptsView(v){const q=S.queue,sy=S.sys,z=S.mem_zones,coh=["all"].concat(S.cohorts);v._f=v._f||"all";const P=S.patients.filter(p=>v._f==="all"||p.cohort===v._f);const hide=!!v._hide;
+  const cnt=k=>S.patients.filter(p=>k.includes(p.status)).length,par=S.settings.parallel||1,rec=S.rec,run=S.patients.filter(p=>["running","paused","starting"].includes(p.status));
+  const misreg=p=>p.status==="failed"&&/do not line up/.test(p.error);
+  const st=p=>{if(p.status==="running"||p.status==="paused"||p.status==="starting"){const tot=p.elapsed+p.remaining,pc=tot?Math.round(100*p.elapsed/tot):0;
+     if(p.stalled)return `<span class="warn" title="no new log line for ${p.stalled} min - open the Log; if nothing uses CPU in Activity Monitor, Stop and Retry">⚠ no progress for ${p.stalled} min</span>`;
+     return `<div class="row" style="margin:0;flex-wrap:nowrap"><div class="bar" style="flex:0 0 140px;min-width:0"><i style="width:${pc}%"></i></div><span class="note">${p.status==="paused"?"paused · ":"● "}${Math.max(1,S.steps.indexOf(p.step)+1)}/5 ${esc(p.step||"starting")} · ${hms(p.elapsed)} · ≈ ${hms(p.remaining)} left</span></div>`}
+    if(p.status==="waiting")return `<span class="mut">waiting · ≈ ${hms(p.remaining)}${p.solo?" · runs alone":""}</span>`;
+    if(p.status==="decision")return `<span class="warn">⚠ waiting for your decision</span>`;
+    if(p.status==="done")return `<span class="ok">✓ done · ${hms(p.elapsed)}</span>`;
+    if(misreg(p)){const m=/shift ([\d.?]+) mm/.exec(p.error),tr=p.tried||[];return `<span class="bad" title="${esc(p.error)}">✗ ${tr.length>1?"still misaligned":"T1 / SWI misaligned"}${m?` (${m[1]} mm)`:""}${tr.length>1?` · tried: ${tr.map(x=>esc(PW()[x.pathway]||x.pathway)).join(", ")}`:""}</span> <button class="b" data-help="reg" title="Which retry should I choose?" style="padding:1px 7px">ⓘ</button>`}
+    return `<span class="${p.status==="failed"?"bad":"warn"}" title="${esc(p.error)}">✗ ${esc(p.status)}${p.error?": "+esc(p.error):""}</span>`};
+  const btn=(a,code,cls)=>`<button class="b ${cls||""}" data-act="${a}" data-code="${esc(code)}" title="${esc(ACT_HELP[a]||"")}">${a}</button>`;
+  const acts=p=>{const c=p.code,lg=`<button class="b" data-lg="${esc(c)}" title="${esc(ACT_HELP.Log)}">Log</button>`;
+    if(misreg(p))return lg+`<button class="b bang" data-bang="${esc(c)}" title="Change the pathway by hand">!</button>`+pwSel(p.next_rec,p.next_rec,`data-retry="${esc(c)}" data-rec="${esc(p.next_rec)}" style="width:330px"`,p.tried)+btn("Retry",c,"pri");
+    const bang=["failed","waiting","decision","stopped"].includes(p.status)?`<button class="b bang" data-bang="${esc(c)}" title="Change the pathway by hand">!</button>`:"";
+    const a=({running:["Pause","Stop"],starting:["Stop"],paused:["Resume","Stop"],waiting:["Remove"],decision:["Remove"],failed:["Retry","Remove"],stopped:["Retry","Remove"],done:["Re-run"]}[p.status]||[]).map(x=>btn(x,c)).join("");
+    return lg+bang+(p.has_qc?`<button class="b" data-qc="${esc(c)}" title="${esc(ACT_HELP.QC)} Opens in its own window.">QC ↗</button>`:"")+a+(p.status==="done"?`<button class="b pri" data-rv="${esc(c)}" title="${esc(ACT_HELP.Review)}">Review</button>`:"")};
+  const notes=S.patients.filter(p=>p.path_note&&!p.path_ack&&p.status!=="done");
+  const nwait=notes.some(p=>p.status==="decision");
+  const pop=notes.length?`<div id="npop" class="card ${v._np?"":"hide"}" style="position:absolute;right:16px;top:48px;width:640px;z-index:6;padding:8px 12px;box-shadow:0 12px 30px #0009">
+    ${notes.map(p=>`<div class="row" style="margin:0;padding:5px 0;border-bottom:1px solid var(--line);font-size:12px;flex-wrap:nowrap"><b class="${p.status==="decision"?"warn":""}">${sidH(p.code)}</b>
+     <span title="${esc(p.path_note)}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.path_note.replace(/^the T1 labels do not line up with the SWI \(shift ([\d.?]+) mm, limit 1.5 mm\)/,"misaligned $1 mm").replace("retrying automatically with","retrying with"))}${p.status==="decision"?" · waits for you":""}</span><span class="sp"></span>
+     ${["waiting","decision"].includes(p.status)?pwSel(p.pathway,p.pathway,`data-pw="${esc(p.code)}" style="width:210px;font-size:12px;padding:2px 24px 2px 6px"`):""}<button class="b pri" data-ack="${esc(p.code)}" style="padding:2px 10px;font-size:12px">OK</button></div>`).join("")}
+    <div class="row" style="margin:6px 0 0;font-size:12px"><span class="note">Change the pathway with the drop-down; a non-recommended choice asks to confirm.</span><span class="sp"></span><button class="b" id="ackall" style="padding:2px 10px;font-size:12px">OK to all</button></div></div>`:"";
+  v.innerHTML=`
+  <div class="card" style="position:relative"><div class="row"><b>Queue</b><span class="mut">Run at the same time:</span>
+    <select id="par">${[1,2,3,4].map(n=>`<option value="${n}" ${n===par?"selected":""}>${n} patient${n>1?"s":""}${n===rec?"  ✓ recommended":n>rec?"  · above recommended ⚠":""}</option>`).join("")}</select>
+    ${par===rec?'<span class="rec">✓ recommended</span>':par>rec?`<span class="pill warn">above recommended (${rec})</span>`:""}<button class="b" id="why" style="padding:3px 9px">ⓘ why ${rec}?</button>
+    <span class="sp"></span>${notes.length?`<button class="pill ${nwait?"warn":""}" id="npill" style="cursor:pointer;background:color-mix(in srgb,var(${nwait?"--warn":"--acc"}) 12%,transparent);border-color:var(${nwait?"--warn":"--acc"});color:var(${nwait?"--warn":"--acc"})">${nwait?"⚠":"ℹ"} ${notes.length} pathway change${notes.length>1?"s":""} ${v._np?"▴":"▾"}</button>`:""}<span class="pill ok">✓ ${cnt(["done"])} done</span><span class="pill">● ${cnt(["running","paused","starting"])} running</span><span class="pill">${cnt(["waiting"])} waiting</span>
+    ${cnt(["decision"])&&!notes.length?`<span class="pill warn">${cnt(["decision"])} need a decision</span>`:""}${cnt(["failed","stopped"])?`<span class="pill bad">✗ ${cnt(["failed","stopped"])} failed</span>`:""}
+    ${cnt(["failed","stopped"])?`<button class="b" id="rall" title="${esc(ACT_HELP["Retry all failed"])}">Retry all failed</button>`:""}<button class="b pri" onclick="go('add')">+ Add patients</button></div>${pop}
+   <div id="whytip" class="tip ${v._why?"":"hide"}"><b>Recommended now: ${rec}</b>${rec!==sy.recommended?` <span class="mut">(${sy.recommended} for SynthSeg only)</span>`:""} · ${esc(sy.chip)} · ${sy.cores} CPU cores · ${sy.mem_total} GB memory · ${sy.disk_free} GB free disk${S.rec_why?` · queue: ${esc(S.rec_why)}`:""}
+    <table style="margin:6px 0;max-width:620px"><tr><th>Pathway</th><th>Memory each</th><th>Time</th></tr><tr><td>SynthSeg / Fast re-registration</td><td>~12 GB, 4 cores</td><td>${S.pw_time.synthseg}</td></tr><tr><td>recon-all</td><td>~5 GB, 1-2 cores</td><td>${S.pw_time.recon}</td></tr><tr><td>SynthMorph / SWI-only</td><td>runs alone</td><td>${S.pw_time.synthmorph} / ${S.pw_time.swi_only}</td></tr></table>
+    <span class="mut">Recalculated from the patients waiting / running: their memory is added up against ${sy.mem_total} GB minus 6 GB for macOS. The graphics chip is not used by these steps on a Mac. Memory figures are estimates.
+    Always run alone: SWI-only and SynthMorph (high / unknown memory). Above ${z[0]} % memory no new patient starts; above ${z[1]} % you get a warning and a "Stop newest patient" button.</span></div>
+   <div class="row" style="margin-top:10px"><b>Memory</b><span>${sy.mem_used} of ${sy.mem_total} GB (${sy.mem_pct} %)</span><span class="mut">· CPU ${sy.cpu_pct} % · free disk ${sy.disk_free} GB${q.n?` · ≈ ${hms(q.remaining)} left · finish ≈ ${new Date(Date.now()+q.remaining*1000).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}`:""}</span></div>
+   ${memBar(sy,z)}<div class="note">🟢 safe · 🟡 ${z[0]}-${z[1]} % no new patient starts · 🔴 ${z[1]} %+ danger${q.mem_wait&&sy.mem_pct<z[1]?' · <span class="warn">waiting for memory before starting the next patient</span>':""}</div>
+   ${sy.mem_pct>=z[1]&&run.length?`<div class="row bad"><b>⚠ Memory in the danger zone (${sy.mem_pct} %)</b> - the Mac may freeze. <button class="b wb" id="stopnew">Stop newest patient (${esc(run.slice().sort((a,b)=>b.started-a.started)[0].code)}) - it goes back to the queue</button></div>`:""}</div>
+  ${q.hold?`<div class="card" style="border-color:var(--bad)"><b class="bad">⏸ Queue paused - setup problem:</b> ${esc(q.hold)}<br><span class="note">Fix it on the Home screen (Setup check), then press "Retry all failed". Waiting patients were not touched.</span></div>`:""}
+  <div class="card"><div class="row" style="margin-top:0"><span class="sp"></span><select id="cf">${coh.map(c=>`<option ${c===v._f?"selected":""}>${esc(c)}</option>`).join("")}</select><label><input type="checkbox" id="hn" ${hide?"checked":""}> Hide names</label></div>
+   <table class="fix"><colgroup><col style="width:90px"><col style="width:150px"><col style="width:80px"><col style="width:160px"><col style="width:52px"><col><col style="width:540px"></colgroup>
+   <tr><th>Code</th><th>Name</th><th>Cohort</th><th>Pathway</th><th>QC</th><th>Status</th><th style="text-align:right">Actions</th></tr>
+   ${P.map(p=>`<tr><td><b>${sidH(p.code)}</b>${["waiting","decision"].includes(p.status)?` <button class="b" data-ren="${esc(p.code)}" title="change the code (only before processing starts)" style="padding:0 5px;border:0">✎</button>`:""}</td>
+    <td>${hide?"•••":`<input data-code="${esc(p.code)}" data-f="name" value="${esc(p.name)}" placeholder="—" style="width:100%;max-width:none">`}</td><td>${esc(p.cohort)}</td>
+    <td>${esc(PW()[p.pathway]||"SynthSeg")}${p.path_note?` <span class="tag" title="${esc(p.path_note)}">auto</span>`:""}${p.mode==="auto"?' <span class="tag ai">Auto · AI only</span>':""}</td><td>${grade(p.qc,p.qc_tip)}</td><td>${st(p)}</td><td><div class="acts">${acts(p)}</div></td></tr>`).join("")||'<tr><td colspan="7" class="mut">No patients yet.</td></tr>'}</table>
+   <div class="note" style="margin-top:6px">You can close this window; processing continues and resumes after a restart. A code can be changed (✎) until processing starts; names any time.</div></div><div id="qcimg"></div>`;
+  $("#cf").onchange=e=>{v._f=e.target.value;ptsView(v)};$("#why").onclick=()=>{v._why=!v._why;$("#whytip").classList.toggle("hide")};
+  $("#par").onchange=async e=>{const n=+e.target.value;if(n>rec){const r=await ask("More than recommended",`You chose <b>${n} patients</b> at the same time; <b>${rec}</b> is recommended for this Mac (${sy.mem_total} GB). The Mac may slow down; if memory reaches the red zone you will be warned and new patients won't start.`,[["back","Back"],["rec",`Keep ${rec}`,"pri"],["go",`Use ${n} anyway`,"wb"]]);
+      if(r!=="go"){if(r==="rec")await api("/api/settings",{parallel:rec});return render()}}await api("/api/settings",{parallel:n});render()};
+  $("#stopnew")&&($("#stopnew").onclick=async()=>{const p=run.slice().sort((a,b)=>b.started-a.started)[0];if(!confirm(`Stop ${p.code} to free memory? It goes back to the queue and starts again from the beginning.`))return;await api("/api/control",{code:p.code,action:"requeue"});render()});
+  $("#rall")&&($("#rall").onclick=async()=>{const r=await api("/api/retry_failed",{});toast(`${r.n} patient(s) back in the queue`);render()});$("#hn").onchange=e=>{v._hide=e.target.checked;ptsView(v)};
+  v.querySelectorAll("[data-ack]").forEach(b=>b.onclick=async()=>{await api("/api/control",{code:b.dataset.ack,action:"accept"});if(notes.length<=1)v._np=false;render()});
+  $("#npill")&&($("#npill").onclick=()=>{v._np=!v._np;$("#npop").classList.toggle("hide");$("#npill").innerHTML=$("#npill").innerHTML.replace(/[▾▴]/,v._np?"▴":"▾")});
+  $("#ackall")&&($("#ackall").onclick=async()=>{for(const p of notes)await api("/api/control",{code:p.code,action:"accept"});v._np=false;render()});
+  v.querySelectorAll("[data-pw]").forEach(el=>el.onchange=async()=>{const p=S.patients.find(x=>x.code===el.dataset.pw),recp=p.pathway;const r=await confirmPath(p.code,el.value,recp,p.path_note);
+    if(r===true)await api("/api/control",{code:p.code,action:"pathway",pathway:el.value});render()});
+  v.querySelectorAll("[data-bang]").forEach(b=>b.onclick=async()=>{const p=S.patients.find(x=>x.code===b.dataset.bang),rec=p.status==="failed"?(p.next_rec||"coreg_masked"):p.pathway;
+    $("#dlg").innerHTML=`<h2>Change the pathway - ${sidH(p.code)}</h2><p class="note">Now: <b>${esc(PW()[p.pathway]||p.pathway)}</b>${p.tried&&p.tried.length?` · tried: ${p.tried.map(t=>esc(PW()[t.pathway]||t.pathway)+" ("+t.shift+" mm)").join(", ")}`:""}. ${auto()?"Automatic mode: the change is applied at once.":"The change asks for confirmation if it is not the recommended one."}</p>
+     <div class="row">${pwSel(rec,rec,'id="bangsel" style="width:100%"',p.tried)}</div><div class="acts" style="margin-top:10px"><button class="b" data-v="x">Cancel</button><button class="b pri" data-v="ok">Apply</button></div>`;
+    $("#shade").style.display="flex";$("#dlg").querySelectorAll("button").forEach(x=>x.onclick=async()=>{const val=$("#bangsel").value;$("#shade").style.display="none";if(x.dataset.v!=="ok")return;
+      const r=await confirmPath(p.code,val,rec,"");if(r===false)return;const chosen=r==="rec"?rec:val;
+      const res=await api("/api/control",["waiting","decision"].includes(p.status)?{code:p.code,action:"pathway",pathway:chosen}:{code:p.code,action:chosen});if(res.error)toast(esc(res.error),1);else toast(`${sidH(p.code)}: ${esc(PW()[chosen])}`);render()})});
+  v.querySelectorAll("[data-ren]").forEach(b=>b.onclick=async()=>{const nc=prompt("New study code for "+b.dataset.ren,b.dataset.ren);if(!nc||nc===b.dataset.ren)return;const r=await api("/api/edit",{code:b.dataset.ren,new_code:nc.trim()});if(r.error)toast(esc(r.error),1);render()});
+  v.querySelectorAll("[data-act]").forEach(b=>b.onclick=async()=>{let a=b.dataset.act.toLowerCase().replace("re-run","rerun");
+    if(a==="retry"){const sel=v.querySelector(`[data-retry="${b.dataset.code}"]`);if(sel){const recp=sel.dataset.rec,r=await confirmPath(b.dataset.code,sel.value,recp,"after a failed registration");
+      if(r===false)return;a=r==="rec"?recp:sel.value;if(a==="recon"&&!confirm("recon-all takes about 2-3 hours for this patient. Continue?"))return}}
+    if(a==="stop"&&!confirm("Stop this patient?"))return;
+    if(a==="rerun"){const p=S.patients.find(x=>x.code===b.dataset.code);if(S.settings.rerun_mode==="auto"){const r=await api("/api/control",{code:p.code,action:"rerun"});
+        toast(r.error?esc(r.error):`${sidH(p.code)}: re-run with ${esc(PW()[p.pathway])} (same as last run)`,!!r.error);return render()}
+      $("#dlg").innerHTML=`<h2>Re-run ${sidH(p.code)}</h2><p class="note">Last run: ${esc(PW()[p.pathway]||p.pathway)}${p.qc?` · QC ${esc(p.qc)}`:""}. The earlier results stay until the new run finishes.</p><div class="banner" data-ln="rerun-note" style="display:block"><b>Re-processing from the original MRI</b> — detection, measurements, MATH and the experimental scores are made again with the current pipeline. The previous run is archived (Compare runs), never replaced. Every human call is kept: it moves to a new candidate only when the match is confident; possible matches wait for your confirmation and the study shows <b>Needs re-review</b> where calls are missing.</div>
+       <div class="row">Pathway ${pwSel(p.pathway,p.pathway,'id="rrsel" style="flex:1"',p.tried)}</div><div class="note">✓ recommended = same as last run · Settings › Re-run can make this automatic.</div>
+       <div class="acts" style="margin-top:10px"><button class="b" data-v="x">Cancel</button><button class="b pri" data-v="ok">Re-run</button></div>`;
+      $("#shade").style.display="flex";$("#dlg").querySelectorAll("button").forEach(x=>x.onclick=async()=>{const val=$("#rrsel").value;$("#shade").style.display="none";if(x.dataset.v!=="ok")return;
+        if(val==="recon"&&!confirm("recon-all takes about 2-3 hours for this patient. Continue?"))return;
+        const r=await api("/api/control",{code:p.code,action:"rerun",pathway:val});if(r.error)toast(esc(r.error),1);render()});return}
+    const r=await api("/api/control",{code:b.dataset.code,action:a});if(r.error)toast(esc(r.error),1);render()});
+  v.querySelectorAll("input[data-code]").forEach(el=>el.onchange=async()=>{const r=await api("/api/edit",{code:el.dataset.code,[el.dataset.f]:el.value.trim()});if(r.error)toast(esc(r.error),1);render()});
+  v.querySelectorAll("[data-lg]").forEach(b=>b.onclick=()=>{$("#logcode").value=b.dataset.lg;$("#log").style.display="block";loadLog()});
+  v.querySelectorAll("[data-help]").forEach(b=>b.onclick=()=>{$("#qcimg").innerHTML=`<div class="card"><h2>The T1 and SWI did not line up - which retry?</h2>
+   <p class="note">The pipeline puts the T1's brain labels onto the SWI. For this patient they landed more than 1.5 mm away from the real cortex, so it stopped and wrote nothing (correct cSS detection needs correct cortex labels). ${S.settings.auto_path===false?"":"With automatic pathways on, the app already tried Fast re-registration and SynthMorph by itself."} Whichever you choose, the 1.5 mm check runs again and refuses a bad result.</p>
+   <table><tr><th>Option</th><th>Time</th><th>When</th><th>What it does</th></tr>
+   ${[["Fast re-registration","minutes","try first","T1 cut to the brain by its own labels, then mri_coreg again - skull / neck cannot pull the fit off; low memory"],
+      ["SynthMorph","minutes","if the fast option is refused","FreeSurfer 8 learned rigid registration, robust across SWI / T1 contrast; memory use not yet confirmed - runs alone"],
+      ["recon-all","~2-3 h","if both are refused","full cortical surfaces + bbregister - the most accurate registration"],
+      ["SWI-only","~30 min","last resort / no usable T1","no T1 at all; coarser labels; SynthStrip may need 30-64 GB memory - runs alone"]].map(r=>`<tr><td><b>${r[0]}</b></td><td>${r[1]}</td><td>${r[2]}</td><td class="note">${r[3]}</td></tr>`).join("")}</table>
+   <p class="note">The failed attempt's files are kept (renamed), never deleted. The method used is shown in the Pathway column.</p></div>`;$("#qcimg").scrollIntoView({behavior:"smooth"})});
+  v.querySelectorAll("[data-qc]").forEach(b=>b.onclick=()=>openWin("/qc?code="+encodeURIComponent(b.dataset.qc),"cssqc"));
+  v.querySelectorAll("[data-rv]").forEach(b=>b.onclick=()=>review([b.dataset.rv]))}
+async function review(codes,cohort){const w=window.open("about:blank","cssreview");if(w)w.document.write('<p style="font:16px -apple-system,sans-serif;padding:30px;color:#888;background:#111418;margin:0;height:100vh">starting the reviewer…</p>');
+  toast("starting the reviewer…");const r=await api("/api/review",{codes,cohort,reviewer:localStorage.getItem("cssapp_reviewer")||""});
+  if(!r.ok){if(w)w.close();return toast(esc(r.error),1)}if(r.opened){if(w)w.close();return}if(w)w.location=r.url;else toast(`pop-up blocked - open <a href="${r.url}" target="_blank">${r.url}</a>`,1)}
+// ---------------- results
+async function resView(v){const all=await api("/api/results");const hide=!!v._hide,coh=["all"].concat(S.cohorts);v._c=v._c||"all";const R=all.filter(r=>v._c==="all"||r.cohort===v._c);
+  v.innerHTML=`<div class="card"><div class="row"><b>Results</b><select id="rc">${coh.map(c=>`<option ${c===v._c?"selected":""}>${esc(c)}</option>`).join("")}</select><label><input type="checkbox" id="hn" ${hide?"checked":""}> Hide names</label><span class="sp"></span>
+    <button class="b pri" id="revc" title="Open the reviewer with every finished patient of this cohort (◂ ▸ to move between them)">▶ Review cohort</button>
+    <button class="b" id="aiall" title="AI scores are computed automatically after every patient; this fills any that are missing">⚙ Update AI scores</button>
+    <button class="b" id="openx" title="Open the results workbook (updated automatically after every patient)">📂 Open Excel</button>
+    <span style="position:relative"><button class="b" id="shareb">Share ▾</button><div id="sharem" class="card hide" style="position:absolute;right:0;top:34px;width:230px;z-index:6;padding:6px">
+      ${[["xlsx","Excel (.xlsx)"],["csv","CSV (.csv)"],["docx","Word (.docx)"],["pdf","PDF (.pdf)"]].map(([f,l])=>`<button class="b" data-fmt="${f}" style="width:100%;margin:2px 0;text-align:left;border:0">${l}</button>`).join("")}
+      <div class="note" style="padding:4px 8px">codes only · saved to your verified export folder (Settings) after a warning</div><button class="b" id="pkg" style="width:100%;margin:2px 0;text-align:left;border:0">Share package (.zip)</button></div></span></div>
+   <table class="fix"><colgroup><col style="width:70px"><col style="width:120px"><col style="width:70px"><col style="width:52px"><col style="width:80px"><col style="width:110px"><col style="width:130px"><col><col style="width:120px"><col style="width:120px"></colgroup>
+   <tr><th>Code</th><th>Name</th><th>Cohort</th><th>QC</th><th>Candidates</th><th>Reviewed / cSS</th><th>Reader L / R = total</th><th>AI L / R = total</th><th>Radiologist R / L</th><th>Version</th></tr>
+   ${R.map(r=>`<tr><td><b>${sidH(r.code)}</b></td><td>${hide?"•••":esc(r.name||"—")}</td><td>${esc(r.cohort)}</td><td>${grade(r.qc_grade,r.qc_tip)}</td><td>${r.candidates??"—"}</td><td>${r.reviewed!=null?`${r.reviewed} / ${r.css_called}`:"not read"}</td>
+     <td>${r.score_total!=null?`${r.score_L} / ${r.score_R} = <b>${r.score_total}</b>`:"—"}</td><td>${r.ai_total!=null?`${r.ai_L} / ${r.ai_R} = ${r.ai_total} <span class="tag ai">AI only, not validated</span>`:(r.candidates!=null?(r.ai_err?`<span class="mut" title="${esc(r.ai_err)}">not available ⓘ</span>`:'<span class="mut">computing…</span>'):"—")}</td>
+     <td>${r.rad_R!==""?`${r.rad_R} / ${r.rad_L}`:"—"}${r.radiologist?` <span class="note">${esc(r.radiologist)}</span>`:""}</td><td class="note">${esc(r.version)}</td></tr>`).join("")}</table>
+   <div class="note" style="margin-top:6px">${agreement(R)} · The Excel workbook in the results folder is updated automatically after every patient; AI scores are computed automatically too.</div></div>`;
+  $("#rc").onchange=e=>{v._c=e.target.value;resView(v)};$("#hn").onchange=e=>{v._hide=e.target.checked;resView(v)};
+  $("#revc").onclick=()=>{const c=R.filter(r=>r.candidates!=null).map(r=>r.code);if(!c.length)return toast("no finished patient in this cohort",1);review(c,v._c==="all"?"":v._c)};
+  $("#aiall").onclick=async()=>{await api("/api/ai_scores",{});toast("AI scores are being updated - the column fills in within a minute")};
+  $("#openx").onclick=async()=>{const r=await api("/api/open_results",{});toast(r.ok?`opened ${esc(r.path)}`:esc(r.error),!r.ok)};
+  $("#shareb").onclick=()=>$("#sharem").classList.toggle("hide");
+  v.querySelectorAll("[data-fmt]").forEach(b=>b.onclick=async()=>{$("#sharem").classList.add("hide");await clinicalExport("/api/export",{fmt:b.dataset.fmt,cohort:v._c})});
+  $("#pkg").onclick=async()=>{$("#sharem").classList.add("hide");const codes=R.filter(r=>r.candidates!=null).map(r=>r.code);await clinicalExport("/api/share",{codes})}}
+function agreement(R){let n=0,a=0;R.forEach(r=>{if(r.score_total==null||r.rad_R==="")return;[["score_R","rad_R"],["score_L","rad_L"]].forEach(([s,g])=>{n++;if(String(r[s])===String(r[g]))a++})});
+  return n?`Reader score vs radiologist: ${a} of ${n} hemispheres agree.`:"Agreement with the radiologist appears here once patients are read and graded."}
+// ---------------- review / blind read
+async function readView(v){const pk=await api("/api/packets"),done=S.patients.filter(p=>p.status==="done");
+  v.innerHTML=`<div class="card"><h2>Review (AI support visible)</h2><div class="row"><span class="lab">Reviewer name</span><input id="rvn" value="${esc(localStorage.getItem("cssapp_reviewer")||"")}" placeholder="e.g. Selim_v1"></div>
+   <div class="row" style="flex-wrap:wrap">${done.map(p=>`<label style="margin-right:10px"><input type="checkbox" class="rc" value="${esc(p.code)}"> ${sidH(p.code)}</label>`).join("")||'<span class="mut">no processed patients yet</span>'}</div>
+   <div class="row"><button class="b pri" id="rv">Open the reviewer ▸</button><button class="b" id="vsetb2">⚙ Reviewer settings…</button><span class="note">opens the usual reviewer with the AI meter, AI score and 3-D view visible</span></div></div>
+  <div class="card"><h2>Blind read (no detector output)</h2><div class="row"><span class="lab">Reader code</span><input id="brd" value="${esc(localStorage.getItem("cssapp_reader")||"READER1")}"></div>
+   <div class="row"><span class="lab">Existing packet</span><select id="pk">${pk.map(x=>`<option>${esc(x)}</option>`).join("")}</select><button class="b pri" id="bopen">Open blind read ▸</button></div>
+   <div class="row"><span class="lab">or new packet from</span><span class="note">the patients ticked above</span><input id="npk" placeholder="packet name, e.g. W2"><button class="b" id="bnew">Create and open ▸</button></div></div>`;
+  const sel=()=>[...document.querySelectorAll(".rc:checked")].map(x=>x.value);
+  $("#vsetb2").onclick=vsetDlg;
+  $("#rv").onclick=()=>{const c=sel();if(!c.length)return toast("tick at least one patient",1);localStorage.setItem("cssapp_reviewer",$("#rvn").value.trim());review(c)};
+  const blind=async(body)=>{localStorage.setItem("cssapp_reader",$("#brd").value.trim());toast("starting the blind viewer…");const r=await api("/api/blind",Object.assign({reader:$("#brd").value.trim()},body));if(!r.ok)return toast(esc(r.error),1);window.open(r.url,"_blank")};
+  $("#bopen").onclick=()=>{if(!$("#pk").value)return toast("no packet yet",1);blind({packet:$("#pk").value})};
+  $("#bnew").onclick=()=>{const c=sel(),n=$("#npk").value.trim();if(!c.length||!n)return toast("tick patients and name the packet",1);blind({packet:n,codes:c,new_packet:true})}}
+// ---------------- reviewer settings (review/viewer_settings.json, read by every reviewer window at start)
+async function vsetDlg(){const V=await api("/api/vset"),g=(k,d)=>V[k]===undefined?d:V[k];
+  const sw=(k,d,l)=>`<div class="row" style="margin:5px 0"><label><input type="checkbox" data-vk="${k}" ${g(k,d)?"checked":""}> ${l}</label></div>`;
+  const sel=(k,d,opts,l)=>`<div class="row" style="margin:5px 0"><span style="width:200px">${l}</span><select data-vs="${k}">${opts.map(([v,t])=>`<option value="${v}" ${String(g(k,d))===String(v)?"selected":""}>${t}</option>`).join("")}</select></div>`;
+  $("#dlg").innerHTML=`<h2>Reviewer settings</h2><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 24px">
+   <div><b class="note">READING</b>${sw("auto",true,"Auto-next candidate after a decision")}${sw("blind",false,"Blind read (no AI meter / score, audit objects)")}${sw("compare",true,"AI comparison before the final save")}</div>
+   <div><b class="note">AFTER THE FINAL SAVE</b>${sw("autopt",true,"Next patient automatically")}${sel("autosec",10,[[0,"Immediately"],[3,"3 s"],[5,"5 s"],[10,"10 s"],[20,"20 s"],[30,"30 s"]],"Close the summary after")}</div>
+   <div><b class="note">AI SUPPORT</b>${sw("ai",true,"AI meter")}${sw("s3",true,"3-D shape card")}</div>
+   <div><b class="note">IMAGE</b>${sw("text",true,"Corner text and scale bar")}${sw("rl",true,"R badge")}${sw("cross2",false,"Crosshair")}${sw("other",true,"Other candidates' markings")}${sel("layout","1",[["1","1 × 1"],["2","1 × 2"],["4","2 × 2"]],"Layout")}</div>
+   <div><b class="note">PANEL</b>${sw("ah",false,"Auto-hide right panel")}${sw("ltah",false,"Fold the left tool strip")}</div>
+   <div><b class="note">SCREENSHOTS</b>${sel("scap","window",[["window","Whole reviewer window"],["area","Choose an area with the mouse"]],"Screenshot button")}</div></div>
+   <p class="note">Applies to reviewer windows opened from now on (an open reviewer: reload it). Primary reviewer and snapshot naming are set in the reviewer.</p>
+   <div class="acts"><button class="b" data-v="x">Cancel</button><button class="b pri" data-v="ok">Save</button></div>`;
+  $("#shade").style.display="flex";$("#dlg").querySelectorAll("button[data-v]").forEach(x=>x.onclick=async()=>{$("#shade").style.display="none";if(x.dataset.v!=="ok")return;const o={};
+    $("#dlg").querySelectorAll("[data-vk]").forEach(e=>o[e.dataset.vk]=e.checked);$("#dlg").querySelectorAll("[data-vs]").forEach(e=>o[e.dataset.vs]=e.dataset.vs==="autosec"?+e.value:e.value);
+    await api("/api/vset",o);toast("reviewer settings saved")})}
+
+// export / share: explicit warning + verified local folder (never the Desktop)
+async function clinicalExport(url,body){const r0=await api(url,body);
+  if(!r0.needs_confirm){toast(r0.ok?`saved ${esc(r0.path)}`:esc(r0.error),!r0.ok);return}
+  const d=S.settings.export_dir||"";window._xok=false;
+  const x=await ask("Export clinical-derived data?",`<span class="warn">${esc(r0.warning)}</span><br><br>Destination: ${d?`<b class="mono">${esc(d)}</b>`:'<b class="bad">no export folder chosen</b> — set one in Settings (not Desktop, Documents or a cloud folder)'}<br><br><label><input type="checkbox" id="xok"> I understand this file contains clinical-derived data and stays on approved local storage</label>`,[["no","Cancel"],["set","Settings…"],["yes","Export","pri"]]);
+  if(x==="set")return go("set");if(x!=="yes")return;
+  if(!window._xok)return toast("export not done: tick the confirmation box",1);
+  const r=await api(url,{...body,confirm_clinical:true});toast(r.ok?`saved ${esc(r.path)}`:esc(r.error),!r.ok)}
+document.addEventListener("change",e=>{if(e.target&&e.target.id==="xok")window._xok=e.target.checked});
+// ---------------- processing manager (v5.14-gui; sketch v2)
+let PMS={code:null,opt:null,from:"detect",timer:null};
+const cat=(st,lab)=>`<span class="cat ${esc(st)}">${esc(lab||String(st).replace(/_/g," "))}</span>`;
+const SN={anatomy:"Anatomy (FreeSurfer / SynthSeg)",registration:"Registration (SWI → T1)",align:"Labels on the SWI grid",detect:"cSS detection + morphology + features",unified:"Unified score + explanations"};
+const tstamp=t=>t?new Date(t*1000).toLocaleString([], {dateStyle:"short",timeStyle:"short"}):"";
+async function procView(v){clearTimeout(PMS.timer);const L=await api("/api/proc/studies");const MS=(await api("/api/proc/models")).models||{};if(V!=="proc")return;
+  const mrow=(n,m)=>`<tr><td class="mono">review/${esc(n)}</td><td>${m.present&&m.compatible&&m.verified_copy_of_production?cat("compatible","verified copy of production · compatible"):m.present?cat("incompatible","PRODUCTION PARITY NOT MET"):cat("missing","not present — production parity NOT met")}</td><td class="note">${esc([m.import_status,...(m.reasons||[]),...(m.notes||[])].filter(Boolean).join(" · "))}</td></tr>`;
+  const mcard=`<div class="card"><h2>Production models in this project</h2><table>${Object.entries(MS).map(([n,m])=>mrow(n,m)).join("")}</table><div class="note">Copied byte-for-byte from the source project when studies are brought in (sha256 verified, never modified, never retrained). The confidence model gives confidence_pct and, with the production setting CSS_CONF=1, rule E30; the ranking model is applied only to studies whose production split is "dev" — exactly as production.</div></div>`;
+  if(!PMS.code&&L.studies.length)PMS.code=L.studies[0].code;
+  const rb=(L.imports_rolled_back||[]).length?`<div class="card notice w">An import was cut off when the app was last closed and has been rolled back (nothing half-imported kept): <b>${L.imports_rolled_back.map(esc).join(", ")}</b>. Bring it in again.</div>`:"";
+  const rec0=L.recovered&&Object.keys(L.recovered).length&&!L.recovered.error?`<div class="card notice w">After the last restart, ${Object.entries(L.recovered).map(([c,r])=>`<b>${sidH(c)}</b> (${r.length} run)`).join(", ")} were found cut off: marked <b>interrupted</b>, previous outputs restored. See their history below.</div>`:"";
+  const rec=rb+(rec0||"");
+  v.innerHTML=`${rec}${mcard}<div class="card"><h2>Studies found on this Mac (${L.studies.length})</h2><div class="note">Every study with an SWI in data/ or a candidate list in review/, including studies processed in Terminal or by older app versions. Nothing is changed by looking.</div>
+   <div style="max-height:220px;overflow:auto;margin-top:6px"><table><tr><th>Study</th><th>In app</th><th>FreeSurfer</th><th>Candidates</th><th>Runs</th><th>Active run</th><th>Last run</th></tr>
+   ${L.studies.map(x=>`<tr data-pc="${esc(x.code)}" class="${x.code===PMS.code?"sel":""}" style="cursor:pointer"><td><b>${sidH(x.code)}</b></td><td>${x.in_app?"yes":'<span class="mut">no (found on disk)</span>'}</td><td>${x.has_fs?"✓":'<span class="mut">—</span>'}</td><td>${x.has_candidates?"✓":'<span class="mut">—</span>'}</td><td>${x.runs}</td><td class="mono">${esc(x.active||"—")}</td><td>${x.busy?cat("running"):x.last_status?cat(x.last_status):'<span class="mut">none recorded</span>'}</td></tr>`).join("")||'<tr><td colspan="7" class="mut">no study found in this project folder</td></tr>'}</table></div></div><div class="card"><h2>Bring in studies from another project folder (read-only)</h2>
+   <div class="note">For testing on studies already processed elsewhere (e.g. your production project). Everything this project needs is <b>copied and verified</b> (sha256 of every file, source checked unchanged before and after): images, registrations, labels, earlier detector outputs and the <b>FreeSurfer folder</b> (an isolated copy — APFS clone on macOS when available). Earlier reader files go to <span class="mono">historical/</span> for comparison only. The source folder is only read; the app refuses every write into the production project.</div>
+   <div class="row"><span class="lab">Source project folder</span><input class="wide" id="lsrc" value="${esc(PMS.src||"")}" placeholder="/Users/you/css_project"><button class="b" id="lsc">Choose…</button><button class="b" id="lscan">List studies</button></div><div id="llist"></div></div>
+  <div id="pmd"></div>`;
+  v.querySelectorAll("[data-pc]").forEach(r=>r.onclick=()=>{PMS.code=r.dataset.pc;PMS.opt=null;procView(v)});
+  $("#lsc").onclick=async()=>{const p=await pick("folder","Choose the other project folder");if(p)$("#lsrc").value=p.replace(/\/$/,"")};
+  const listSrc=async()=>{PMS.src=$("#lsrc").value.trim();const r=await api("/api/proc/scan_source?path="+encodeURIComponent(PMS.src));
+    if(!r.ok){$("#llist").innerHTML=`<div class="bad">${esc(r.error)}</div>`;return}
+    $("#llist").innerHTML=`<div style="max-height:200px;overflow:auto"><table><tr><th></th><th>Study</th><th>FreeSurfer</th><th>Candidates</th><th></th></tr>${r.studies.map(x=>`<tr><td>${x.here?"":`<input type="checkbox" data-lk="${esc(x.code)}">`}</td><td><b>${esc(x.code)}</b></td><td>${x.has_fs?"✓ (will be copied)":'<span class="mut">—</span>'}</td><td>${x.has_candidates?"✓":'<span class="mut">—</span>'}</td><td class="mut">${x.here?"already in this project":""}</td></tr>`).join("")}</table></div>
+     <div class="row"><button class="b pri" id="lgo">Bring selected into this project</button></div>`;
+    $("#lgo").onclick=async()=>{const codes=[...document.querySelectorAll("[data-lk]:checked")].map(e=>e.dataset.lk);if(!codes.length)return toast("tick at least one study",1);
+      $("#lgo").disabled=true;$("#lgo").textContent="copying…";const x=await api("/api/proc/link",{source:PMS.src,codes});
+      toast((x.models&&!x.models.error?Object.entries(x.models).map(([n,m])=>`${esc(n)}: ${esc(m.status)}`).join("<br>")+"<br>":"")+x.results.map(y=>y.ok?`${esc(y.code)}: ${y.copied} files copied + verified${y.freesurfer?`, FreeSurfer ${y.fs_method==="apfs_clone"?"cloned":"copied"} (${y.fs_files} files, verified)`:""}`:`${esc(y.code)}: ${esc(y.error)}`).join("<br>"),!x.ok);PMS.code=codes[0];PMS.opt=null;procView(v)}};
+  $("#lscan").onclick=listSrc;
+  if(PMS.code)procDetail($("#pmd"))}
+async function procDetail(el,keep){const y=window.scrollY,openR=[...document.querySelectorAll('#pmh tr[id^="d_"]:not(.hide)')].map(r=>r.id);
+  const c=PMS.code,a=await api("/api/proc/audit?code="+encodeURIComponent(c));if(V!=="proc"||c!==PMS.code)return;
+  if(!a.ok){el.innerHTML=`<div class="card bad">${esc(a.error)}</div>`;return}
+  const I=a.identity||{},im=x=>x?`<span class="mono">${esc((x.sha256||"").slice(0,4))}…${esc((x.sha256||"").slice(-3))} · ${(x.dims||[]).join("×")} · ${(x.voxel_mm||[]).join("×")} mm · ${esc(x.orientation||"?")}</span>${x.header_error?` <span class="bad">header unreadable</span>`:""}`:'<span class="mut">not present</span>';
+  const RU=["compatible","compatible_with_limitations","unknown","not_applicable"],st=a.stages,first=["anatomy","registration","align","detect","unified"].find(s=>!RU.includes(st[s].status));
+  const allOk=!first,fsOk=RU.includes(st.anatomy.status)&&st.anatomy.kind==="freesurfer";
+  const early=first==="anatomy"||first==="registration";
+  if(!PMS.opt)PMS.opt=allOk||!early?"fresh":"full";
+  const busy=a.busy;
+  el.innerHTML=`<div class="card"><h2>${sidH(c)} · earlier processing</h2>
+   <table><tr><th style="width:190px">MRI identity (now in data/)</th><td><b>SWI</b> ${im(I.swi)}<br><b>T1</b> ${im(I.t1)}</td></tr>
+    <tr><th>FreeSurfer</th><td>${I.freesurfer?`<span class="mono">${esc(I.freesurfer.path)}</span> · ${esc(I.freesurfer.version||"version not recorded")}${I.freesurfer.no_v8?" · -no-v8":""}`:'<span class="mut">no recon-all folder</span>'}</td></tr>
+    <tr><th>Previous detection</th><td>${I.detection?`${esc(I.detection.pipeline_version||"?")} ${I.detection.run_at?"· "+esc(I.detection.run_at):""}`:'<span class="mut">none</span>'}</td></tr></table>
+   <h2 style="margin-top:12px">Compatibility per stage (dependency order)</h2>
+   <table><tr><th style="width:260px">Stage</th><th style="width:210px">Status</th><th>Evidence</th><th>Output found</th></tr>
+   ${Object.values(st).map(r=>`<tr><td>${SN[r.stage]}</td><td>${cat(r.status,r.label)}</td><td>${esc(r.why)}</td><td class="mono" title="${esc(r.files.join("\n"))}">${esc(r.files.slice(0,2).join(", "))}${r.files.length>2?` +${r.files.length-2}`:""}</td></tr>`).join("")}</table>
+   ${!a.adopted&&Object.values(st).some(r=>r.status==="unknown")?`<div class="tip notice w"><b>Confirm the earlier outputs.</b> They are not yet linked to this MRI by a run record (e.g. made in Terminal). If you know they were made from these images, record them as the first run — nothing is changed or moved. <button class="b pri" id="adopt">Confirm and record as run</button></div>`:""}
+  </div>
+  <div class="card"><h2>What to do</h2>${busy?`<div class="notice card">Working: run <span class="mono">${esc(busy.run_id)}</span> · stage <b>${esc(busy.stage||"starting")}</b> · started ${tstamp(busy.started)}. Other actions wait until it finishes.</div>`:""}
+   <label class="opt ${PMS.opt==="fresh"?"on":""} ${early?"dis":""}" data-o="fresh"><b>● New detection run</b> (recommended for your test) — reuse anatomy, registration and labels; run cSS detection, morphology, features, unified score and explanations again with this version.${early?`<div class="bad note">not possible: ${esc(SN[first])} is ${esc(st[first].label)} — use the last option</div>`:""}</label>
+   <label class="opt ${PMS.opt==="from"?"on":""} ${early?"dis":""}" data-o="from"><b>○ Re-run from a stage</b> <select id="pmfrom">${["align","detect","unified"].map(s=>`<option value="${s}" ${s===PMS.from?"selected":""}>${SN[s]}</option>`).join("")}</select><div class="note">later stages always follow (dependencies)</div></label>
+   <label class="opt ${PMS.opt==="reuse"?"on":""} ${allOk?"":"dis"}" data-o="reuse"><b>○ Use everything as is</b>${allOk?" — no processing; the current outputs stay active":` — unavailable: ${esc(SN[first])} is ${esc(st[first].label)}`}</label>
+   <label class="opt ${PMS.opt==="full"?"on":""}" data-o="full"><b>○ Re-run anatomy / registration</b> — needs the raw series: Patients → Re-run. ${fsOk?"A finished FreeSurfer is reused automatically; a new reconstruction is never started without you asking for it.":""}</label>
+   <div class="tip notice w">Nothing is deleted or overwritten: the current outputs are archived as a run before anything runs; if the run fails, they are put back. Reader files (calls, reviewers) are never touched.</div>
+   <div class="row"><button class="b pri" id="pmgo" ${busy?"disabled":""}>Start</button><button class="b" id="pmrev">Open candidates in the reviewer (3-D, explanations)</button></div></div>
+  <div class="card"><h2>Processing history</h2><div id="pmh"></div></div>`;
+  el.querySelectorAll("[data-o]").forEach(o=>o.onclick=e=>{if(o.classList.contains("dis")||e.target.tagName==="SELECT")return;PMS.opt=o.dataset.o;procDetail(el)});
+  const fr=$("#pmfrom");if(fr)fr.onchange=()=>{PMS.from=fr.value;PMS.opt="from";procDetail(el)};
+  if($("#adopt"))$("#adopt").onclick=async()=>{const r=await api("/api/proc/adopt",{code:c});toast(r.ok?"earlier outputs recorded as the first run":esc(r.error),!r.ok);procDetail(el)};
+  $("#pmrev").onclick=async()=>{toast("starting the reviewer…");const r=await api("/api/review",{codes:[c],cohort:"",reviewer:localStorage.getItem("cssapp_reviewer")||""});if(r.ok)openWin(r.url,"reviewer");else toast(esc(r.error),1)};
+  $("#pmgo").onclick=async()=>{const o=PMS.opt;
+    if(o==="reuse"){toast("nothing to run: the current outputs stay active");return}
+    if(o==="full"){go("pts");toast("Patients → choose the patient → Re-run. A finished FreeSurfer is reused.");return}
+    const from=o==="fresh"?"detect":PMS.from;
+    const ok=await ask("Start a new run?",`${sidH(c)}: re-run <b>${esc(SN[from])}</b> and every later stage. Reused: ${["anatomy","registration","align","detect"].filter(s=>["anatomy","registration","align","detect","unified"].indexOf(s)<["anatomy","registration","align","detect","unified"].indexOf(from)).map(s=>esc(SN[s])).join(", ")}. The current outputs stay archived.`,[["no","Cancel"],["yes","Start","pri"]]);
+    if(ok!=="yes")return;const r=await api("/api/proc/start",{code:c,choice:"selective",rerun_from:from});toast(r.ok?`run ${esc(r.run_id)} started: ${esc(r.run.join(" → "))}`:esc(r.error),!r.ok);procDetail(el)};
+  procHistory($("#pmh"),c,a);
+  if(keep){for(const id of openR){const r=document.getElementById(id);if(!r)continue;r.classList.remove("hide");
+      api(`/api/proc/log?code=${encodeURIComponent(c)}&run_id=${encodeURIComponent(id.slice(2))}`).then(g=>{const p=document.getElementById("lg_"+id.slice(2));if(p)p.textContent=g.log||"(no log: nothing was run in this record)"})}
+    window.scrollTo(0,y)}
+  if(busy)PMS.timer=setTimeout(()=>{if(V==="proc"&&PMS.code===c)procDetail(el,true)},2500)}
+function procHistory(el,c,a){const R=(a.runs||[]).slice().reverse();
+  el.innerHTML=R.length?`<table><tr><th>Run</th><th>Started – ended</th><th>Run · reused</th><th>Status</th><th>Software</th><th></th></tr>
+  ${R.map(m=>`<tr><td class="mono"><b>${esc(m.run_id)}</b>${m.run_id===a.active_run?' <b style="color:var(--acc)">★ active</b>':""}</td><td>${tstamp(m.created)}${m.finished?" – "+tstamp(m.finished):m.status==="interrupted"?" – (app closed)":""}</td>
+   <td>${m.status==="adopted"?"found on disk (confirmed)":`${esc((m.run||[]).join(", "))}${(m.reuse||[]).length?` · <span class="mut">${esc(m.reuse.join(", "))}</span>`:""}`}</td><td>${cat(m.status)}</td><td class="mono">${esc((m.software||{}).pipeline||"")}</td>
+   <td class="acts">${["completed","adopted"].includes(m.status)&&m.run_id!==a.active_run?`<button class="b" data-act="${esc(m.run_id)}">Make active…</button>`:""}${["failed","interrupted"].includes(m.status)?`<button class="b" data-res="${esc(m.run_id)}">Resume…</button>`:""}<button class="b" data-det="${esc(m.run_id)}">Details</button></td></tr>
+   <tr class="hide" id="d_${esc(m.run_id)}"><td colspan="6">${m.message?`<div class="tip ${m.status==="completed"?"":"err"}" style="white-space:pre-wrap">${esc(m.message)}</div>`:""}
+    <div class="note">Stages: ${Object.entries(m.stages||{}).map(([k,s])=>`${esc(k)} ${cat(String(s).startsWith("reused")?"reused":String(s).split(":")[0],s)}`).join(" ")}</div>
+    <div class="note">MRI: <span class="mono">SWI ${esc(((m.mri||{}).swi||"").slice(0,10))}… · T1 ${esc(((m.mri||{}).t1||"—").slice(0,10))}</span> · parent ${esc(m.parent||"—")} · archive <span class="mono">runs/…/${esc(m.run_id)}/</span>${m.restored_files!=null?` · previous outputs restored (${m.restored_files} files)`:""}</div>
+    <pre class="mono" id="lg_${esc(m.run_id)}" style="max-height:200px;overflow:auto;white-space:pre-wrap"></pre></td></tr>`).join("")}</table>`
+   :'<div class="mut">No run recorded yet. Earlier outputs (if any) are listed above; confirming them records the first run.</div>';
+  el.querySelectorAll("[data-det]").forEach(b=>b.onclick=async()=>{const r=b.dataset.det,row=$("#d_"+r);row.classList.toggle("hide");if(!row.classList.contains("hide")){const g=await api(`/api/proc/log?code=${encodeURIComponent(c)}&run_id=${encodeURIComponent(r)}`);$("#lg_"+r).textContent=g.log||"(no log: nothing was run in this record)"}});
+  el.querySelectorAll("[data-act]").forEach(b=>b.onclick=async()=>{const r=b.dataset.act;
+    if(await ask("Make this run active?",`${sidH(c)}: the outputs of run <b>${esc(r)}</b> are put back in place. The current active outputs stay archived in their own run and can be restored the same way.`,[["no","Cancel"],["yes","Make active","pri"]])!=="yes")return;
+    const x=await api("/api/proc/set_active",{code:c,run_id:r,confirm:true});toast(x.ok?`${esc(r)} is now active`:esc(x.error),!x.ok);procDetail($("#pmd"))});
+  el.querySelectorAll("[data-res]").forEach(b=>b.onclick=async()=>{const r=b.dataset.res;
+    if(await ask("Resume this run?",`A new run starts from the first unfinished stage of <b>${esc(r)}</b>. The record of ${esc(r)} is kept as it is.`,[["no","Cancel"],["yes","Resume","pri"]])!=="yes")return;
+    const x=await api("/api/proc/resume",{code:c,run_id:r});toast(x.ok?`run ${esc(x.run_id)} started`:esc(x.error),!x.ok);procDetail($("#pmd"))})}
+
+// ---------------- notification centre (v5.14.2-rc4): bell + side curtain; hover = preview, click = keep open
+const NS={open:false,pinned:false,data:null,hoverT:null};
+const NACT={open_selection:["Open study selection",()=>{U.step="selection";go("uni")}],open_train:["Review results",()=>{U.step="train";go("uni")}],open_processing:["Open processing",()=>go("proc")],open_unified:["Open Unified",()=>go("uni")]};
+async function nLoad(){try{const r=await api("/api/notif/list");NS.data=r;$("#bb").textContent=r.badge?String(r.badge):"";$("#bell").classList.toggle("urg",!!r.urgent);if(NS.open)nRender()}catch(e){}}
+function nLbl(i,t){return i.study?esc(t).split(esc(i.study)).join(sidH(i.study)):esc(t)}   // stored with the internal key; shown with the mode's identifier
+function nRender(){const r=NS.data;if(!r)return;const snz=r.settings.snooze_min||5;
+  const item=i=>`<div class="nit ${i.level}"><span class="nx" data-nx="${i.id}" title="remove from the centre (kept in the log)">✕ remove</span><div class="nt">${nLbl(i,i.title)}</div>${i.text?`<div class="note">${nLbl(i,i.text)}</div>`:""}
+   <div class="na">${(i.actions||[]).filter(a=>NACT[a]).map(a=>`<button class="b" data-na="${a}">${NACT[a][0]}</button>`).join("")}<button class="b" data-sz="${i.id}" data-m="${snz}">⏰ Snooze ${snz} min</button><select data-szs="${i.id}"><option value="">more…</option><option value="15">15 min</option><option value="60">1 h</option><option value="960">until tomorrow</option></select></div>
+   <div class="note" style="margin-top:3px">${new Date(i.t*1000).toLocaleString([], {dateStyle:"short",timeStyle:"short"})}${i.study?" · "+sidH(i.study):""}</div></div>`;
+  const sec=(t,arr)=>arr.length?`<div class="nsec">${t} (${arr.length})</div>${arr.map(item).join("")}`:"";
+  const U_=r.items.filter(i=>i.level==="urgent"),A=r.items.filter(i=>i.level==="action"),D=r.items.filter(i=>i.level==="done");
+  $("#nbody").innerHTML=sec("⚠ Action required · urgent",U_)+sec("● Action required",A)+(r.running.length?`<div class="nsec">↻ Running (${r.running.length})</div>${r.running.map(x=>`<div class="nit"><div class="nt">${esc(x.title)}</div><div class="note">${esc(x.text||"")}</div>${x.progress!=null?`<div class="nbar"><i style="width:${Math.round(100*x.progress)}%"></i></div>`:""}</div>`).join("")}`:"")+sec("✓ Finished & changes",D)
+    ||'<p class="mut" style="margin-top:20px">Nothing here. Finished work, changes and things that need you will appear here.</p>';
+  $("#nbody").querySelectorAll("[data-nx]").forEach(b=>b.onclick=async()=>{await api("/api/notif/act",{id:b.dataset.nx,op:"remove"});nLoad()});
+  $("#nbody").querySelectorAll("[data-sz]").forEach(b=>b.onclick=async()=>{await api("/api/notif/act",{id:b.dataset.sz,op:"snooze",minutes:+b.dataset.m});toast(`snoozed ${b.dataset.m} min`);nLoad()});
+  $("#nbody").querySelectorAll("[data-szs]").forEach(e=>e.onchange=async()=>{if(!e.value)return;await api("/api/notif/act",{id:e.dataset.szs,op:"snooze",minutes:+e.value});toast("snoozed");nLoad()});
+  $("#nbody").querySelectorAll("[data-na]").forEach(b=>b.onclick=()=>{nShow(false);NACT[b.dataset.na][1]()})}
+function nShow(on,pin){NS.open=on;if(pin!==undefined)NS.pinned=pin;$("#drawer").classList.toggle("open",on);if(on)nRender()}
+$("#bell").onclick=()=>{if(NS.open&&NS.pinned)nShow(false,false);else nShow(true,true)};
+$("#bell").onmouseenter=()=>{if(!(NS.data&&NS.data.settings.hover))return;clearTimeout(NS.hoverT);NS.hoverT=setTimeout(()=>{if(!NS.open)nShow(true,false)},250)};
+$("#bell").onmouseleave=()=>clearTimeout(NS.hoverT);
+$("#drawer").onmouseleave=()=>{if(NS.open&&!NS.pinned)nShow(false)};
+$("#nclose").onclick=()=>nShow(false,false);$("#nread").onclick=async()=>{await api("/api/notif/act",{id:"*",op:"read"});nLoad()};
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&NS.open)nShow(false,false)});
+nLoad();setInterval(nLoad,5000);
+
+function notifSettingsCard(){const N=S.settings.notif||{};const sec=N.sections||{},src=N.sources||{};
+  const cb=(grp,k,l,on)=>`<label style="margin-right:12px"><input type="checkbox" data-ng="${grp}" data-nk="${k}" ${on!==false?"checked":""}> ${l}</label>`;
+  return `<div class="card"><h2>Notification centre</h2>
+   <div class="row"><span class="lab">Default snooze time</span>${seg("nsz",[["5","5 min"],["15","15 min"],["60","1 h"]],String(N.snooze_min||5))}<input id="nszc" type="number" min="1" max="1440" value="${N.snooze_min||5}" style="width:80px"> <span class="note">minutes (custom)</span></div>
+   <div class="row"><span class="lab">Show in the centre</span>${cb("sections","urgent","action required · urgent",sec.urgent)}${cb("sections","action","action required",sec.action)}${cb("sections","running","running",sec.running)}${cb("sections","done","finished &amp; changes",sec.done)}</div>
+   <div class="row"><span class="lab">Sources</span>${cb("sources","processing","processing runs",src.processing)}${cb("sources","imports","imports",src.imports)}${cb("sources","training","training / models",src.training)}${cb("sources","exports","exports / backups",src.exports)}${cb("sources","reviews","reviews",src.reviews)}</div>
+   <div class="row"><span class="lab">Badge counts</span>${seg("nbd",[["action","action required only"],["all","everything unread"]],N.badge||"action")}</div>
+   <div class="row"><span class="lab">macOS banner</span>${seg("nbn",[["off","off"],["urgent","urgent only"],["all","all"]],N.banner||"urgent")}<span class="note">local notifier only; nothing leaves the Mac</span></div>
+   <div class="row"><span class="lab">Clear finished items after</span>${seg("ncl",[["1","1 day"],["7","7 days"],["never","never"]],String(N.clear_days??7))}</div>
+   <div class="row"><span class="lab">Open the curtain</span>${seg("nhv",[["1","preview on hover"],["0","click only"]],N.hover===false?"0":"1")}</div>
+   <div class="row"><span class="lab">History</span><button class="b" id="nlog">Open full log…</button><button class="b" id="nclr">Clear removed items</button></div></div>`}
+function bindNotifSettings(){const save=async o=>{await api("/api/notif/settings",o);await refresh();nLoad();toast("notification settings saved")};const N=()=>S.settings.notif||{};
+  bindSeg("nsz",x=>save({snooze_min:+x}).then(render));$("#nszc").onchange=e=>save({snooze_min:Math.max(1,+e.target.value||5)}).then(render);
+  bindSeg("nbd",x=>save({badge:x}).then(render));bindSeg("nbn",x=>save({banner:x}).then(render));bindSeg("ncl",x=>save({clear_days:x==="never"?"never":+x}).then(render));bindSeg("nhv",x=>save({hover:x==="1"}).then(render));
+  document.querySelectorAll("[data-ng]").forEach(e=>e.onchange=()=>{const g=e.dataset.ng,o={...(N()[g]||{})};o[e.dataset.nk]=e.checked;save({[g]:o})});
+  $("#nclr").onclick=async()=>{await api("/api/notif/clear_removed",{});toast("removed items cleared")};
+  $("#nlog").onclick=async()=>{const r=await api("/api/notif/log");$("#dlg").innerHTML=`<h2>Notification log</h2><div style="max-height:55vh;overflow:auto"><table>${r.log.map(i=>`<tr><td class="note" style="white-space:nowrap">${new Date(i.t*1000).toLocaleString([], {dateStyle:"short",timeStyle:"short"})}</td><td>${esc(i.level)}</td><td>${esc(i.title)}<div class="note">${esc(i.text||"")}</div></td><td class="note">${i.removed?"removed":""}${i.resolved?" resolved":""}</td></tr>`).join("")||'<tr><td class="mut">empty</td></tr>'}</table></div><div class="acts"><button class="b pri">Close</button></div>`;
+    $("#shade").style.display="flex";$("#dlg").querySelector("button").onclick=()=>$("#shade").style.display="none"}}
+// ======================================================================= redesign (2026-11): Studies · study panel · Activity
+const STEPN={import:"Importing images",anatomy:"Brain anatomy",align:"Aligning labels",detect:"Detecting candidates",qc:"Quality check"};
+const W={q:"",f:"all",coh:"all",hide:false,sel:new Set(),cur:null,tab:"summary",data:null,pf:null};
+function plainErr(e){if(!e)return"";if(/do not line up/.test(e)){const m=/shift ([\d.?]+) mm/.exec(e);return `T1 and SWI images did not line up${m?` (${m[1]} mm)`:""} — choose another registration method`}
+  if(/dcm2niix/.test(e))return "DICOM converter missing — Settings › System › Install dcm2niix";if(/licen/i.test(e))return "FreeSurfer licence problem — Settings › System";return e.split(" - ")[0].slice(0,140)}
+function studyStatus(p,r,d){ // one plain label per study (p: queue record, r: results row, d: processing-manager row)
+  if(d&&d.busy)return {k:"acc",l:"Processing",s:"new detection run"};
+  if(p){const st=p.status;
+    if(["running","starting","paused"].includes(st)){const k=Math.max(1,S.steps.indexOf(p.step)+1);return {k:"acc",l:st==="paused"?"Paused":"Processing",s:`step ${k} of 5 · ${STEPN[p.step]||"starting"}`}}
+    if(st==="waiting")return {k:"",l:"Waiting",s:"in the queue"};if(st==="decision")return {k:"warn",l:"Needs your decision",s:"anatomy method"};
+    if(st==="failed"||st==="stopped")return {k:"bad",l:"Needs attention",s:st==="stopped"?"stopped":plainErr(p.error)}}
+  if(d&&["failed","interrupted"].includes(d.last_status))return {k:"bad",l:"Needs attention",s:`last processing run ${d.last_status}`};
+  if(!r||r.candidates==null)return {k:"",l:"Not processed",s:d&&d.has_fs?"anatomy available":""};
+  if(r.review_state==="reviewed"||(!r.review_state&&r.score_total!=null))return {k:"ok",l:"Reviewed",s:r.review_reason||`${r.reviewed} calls`};   // v5.15: any reviewer, all candidates called, finished
+  if(r.review_state==="needs_rereview")return {k:"warn",l:"Needs re-review",s:r.review_reason||"candidates changed after the review"};
+  if(r.review_state==="error")return {k:"bad",l:"Needs attention",s:r.review_reason||"review state unavailable"};
+  if(r.reviewed)return {k:"warn",l:"Review in progress",s:r.review_reason||`${r.reviewed} of ${r.candidates} called`};
+  return {k:"ok",l:"Ready for review",s:`${r.candidates} candidates`}}
+async function loadStudies(){const [R,D]=await Promise.all([api("/api/results"),api("/api/proc/studies")]);const by={};
+  S.patients.forEach(p=>by[p.code]={code:p.code,p});R.forEach(r=>(by[r.code]=by[r.code]||{code:r.code}).r=r);(D.studies||[]).forEach(d=>(by[d.code]=by[d.code]||{code:d.code}).d=d);
+  const all=Object.values(by).map(x=>({...x,st:studyStatus(x.p,x.r,x.d),cohort:(x.p&&x.p.cohort)||(x.r&&x.r.cohort)||"",name:(x.p&&x.p.name)||(x.r&&x.r.name)||"",
+    archived:!!((x.r&&x.r.archived)||(x.p&&x.p.archived)),retired:!!((x.r&&x.r.retired)||(x.p&&x.p.retired))}));
+  const rows=all.filter(x=>!x.archived&&!x.retired);W.archivedRows=all.filter(x=>x.archived&&!x.retired);W.retiredRows=all.filter(x=>x.retired);   // v5.20
+  rows.sort((a,b)=>a.code.localeCompare(b.code,undefined,{numeric:true}));W.data={rows,recovered:D.recovered,rolled:D.imports_rolled_back};return W.data}
+const FIL=[["all","Studies",r=>true],["proc","Processing",r=>["Processing","Paused","Waiting"].includes(r.st.l)],["att","Need attention",r=>["Needs attention","Needs your decision"].includes(r.st.l)],
+  ["ready","Ready for review",r=>["Ready for review","Review in progress","Needs re-review"].includes(r.st.l)],["done","Reviewed",r=>r.st.l==="Reviewed"]];
+// v5.19 Studies list: separate code / accession / patient name / MRN columns (Incognito: code + incognito icon), filters on every field
+// and every status, sorting on every column, grouping by MRN or patient name (Standard) or a plain list
+const ST_ORDER=["Needs attention","Needs your decision","Processing","Paused","Waiting","Not processed","Ready for review","Review in progress","Needs re-review","Reviewed"];
+Object.assign(W,{sort:W.sort||{k:"code",d:1},grp:W.grp||"mrn",flt:W.flt||{status:"",mrn:"",name:"",acc:"",code:""},closed:W.closed||new Set()});
+function sIdent(x){const i=(x.r&&x.r.ident)||(x.p&&x.p.ident)||{},s=IDV.st||{},std=s.mode==="standard"&&!i.locked;
+  return {std,code:i.deid_code||x.code,acc:std?(i.accession||""):"",mrn:std?(i.mrn||""):"",name:std?(i.patient_name||""):"",disp:i.display_name||"",accMissing:!!i.accession_missing,n:i.n_exams_of_patient||1,pu:i.patient_uuid||""}}
+const SKEY={code:x=>sIdent(x).code,acc:x=>sIdent(x).acc,name:x=>sIdent(x).name.toLowerCase(),mrn:x=>sIdent(x).mrn,cohort:x=>x.cohort||"",status:x=>ST_ORDER.indexOf(x.st.l),
+  cand:x=>x.r&&x.r.candidates!=null?x.r.candidates:-1,rev:x=>x.r&&x.r.reviewed!=null?x.r.reviewed:-1,score:x=>x.r&&x.r.score_total!=null?x.r.score_total:-1};
+function sCmp(a,b){const k=SKEY[W.sort.k]||SKEY.code,x=k(a),y=k(b);const c=typeof x==="number"&&typeof y==="number"?x-y:String(x).localeCompare(String(y),undefined,{numeric:true});return (c||SKEY.code(a).localeCompare(SKEY.code(b),undefined,{numeric:true}))*W.sort.d}
+async function studiesView(v){const D=await loadStudies();if(V!=="studies")return;
+  const hq=location.hash.match(/^#studies\?(.+)$/);if(hq&&W._hq!==hq[1]){W._hq=hq[1];const q=new URLSearchParams(hq[1]);   // #studies?grp=mrn|name|none&sort=<col>&dir=asc|desc&status=…&cohort=…&q=…&mrn=…&name=…&acc=…&code=…
+    if(q.get("grp"))W.grp=q.get("grp");if(q.get("sort"))W.sort={k:q.get("sort"),d:q.get("dir")==="desc"?-1:1};if(q.get("cohort"))W.coh=q.get("cohort");if(q.get("q")!==null)W.q=q.get("q");
+    ["status","mrn","name","acc","code"].forEach(k=>{if(q.get(k)!==null)W.flt[k]=q.get(k)});if(q.get("open"))setTimeout(()=>openSheet(q.get("open"),q.get("tab")||undefined),50)}
+  if(!W.pf)W.pf=await api("/api/preflight").catch(()=>[]);const bad=(W.pf||[]).filter(x=>!x.ok&&!/Own app window|Disk space/.test(x.item));
+  const coh=["all",...new Set(D.rows.map(r=>r.cohort).filter(Boolean))],std=(IDV.st||{}).mode==="standard"&&(IDV.st||{}).unlocked,F=W.flt,lc=s=>String(s||"").toLowerCase();
+  const has=(a,b)=>!b||lc(a).includes(lc(b));
+  const vis=D.rows.filter(FIL.find(f=>f[0]===W.f)[2]).filter(r=>W.coh==="all"||r.cohort===W.coh).filter(r=>!F.status||r.st.l===F.status)
+    .filter(r=>{const i=sIdent(r);return has(i.code,F.code)&&(!std||(has(i.mrn,F.mrn)&&has(i.name,F.name)&&has(i.acc,F.acc)))&&(!W.q||lc([i.code,i.acc,i.mrn,i.name,i.disp,r.cohort,r.st.l].join(" ")).includes(lc(W.q)))}).sort(sCmp);
+  const agr=agreement(D.rows.map(r=>r.r).filter(Boolean));
+  const cols=std?[["code","Code"],["acc","Accession number"],["name","Patient name"],["mrn","MRN"],["cohort","Cohort"],["status","Status"],["cand","Candidates"],["rev","Reviewed"],["score","Score <span class=\"note\">reader · AI</span>"]]
+                 :[["code","Code"],["pat","Patient"],["cohort","Cohort"],["status","Status"],["cand","Candidates"],["rev","Reviewed"],["score","Score <span class=\"note\">reader · AI</span>"]];
+  const th=([k,l])=>k==="pat"?`<th data-id="patcol">${l}</th>`:`<th data-sk="${k}" ${k==="name"?'data-id="patcol"':""} class="sortable" title="sort ascending / descending">${l} <span class="sarrow ${W.sort.k===k?"on":""}">${W.sort.k===k?(W.sort.d>0?"▲":"▼"):"↕"}</span></th>`;
+  const row=x=>{const r=x.r||{},i=sIdent(x);return `<tr data-st="${esc(x.code)}" class="${W.cur===x.code?"cur":""}"><td><input type="checkbox" data-sc="${esc(x.code)}" ${W.sel.has(x.code)?"checked":""}></td>
+    <td style="white-space:nowrap"><span class="code">${esc(i.code)}</span>${i.disp?`<span class="sub2">${esc(i.disp)}</span>`:""}</td>
+    ${std?`<td>${i.acc?esc(i.acc):i.accMissing?'<span class="pill bad" data-id="acc-missing" title="enter the accession number (Edit identifiers)">accession missing</span>':'<span class="mut">—</span>'}</td><td>${i.name?esc(i.name):'<span class="mut">—</span>'}</td><td>${i.mrn?`<span class="mono">${esc(i.mrn)}</span>`:'<span class="bad">MRN missing</span>'}</td>`
+         :`<td>${typeof INCOG_ICON!=="undefined"?INCOG_ICON:""}</td>`}
+    <td class="mut">${esc(x.cohort||"—")}</td><td><span class="st ${x.st.k}"><i></i>${esc(x.st.l)}</span>${x.st.s?`<span class="sub2">${esc(x.st.s)}</span>`:""}</td>
+    <td>${r.candidates??'<span class="mut">—</span>'}</td><td>${r.reviewed!=null?`${r.reviewed}${r.css_called!=null?` <span class="mut">· ${r.css_called} cSS</span>`:""}`:'<span class="mut">—</span>'}</td>
+    <td>${r.score_total!=null?`<b>${r.score_total}</b>`:'<span class="mut">—</span>'} <span class="mut">·</span> ${r.ai_total!=null?`<span title="AI only, not validated">${r.ai_total}</span>`:'<span class="mut">—</span>'}</td></tr>`};
+  let body="";
+  if(std&&W.grp!=="none"){const g=new Map();vis.forEach(x=>{const i=sIdent(x),k=W.grp==="mrn"?(i.mrn||"(no MRN)"):(i.name||"(no name)");if(!g.has(k))g.set(k,[]);g.get(k).push(x)});
+    body=[...g.entries()].map(([k,L])=>{const i=sIdent(L[0]),open=!W.closed.has(k);
+      return `<tr class="sgroup" data-grp="${esc(k)}"><td colspan="${cols.length+1}"><span class="caret">${open?"▾":"▸"}</span> ${W.grp==="mrn"?`<b class="mono">MRN ${esc(k)}</b>${i.name?` <span class="mut">${esc(i.name)}</span>`:""}`:`<b>${esc(k)}</b>${i.mrn?` <span class="mono mut">MRN ${esc(i.mrn)}</span>`:""}`} <span class="pill">${L.length} ${L.length>1?"examinations":"examination"}</span></td></tr>`+(open?L.map(row).join(""):"")}).join("")}
+  else body=vis.map(row).join("");
+  v.innerHTML=`${bad.length?`<div class="banner w"><b>Setup needs attention</b><span class="mut">${bad.map(x=>esc(x.item)).join(" · ")}</span><span class="sp"></span><button class="b sm" onclick="W.setTab='system';go('set')">Open setup</button></div>`:""}
+   ${S.queue.hold?`<div class="banner e"><b>Processing is paused</b><span>${esc(S.queue.hold)}</span><span class="sp"></span><button class="b sm" onclick="go('act')">Open Activity</button></div>`:""}
+   <div class="tiles">${FIL.map(([k,t,f])=>`<div class="tile ${W.f===k?"on":""}" data-fl="${k}"><div class="n ${k==="att"&&D.rows.filter(f).length?"bad":""}">${D.rows.filter(f).length}</div><div class="t">${t}</div></div>`).join("")}</div>
+   <div class="tbar"><input type="search" id="sq" placeholder="Search everything" value="${esc(W.q)}">
+    <span class="sp"></span>
+    <button class="b" id="sedit" data-id="bulk-edit" title="edit the cohort / display name of the ticked studies">Edit</button>
+    <span style="position:relative"><button class="b" id="sarch" data-id="archive-menu">Archive ▾</button><div class="menu hide" id="sarchm"><button id="sarch1">Archive ticked studies</button><button id="sarch2">Archive a cohort…</button><div class="divider" style="margin:6px 0"></div><button id="sarch3" data-id="open-archive">Open the archive (${(W.archivedRows||[]).length+(W.retiredRows||[]).length})</button></div></span>
+    <button class="b" id="srem" data-id="remove">Remove…</button>
+    <button class="b" id="scalls" onclick="openCalls()" title="every reviewer's calls are kept; choose whose calls are used">Reviewer calls</button><button class="b" id="srev">${W.sel.size?`Review ${W.sel.size} selected`:"Review"}</button>
+    <span style="position:relative"><button class="b" id="sexp">Export ▾</button><div class="menu hide" id="sexpm">${[["xlsx","Excel workbook (.xlsx)"],["csv","CSV (.csv)"],["docx","Word report (.docx)"],["pdf","PDF report (.pdf)"]].map(([f,l])=>`<button data-fmt="${f}">${l}</button>`).join("")}<button id="sxf" data-id="export-files">Studies with files…</button><button id="spkg">Share package (.zip)</button><div class="divider" style="margin:6px 0"></div><button id="sopx">Open results workbook</button><button id="sai">Update AI scores</button><div class="note" style="padding:4px 10px">Written only to a local folder you choose, after a warning</div></div></span>
+    <button class="b pri" onclick="go('add')">Add studies</button></div>
+   <div class="fbar" data-id="filters"><span class="note">Filter</span>
+    <select id="fst" title="status"><option value="">All statuses</option>${ST_ORDER.map(s=>`<option ${F.status===s?"selected":""}>${s}</option>`).join("")}</select>
+    <select id="scoh" title="cohort">${coh.map(c=>`<option value="${esc(c)}" ${c===W.coh?"selected":""}>${c==="all"?"All cohorts":esc(c)}</option>`).join("")}</select>
+    <input data-ff="code" placeholder="code" value="${esc(F.code)}">${std?`<input data-ff="acc" placeholder="accession" value="${esc(F.acc)}"><input data-ff="mrn" placeholder="MRN" value="${esc(F.mrn)}"><input data-ff="name" placeholder="patient name" value="${esc(F.name)}">`:""}
+    ${Object.values(F).some(Boolean)||W.coh!=="all"||W.q?'<button class="b sm" id="fclr">Clear filters</button>':""}
+    <span class="sp"></span>${std?`<span class="note">Group by</span>${seg("sgrp",[["mrn","MRN"],["name","Patient name"],["none","No grouping"]],W.grp)}`:'<span class="note" title="Incognito shows no patient grouping">Incognito: list by code</span>'}
+    <span class="note">${vis.length} of ${D.rows.length}</span></div>
+   <div class="list"><table data-id="studies"><thead><tr><th style="width:34px"><input type="checkbox" id="sall"></th>${cols.map(th).join("")}</tr></thead><tbody>
+   ${body||`<tr><td colspan="${cols.length+1}" class="empty">${D.rows.length?"No study matches these filters.":`No studies yet. <a href="#" onclick="go('add');return false" style="color:var(--acc)">Add studies</a> to begin.`}</td></tr>`}
+   </tbody></table></div><div class="note" style="margin-top:10px">${agr} · AI scores are rule-based and not validated.</div>`;
+  const re=()=>studiesView(v);
+  v.querySelectorAll("[data-fl]").forEach(t=>t.onclick=()=>{W.f=t.dataset.fl;re()});
+  const keep=(sel,fn)=>e=>{fn(e);clearTimeout(W.qt);W.qt=setTimeout(()=>{re().then(()=>{const q=$(sel);if(q){q.focus();q.setSelectionRange(q.value.length,q.value.length)}})},250)};
+  $("#sq").oninput=keep("#sq",e=>W.q=e.target.value);
+  v.querySelectorAll("[data-ff]").forEach(i=>i.oninput=keep(`[data-ff="${i.dataset.ff}"]`,e=>F[i.dataset.ff]=e.target.value));
+  $("#fst").onchange=e=>{F.status=e.target.value;re()};$("#scoh").onchange=e=>{W.coh=e.target.value;re()};
+  $("#fclr")&&($("#fclr").onclick=()=>{Object.keys(F).forEach(k=>F[k]="");W.coh="all";W.q="";W.f="all";re()});
+  bindSeg("sgrp",x=>{W.grp=x;re()});
+  v.querySelectorAll("[data-sk]").forEach(h=>h.onclick=()=>{const k=h.dataset.sk;W.sort=W.sort.k===k?{k,d:-W.sort.d}:{k,d:1};re()});
+  v.querySelectorAll("[data-grp]").forEach(g=>g.onclick=()=>{const k=g.dataset.grp;W.closed.has(k)?W.closed.delete(k):W.closed.add(k);re()});
+  v.querySelectorAll("[data-sc]").forEach(c=>{c.onclick=e=>e.stopPropagation();c.onchange=()=>{c.checked?W.sel.add(c.dataset.sc):W.sel.delete(c.dataset.sc);$("#srev").textContent=W.sel.size?`Review ${W.sel.size} selected`:"Review"}});
+  $("#sall").onchange=e=>{vis.forEach(x=>e.target.checked?W.sel.add(x.code):W.sel.delete(x.code));re()};
+  v.querySelectorAll("[data-st]").forEach(tr=>tr.onclick=()=>openSheet(tr.dataset.st));
+  $("#srev").onclick=()=>{const c=W.sel.size?[...W.sel]:vis.filter(x=>x.r&&x.r.candidates!=null).map(x=>x.code);if(!c.length)return toast("no processed study to review",1);review(c,W.coh==="all"?"":W.coh)};
+  $("#sexp").onclick=e=>{e.stopPropagation();$("#sexpm").classList.toggle("hide")};document.addEventListener("click",()=>$("#sexpm")&&$("#sexpm").classList.add("hide"),{once:true});
+  v.querySelectorAll("[data-fmt]").forEach(b=>b.onclick=()=>clinicalExport("/api/export",{fmt:b.dataset.fmt,cohort:W.coh}));
+  $("#spkg").onclick=()=>clinicalExport("/api/share",{codes:vis.filter(x=>x.r&&x.r.candidates!=null).map(x=>x.code)});
+  $("#sxf").onclick=()=>typeof openFileExport==="function"&&openFileExport(W.sel.size?[...W.sel]:vis.map(x=>x.code),W.sel.size?"selected":"filtered list");
+  $("#sopx").onclick=async()=>{const r=await api("/api/open_results",{});toast(r.ok?`opened ${esc(r.path)}`:esc(r.error),!r.ok)};
+  $("#sai").onclick=async()=>{await api("/api/ai_scores",{});toast("AI scores are being updated — they fill in within a minute")};
+  $("#sedit").onclick=()=>bulkEdit([...W.sel]);$("#srem").onclick=()=>openRemove([...W.sel]);
+  $("#sarch").onclick=e=>{e.stopPropagation();$("#sarchm").classList.toggle("hide")};document.addEventListener("click",()=>$("#sarchm")&&$("#sarchm").classList.add("hide"),{once:true});
+  $("#sarch1").onclick=()=>archiveStudies([...W.sel],true);$("#sarch2").onclick=()=>archiveCohort();$("#sarch3").onclick=()=>go("archive")}
+// ---------- study panel
+function closeSheet(){W.cur=null;$("#sheet").classList.remove("open");document.querySelectorAll("tr.cur").forEach(t=>t.classList.remove("cur"))}
+async function openSheet(code,tab){W.cur=code;if(tab)W.tab=tab;document.querySelectorAll("[data-st]").forEach(t=>t.classList.toggle("cur",t.dataset.st===code));
+  if(!W.data)await loadStudies();const x=W.data.rows.find(r=>r.code===code)||{code,st:{l:"",k:""}};const p=x.p,r=x.r||{},sh=$("#sheet");
+  const prim=primaryAction(x);
+  sh.innerHTML=`<div class="sh"><div style="display:flex;align-items:flex-start;gap:12px"><div style="flex:1;min-width:0">${typeof sheetHead==="function"?sheetHead(x):`<div style="font-size:20px;font-weight:650">${sidH(code)}</div><div class="note">${esc(x.cohort||"no cohort")}</div>`}
+     <div style="margin-top:8px"><span class="st ${x.st.k}"><i></i><b>${esc(x.st.l)}</b></span>${x.st.s?` <span class="mut">· ${esc(x.st.s)}</span>`:""}</div></div>
+     <button class="b q" id="shx" title="Close (Esc)">✕</button></div>
+    <div class="row" style="margin:14px 0 2px">${prim?`<button class="b pri" id="shprim">${prim[0]}</button>`:""}${r.candidates!=null&&!(prim&&prim[1]==="review")?`<button class="b" id="shrev">Open in reviewer</button>`:""}<button class="b" id="shedb" data-id="sh-edit">Edit</button></div><div id="shedit"></div>
+    <div class="tabs">${[["summary","Summary"],["processing","Processing"],["technical","Technical"],["log","Log"]].map(([k,l])=>`<button data-tb="${k}" class="${W.tab===k?"on":""}">${l}</button>`).join("")}</div></div><div class="sb" id="shb"></div>`;
+  sh.classList.add("open");$("#shx").onclick=closeSheet;
+  sh.querySelectorAll("[data-tb]").forEach(b=>b.onclick=()=>openSheet(code,b.dataset.tb));
+  if(prim)$("#shprim").onclick=prim[2];if($("#shrev"))$("#shrev").onclick=()=>review([code]);
+  $("#shedb").onclick=()=>typeof openStudyEdit==="function"&&openStudyEdit(code);typeof bindSheetHead==="function"&&bindSheetHead();
+  sh.querySelectorAll("[data-ren]").forEach(b=>b.onclick=async()=>{const nc=prompt("New study code for "+code,code);if(!nc||nc===code)return;const r2=await api("/api/edit",{code,new_code:nc.trim()});if(r2.error)return toast(esc(r2.error),1);closeSheet();render()});
+  const b=$("#shb");
+  if(W.tab==="summary")return sheetSummary(b,x);if(W.tab==="processing")return sheetProcessing(b,x);if(W.tab==="technical")return sheetTechnical(b,x);
+  if(W.tab==="log"){const L=await api("/api/log?code="+encodeURIComponent(code)).catch(()=>({text:""}));b.innerHTML=`<div class="row" style="margin-top:0"><span class="note">Technical log of the pipeline for this study</span><span class="sp"></span><button class="b sm" id="lgcp">Copy</button></div><pre class="mono" style="white-space:pre-wrap;max-height:65vh;overflow:auto;background:var(--panel2);padding:12px;border-radius:8px">${esc(L.text||"(no log yet)")}</pre>`;
+    $("#lgcp").onclick=()=>{navigator.clipboard.writeText(L.text||"");toast("log copied")}}}
+function primaryAction(x){const p=x.p,r=x.r||{};
+  if(p&&["failed","stopped"].includes(p.status))return ["Retry…","retry",()=>ctl(p,"retry")];
+  if(p&&p.status==="decision")return ["Choose anatomy method…","dec",()=>pathwayDialog(p)];
+  if(p&&["running","starting"].includes(p.status))return null;
+  if(r.candidates!=null)return ["Open in reviewer","review",()=>review([x.code])];
+  if(x.d&&!x.d.has_candidates)return ["Start processing…","proc",()=>{W.tab="processing";openSheet(x.code)}];
+  return null}
+function sheetSummary(b,x){const p=x.p||{},r=x.r||{};const warn=[];if(p.error)warn.push(plainErr(p.error));if(p.path_note&&!p.path_ack)warn.push(p.path_note);if(p.stalled)warn.push(`no progress for ${p.stalled} min — check the Log; if nothing uses CPU, Stop and Retry`);
+  b.innerHTML=`${warn.length?`<div class="banner w" style="display:block">${warn.map(w=>`<div>${esc(w)}</div>`).join("")}</div>`:""}
+   <div class="row" style="margin-bottom:8px"><button class="b sm" onclick="typeof openStudyEdit==='function'&&openStudyEdit('${esc(x.code)}')" data-id="edit">Edit identifiers</button> <button class="b sm" onclick="typeof openLineage==='function'&&openLineage('${esc(x.code)}')" data-ln="open">Compare runs</button></div>
+   <div class="kv"><div>Candidates</div><div>${r.candidates??"—"}</div><div>Reviewed</div><div>${r.reviewed!=null?`${r.reviewed} calls${r.css_called!=null?` · ${r.css_called} cSS`:""}`:"not read yet"}</div>
+    <div>Reader score</div><div>${r.score_total!=null?`<b>${r.score_total}</b> <span class="mut">(L ${r.score_L} / R ${r.score_R})</span>`:"—"}</div>
+    <div>AI score</div><div>${r.ai_total!=null?`${r.ai_total} <span class="mut">(L ${r.ai_L} / R ${r.ai_R})</span> <span class="tag ai">not validated</span>`:(r.ai_err?`<span class="mut" title="${esc(r.ai_err)}">not available</span>`:"—")}</div>
+    <div>Radiologist</div><div>${r.rad_R!==undefined&&r.rad_R!==""?`R ${r.rad_R} / L ${r.rad_L}${r.radiologist?` · ${esc(r.radiologist)}`:""}`:"—"}</div>
+    <div>Image quality (QC)</div><div>${grade(r.qc_grade||p.qc,r.qc_tip||p.qc_tip)}${p.has_qc?` <button class="b sm" id="shqc" style="margin-left:8px">QC image</button>`:""} <button class="b sm" style="margin-left:4px" onclick="QCV.code='${esc(x.code)}';go('qc')" title="FreeSurfer / SynthSeg outputs, registration and QC metrics">Anatomy QC</button></div>
+    <div>Anatomy method</div><div>${esc(PW()[p.pathway]||(x.d&&x.d.has_fs?"FreeSurfer (recon-all)":"—"))}</div>
+    ${r.unified_status&&r.unified_status!=="off"?`<div>Unified score</div><div>${esc(r.unified_status)}${r.unified_css_compatible!=null?` · ${r.unified_css_compatible} cSS-compatible / ${r.unified_uncertain} uncertain / ${r.unified_alternative} alternative`:""}</div>`:""}
+    <div>Pipeline version</div><div class="mono">${esc(r.version||p.version||"—")}</div></div>`;
+  $("#shqc")&&($("#shqc").onclick=()=>openWin("/qc?code="+encodeURIComponent(x.code),"cssqc"))}
+async function sheetProcessing(b,x){const p=x.p,code=x.code;let a=null;try{a=await api("/api/proc/audit?code="+encodeURIComponent(code))}catch(e){}
+  const rows=[];const A=(t,d,btns)=>rows.push(`<div class="ar"><div class="at"><b>${t}</b><div class="note">${d}</div></div>${btns}</div>`);
+  if(p){const s=p.status;
+    if(["running","starting","paused"].includes(s))A(s==="paused"?"Paused":"Processing now",`step ${Math.max(1,S.steps.indexOf(p.step)+1)} of 5 · ${STEPN[p.step]||"starting"} · ${hms(p.elapsed)} elapsed`,`${s==="running"?`<button class="b" data-c="pause">Pause</button>`:""}${s==="paused"?`<button class="b" data-c="resume">Resume</button>`:""}<button class="b danger" data-c="stop">Stop</button>`);
+    if(["failed","stopped"].includes(s))A("Retry",esc(plainErr(p.error)||"run the pipeline again"),`<button class="b pri" data-c="retry">Retry…</button>`);
+    if(["waiting","decision","failed","stopped"].includes(s))A("Anatomy method",`now: ${esc(PW()[p.pathway]||p.pathway)}${p.tried&&p.tried.length?` · tried: ${p.tried.map(t=>esc(PW()[t.pathway]||t.pathway)).join(", ")}`:""}`,`<button class="b" data-c="pathway">Change…</button>`);
+    if(s==="done")A("Run the full pipeline again","imports and processes from the original images; a finished FreeSurfer is reused",`<button class="b" data-c="rerun">Re-run…</button>`);
+    if(["waiting","decision","failed","stopped"].includes(s))A("Remove from the queue","the study's files are not deleted",`<button class="b danger" data-c="remove">Remove</button>`)}
+  const busy=a&&a.busy;
+  if(a&&a.ok){const st=a.stages,RU=["compatible","compatible_with_limitations","unknown","not_applicable"],first=["anatomy","registration","align","detect","unified"].find(k=>!RU.includes(st[k].status));
+    const early=first==="anatomy"||first==="registration",needAdopt=!a.adopted&&Object.values(st).some(z=>z.status==="unknown");
+    if(busy)A("New detection run in progress",`stage ${esc(busy.stage||"starting")} · started ${new Date(busy.started*1000).toLocaleTimeString([], {timeStyle:"short"})}`,"");
+    else if(st.detect.status!=="missing"||st.align.status!=="missing")A("New detection run",early?`not possible: ${esc(st[first].label)} ${esc(first)} — re-run from the original images instead`:
+      "detect candidates again with this version, reusing the existing anatomy, registration and labels (FreeSurfer is never re-run here)",early?"":`<button class="b" data-c="fresh">Start…</button>`);
+    if(needAdopt)rows.unshift(`<div class="banner w" style="display:block"><b>Earlier outputs found</b><div class="note">They are not yet linked to this MRI. If you know they were made from these images, confirm them — nothing is changed or moved.</div><div class="row"><button class="b pri" id="adopt">Confirm earlier outputs</button></div></div>`)}
+  b.innerHTML=`<div class="alist">${rows.join("")||'<div class="empty">No processing actions for this study.</div>'}</div><h3 style="margin-top:22px">Processing history</h3><div id="pmh"></div>`;
+  if(a&&a.ok)procHistory($("#pmh"),code,a);else $("#pmh").innerHTML='<div class="note">No history recorded.</div>';
+  b.querySelectorAll("[data-c]").forEach(btn=>btn.onclick=async()=>{const c=btn.dataset.c;
+    if(c==="fresh"){if(await ask("Start a new detection run?",`${sidH(code)}: detect candidates again, with morphology, predictors, AI score and explanations. Anatomy, registration and labels are reused. The current results stay archived and come back if the run fails.`,[["no","Cancel"],["yes","Start","pri"]])!=="yes")return;
+      const r=await api("/api/proc/start",{code,choice:"selective",rerun_from:"detect"});toast(r.ok?`started: ${esc(r.run.join(" → "))}`:esc(r.error),!r.ok);return openSheet(code)}
+    if(c==="pathway")return pathwayDialog(p);await ctl(p,c);openSheet(code)});
+  $("#adopt")&&($("#adopt").onclick=async()=>{const r=await api("/api/proc/adopt",{code});toast(r.ok?"earlier outputs recorded as the first run":esc(r.error),!r.ok);openSheet(code)})}
+async function sheetTechnical(b,x){const a=await api("/api/proc/audit?code="+encodeURIComponent(x.code)).catch(()=>null);if(!a||!a.ok){b.innerHTML='<div class="empty">No technical record for this study yet.</div>';return}
+  const I=a.identity||{},im=z=>z?`<span class="mono">${esc((z.sha256||"").slice(0,8))}… · ${(z.dims||[]).join("×")} · ${(z.voxel_mm||[]).join("×")} mm · ${esc(z.orientation||"?")}</span>`:'<span class="mut">not present</span>';
+  b.innerHTML=`<h3>MRI identity</h3><div class="kv" style="margin-bottom:18px"><div>SWI</div><div>${im(I.swi)}</div><div>T1</div><div>${im(I.t1)}</div><div>FreeSurfer</div><div>${I.freesurfer?`${esc(I.freesurfer.version||"version not recorded")}${I.freesurfer.no_v8?" · -no-v8":""}`:'<span class="mut">none</span>'}</div><div>Previous detection</div><div>${I.detection?esc(I.detection.pipeline_version||"?"):'<span class="mut">none</span>'}</div></div>
+   <h3>Can earlier outputs be reused?</h3><table><tr><th>Stage</th><th>Status</th><th>Why</th></tr>${Object.values(a.stages).map(z=>`<tr><td>${esc({anatomy:"Brain anatomy",registration:"Registration (SWI → T1)",align:"Labels on the SWI",detect:"cSS detection",unified:"Unified score"}[z.stage]||z.stage)}</td><td>${cat(z.status,z.label)}</td><td class="note">${esc(z.why)}</td></tr>`).join("")}</table>`}
+// shared queue actions (same API calls and confirmations as before the redesign)
+async function ctl(p,a){const c=p.code;
+  if(a==="retry"&&/do not line up/.test(p.error||""))return pathwayDialog(p,true);
+  if(a==="stop"&&!confirm(`Stop ${c}? Its partial results are discarded; you can Retry later.`))return;
+  if(a==="remove"&&!confirm(`Remove ${c} from the queue? Its files are not deleted.`))return;
+  if(a==="rerun"){if(S.settings.rerun_mode==="auto"){const r=await api("/api/control",{code:c,action:"rerun"});toast(r.error?esc(r.error):`${sidH(c)}: re-run with ${esc(PW()[p.pathway])}`,!!r.error);return render()}
+    return pathwayDialog(p,false,true)}
+  const r=await api("/api/control",{code:c,action:a});if(r.error)toast(esc(r.error),1);render()}
+function pathwayDialog(p,isRetry,isRerun){const rec=isRetry?(p.next_rec||"coreg_masked"):p.pathway;
+  $("#dlg").innerHTML=`<h2>${isRerun?"Re-run":isRetry?"Retry":"Anatomy method"} · ${sidH(p.code)}</h2><p class="note">${isRetry?"The T1 and SWI did not line up. Choose how to register them; the 1.5 mm check runs again and refuses a bad result. The failed attempt's files are kept.":isRerun?"The earlier results stay until the new run finishes.":"How the brain anatomy is obtained for this study."}
+   ${p.tried&&p.tried.length?`<br>Tried: ${p.tried.map(t=>esc(PW()[t.pathway]||t.pathway)+" ("+t.shift+" mm)").join(", ")}`:""}</p>
+   <div class="row">${pwSel(rec,rec,'id="pwsel" style="width:100%"',p.tried)}</div>
+   <details class="note" style="margin-top:6px"><summary>Which method should I choose?</summary><table style="margin-top:6px">${[["Fast re-registration","minutes","try first"],["SynthMorph","minutes","if the fast option is refused (runs alone)"],["recon-all","~2–3 h","most accurate registration"],["SWI-only","~30 min","last resort, coarser labels"]].map(z=>`<tr><td><b>${z[0]}</b></td><td>${z[1]}</td><td>${z[2]}</td></tr>`).join("")}</table></details>
+   <div class="acts" style="margin-top:14px"><button class="b" data-v="x">Cancel</button><button class="b pri" data-v="ok">${isRerun?"Re-run":isRetry?"Retry":"Apply"}</button></div>`;
+  $("#shade").style.display="flex";$("#dlg").querySelectorAll("button[data-v]").forEach(x=>x.onclick=async()=>{const val=$("#pwsel").value;$("#shade").style.display="none";if(x.dataset.v!=="ok")return;
+    const r=await confirmPath(p.code,val,rec,isRetry?"after a failed registration":"");if(r===false)return;const ch=r==="rec"?rec:val;if(ch==="recon"&&!confirm("recon-all takes about 2-3 hours for this study. Continue?"))return;
+    const body=isRerun?{code:p.code,action:"rerun",pathway:ch}:["waiting","decision"].includes(p.status)?{code:p.code,action:"pathway",pathway:ch}:{code:p.code,action:ch};
+    const res=await api("/api/control",body);if(res.error)toast(esc(res.error),1);else toast(`${sidH(p.code)}: ${esc(PW()[ch])}`);render();if(W.cur)openSheet(W.cur)})}
+// ---------- Activity (Process Manager)
+const AC={capOpen:false};
+// v5.19 the processing list names a study like the Studies list: code (+ accession · name · MRN in Standard)
+function actName(code){const p=(S.patients||[]).find(x=>x.code===code)||{},i=p.ident||{},st=IDV&&IDV.st||{},std=st.mode==="standard"&&!i.locked;
+  return std?`${i.accession?esc(i.accession):'<span class="bad">accession missing</span>'}<span class="mut" style="font-weight:400">${esc([i.patient_name,i.mrn?`MRN ${i.mrn}`:""].filter(Boolean).map(x=>" · "+x).join(""))}</span>`:sidH(code)}
+async function activityView(v){const [U,D]=await Promise.all([api("/api/u/state").catch(()=>({jobs:{}})),api("/api/proc/studies").catch(()=>({studies:[]}))]);if(V!=="act")return;
+  const P=S.patients.filter(p=>!p.archived&&!p.retired),sy=S.sys,z=S.mem_zones,par=S.settings.parallel||1,rec=S.rec,now=Date.now()/1000;const att=[],run=[],wait=[],done=[];
+  const btn=(c,l,cls)=>`<button class="b sm ${cls||""}" ${c}>${l}</button>`;
+  P.forEach(p=>{const s=p.status,k=Math.max(1,S.steps.indexOf(p.step)+1),log=btn(`data-lgc="${esc(p.code)}"`,"Details","q"),open=`data-op="${esc(p.code)}"`;
+    if(["running","starting","paused"].includes(s))run.push({t:`<b ${open} style="cursor:pointer">${actName(p.code)}</b><span class="kind">pipeline</span>`,m:`${s==="paused"?"Paused · ":""}step ${k} of 5 · ${STEPN[p.step]||"starting"} · ${hms(p.elapsed)} elapsed${p.remaining?` · ≈ ${hms(p.remaining)} left (estimate)`:""}${p.stalled?` · <span class="warn">no progress for ${p.stalled} min</span>`:""}`,
+      g:(k-1)/5,a:(s==="running"?btn(`data-pc="pause" data-cd="${esc(p.code)}"`,"Pause"):"")+(s==="paused"?btn(`data-pc="resume" data-cd="${esc(p.code)}"`,"Resume"):"")+btn(`data-pc="stop" data-cd="${esc(p.code)}"`,"Stop","danger")+log});
+    else if(s==="waiting")wait.push({t:`<b ${open} style="cursor:pointer">${actName(p.code)}</b><span class="kind">pipeline</span>`,m:`${esc(PW()[p.pathway]||p.pathway)}${p.solo?" · runs alone":""}${p.remaining?` · ≈ ${hms(p.remaining)} (estimate)`:""}`,a:btn(`data-pc="pathway" data-cd="${esc(p.code)}"`,"Method…","q")+btn(`data-pc="remove" data-cd="${esc(p.code)}"`,"Remove","q danger")});
+    else if(s==="decision")att.push({t:`<b ${open} style="cursor:pointer">${actName(p.code)}</b><span class="kind">needs your decision</span>`,m:esc(p.path_note||"choose the anatomy method"),a:btn(`data-pc="pathway" data-cd="${esc(p.code)}"`,"Choose…","pri")+btn(`data-pc="accept" data-cd="${esc(p.code)}"`,"Accept as is")});
+    else if(["failed","stopped"].includes(s))att.push({t:`<b ${open} style="cursor:pointer">${actName(p.code)}</b><span class="kind">pipeline ${s}</span>`,m:esc(plainErr(p.error)||s),a:btn(`data-pc="retry" data-cd="${esc(p.code)}"`,"Retry…","pri")+btn(`data-pc="remove" data-cd="${esc(p.code)}"`,"Remove","q danger")+log});
+    else if(s==="done"&&p.path_note&&!p.path_ack)att.push({t:`<b ${open} style="cursor:pointer">${actName(p.code)}</b><span class="kind">method changed</span>`,m:esc(p.path_note),a:btn(`data-pc="accept" data-cd="${esc(p.code)}"`,"OK")});
+    else if(s==="done"&&p.started&&now-p.started<86400)done.push({t:`<b ${open} style="cursor:pointer">${actName(p.code)}</b><span class="kind">pipeline</span>`,m:`finished · ${hms(p.elapsed)}`,a:log})});
+  (D.studies||[]).forEach(d=>{const open=`data-op="${esc(d.code)}"`;
+    if(d.busy)run.push({t:`<b ${open} style="cursor:pointer">${actName(d.code)}</b><span class="kind">new detection run</span>`,m:"working (stage shown in the study's Processing tab)",a:btn(`data-ops="${esc(d.code)}"`,"Open","q")});
+    else if(["failed","interrupted"].includes(d.last_status))att.push({t:`<b ${open} style="cursor:pointer">${sidH(d.code)}</b><span class="kind">detection run ${d.last_status}</span>`,m:"previous results were restored · resume or start again from the study",a:btn(`data-ops="${esc(d.code)}"`,"Open…","pri")})});
+  Object.entries(U.jobs||{}).forEach(([n,j])=>{const nm={audit:"Cohort audit",extract:"Feature extraction",train:"Model training",robustness:"Robustness suite",export:"Export",protocol:"Test protocol"}[n]||n;
+    const last=(j.log||[]).slice(-1)[0]||"";
+    if(j.status==="running")run.push({t:`<b>${esc(nm)}</b><span class="kind">model</span>`,m:esc(last).slice(0,140),g:j.progress,a:btn(`data-ust="${esc(n)}"`,"Stop","danger")+btn(`data-ulg="${esc(n)}"`,"Details","q")});
+    else if(j.status==="failed")att.push({t:`<b>${esc(nm)}</b><span class="kind">model job failed</span>`,m:esc(((j.error||"").split("\n").filter(Boolean).slice(-1)[0]||"see details")).slice(0,160),a:btn(`data-ulg="${esc(n)}"`,"Details","q")+btn(`data-umd="1"`,"Open Model","q")});
+    else if(["completed","stopped"].includes(j.status)&&j.finished&&now-j.finished<86400)done.push({t:`<b>${esc(nm)}</b><span class="kind">model</span>`,m:`${j.status} · ${new Date(j.finished*1000).toLocaleTimeString([], {timeStyle:"short"})}`,a:btn(`data-ulg="${esc(n)}"`,"Details","q")})});
+  const grp=(t,arr,emp)=>`<div class="act"><div class="ah">${t}<span class="mut" style="font-weight:500">${arr.length}</span></div>${arr.length?arr.map(x=>`<div class="pr"><div class="pt">${x.t}<div class="pm">${x.m}</div></div>${x.g!=null?`<div class="pg"><div class="bar"><i style="width:${Math.max(3,Math.round(100*x.g))}%"></i></div></div>`:""}<div class="pa">${x.a||""}</div></div>`).join(""):`<div class="empty">${emp}</div>`}</div>`;
+  const dz=sy.mem_pct>=z[1];if(dz)AC.capOpen=true;
+  v.innerHTML=`${S.queue.hold?`<div class="banner e"><b>Processing is paused — setup problem</b><span>${esc(S.queue.hold)}</span><span class="sp"></span><button class="b sm" onclick="W.setTab='system';go('set')">Open setup</button></div>`:""}
+   ${dz?`<div class="banner e"><b>Memory almost full (${sy.mem_pct} %)</b><span>the Mac may freeze</span><span class="sp"></span>${run.length?`<button class="b sm wb" id="stopnew">Stop newest study</button>`:""}</div>`:""}
+   <div class="tbar"><span class="mut">Process</span><select id="par">${[1,2,3,4].map(n=>`<option value="${n}" ${n===par?"selected":""}>${n} stud${n>1?"ies":"y"} at a time${n===rec?" (recommended)":""}</option>`).join("")}</select>
+    ${att.some(x=>/pipeline (failed|stopped)/.test(x.t))?`<button class="b" id="rall">Retry all failed</button>`:""}<span class="sp"></span><button class="b q" id="capb">${AC.capOpen?"Hide":"Show"} capacity</button></div>
+   <div id="cap" class="${AC.capOpen?"":"hide"} card"><div class="row" style="margin-top:0"><b>Memory</b><span>${sy.mem_used} of ${sy.mem_total} GB (${sy.mem_pct} %)</span><span class="mut">· CPU ${sy.cpu_pct} % · free disk ${sy.disk_free} GB</span></div>${memBar(sy,z)}
+    <div class="note">Below ${z[0]} % new studies start normally · ${z[0]}–${z[1]} % no new study starts · above ${z[1]} % warning. Recommended now: ${rec} at a time (${esc(sy.chip)}, ${sy.cores} cores, ${sy.mem_total} GB${S.rec_why?`; ${esc(S.rec_why)}`:""}). SWI-only and SynthMorph always run alone. Memory figures are estimates.</div></div>
+   ${grp("Needs attention",att,"Nothing needs your attention.")}${grp("Running",run,"Nothing is running.")}${grp("Waiting",wait,"The queue is empty.")}${grp("Finished in the last 24 hours",done,"Nothing finished recently.")}
+   <div class="note">You can close the window: processing continues, and work cut off by a restart is resumed or marked interrupted automatically.</div>`;
+  $("#capb").onclick=()=>{AC.capOpen=!AC.capOpen;activityView(v)};
+  $("#par").onchange=async e=>{const n=+e.target.value;if(n>rec&&await ask("More than recommended",`${n} studies at a time is above the recommendation (${rec}) for this Mac (${sy.mem_total} GB). It may slow down; in the red memory zone new studies won't start.`,[["back","Back"],["go",`Use ${n}`,"wb"]])!=="go")return render();await api("/api/settings",{parallel:n});render()};
+  $("#rall")&&($("#rall").onclick=async()=>{const r=await api("/api/retry_failed",{});toast(`${r.n} stud${r.n===1?"y":"ies"} back in the queue`);render()});
+  $("#stopnew")&&($("#stopnew").onclick=async()=>{const p=P.filter(x=>["running","paused","starting"].includes(x.status)).sort((a,b)=>b.started-a.started)[0];if(!p||!confirm(`Stop ${p.code} to free memory? It goes back to the queue and starts again later.`))return;await api("/api/control",{code:p.code,action:"requeue"});render()});
+  v.querySelectorAll("[data-pc]").forEach(b=>b.onclick=async()=>{const p=P.find(x=>x.code===b.dataset.cd),c=b.dataset.pc;if(c==="pathway")return pathwayDialog(p);if(c==="accept"){await api("/api/control",{code:p.code,action:"accept"});return render()}await ctl(p,c)});
+  v.querySelectorAll("[data-lgc]").forEach(b=>b.onclick=()=>openLog(b.dataset.lgc));v.querySelectorAll("[data-op],[data-ops]").forEach(b=>b.onclick=()=>{go("studies");setTimeout(()=>openSheet(b.dataset.op||b.dataset.ops,b.dataset.ops?"processing":"summary"),300)});
+  v.querySelectorAll("[data-ust]").forEach(b=>b.onclick=async()=>{await api("/api/u/stop",{job:b.dataset.ust});toast("stopping…")});v.querySelectorAll("[data-umd]").forEach(b=>b.onclick=()=>go("uni"));
+  v.querySelectorAll("[data-ulg]").forEach(b=>b.onclick=async()=>{const r=await api("/api/u/log?job="+b.dataset.ulg);$("#dlg").innerHTML=`<h2>Details · ${esc(b.dataset.ulg)}</h2><pre class="mono" style="max-height:50vh;overflow:auto;white-space:pre-wrap">${esc((r.log||[]).join("\n")||"(empty)")}${r.error?"\n\n"+esc(r.error):""}</pre><div class="acts"><button class="b pri">Close</button></div>`;$("#shade").style.display="flex";$("#dlg").querySelector("button").onclick=()=>$("#shade").style.display="none"})}
+// ---------- Add studies (two ways in) and Settings (tabs)
+W.addTab="folders";W.setTab="general";
+function addHost(v){const hm=location.hash.match(/^#add\?(.+)$/);
+  if(hm&&!ADD._deep&&typeof IW!=="undefined"){ADD._deep=1;W.addTab="folders";const q=new URLSearchParams(hm[1]);     // #add?folder=…[&folder_is=…&sub_is=…&mode=…&go=1]
+    IW.folder=q.get("folder")||"";IW.plan=null;["folder_is","sub_is","mode","manifest"].forEach(k=>{if(q.get(k)!==null)IW[k]=q.get(k)});if(q.get("cohort"))IW.proc.cohort=q.get("cohort");
+    if(q.get("go")==="1"&&IW.folder&&IW.folder_is)setTimeout(()=>iwPlan($("#addbody")),0)}
+  v.innerHTML=`<div class="subtabs" data-id="addtabs"><button data-at="folders" class="${W.addTab==="folders"?"on":""}">From folders</button><button data-at="project" class="${W.addTab==="project"?"on":""}">From another project</button></div><div id="addbody"></div>`;
+  v.querySelectorAll("[data-at]").forEach(b=>b.onclick=()=>{W.addTab=b.dataset.at;addHost(v)});const el=$("#addbody");
+  return W.addTab==="folders"?(typeof importWizardView==="function"?importWizardView(el):(el.innerHTML='<div class="card">Import not loaded.</div>')):bringInView(el)}
+async function bringInView(el){const MS=(await api("/api/proc/models")).models||{};const L=await api("/api/proc/studies");const KP=(await api("/api/kp/list").catch(()=>({projects:[]}))).projects||[];
+  el.innerHTML=`<div class="card" data-id="kp"><h3 style="margin:0 0 6px">Projects found on this Mac</h3><p class="note" style="margin-top:0">Studies already processed in another project (for example the previous Percival version) do not need to be processed again: bring them in here, and every new import is checked against these projects (same images = reuse the results). The other projects are only read.</p>
+    ${KP.length?`<table>${KP.map(k=>`<tr data-kp="${esc(k.path)}"><td><b>${esc(k.kind)}</b><div class="note mono">${esc(k.path)}</div></td><td>${k.n_processed} processed · ${k.n_here} already here</td>
+      <td><label class="note"><input type="checkbox" data-kpt="${esc(k.path)}" ${k.enabled?"checked":""}> check during imports</label></td>
+      <td><button class="b ${k.n_processed-k.n_here>0?"pri":""}" data-kpb="${esc(k.path)}" ${k.n_processed-k.n_here>0?"":"disabled"}>Bring in ${k.n_processed-k.n_here} processed studies</button></td></tr>`).join("")}</table>`:'<p class="note">No other project found.</p>'}
+    <div class="row"><button class="b" id="kpadd">Add a project folder…</button></div></div>
+  <p class="note" style="max-width:820px;margin-top:0">Bring in studies already processed in another project (for example your production project). Everything is <b>copied and verified</b> — images, registrations, labels, earlier results and the FreeSurfer folder (an isolated copy). The other project is only read; nothing there is ever changed.</p>
+   <div class="row"><input class="wide" id="lsrc" value="${esc(PMS.src||"")}" placeholder="/Users/you/css_project"><button class="b" id="lsc">Choose…</button><button class="b pri" id="lscan">List studies</button></div><div id="llist"></div>
+   <h3 style="margin-top:26px">Production models in this project</h3><table>${Object.entries(MS).map(([n,m])=>`<tr><td class="mono" style="width:280px">review/${esc(n)}</td><td style="width:240px">${m.present&&m.compatible&&m.verified_copy_of_production?cat("compatible","verified copy · compatible"):m.present?cat("incompatible","not matching production"):cat("missing","not present")}</td><td class="note">${esc([m.import_status,...(m.reasons||[]),...(m.notes||[])].filter(Boolean).join(" · "))}</td></tr>`).join("")}</table>
+   <div class="note">Copied byte-for-byte when studies are brought in; never modified or retrained. ${(L.studies||[]).length} studies in this project.</div>`;
+  $("#lsc").onclick=async()=>{const p=await pick("folder","Choose the other project folder");if(p)$("#lsrc").value=p.replace(/\/$/,"")};
+  el.querySelectorAll("[data-kpt]").forEach(c=>c.onchange=async()=>{await api("/api/kp/toggle",{path:c.dataset.kpt,on:c.checked});toast(c.checked?"checked during imports":"no longer checked")});
+  el.querySelectorAll("[data-kpb]").forEach(b=>b.onclick=async()=>{if(!confirm("Bring every processed study of this project that is not here yet into this project? Files are copied and verified; the other project is only read."))return;
+    b.disabled=true;b.textContent="copying and verifying…";const x=await api("/api/kp/bring_all",{path:b.dataset.kpb});const ok=(x.results||[]).filter(y=>y.ok).length,bad=(x.results||[]).filter(y=>!y.ok);
+    toast(`${ok} studies brought in${bad.length?` · ${bad.length} not: ${bad.slice(0,4).map(y=>esc(y.error)).join("; ")}`:""}`,bad.length>0);S=await api("/api/state");bringInView(el)});
+  $("#kpadd").onclick=async()=>{const p=await pick("folder","Choose another Percival project folder");if(!p)return;const r=await api("/api/kp/add",{path:p.replace(/\/$/,"")});if(!r.ok)return toast(esc(r.error),1);bringInView(el)};
+  $("#lscan").onclick=async()=>{PMS.src=$("#lsrc").value.trim();const r=await api("/api/proc/scan_source?path="+encodeURIComponent(PMS.src));
+    if(!r.ok){$("#llist").innerHTML=`<div class="bad" style="margin:10px 0">${esc(r.error)}</div>`;return}
+    $("#llist").innerHTML=`<div class="list" style="margin-top:12px;max-height:340px;overflow:auto"><table><thead><tr><th style="width:34px"><input type="checkbox" id="lkall"></th><th>Study</th><th>FreeSurfer</th><th>Earlier results</th><th></th></tr></thead><tbody>${r.studies.map(x=>`<tr><td>${x.here?"":`<input type="checkbox" data-lk="${esc(x.code)}">`}</td><td><b>${esc(x.code)}</b></td><td>${x.has_fs?"yes (copied)":'<span class="mut">—</span>'}</td><td>${x.has_candidates?"yes":'<span class="mut">—</span>'}</td><td class="mut">${x.here?"already in this project":""}</td></tr>`).join("")}</tbody></table></div>
+     <div class="row"><button class="b pri" id="lgo">Bring selected into this project</button></div>`;
+    $("#lkall").onchange=e=>document.querySelectorAll("[data-lk]").forEach(c=>c.checked=e.target.checked);
+    $("#lgo").onclick=async()=>{const codes=[...document.querySelectorAll("[data-lk]:checked")].map(e=>e.dataset.lk);if(!codes.length)return toast("tick at least one study",1);
+      $("#lgo").disabled=true;$("#lgo").textContent="copying and verifying…";const x=await api("/api/proc/link",{source:PMS.src,codes});
+      toast((x.models&&!x.models.error?Object.entries(x.models).map(([n,m])=>`${esc(n)}: ${esc(m.status)}`).join("<br>")+"<br>":"")+x.results.map(y=>y.ok?`${esc(y.code)}: ${y.copied} files copied + verified${y.freesurfer?`, FreeSurfer ${y.fs_method==="apfs_clone"?"cloned":"copied"} (${y.fs_files} files)`:""}`:`${esc(y.code)}: ${esc(y.error)}`).join("<br>"),!x.ok);
+      go("studies");setTimeout(()=>openSheet(codes[0],"processing"),400)}}}
+const SETMAP=[["Version","system"],["FreeSurfer","processing"],["When SynthSeg","processing"],["Re-run","processing"],["When a retry","processing"],["Reviewer","general"],["Backup and export","general"],["Notification centre","notifications"],["Features","general"]];
+async function setHost(v){setView(v);const cards=[...v.querySelectorAll(":scope > .card")],last=v.lastElementChild;
+  const tabs=[["general","General"],["processing","Processing"],["notifications","Notifications"],["system","System"]];
+  v.insertAdjacentHTML("afterbegin",`<div class="subtabs">${tabs.map(([k,l])=>`<button data-stb="${k}" class="${W.setTab===k?"on":""}">${l}</button>`).join("")}</div>`);
+  cards.forEach(c=>{const h=(c.querySelector("h2")||{}).textContent||"";const m=SETMAP.find(([t])=>h.startsWith(t));c.dataset.tab=m?m[1]:"general";c.classList.toggle("hide",c.dataset.tab!==W.setTab)});
+  if(W.setTab==="processing"){const n=document.createElement("div");n.className="note";n.style.margin="0 0 14px";n.textContent="Advanced: these options change how studies are processed. The defaults are the validated production settings.";v.querySelector(".subtabs").after(n)}
+  if(W.setTab==="system"){const host=document.createElement("div");v.querySelector(".subtabs").after(host);await systemPanel(host)}
+  if(W.setTab==="notifications"&&last)last.classList.add("hide");
+  v.querySelectorAll("[data-stb]").forEach(b=>b.onclick=()=>{W.setTab=b.dataset.stb;render()})}
+async function systemPanel(el){const pf=await api("/api/preflight");W.pf=pf;
+  el.innerHTML=`<div class="card"><h2>Setup check</h2><table>${pf.map(x=>`<tr><td style="width:30px" class="${x.ok?"ok":"bad"}">${x.ok?"✓":"✗"}</td><td style="width:220px">${esc(x.item)}</td><td class="mut">${esc(x.detail)} ${x.fix==="dcm2niix"?`<button class="b sm pri" data-fix="dcm2niix">Install dcm2niix</button>`:""}${x.fix==="pywebview"?`<button class="b sm" data-fix="pywebview">Install (own window + Dock icon)</button>`:""}${x.fix==="licence"?`${x.fix_path?`<button class="b sm pri" data-lic="perm" data-p="${esc(x.fix_path)}">Make it readable</button> `:""}<button class="b sm" data-lic="choose">Choose licence file…</button>`:""}</td></tr>`).join("")}</table></div>
+   <div class="card"><h2>Pipeline code</h2><div class="row"><span class="mono">${esc(S.version)}</span></div><div class="row"><button class="b" id="inst">Install / update from zip…</button><button class="b" id="rb">Roll back to the previous version</button></div><div class="note">Installing keeps a backup of the current code; studies, calls and results are never touched.</div></div>`;
+  el.querySelectorAll("[data-fix]").forEach(b=>b.onclick=async()=>{b.disabled=true;b.textContent="installing…";const r=await api("/api/fix",{what:b.dataset.fix});toast(r.ok?(b.dataset.fix==="pywebview"?"installed — quit Percival and open it again":`${esc(b.dataset.fix)} installed — Activity › Retry all failed`):`install failed: ${esc(r.error)}`,!r.ok);W.pf=null;render()});
+  el.querySelectorAll("[data-lic]").forEach(b=>b.onclick=async()=>{const r=await api("/api/fix",b.dataset.lic==="perm"?{what:"licence_permission",path:b.dataset.p}:{what:"licence_choose"});toast(r.ok?"licence OK — Activity › Retry all failed":`not fixed: ${esc(r.error)}`,!r.ok);W.pf=null;render()});
+  $("#inst").onclick=async()=>{const p=await pick("file","Choose the cSS pipeline zip");if(!p)return;const r=await api("/api/install",{path:p});toast(r.ok?`installed ${esc(r.version)} (${r.files} files; backup kept)`:esc(r.error),!r.ok);render()};
+  $("#rb").onclick=async()=>{if(!confirm("Restore the previous pipeline version?"))return;const r=await api("/api/rollback",{});toast(r.ok?`restored ${esc(r.version)}`:esc(r.error),!r.ok);render()}}
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&$("#sheet").classList.contains("open")&&$("#shade").style.display!=="flex")closeSheet()});
+
+// ---------------- settings
+function setView(v){const s=S.settings,F=s.features;const L={duplicate_check:"Duplicate-scan check",preflight:"Pre-flight check before processing",qc_snapshot:"QC snapshot per patient",notify:"Notification when a patient finishes / fails",
+   version_stamp:"Version stamp on every result",share:"Share package (codes only)",backup:"Automatic daily backup (calls, grades, results - no images)",name_warning:"Warn when a folder name looks like a person's name",train_include_archived:"Include archived studies in model training",show_prototypes:"Show the older research prototypes in the menu (Training, Predictor model, Shadow ML, Image ML - they do not feed the Percival Score)"};
+  v.innerHTML=`<div class="card"><h2>Version</h2><div class="row"><span class="lab">Active version</span><span class="mono">${esc(S.version)}</span></div><div class="note">Percival (experimental cSS application) · research software, not a diagnostic device</div></div>
+  <div class="card" data-setup="settings"><h2>Setup</h2><div class="row"><span class="note">Check the installation, configure FreeSurfer and its licence, and see the readiness report.</span><span class="sp"></span><button class="b pri" onclick="go('setup')">Open setup wizard</button></div></div>
+  <div class="card"><h2>FreeSurfer</h2><div class="row"><span class="lab">FreeSurfer folder</span><input class="wide" id="fs" value="${esc(s.freesurfer_home||"")}" placeholder="/Applications/freesurfer/8.2.0"><button class="b" id="fsc">Choose…</button></div>
+   <div class="row"><span class="lab">Licence file</span><input class="wide" id="lic" value="${esc(s.fs_license||"")}" placeholder="found automatically if readable"><button class="b" id="licc">Choose…</button></div>
+   <div class="row"><span class="lab">Threads</span><input id="thr" type="number" min="1" max="12" value="${s.threads||4}" style="width:80px"><span class="note">CPU threads for SynthSeg / recon-all (4 is safe on a 36 GB Mac); shared between patients running at the same time</span></div></div>
+  <div class="card"><h2>When SynthSeg cannot run for a patient</h2><div class="row">${seg("ap",[["1","Switch automatically + tell me"],["0","Ask me first"]],s.auto_path===false?"0":"1")}</div>
+   <div class="note">No T1 → SWI-only (runs alone, last) · T1 does not cover the brain and another T1 exists → the other T1 · no usable T1 → SWI-only · T1 / SWI misaligned → Fast re-registration → SynthMorph → then you decide (recon-all 2-3 h) · no SWI → not queued.</div></div>
+  <div class="card"><h2>Re-run of a finished patient</h2><div class="row">${seg("rr",[["choose","Let me choose the pathway"],["auto","Automatic - same pathway as last run"]],s.rerun_mode==="auto"?"auto":"choose")}</div></div>
+  <div class="card"><h2>Reviewer</h2><div class="row"><button class="b" id="vsetb">⚙ Reviewer settings…</button><span class="note">the same settings window as in the reviewer (shared by every reviewer window)</span></div></div>
+  <div class="card"><h2>When a retry is needed (T1 / SWI misaligned)</h2><div class="row">${seg("ar",[["1","Retry automatically (next pathway)"],["0","Let me choose (recommended marked)"]],s.auto_retry===false?"0":"1")}</div>
+   <div class="note">Order: Fast re-registration (~4 min) → SynthMorph (~5 min, alone) → recon-all (~2-3 h, always asks) → SWI-only. In both modes a failed retry moves the recommendation to the next pathway; the failed attempt's files are kept, renamed.</div></div>
+  <div class="card"><h2>Storage &amp; Locations</h2>
+   <p class="note">PERCIVAL allows independent destination configuration for all storage categories. Changing the Working Directory offers automatic safe migration.</p>
+   <table style="width:100%;margin-top:8px">
+     <thead>
+       <tr style="border-bottom:1px solid var(--line);text-align:left">
+         <th style="padding:6px">Category</th>
+         <th style="padding:6px">Current Location</th>
+         <th style="width:110px;padding:6px">Status</th>
+         <th style="width:100px;text-align:center;padding:6px">Action</th>
+       </tr>
+     </thead>
+     <tbody>
+       <tr style="border-bottom:1px solid var(--line)">
+         <td style="padding:6px"><b>Working Directory</b><br><span class="note">Active staging &amp; scratch (fast SSD)</span></td>
+         <td class="mono" style="font-size:12px;padding:6px">${esc(S.project.path || "Default")}</td>
+         <td style="padding:6px"><span class="pill ok">Active</span></td>
+         <td style="text-align:center;padding:6px"><button class="b sm pri" id="set-ch-work">Migrate…</button></td>
+       </tr>
+       <tr style="border-bottom:1px solid var(--line)">
+         <td style="padding:6px"><b>External Data Vault</b><br><span class="note">Pensieve memory &amp; archival</span></td>
+         <td class="mono" style="font-size:12px;padding:6px">${esc(s.vault_mount || "/Volumes/Percival/PERCIVAL_VAULT")}</td>
+         <td style="padding:6px"><span class="pill ${s.vault_mount ? 'ok' : 'warn'}">${s.vault_mount ? 'Configured' : 'Default'}</span></td>
+         <td style="text-align:center;padding:6px"><button class="b sm" id="set-ch-vault">Change…</button></td>
+       </tr>
+       <tr style="border-bottom:1px solid var(--line)">
+         <td style="padding:6px"><b>Scratch Directory</b><br><span class="note">Intermediate resamplings</span></td>
+         <td class="mono" style="font-size:12px;padding:6px">${esc(s.scratch_dir || (S.project.path + "/app_data/scratch"))}</td>
+         <td style="padding:6px"><span class="pill ok">Active</span></td>
+         <td style="text-align:center;padding:6px"><button class="b sm" id="set-ch-scratch">Change…</button></td>
+       </tr>
+       <tr style="border-bottom:1px solid var(--line)">
+         <td style="padding:6px"><b>Original MRI Acquisitions</b><br><span class="note">Raw DICOM/NIfTI scans</span></td>
+         <td class="mono" style="font-size:12px;padding:6px">${esc(s.originals_dir || (S.project.path + "/data"))}</td>
+         <td style="padding:6px"><span class="pill ok">Active</span></td>
+         <td style="text-align:center;padding:6px"><button class="b sm" id="set-ch-orig">Change…</button></td>
+       </tr>
+       <tr style="border-bottom:1px solid var(--line)">
+         <td style="padding:6px"><b>Processed MRI (FreeSurfer)</b><br><span class="note">Cortical reconstructions &amp; masks</span></td>
+         <td class="mono" style="font-size:12px;padding:6px">${esc(s.processed_dir || (S.project.path + "/subjects"))}</td>
+         <td style="padding:6px"><span class="pill ok">Active</span></td>
+         <td style="text-align:center;padding:6px"><button class="b sm" id="set-ch-proc">Change…</button></td>
+       </tr>
+       <tr style="border-bottom:1px solid var(--line)">
+         <td style="padding:6px"><b>ALBUS Outputs</b><br><span class="note">Sulcal geometries &amp; Darboux tensors</span></td>
+         <td class="mono" style="font-size:12px;padding:6px">${esc(s.albus_dir || (S.project.path + "/review"))}</td>
+         <td style="padding:6px"><span class="pill ok">Active</span></td>
+         <td style="text-align:center;padding:6px"><button class="b sm" id="set-ch-albus">Change…</button></td>
+       </tr>
+       <tr style="border-bottom:1px solid var(--line)">
+         <td style="padding:6px"><b>LUMOS Outputs</b><br><span class="note">Neural network inferences &amp; GradCAMs</span></td>
+         <td class="mono" style="font-size:12px;padding:6px">${esc(s.lumos_dir || (S.project.path + "/unified_engine/percival"))}</td>
+         <td style="padding:6px"><span class="pill ok">Active</span></td>
+         <td style="text-align:center;padding:6px"><button class="b sm" id="set-ch-lumos">Change…</button></td>
+       </tr>
+       <tr style="border-bottom:1px solid var(--line)">
+         <td style="padding:6px"><b>NOX Outputs</b><br><span class="note">Epistemic uncertainty maps</span></td>
+         <td class="mono" style="font-size:12px;padding:6px">${esc(s.nox_dir || (S.project.path + "/results/nox"))}</td>
+         <td style="padding:6px"><span class="pill ok">Active</span></td>
+         <td style="text-align:center;padding:6px"><button class="b sm" id="set-ch-nox">Change…</button></td>
+       </tr>
+       <tr style="border-bottom:1px solid var(--line)">
+         <td style="padding:6px"><b>Pensieve Backups</b><br><span class="note">Zero-corruption SQLite snapshots</span></td>
+         <td class="mono" style="font-size:12px;padding:6px">${esc(s.pensieve_backups_dir || (S.project.path + "/app_data/pensieve_snapshots"))}</td>
+         <td style="padding:6px"><span class="pill ok">Active</span></td>
+         <td style="text-align:center;padding:6px"><button class="b sm" id="set-ch-pensieve">Change…</button></td>
+       </tr>
+       <tr>
+         <td style="padding:6px"><b>Reports &amp; Exports</b><br><span class="note">Clinical PDFs &amp; spreadsheets</span></td>
+         <td class="mono" style="font-size:12px;padding:6px">${esc(s.export_dir || (S.project.path + "/results"))}</td>
+         <td style="padding:6px"><span class="pill ok">Active</span></td>
+         <td style="text-align:center;padding:6px"><button class="b sm" id="set-ch-export">Change…</button></td>
+       </tr>
+     </tbody>
+   </table>
+  </div>
+  <div class="card"><h2>Backup, export and library folders (this Mac only)</h2><div class="row"><span class="lab">Backup folder</span><input class="wide" id="bk" value="${esc(s.backup_dir||"")}" placeholder="e.g. /Volumes/LabDisk/cSS_backup"><button class="b" id="bkc">Choose…</button></div>
+   <div class="row"><span class="lab">Export / share folder</span><input class="wide" id="xd" value="${esc(s.export_dir||"")}" placeholder="e.g. /Volumes/LabDisk/cSS_exports"><button class="b" id="xdc">Choose…</button></div>
+   <div class="row"><span class="lab">Study library folder</span><input class="wide" id="lbd" value="${esc(s.library_dir||"")}" placeholder="e.g. /Volumes/LabDisk/Percival_library (copies of imported MRI)"><button class="b" id="lbdc">Choose…</button></div>
+   <div class="note">All must be existing local folders. Refused: ~/Desktop and ~/Documents (iCloud "Desktop &amp; Documents" can sync them silently), iCloud Drive, Dropbox, Google Drive, OneDrive and other cloud folders. Nothing is ever uploaded.</div></div>
+  <div class="card"><h2>Data Vault &amp; Storage Architecture</h2>
+   <div class="row"><span class="lab">Data Vault Mount</span><input class="wide" id="vm" value="${esc(s.vault_mount||"")}" placeholder="/Volumes/PERCIVAL_VAULT"><button class="b" id="vmc">Choose…</button></div>
+   <div class="row"><label style="display:flex;gap:7px;align-items:center;cursor:pointer"><input type="checkbox" id="rm-loc" ${((s.storage_policy||{}).remove_local_mri_after_archive)?"checked":""}> Remove local original MRI copies after verified archival (DEFAULT: DISABLED)</label></div>
+   <div class="note">Safe staging topology: Fast Mac SSD compute with external long-term storage. When disabled, original scans remain in local workspace.</div></div>
+  <div class="card"><h2>Application Security &amp; Optional App Lock</h2>
+   <div class="row"><label style="display:flex;gap:7px;align-items:center;cursor:pointer"><input type="checkbox" id="app-lock" ${s.app_lock_enabled?"checked":""}> Enable Application Passphrase Lock (DEFAULT: DISABLED)</label></div>
+   <div class="note">Optional application lock for multi-user or shared Macs. When disabled (default), PERCIVAL launches directly without password prompts, relying on macOS account isolation and FileVault disk encryption.</div></div>
+  <div class="card"><h2>System Diagnostics &amp; Legacy Migration</h2>
+   <div class="row" style="gap:10px;flex-wrap:wrap">
+     <button class="b pri" id="set-hc">Run 19-Point Startup Health Check</button>
+     <button class="b" id="set-mig">Scan for Legacy Research Data</button>
+     <button class="b" id="set-rec">Inspect Recovery Center</button>
+   </div></div>
+  ${notifSettingsCard()}
+  <div class="card"><h2>Features</h2>${Object.keys(L).map(k=>`<div class="row"><label><input type="checkbox" data-ft="${k}" ${F[k]?"checked":""}> ${L[k]}</label></div>`).join("")}</div>
+  <div class="row"><button class="b" id="quit">Quit the app</button><span class="note">closing the window does not stop processing; Quit does</span><span class="sp"></span><button class="b pri" id="save">Save settings</button></div>`;
+  bindNotifSettings();
+  bindSeg("rr",async x=>{await api("/api/settings",{rerun_mode:x});render()});$("#vsetb").onclick=vsetDlg;
+  bindSeg("ar",async x=>{await api("/api/settings",{auto_retry:x==="1"});render()});
+  bindSeg("ap",async x=>{await api("/api/settings",{auto_path:x==="1"});render()});
+  $("#quit").onclick=async()=>{if(!confirm("Quit Percival?"))return;let r=await api("/api/quit",{});if(!r.ok&&confirm(r.error+"\n\nQuit anyway?"))r=await api("/api/quit",{force:true});if(r.ok)document.body.innerHTML='<p style="padding:40px">cSS Pipeline has stopped. Open it again from Applications.</p>'};
+  $("#licc").onclick=async()=>{const p=await pick("file","Choose your FreeSurfer license.txt");if(p)$("#lic").value=p};
+  $("#fsc").onclick=async()=>{const p=await pick("folder","Choose the FreeSurfer folder");if(p)$("#fs").value=p.replace(/\/$/,"")};$("#bkc").onclick=async()=>{const p=await pick("folder","Choose the backup folder");if(p)$("#bk").value=p};$("#xdc").onclick=async()=>{const p=await pick("folder","Choose the export folder");if(p)$("#xd").value=p};$("#lbdc").onclick=async()=>{const p=await pick("folder","Choose the study library folder");if(p)$("#lbd").value=p};
+  $("#vmc")&&($("#vmc").onclick=async()=>{const p=await pick("folder","Choose the Data Vault folder or external drive");if(p)$("#vm").value=p});
+  $("#set-hc")&&($("#set-hc").onclick=async()=>{const hc=await api("/api/health");alert(`Startup Health Check:\nStatus: ${hc.status}\nPassed: ${hc.passed}/${hc.total_checks}\nRepairs: ${hc.repairs_applied.length}`);});
+  $("#set-mig")&&($("#set-mig").onclick=async()=>{const m=await api("/api/migration/discover");alert(`Legacy Migration Discovery:\nFound ${m.total_studies} studies (${m.total_mb} MB). Check Research › Percival Intelligence › Data Vault for migration plans.`);});
+  $("#set-rec")&&($("#set-rec").onclick=async()=>{const rc=await api("/api/recovery/summary");alert(`Recovery Center:\nActive: ${rc.active_jobs}\nCompleted: ${rc.completed_jobs}\nResumable: ${rc.resumable_jobs_count}`);});
+  $("#set-ch-work")&&($("#set-ch-work").onclick=async()=>{
+    const p=await pick("folder","Choose New PERCIVAL Working Directory");
+    if(!p) return;
+    const plan=await api("/api/storage/migrate_plan",{target_dir:p});
+    if(!plan.ok){ alert(`Cannot migrate:\n${plan.error}`); return; }
+    const choice = confirm(`Working Directory Migration:\nTarget: ${plan.target_dir}\nFiles to migrate: ${plan.file_count} (${plan.total_gb} GB)\nTarget free space: ${plan.target_free_gb} GB\n\nClick OK to migrate existing working files to the new location (Recommended).\nClick Cancel to abort.`);
+    if(!choice) return;
+    toast("Migrating working directory… please wait");
+    const res=await api("/api/storage/migrate_execute",{target_dir:p,verify_checksums:true});
+    if(res.ok){ alert(`Migration Complete!\nMigrated: ${res.files_migrated} files (${res.total_gb} GB)\nPrevious directory kept safe.\nQuit and reopen Percival to load the new directory.`); render(); }
+    else { alert(`Migration failed:\n${res.error}`); }
+  });
+  $("#set-ch-vault")&&($("#set-ch-vault").onclick=async()=>{const p=await pick("folder","Choose External Data Vault folder or drive");if(p){await api("/api/settings",{vault_mount:p.replace(/\/$/,"")});render();}});
+  $("#set-ch-scratch")&&($("#set-ch-scratch").onclick=async()=>{const p=await pick("folder","Choose Scratch folder");if(p){await api("/api/settings",{scratch_dir:p});render();}});
+  $("#set-ch-orig")&&($("#set-ch-orig").onclick=async()=>{const p=await pick("folder","Choose Original MRI folder");if(p){await api("/api/settings",{originals_dir:p});render();}});
+  $("#set-ch-proc")&&($("#set-ch-proc").onclick=async()=>{const p=await pick("folder","Choose Processed MRI folder");if(p){await api("/api/settings",{processed_dir:p});render();}});
+  $("#set-ch-albus")&&($("#set-ch-albus").onclick=async()=>{const p=await pick("folder","Choose ALBUS Outputs folder");if(p){await api("/api/settings",{albus_dir:p});render();}});
+  $("#set-ch-lumos")&&($("#set-ch-lumos").onclick=async()=>{const p=await pick("folder","Choose LUMOS Outputs folder");if(p){await api("/api/settings",{lumos_dir:p});render();}});
+  $("#set-ch-nox")&&($("#set-ch-nox").onclick=async()=>{const p=await pick("folder","Choose NOX Outputs folder");if(p){await api("/api/settings",{nox_dir:p});render();}});
+  $("#set-ch-pensieve")&&($("#set-ch-pensieve").onclick=async()=>{const p=await pick("folder","Choose Pensieve Backups folder");if(p){await api("/api/settings",{pensieve_backups_dir:p});render();}});
+  $("#set-ch-export")&&($("#set-ch-export").onclick=async()=>{const p=await pick("folder","Choose Reports & Exports folder");if(p){await api("/api/settings",{export_dir:p});render();}});
+  $("#save").onclick=async()=>{const f={};document.querySelectorAll("[data-ft]").forEach(x=>f[x.dataset.ft]=x.checked);
+    const pol=(S.settings.storage_policy||{});pol.remove_local_mri_after_archive=$("#rm-loc").checked;
+    const r=await api("/api/settings",{fs_license:$("#lic").value.trim(),freesurfer_home:$("#fs").value.trim(),threads:+$("#thr").value,backup_dir:$("#bk").value.trim(),export_dir:$("#xd").value.trim(),library_dir:$("#lbd").value.trim(),vault_mount:($("#vm")?$("#vm").value.trim():""),app_lock_enabled:($("#app-lock")?$("#app-lock").checked:false),storage_policy:pol,features:f});toast(r.ok?"settings saved":esc(r.error),!r.ok);render()}}
+(async()=>{
+  let m = (location.hash.match(/^#([a-zA-Z0-9_\-]+)(?::([a-zA-Z0-9_\-]+))?/)||[]);
+  let initial = m[1];
+  let sub = m[2];
+  if(initial === "files") { initial = "set"; sub = "c_filemanager"; }
+  if(!initial){
+    try{
+      const r = await api("/api/setup/first_run");
+      if(r && r.first_run) initial = "setup";
+    }catch(e){}
+  }
+  if(sub && window.SV) window.SV.currentSection = sub;
+  nav(initial||"studies", sub);
+})();
+setInterval(async()=>{const busy=document.activeElement&&document.activeElement.matches("input,select,textarea")||$("#shade").style.display==="flex"||($("#sexpm")&&!$("#sexpm").classList.contains("hide"));
+  if(busy)return;if(V==="studies"||V==="act"){const y=window.scrollY;await render();window.scrollTo(0,y);if(V==="studies"&&W.cur&&W.tab!=="log"&&W.tab!=="technical"){const sb=$("#shb"),sy=sb?sb.scrollTop:0;await openSheet(W.cur);if($("#shb"))$("#shb").scrollTop=sy}}
+  if($("#log").style.display==="block")loadLog()},4000);
+</script><script src="/unified_view.js"></script><script src="/shadow_view.js"></script><script src="/image_ml_view.js"></script><script src="/calls_view.js"></script><script src="/qc_view.js"></script><script src="/identity_view.js"></script><script src="/import_wizard_view.js"></script><script src="/export_view.js"></script><script src="/study_admin_view.js"></script><script src="/percival_view.js"></script><script src="/lineage_view.js"></script><script src="/training_view.js"></script><script src="/file_manager_view.js"></script><script src="/settings_view.js"></script><script src="/setup_view.js"></script>
+</body></html>
