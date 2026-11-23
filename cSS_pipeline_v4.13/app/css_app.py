@@ -1882,19 +1882,74 @@ def train_post(op, d):
         if op == "evaluate": return TG.run_evaluation(AD, n=int(d.get("n", 12)))
         return dict(ok=False, error=f"unknown {op}")
     except Exception as e: return dict(ok=False, error=f"{type(e).__name__}: {e}"[-300:])
-# ------------------------------------------------------------------ first-run setup wizard (v5.17) - app/setup_gui.py
+# ------------------------------------------------------------------ PERCIVAL Setup Center & Configuration (v5.26)
 def _image_model_ok():
     import image_ml_gui as IMG
     return any(m.get("status") == "ok" for m in IMG.models(force=True).get("models", []))
+
 def setup_get(op, q):
     try:
-        import setup_gui as SG
+        from uengine.setup import (
+            SetupStateManager, InstallationDiscoveryService,
+            SystemReadinessService, DiagnosticExportService,
+            validate_python, validate_pipeline, validate_freesurfer,
+            validate_license, validate_mri_tool, validate_workspace,
+            validate_vault, validate_pensieve, CURRENT_APP_VERSION
+        )
+        sm = SetupStateManager(B)
+        disc = InstallationDiscoveryService(B)
+
+        if op == "lifecycle":
+            lm = sm.detect_launch_mode(CURRENT_APP_VERSION)
+            st = sm.get_state()
+            return dict(
+                state=st.get("state"),
+                mode=st.get("mode"),
+                is_first_launch=st.get("is_first_launch"),
+                completed=st.get("completed"),
+                current_step=st.get("current_step", 1),
+                last_completed_step=st.get("last_completed_step", 0),
+                allow_dashboard=lm.get("allow_dashboard", False),
+                launch_type=lm.get("launch_type"),
+                notice=lm.get("notice"),
+                app_version=CURRENT_APP_VERSION,
+                validated_config=st.get("validated_config", {})
+            )
+
+        if op == "discovery":
+            cached = sm.get_state().get("discovery_cache")
+            force = q.get("force") == "1"
+            if not cached or force:
+                cached = disc.run_full_discovery()
+                sm.cache_discovery(cached)
+            return dict(ok=True, discovery=cached)
+
+        if op == "readiness":
+            st = sm.get_state()
+            disc_data = st.get("discovery_cache") or disc.run_full_discovery()
+            cfg = dict(SET)
+            cfg.update(st.get("validated_config", {}))
+            readiness = SystemReadinessService.evaluate_capabilities(cfg, disc_data)
+            return dict(ok=True, readiness=readiness, dependencies=SystemReadinessService.get_dependency_map())
+
+        if op == "diagnostics":
+            rep = DiagnosticExportService.generate_report(sm, disc, SystemReadinessService)
+            md = DiagnosticExportService.format_markdown(rep)
+            return dict(ok=True, report=rep, markdown=md)
+
+        if op == "first_run":
+            lm = sm.detect_launch_mode(CURRENT_APP_VERSION)
+            return dict(first_run=not lm.get("allow_dashboard", False), lifecycle=lm)
+
         if op == "state":
+            import setup_gui as SG
             items = SG.checks(B, AD, SET, fs_env, find_license, which, os.path.join(os.path.dirname(HERE), "unified_engine"), _image_model_ok)
             vols = SG.detected_volumes()
             def_vault = SET.get("vault_mount") or (vols[0]["vault_path"] if vols else "")
+            lm = sm.detect_launch_mode(CURRENT_APP_VERSION)
             return dict(
-                first_run=SG.first_run(AD),
+                first_run=not lm.get("allow_dashboard", False),
+                lifecycle=lm,
                 items=items,
                 report=SG.report(items, AD),
                 settings=dict(
@@ -1907,23 +1962,87 @@ def setup_get(op, q):
                 ),
                 detected_volumes=vols
             )
-        if op == "first_run": return dict(first_run=SG.first_run(AD))
+
         return dict(error=f"unknown {op}")
-    except Exception as e: return dict(error=f"setup unavailable: {type(e).__name__}: {e}"[-300:])
+    except Exception as e:
+        return dict(error=f"setup unavailable: {type(e).__name__}: {e}"[-300:])
+
 def setup_post(op, d):
     try:
-        import setup_gui as SG
-        if op == "validate_fs": return SG.validate_fs(d.get("path"))
-        if op == "validate_license": return SG.validate_license(d.get("path"))
-        if op == "test": return SG.test_fs(d.get("home") or SET.get("freesurfer_home", ""), d.get("license") or find_license(SET.get("freesurfer_home", ""), fs_env()))
-        if op == "save":
-            v = SG.validate_fs(d.get("home")) if d.get("home") else dict(ok=True)
-            l = SG.validate_license(d.get("license")) if d.get("license") else dict(ok=True)
-            if not v["ok"]: return dict(ok=False, error=v["error"])
-            if not l["ok"]: return dict(ok=False, error=l["error"])
+        from uengine.setup import (
+            SetupStateManager, InstallationDiscoveryService,
+            SystemReadinessService, DiagnosticExportService,
+            validate_python, validate_pipeline, validate_freesurfer,
+            validate_license, validate_mri_tool, validate_workspace,
+            validate_vault, validate_pensieve, CURRENT_APP_VERSION
+        )
+        sm = SetupStateManager(B)
+        disc = InstallationDiscoveryService(B)
+
+        if op == "step":
+            step = int(d.get("step", 1))
+            partial = d.get("partial_config", {})
+            sm.set_step(step, partial)
+            return dict(ok=True, current_step=step, state=sm.get_state())
+
+        if op == "validate_component":
+            comp = d.get("component")
+            p = d.get("path", "")
+            if comp == "python": return validate_python(p)
+            if comp == "pipeline": return validate_pipeline(p)
+            if comp == "freesurfer": return validate_freesurfer(p)
+            if comp == "license": return validate_license(p)
+            if comp == "mri_tool": return validate_mri_tool(d.get("tool_name", "dcm2niix"), p)
+            if comp == "workspace": return validate_workspace(p)
+            if comp == "vault": return validate_vault(p)
+            if comp == "pensieve": return validate_pensieve(p)
+            return dict(ok=False, error=f"Unknown component: {comp}")
+
+        if op == "validate_fs":
+            return validate_freesurfer(d.get("path"))
+
+        if op == "validate_license":
+            return validate_license(d.get("path"))
+
+        if op == "test":
+            import setup_gui as SG
+            return SG.test_fs(d.get("home") or SET.get("freesurfer_home", ""), d.get("license") or find_license(SET.get("freesurfer_home", ""), fs_env()))
+
+        if op in ("save", "save_config"):
+            v_fs = validate_freesurfer(d.get("home")) if d.get("home") else dict(ok=True)
+            v_lic = validate_license(d.get("license")) if d.get("license") else dict(ok=True)
+            if not v_fs.get("ok"): return dict(ok=False, error=v_fs.get("error"))
+            if not v_lic.get("ok"): return dict(ok=False, error=v_lic.get("error"))
+
+            cfg_updates = {}
             with LOCK:
-                if d.get("home"): SET["freesurfer_home"] = v["home"]
-                if d.get("license"): SET["fs_license"] = l["path"]
+                if d.get("home"):
+                    SET["freesurfer_home"] = v_fs.get("home", d.get("home"))
+                    cfg_updates["freesurfer_home"] = SET["freesurfer_home"]
+                    cfg_updates["freesurfer_valid"] = True
+                    cfg_updates["freesurfer_version"] = v_fs.get("version", "v7+")
+
+                if d.get("license"):
+                    SET["fs_license"] = v_lic.get("path", d.get("license"))
+                    cfg_updates["fs_license"] = SET["fs_license"]
+                    cfg_updates["license_valid"] = True
+
+                if d.get("python_executable"):
+                    v_py = validate_python(d["python_executable"])
+                    if v_py.get("ok"):
+                        SET["python_executable"] = d["python_executable"]
+                        cfg_updates["python_executable"] = d["python_executable"]
+                        cfg_updates["python_valid"] = True
+                        cfg_updates["python_version"] = v_py.get("version", "")
+
+                if d.get("pipeline_dir"):
+                    v_pipe = validate_pipeline(d["pipeline_dir"])
+                    if v_pipe.get("ok"):
+                        SET["pipeline_dir"] = d["pipeline_dir"]
+                        cfg_updates["pipeline_dir"] = d["pipeline_dir"]
+                        cfg_updates["pipeline_valid"] = True
+                        cfg_updates["pipeline_version"] = v_pipe.get("version", "")
+
                 if "workspace_dir" in d and d["workspace_dir"].strip():
                     wdir = os.path.abspath(os.path.expanduser(d["workspace_dir"].strip()))
                     cfg_dir = os.path.expanduser("~/Library/Application Support/Percival Dev")
@@ -1932,30 +2051,88 @@ def setup_post(op, d):
                         with open(os.path.join(cfg_dir, "project_path"), "w") as pf: pf.write(wdir)
                     except Exception: pass
                     SET["workspace_dir"] = wdir
+                    cfg_updates["workspace_dir"] = wdir
+                    cfg_updates["workspace_valid"] = True
+
                 if "vault_mount" in d and d["vault_mount"].strip():
                     vdir = os.path.abspath(os.path.expanduser(d["vault_mount"].strip()))
                     SET["vault_mount"] = vdir
+                    cfg_updates["vault_mount"] = vdir
+                    v_res = validate_vault(vdir)
+                    cfg_updates["vault_valid"] = v_res.get("ok", False)
+                    cfg_updates["vault_connected"] = v_res.get("connected", False)
                     try:
                         with open(os.path.expanduser("~/.percival_vault_config.json"), "w") as vf:
                             json.dump({"vault_path": vdir, "updated_at": datetime.datetime.now().isoformat()}, vf, indent=2)
                     except Exception: pass
+
                 if "candidate_redetection" in d:
                     SET["candidate_redetection"] = bool(d["candidate_redetection"])
+                    cfg_updates["candidate_redetection"] = SET["candidate_redetection"]
                 if "candidate_calling" in d:
                     SET["candidate_calling"] = bool(d["candidate_calling"])
+                    cfg_updates["candidate_calling"] = SET["candidate_calling"]
+
                 SET["rerun_mode"] = "auto"
                 jsave("settings.json", SET)
-            return dict(ok=True, saved=dict(freesurfer_home=SET.get("freesurfer_home", ""), fs_license=SET.get("fs_license", ""), workspace_dir=SET.get("workspace_dir", B), vault_mount=SET.get("vault_mount", "")))
+                sm.update_validated_config(cfg_updates)
+
+            return dict(ok=True, saved=cfg_updates)
+
+        if op == "revert":
+            ok, msg = sm.revert_to_previous_config()
+            return dict(ok=ok, message=msg, state=sm.get_state())
+
+        if op == "rescan":
+            cached = disc.run_full_discovery()
+            sm.cache_discovery(cached)
+            return dict(ok=True, discovery=cached)
+
+        if op == "reset":
+            sm.reset_to_first_launch()
+            return dict(ok=True, message="Reset to first launch.")
+
         if op == "finish":
+            disc_data = sm.get_state().get("discovery_cache") or disc.run_full_discovery()
+            cfg = dict(SET)
+            cfg.update(sm.get_state().get("validated_config", {}))
+
+            if "workspace_valid" not in cfg:
+                v_ws = validate_workspace(B)
+                cfg["workspace_valid"] = v_ws.get("ok", False)
+                cfg["workspace_free_gb"] = v_ws.get("free_gb", 0.0)
+            if "python_valid" not in cfg:
+                cfg["python_valid"] = True
+            if "pipeline_valid" not in cfg:
+                v_p = validate_pipeline(B)
+                cfg["pipeline_valid"] = v_p.get("ok", False)
+            if "dcm2niix_valid" not in cfg:
+                v_d = validate_mri_tool("dcm2niix")
+                cfg["dcm2niix_valid"] = v_d.get("ok", False)
+            if "freesurfer_valid" not in cfg:
+                v_f = validate_freesurfer(SET.get("freesurfer_home", ""))
+                cfg["freesurfer_valid"] = v_f.get("ok", False)
+            if "license_valid" not in cfg:
+                v_l = validate_license(SET.get("fs_license", "") or find_license(SET.get("freesurfer_home", ""), fs_env()))
+                cfg["license_valid"] = v_l.get("ok", False)
+            if "vault_valid" not in cfg:
+                v_v = validate_vault(SET.get("vault_mount", "/Volumes/Percival/PERCIVAL_VAULT"))
+                cfg["vault_valid"] = v_v.get("ok", False)
+                cfg["vault_connected"] = v_v.get("connected", False)
+
+            sm.update_validated_config(cfg)
+            readiness = SystemReadinessService.evaluate_capabilities(cfg, disc_data)
+            sm.mark_completed(readiness)
+
+            import setup_gui as SG
             items = SG.checks(B, AD, SET, fs_env, find_license, which, os.path.join(os.path.dirname(HERE), "unified_engine"), _image_model_ok)
-            w_state = os.path.join(AD, "wizard_state.json")
-            try:
-                with open(w_state, "w") as wf:
-                    json.dump({"status": "completed", "completed_at": datetime.datetime.now().isoformat()}, wf, indent=2)
-            except Exception: pass
-            return dict(ok=True, report=SG.report(items, AD, done=True))
+            SG.report(items, AD, done=True)
+
+            return dict(ok=True, readiness=readiness, state=sm.get_state())
+
         return dict(ok=False, error=f"unknown {op}")
-    except Exception as e: return dict(ok=False, error=f"{type(e).__name__}: {e}"[-300:])
+    except Exception as e:
+        return dict(ok=False, error=f"{type(e).__name__}: {e}"[-300:])
 def last_activity(code):
     m = [os.path.getmtime(f) for f in (f"{AD}/logs/{code}.log", f"{B}/logs/{code}_run.log") if os.path.exists(f)]
     return max(m) if m else 0

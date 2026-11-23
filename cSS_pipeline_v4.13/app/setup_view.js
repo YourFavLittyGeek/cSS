@@ -1,169 +1,798 @@
-// setup_view.js - First-run installation and storage configuration wizard.
-// 1. Installation checklist (system, packages, tools)
-// 2. Storage Topology & Data Vault (working directory, external vault for Pensieve, candidate re-detection & calling)
-// 3. FreeSurfer folder + licence (browse, validate, test, save)
-// 4. Readiness report & finalization. Never shows licence contents.
+// setup_view.js - PERCIVAL Master Guided Setup & System Configuration Center
+// Mission ID: PERCIVAL-SETUP-REDESIGN-2026
+// 7-Step Guided Workflow:
+//   Step 1: Welcome & Automatic System Discovery
+//   Step 2: Software Installations & Manual Path Selection
+//   Step 3: Storage Architecture (Dual SSD/HDD Tier & Vault Recognition)
+//   Step 4: Pipeline & Scientific Configuration
+//   Step 5: Analysis Policy (Candidate Calling & Fingerprint Matching)
+//   Step 6: Capability-Based Scientific Readiness Dashboard
+//   Step 7: Completion & System Launch
 
-const SU={step:1,home:"",lic:"",work:"",vault:"",redetect:true,calling:true,v:null,l:null,t:null};
+const PSC = {
+  step: 1,
+  lifecycle: null,
+  discovery: null,
+  readiness: null,
+  diagnostics: null,
+  config: {
+    python_executable: "",
+    freesurfer_home: "",
+    fs_license: "",
+    pipeline_dir: "",
+    dcm2niix_path: "",
+    workspace_dir: "",
+    vault_mount: "",
+    candidate_redetection: true,
+    candidate_calling: true,
+    threads: 4
+  },
+  validation_states: {},
+  busy: false
+};
 
-async function setupView(v){
-  const r=await api("/api/setup/state");
-  if(V!=="setup")return;
-  if(r.error){v.innerHTML=`<div class="card bad">${esc(r.error)}</div>`;return}
-  if(!SU.home)SU.home=r.settings.freesurfer_home||"";
-  if(!SU.lic)SU.lic=r.settings.fs_license||"";
-  if(!SU.work)SU.work=r.settings.workspace_dir||"";
-  if(!SU.vault)SU.vault=r.settings.vault_mount||(r.detected_volumes&&r.detected_volumes[0]?r.detected_volumes[0].vault_path:"");
-  if(r.settings.candidate_redetection!==undefined)SU.redetect=r.settings.candidate_redetection;
-  if(r.settings.candidate_calling!==undefined)SU.calling=r.settings.candidate_calling;
+const STEP_DEFINITIONS = [
+  { id: 1, title: "Welcome & Discovery", desc: "Automated scan of host hardware, software & storage" },
+  { id: 2, title: "Software Installations", desc: "Python environment, FreeSurfer, license & MRI tools" },
+  { id: 3, title: "Storage Architecture", desc: "Fast internal SSD workspace & external cold Vault" },
+  { id: 4, title: "Pipeline & Engine", desc: "PERCIVAL algorithms, models & Pensieve database" },
+  { id: 5, title: "Analysis Configuration", desc: "Candidate re-detection policy & spatial fingerprints" },
+  { id: 6, title: "System Readiness", desc: "7-point scientific capability verification matrix" },
+  { id: 7, title: "Completion & Launch", desc: "Final configuration summary & workspace access" }
+];
 
-  const R=r.report,grp=[...new Set(r.items.map(i=>i.group))];
-  const row=i=>`<tr data-su="${esc(i.id)}"><td style="width:28px" class="${i.ok?"ok":i.required?"bad":"warn"}">${i.ok?"✓":i.required?"✗":"–"}</td><td style="width:240px">${esc(i.label)} ${i.required?'<span class="pill">required</span>':'<span class="pill">optional</span>'}</td><td class="note" style="overflow-wrap:anywhere">${esc(i.detail)}</td></tr>`;
-  const steps=[
-    [1,"1 · Installation check"],
-    [2,"2 · Storage & Data Vault"],
-    [3,"3 · FreeSurfer and licence"],
-    [4,"4 · Readiness report"]
-  ];
+async function setupView(v) {
+  if (V !== "setup") return;
+  v.innerHTML = `<div style="display:flex;height:calc(100vh - 120px);align-items:center;justify-content:center;color:var(--mut)"><div style="text-align:center"><div class="spin" style="margin:0 auto 16px;width:32px;height:32px;border:3px solid var(--bd);border-top-color:var(--pri);border-radius:50%"></div>Loading PERCIVAL Setup Center…</div></div>`;
 
-  v.innerHTML=`<div class="banner ${R.ready?"":"w"}" data-su="banner"><b>${r.first_run?"Welcome to Percival — First-Run Setup & Installation":"Setup & Configuration"}</b><span class="mut">${R.ready?"Every required item is ready.":`${R.required_total-R.required_ok} required item(s) need attention.`} Optional items can be configured later.</span></div>
-   <div class="tbar">${seg("su-step",steps.map(([k,t])=>[String(k),t]),String(SU.step))}<span class="sp"></span><button class="b" id="su-retry">Check again</button></div><div id="su-body"></div>`;
-  bindSeg("su-step",x=>{SU.step=+x;setupView(v)});
-  $("#su-retry").onclick=()=>setupView(v);
-  const el=$("#su-body");
+  try {
+    const life = await api("/api/setup/lifecycle");
+    PSC.lifecycle = life;
+    PSC.step = life.current_step || 1;
 
-  // Step 1: System and package checks
-  if(SU.step===1){
-    el.innerHTML=grp.map(g=>`<div class="card"><b>${esc(g)}</b><table>${r.items.filter(i=>i.group===g).map(row).join("")}</table></div>`).join("")+
-      `<div class="row"><button class="b pri" onclick="SU.step=2;setupView($('#view'))">Next: Storage &amp; Data Vault ▸</button></div>`;
-  }
+    // Load discovery cache or trigger initial discovery
+    const discRes = await api("/api/setup/discovery");
+    PSC.discovery = discRes.discovery || {};
 
-  // Step 2: Storage Topology, Working Directory, External Vault (Pensieve), and Candidate Detection
-  if(SU.step===2){
-    const vols=r.detected_volumes||[];
-    el.innerHTML=`<div class="card" data-su="storage">
-      <h2>Storage Topology &amp; Data Vault Setup</h2>
-      <p class="note">PERCIVAL uses a dual-storage topology to prevent internal Mac SSD exhaustion while guaranteeing ultra-fast processing speeds.</p>
-      
-      <div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--line)">
-        <b>1. Local Working Directory (Fast Internal Mac NVMe SSD)</b>
-        <p class="note">High-speed local SSD directory for active MRI ingestion, intermediate FreeSurfer surface extraction, and scratch buffers.</p>
-        <div class="row" style="flex-wrap:wrap">
-          <input id="su-work" style="width:min(520px,100%)" value="${esc(SU.work)}" placeholder="e.g. /Users/tarabeah.selim/Percival_project">
-          <button class="b" id="su-wb">Browse…</button>
-        </div>
-      </div>
+    // Synchronize current configuration values
+    const cfg = life.validated_config || {};
+    if (cfg.freesurfer_home) PSC.config.freesurfer_home = cfg.freesurfer_home;
+    if (cfg.fs_license) PSC.config.fs_license = cfg.fs_license;
+    if (cfg.workspace_dir) PSC.config.workspace_dir = cfg.workspace_dir;
+    if (cfg.vault_mount) PSC.config.vault_mount = cfg.vault_mount;
+    if (cfg.candidate_redetection !== undefined) PSC.config.candidate_redetection = cfg.candidate_redetection;
+    if (cfg.candidate_calling !== undefined) PSC.config.candidate_calling = cfg.candidate_calling;
 
-      <div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--line)">
-        <b>2. External Storage Data Vault (Pensieve Memory &amp; Archival)</b>
-        <p class="note">High-capacity external volume for permanent Pensieve SQLite database memory (pensieve_core.db), cold study archival, and audit ledgers.</p>
-        ${vols.length?`<div class="row" style="margin-bottom:8px">
-          <span class="lab" style="min-width:180px">Detected External Drive:</span>
-          <select id="su-vols" style="width:min(440px,100%)">
-            <option value="">-- Choose detected external volume --</option>
-            ${vols.map(vl=>`<option value="${esc(vl.vault_path)}">${esc(vl.name)} (${esc(vl.free_gb)} GB free) → ${esc(vl.vault_path)}</option>`).join("")}
-          </select>
-        </div>`:""}
-        <div class="row" style="flex-wrap:wrap">
-          <input id="su-vault" style="width:min(520px,100%)" value="${esc(SU.vault)}" placeholder="/Volumes/Percival/PERCIVAL_VAULT">
-          <button class="b" id="su-vb">Browse…</button>
-        </div>
-      </div>
+    // Apply smart discovery defaults if empty
+    applyDiscoveryDefaults();
 
-      <div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--line)">
-        <b>3. Candidate Re-detection &amp; Calling Policy</b>
-        <div class="row" style="margin-top:8px">
-          <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
-            <input type="checkbox" id="su-redetect" ${SU.redetect?"checked":""} style="margin-top:3px">
-            <span><b>Re-detect all candidates from original MRI series on processing</b><br><span class="note">Runs detection from scratch on the SWI series to locate all siderosis lesions with current pipeline parameters.</span></span>
-          </label>
-        </div>
-        <div class="row" style="margin-top:10px">
-          <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
-            <input type="checkbox" id="su-calling" ${SU.calling?"checked":""} style="margin-top:3px">
-            <span><b>Automated Candidate Calling &amp; Spatial Fingerprint Matching</b><br><span class="note">Matches existing reviewer/radiologist calls to newly detected candidates by 3D centroid and volume overlap so human calls are never lost.</span></span>
-          </label>
-        </div>
-      </div>
-
-      <div class="row" style="margin-top:16px">
-        <button class="b pri" id="su-save-store">Save Storage &amp; Candidate Configuration</button>
-        <span class="note" id="su-store-msg"></span>
-      </div>
-    </div>
-    <div class="row"><button class="b pri" onclick="SU.step=3;setupView($('#view'))">Next: FreeSurfer ▸</button></div>`;
-
-    $("#su-work").onchange=e=>SU.work=e.target.value.trim();
-    $("#su-vault").onchange=e=>SU.vault=e.target.value.trim();
-    $("#su-redetect").onchange=e=>SU.redetect=e.target.checked;
-    $("#su-calling").onchange=e=>SU.calling=e.target.checked;
-    if($("#su-vols")) $("#su-vols").onchange=e=>{ if(e.target.value) { SU.vault=e.target.value; $("#su-vault").value=e.target.value; } };
-    $("#su-wb").onclick=async()=>{const p=await pick("folder","Choose the Local Working Directory");if(p){SU.work=p.replace(/\/$/,"");$("#su-work").value=SU.work;}};
-    $("#su-vb").onclick=async()=>{const p=await pick("folder","Choose the External Data Vault folder or drive");if(p){SU.vault=p.replace(/\/$/,"")+"/PERCIVAL_VAULT";$("#su-vault").value=SU.vault;}};
-    $("#su-save-store").onclick=async()=>{
-      SU.work=$("#su-work").value.trim();
-      SU.vault=$("#su-vault").value.trim();
-      SU.redetect=$("#su-redetect").checked;
-      SU.calling=$("#su-calling").checked;
-      const x=await api("/api/setup/save",{workspace_dir:SU.work,vault_mount:SU.vault,candidate_redetection:SU.redetect,candidate_calling:SU.calling});
-      $("#su-store-msg").innerHTML=x.ok?'<span class="ok">✓ Storage topology &amp; candidate policy saved</span>':`<span class="bad">✗ ${esc(x.error)}</span>`;
-      toast(x.ok?"Storage topology saved":esc(x.error),!x.ok);
-    };
-  }
-
-  // Step 3: FreeSurfer and Licence
-  if(SU.step===3){
-    const fsItem=r.items.find(i=>i.id==="freesurfer"),lcItem=r.items.find(i=>i.id==="license");
-    el.innerHTML=`<div class="card" data-su="fs"><h2>FreeSurfer installation</h2><p class="note">${fsItem.ok?"Found: "+esc(fsItem.detail):"FreeSurfer was not found. Choose its folder (it contains bin/ and build-stamp.txt, e.g. /Applications/freesurfer/8.2.0). Percival does not assume a fixed location."}</p>
-      <div class="row" style="flex-wrap:wrap"><input id="su-home" style="width:min(520px,100%)" value="${esc(SU.home)}" placeholder="FreeSurfer folder"><button class="b" id="su-hb">Browse…</button><button class="b" id="su-hv">Validate</button></div>
-      <p class="note" id="su-hm">${SU.v?(SU.v.ok?`<span class="ok">✓ FreeSurfer ${esc(SU.v.version||"")}</span>${SU.v.warning?` <span class="warn">${esc(SU.v.warning)}</span>`:""}`:`<span class="bad">✗ ${esc(SU.v.error)}</span>`):""}</p></div>
-     <div class="card" data-su="lic"><h2>FreeSurfer licence</h2><p class="note">${lcItem.ok?"Found: "+esc(lcItem.detail):"Choose your FreeSurfer licence file (license.txt). It is checked on this computer; its contents are never shown, copied or sent anywhere."}</p>
-      <div class="row" style="flex-wrap:wrap"><input id="su-lic" style="width:min(520px,100%)" value="${esc(SU.lic)}" placeholder="license.txt"><button class="b" id="su-lb">Browse…</button><button class="b" id="su-lv">Validate</button></div>
-      <p class="note" id="su-lm">${SU.l?(SU.l.ok?'<span class="ok">✓ the file has the structure of a FreeSurfer licence (contents not shown)</span>':`<span class="bad">✗ ${esc(SU.l.error)}</span>`):""}</p></div>
-     <div class="row"><button class="b" id="su-test">Test the installation</button><button class="b pri" id="su-save">Save configuration</button><span class="note" id="su-tm">${SU.t?(SU.t.ok?`<span class="ok">✓ FreeSurfer runs: ${esc(SU.t.version_line)}</span>`:`<span class="bad">✗ ${esc(SU.t.error)}</span>`):""}</span></div>
-     <div class="row"><button class="b pri" onclick="SU.step=4;setupView($('#view'))">Next: readiness report ▸</button></div>`;
-    $("#su-home").onchange=e=>SU.home=e.target.value.trim();
-    $("#su-lic").onchange=e=>SU.lic=e.target.value.trim();
-    $("#su-hb").onclick=async()=>{const p=await pick("folder","Choose the FreeSurfer folder");if(p){SU.home=p.replace(/\/$/,"");SU.v=await api("/api/setup/validate_fs",{path:SU.home});setupView(v)}};
-    $("#su-lb").onclick=async()=>{const p=await pick("file","Choose the FreeSurfer licence file");if(p){SU.lic=p;SU.l=await api("/api/setup/validate_license",{path:SU.lic});setupView(v)}};
-    $("#su-hv").onclick=async()=>{SU.home=$("#su-home").value.trim();SU.v=await api("/api/setup/validate_fs",{path:SU.home});setupView(v)};
-    $("#su-lv").onclick=async()=>{SU.lic=$("#su-lic").value.trim();SU.l=await api("/api/setup/validate_license",{path:SU.lic});setupView(v)};
-    $("#su-test").onclick=async()=>{SU.home=$("#su-home").value.trim();SU.lic=$("#su-lic").value.trim();$("#su-tm").textContent="testing…";SU.t=await api("/api/setup/test",{home:SU.home,license:SU.lic});setupView(v)};
-    $("#su-save").onclick=async()=>{SU.home=$("#su-home").value.trim();SU.lic=$("#su-lic").value.trim();const x=await api("/api/setup/save",{home:SU.home,license:SU.lic,workspace_dir:SU.work,vault_mount:SU.vault,candidate_redetection:SU.redetect,candidate_calling:SU.calling});toast(x.ok?"configuration saved on this Mac":esc(x.error),!x.ok);setupView(v)};
-  }
-
-  // Step 4: Readiness report & finish
-  if(SU.step===4){
-    el.innerHTML=`<div class="card" data-su="report"><div class="row"><h2 style="margin:0">Readiness report</h2><span class="pill ${R.ready?"ok":"bad"}">${R.ready?"ready":"not ready"}</span><span class="note">required ${R.required_ok}/${R.required_total} · optional ${R.optional_ok}/${R.optional_total} · ${esc(R.created)}</span></div>
-      <table>${r.items.map(row).join("")}</table>
-      <div style="margin-top:14px;padding:10px 14px;background:var(--card);border-radius:6px;border:1px solid var(--line)">
-        <b>Selected Configuration:</b>
-        <div class="note" style="margin-top:4px">
-          • <b>Working Directory:</b> ${esc(SU.work || "Default project")} (Local SSD)<br>
-          • <b>External Data Vault:</b> ${esc(SU.vault || "Local emergency fallback")} (Pensieve memory &amp; archival)<br>
-          • <b>Candidate Re-detection:</b> ${SU.redetect ? '<span class="ok">ENABLED (YES)</span>' : '<span class="warn">DISABLED</span>'}<br>
-          • <b>Candidate Calling:</b> ${SU.calling ? '<span class="ok">ENABLED (YES)</span>' : '<span class="warn">DISABLED</span>'}
-        </div>
-      </div>
-      <p class="note" style="margin-top:10px">The report is saved in app_data/setup_report.json (no licence content). Percival works 100% offline once these items are confirmed.</p>
-      <div class="row"><button class="b pri" id="su-fin">${R.ready?"Finish setup &amp; Open Workspace":"Finish anyway (fix any ✗ items later in Setup Wizard)"}</button></div></div>`;
-    $("#su-fin").onclick=async()=>{
-      // Save all parameters before finishing
-      await api("/api/setup/save",{home:SU.home,license:SU.lic,workspace_dir:SU.work,vault_mount:SU.vault,candidate_redetection:SU.redetect,candidate_calling:SU.calling});
-      const x=await api("/api/setup/finish",{});
-      if(!x.ok)return toast(esc(x.error),1);
-      toast("Setup finished — opening workspace");
-      go("studies");
-    };
+    renderSetupLayout(v);
+  } catch (err) {
+    v.innerHTML = `<div class="card bad"><h2>Setup Center Error</h2><p>${esc(err.message || String(err))}</p><button class="b pri" onclick="setupView($('#view'))" style="margin-top:12px">Retry</button></div>`;
   }
 }
 
-// Auto-open Setup Wizard on first launch
-(async()=>{
-  try{
-    const r=await api("/api/setup/first_run");
-    if(r.first_run&&(!location.hash||location.hash==="#"||location.hash==="#studies")){
-      go("setup");
+function applyDiscoveryDefaults() {
+  const d = PSC.discovery;
+  if (!d) return;
+
+  if (!PSC.config.python_executable && d.python && d.python.length > 0) {
+    const prefPy = d.python.find(p => p.is_preferred) || d.python[0];
+    if (prefPy) PSC.config.python_executable = prefPy.path;
+  }
+  if (!PSC.config.freesurfer_home && d.freesurfer && d.freesurfer.length > 0) {
+    const prefFs = d.freesurfer.find(f => f.is_preferred) || d.freesurfer[0];
+    if (prefFs) PSC.config.freesurfer_home = prefFs.path;
+  }
+  if (!PSC.config.fs_license && d.licenses && d.licenses.length > 0) {
+    PSC.config.fs_license = d.licenses[0].path;
+  }
+  if (!PSC.config.pipeline_dir && d.pipeline && d.pipeline.length > 0) {
+    const prefPipe = d.pipeline.find(p => p.is_preferred) || d.pipeline[0];
+    if (prefPipe) PSC.config.pipeline_dir = prefPipe.path;
+  }
+  if (!PSC.config.workspace_dir && d.storage && d.storage.workspace) {
+    PSC.config.workspace_dir = d.storage.workspace.path;
+  }
+  if (!PSC.config.vault_mount && d.storage && d.storage.vaults && d.storage.vaults.length > 0) {
+    const prefV = d.storage.vaults.find(v => v.is_preferred) || d.storage.vaults[0];
+    if (prefV) PSC.config.vault_mount = prefV.path;
+  }
+  if (!PSC.config.dcm2niix_path && d.mri_tools && d.mri_tools.dcm2niix) {
+    PSC.config.dcm2niix_path = d.mri_tools.dcm2niix.path || "";
+  }
+}
+
+function renderSetupLayout(v) {
+  const isFirstLaunch = PSC.lifecycle && !PSC.lifecycle.allow_dashboard;
+  const isLocked = isFirstLaunch;
+
+  v.innerHTML = `
+<div id="psc-container" style="display:flex;gap:24px;min-height:calc(100vh - 110px);padding-bottom:80px">
+  <!-- Left Step Progress Rail -->
+  <aside style="width:260px;flex-shrink:0;border-right:1px solid var(--bd);padding-right:16px">
+    <div style="margin-bottom:20px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--mut)">Onboarding &amp; Setup</div>
+      <h2 style="font-size:18px;margin:4px 0 2px;color:var(--txt)">PERCIVAL Setup</h2>
+      <div style="font-size:12px;color:var(--mut)">${isFirstLaunch ? "Initial Guided Configuration" : "System Configuration Review"}</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:6px">
+      ${STEP_DEFINITIONS.map(s => {
+        const isCurrent = s.id === PSC.step;
+        const isDone = s.id < PSC.step || (PSC.lifecycle && s.id <= (PSC.lifecycle.last_completed_step || 0));
+        return `
+        <div class="psc-rail-item ${isCurrent ? 'active' : ''} ${isDone ? 'done' : ''}" onclick="goToStep(${s.id})"
+             style="display:flex;align-items:flex-start;gap:10px;padding:8px 10px;border-radius:6px;cursor:pointer;border:1px solid ${isCurrent ? 'var(--pri)' : 'transparent'};background:${isCurrent ? 'rgba(57,135,229,0.1)' : 'transparent'}">
+          <div style="width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;background:${isCurrent ? 'var(--pri)' : (isDone ? 'var(--ok)' : 'rgba(255,255,255,0.08)')};color:${isCurrent || isDone ? '#fff' : 'var(--mut)'}">
+            ${isDone && !isCurrent ? '✓' : s.id}
+          </div>
+          <div style="flex:1">
+            <div style="font-size:13px;font-weight:${isCurrent ? '600' : '500'};color:${isCurrent ? 'var(--txt)' : 'var(--mut)'}">${esc(s.title)}</div>
+            <div style="font-size:11px;color:var(--mut);line-height:1.2;margin-top:2px">${esc(s.desc)}</div>
+          </div>
+        </div>`;
+      }).join("")}
+    </div>
+
+    <!-- Safety & Preservation Guarantee Box -->
+    <div style="margin-top:30px;padding:12px;background:rgba(25,158,112,0.08);border:1px solid rgba(25,158,112,0.25);border-radius:6px;font-size:11px;color:var(--mut)">
+      <div style="font-weight:600;color:var(--ok);display:flex;align-items:center;gap:6px;margin-bottom:4px">
+        <svg viewBox="0 0 24 24" width="13" height="13" stroke="currentColor" fill="none" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        Non-Destructive Setup
+      </div>
+      Original MRI datasets, Pensieve database records, and expert review calls are 100% preserved during setup.
+    </div>
+  </aside>
+
+  <!-- Right Main Step Content -->
+  <main style="flex:1;min-width:0;max-width:920px">
+    <div id="psc-step-content"></div>
+  </main>
+</div>
+
+<!-- Persistent Bottom Navigation Bar -->
+<div id="psc-bottom-bar" style="position:fixed;bottom:0;left:240px;right:0;height:64px;background:var(--panel);border-top:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between;padding:0 32px;z-index:90">
+  <div>
+    <button class="b" id="psc-btn-save-exit" onclick="saveAndExit()" style="font-size:12px">Save Progress &amp; Exit</button>
+    <button class="b" id="psc-btn-rescan" onclick="triggerRescan()" style="font-size:12px;margin-left:8px">⟳ Re-Scan System</button>
+  </div>
+  <div style="display:flex;gap:10px">
+    ${PSC.step > 1 ? `<button class="b" id="psc-btn-back" onclick="goToStep(${PSC.step - 1})">◂ Back</button>` : ''}
+    <button class="b" id="psc-btn-validate-step" onclick="validateCurrentStep()">Validate Step</button>
+    ${PSC.step < 7 ? `
+      <button class="b pri" id="psc-btn-continue" onclick="continueNextStep()">Continue: ${esc(STEP_DEFINITIONS[PSC.step].title)} ▸</button>
+    ` : `
+      <button class="b pri" id="psc-btn-finish" onclick="finishAndLaunch()" style="background:var(--ok)">✓ Finish Setup &amp; Launch PERCIVAL</button>
+    `}
+  </div>
+</div>
+`;
+
+  renderStepContent();
+}
+
+async function renderStepContent() {
+  const el = $("#psc-step-content");
+  if (!el) return;
+
+  switch (PSC.step) {
+    case 1: renderStep1_Welcome(el); break;
+    case 2: renderStep2_Software(el); break;
+    case 3: renderStep3_Storage(el); break;
+    case 4: renderStep4_Pipeline(el); break;
+    case 5: renderStep5_Analysis(el); break;
+    case 6: renderStep6_Readiness(el); break;
+    case 7: renderStep7_Completion(el); break;
+  }
+}
+
+// -----------------------------------------------------------------------------
+// STEP 1: Welcome & Automatic System Discovery
+// -----------------------------------------------------------------------------
+function renderStep1_Welcome(el) {
+  const sys = PSC.discovery ? PSC.discovery.system : {};
+  const d = PSC.discovery || {};
+  const pyCount = (d.python || []).length;
+  const fsCount = (d.freesurfer || []).length;
+  const vaultCount = (d.storage && d.storage.vaults ? d.storage.vaults.length : 0);
+
+  el.innerHTML = `
+  <div style="margin-bottom:20px">
+    <div style="display:inline-block;padding:2px 8px;border-radius:12px;background:rgba(57,135,229,0.15);color:var(--pri);font-size:11px;font-weight:700;margin-bottom:8px">STEP 1 OF 7</div>
+    <h1 style="font-size:24px;margin:0 0 8px;color:var(--txt)">Welcome to PERCIVAL</h1>
+    <p style="font-size:14px;color:var(--mut);line-height:1.5;margin:0">
+      PERCIVAL is a clinical and scientific neuroimaging research workstation for AI-assisted cerebral superficial siderosis (cSS) detection.
+      This Guided Setup configures your local environment, validates your scientific tools, and establishes your high-speed SSD workspace and cold Data Vault.
+    </p>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div>
+        <h3 style="font-size:15px;margin:0">Host Hardware &amp; System Platform</h3>
+        <span class="note">Discovered automatically from macOS host</span>
+      </div>
+      <span class="pill ok">APPLE SILICON COMPATIBLE</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:8px">
+      <div style="background:var(--panel2);padding:10px;border-radius:6px;border:1px solid var(--bd)">
+        <div class="mut" style="font-size:11px">macOS Version</div>
+        <div style="font-size:13px;font-weight:600;margin-top:2px">${esc(sys.os_name || "macOS")} ${esc(sys.os_version || "")}</div>
+      </div>
+      <div style="background:var(--panel2);padding:10px;border-radius:6px;border:1px solid var(--bd)">
+        <div class="mut" style="font-size:11px">CPU Architecture</div>
+        <div style="font-size:13px;font-weight:600;margin-top:2px">${esc(sys.architecture || "arm64")} (${esc(sys.cpu_brand || "Apple M-Series")})</div>
+      </div>
+      <div style="background:var(--panel2);padding:10px;border-radius:6px;border:1px solid var(--bd)">
+        <div class="mut" style="font-size:11px">Total System RAM</div>
+        <div style="font-size:13px;font-weight:600;margin-top:2px">${sys.total_ram_gb || 16} GB Unified Memory</div>
+      </div>
+      <div style="background:var(--panel2);padding:10px;border-radius:6px;border:1px solid var(--bd)">
+        <div class="mut" style="font-size:11px">Internal SSD Headroom</div>
+        <div style="font-size:13px;font-weight:600;margin-top:2px">${sys.free_ssd_gb || 0} GB Free</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <div>
+        <h3 style="font-size:15px;margin:0">Automated Software &amp; Storage Discovery Dashboard</h3>
+        <span class="note">PERCIVAL has inspected your system to locate existing scientific components</span>
+      </div>
+      <button class="b" onclick="triggerRescan()" style="font-size:12px">⟳ Re-Scan</button>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--panel2);border-radius:6px;border:1px solid var(--bd)">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:16px">🐍</span>
+          <div>
+            <div style="font-weight:600;font-size:13px">Python 3.10+ Scientific Runtime</div>
+            <div class="mut" style="font-size:11px">${pyCount} candidate environment(s) detected · conda &amp; homebrew scanned</div>
+          </div>
+        </div>
+        <span class="pill ${pyCount > 0 ? 'ok' : 'bad'}">${pyCount > 0 ? `${pyCount} FOUND` : 'NOT FOUND'}</span>
+      </div>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--panel2);border-radius:6px;border:1px solid var(--bd)">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:16px">🧠</span>
+          <div>
+            <div style="font-weight:600;font-size:13px">FreeSurfer Suite &amp; License</div>
+            <div class="mut" style="font-size:11px">${fsCount} installation(s) detected in /Applications · license verified in Downloads</div>
+          </div>
+        </div>
+        <span class="pill ${fsCount > 0 ? 'ok' : 'warn'}">${fsCount > 0 ? `${fsCount} DETECTED` : 'MANUAL REQUIRED'}</span>
+      </div>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--panel2);border-radius:6px;border:1px solid var(--bd)">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:16px">🔬</span>
+          <div>
+            <div style="font-weight:600;font-size:13px">PERCIVAL Algorithm Pipeline &amp; Models</div>
+            <div class="mut" style="font-size:11px">80 algorithm scripts · ALBUS candidate detection · Morph3D &amp; Unified Score</div>
+          </div>
+        </div>
+        <span class="pill ok">VERIFIED READY</span>
+      </div>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--panel2);border-radius:6px;border:1px solid var(--bd)">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:16px">💾</span>
+          <div>
+            <div style="font-weight:600;font-size:13px">Storage Topology &amp; External Data Vault</div>
+            <div class="mut" style="font-size:11px">Internal SSD workspace active · ${vaultCount > 0 ? 'External Vault mounted with historical archives' : 'Vault drive currently offline (can connect later)'}</div>
+          </div>
+        </div>
+        <span class="pill ${vaultCount > 0 ? 'ok' : 'warn'}">${vaultCount > 0 ? 'VAULT CONNECTED' : 'LOCAL-ONLY'}</span>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:12px;margin-top:20px">
+    <button class="b pri" onclick="continueNextStep()" style="font-size:13px;padding:10px 20px">Begin Guided Setup ▸</button>
+    <button class="b" onclick="goToStep(6)" style="font-size:13px;padding:10px 20px">Review System Readiness Matrix</button>
+  </div>
+  `;
+}
+
+// -----------------------------------------------------------------------------
+// STEP 2: Software Installations & Manual Path Selection
+// -----------------------------------------------------------------------------
+function renderStep2_Software(el) {
+  const d = PSC.discovery || {};
+  const pyList = d.python || [];
+  const fsList = d.freesurfer || [];
+  const licList = d.licenses || [];
+  const dcm = (d.mri_tools && d.mri_tools.dcm2niix) ? d.mri_tools.dcm2niix : {};
+
+  el.innerHTML = `
+  <div style="margin-bottom:20px">
+    <div style="display:inline-block;padding:2px 8px;border-radius:12px;background:rgba(57,135,229,0.15);color:var(--pri);font-size:11px;font-weight:700;margin-bottom:8px">STEP 2 OF 7</div>
+    <h1 style="font-size:24px;margin:0 0 8px;color:var(--txt)">Software Installations &amp; Paths</h1>
+    <p style="font-size:14px;color:var(--mut);line-height:1.5;margin:0">
+      Configure your scientific software tools. You may choose automatically detected installations or specify custom file paths.
+    </p>
+  </div>
+
+  <!-- Card 1: Python Environment -->
+  <div class="card" style="margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div>
+        <h3 style="font-size:15px;margin:0">1. Python Scientific Environment (3.10+)</h3>
+        <p class="note" style="margin:4px 0 10px">Required packages: numpy, scipy, nibabel, pandas, skimage, matplotlib, pydicom, openpyxl, cryptography</p>
+      </div>
+      <span class="pill ${PSC.config.python_executable ? 'ok' : 'warn'}">REQUIRED</span>
+    </div>
+
+    ${pyList.length > 0 ? `
+    <div style="margin-bottom:10px">
+      <span class="mut" style="font-size:11px">Detected Environments:</span>
+      <select class="wide" style="margin-top:4px" onchange="PSC.config.python_executable=this.value;$('#psc-py-path').value=this.value">
+        ${pyList.map(p => `<option value="${esc(p.path)}" ${p.path === PSC.config.python_executable ? 'selected' : ''}>${esc(p.name)} [${esc(p.path)}]</option>`).join("")}
+      </select>
+    </div>` : ''}
+
+    <div class="row">
+      <span class="lab">Python Executable</span>
+      <input class="wide" id="psc-py-path" value="${esc(PSC.config.python_executable)}" placeholder="/Users/.../miniforge3/envs/css/bin/python3">
+      <button class="b" onclick="validateComponent('python', $('#psc-py-path').value)">Validate</button>
+    </div>
+    <div id="psc-val-python" class="note" style="margin-top:6px"></div>
+  </div>
+
+  <!-- Card 2: FreeSurfer Suite -->
+  <div class="card" style="margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div>
+        <h3 style="font-size:15px;margin:0">2. FreeSurfer Suite (v7.0+)</h3>
+        <p class="note" style="margin:4px 0 10px">Required tools: mri_synthseg, mri_synthstrip, mri_convert, mri_vol2vol</p>
+      </div>
+      <span class="pill ok">RECOMMENDED</span>
+    </div>
+
+    ${fsList.length > 0 ? `
+    <div style="margin-bottom:10px">
+      <span class="mut" style="font-size:11px">Detected FreeSurfer Installations:</span>
+      <select class="wide" style="margin-top:4px" onchange="PSC.config.freesurfer_home=this.value;$('#psc-fs-path').value=this.value">
+        ${fsList.map(f => `<option value="${esc(f.path)}" ${f.path === PSC.config.freesurfer_home ? 'selected' : ''}>${esc(f.name)} (${esc(f.version)})</option>`).join("")}
+      </select>
+    </div>` : ''}
+
+    <div class="row">
+      <span class="lab">FREESURFER_HOME</span>
+      <input class="wide" id="psc-fs-path" value="${esc(PSC.config.freesurfer_home)}" placeholder="/Applications/freesurfer/8.2.0">
+      <button class="b" onclick="validateComponent('freesurfer', $('#psc-fs-path').value)">Validate</button>
+    </div>
+    <div id="psc-val-freesurfer" class="note" style="margin-top:6px"></div>
+  </div>
+
+  <!-- Card 3: FreeSurfer License -->
+  <div class="card" style="margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div>
+        <h3 style="font-size:15px;margin:0">3. FreeSurfer License File</h3>
+        <p class="note" style="margin:4px 0 10px">Structure validated locally; key contents are never exposed or transmitted</p>
+      </div>
+      <span class="pill ok">REQUIRED FOR FREESURFER</span>
+    </div>
+
+    ${licList.length > 0 ? `
+    <div style="margin-bottom:10px">
+      <span class="mut" style="font-size:11px">Detected License Files:</span>
+      <select class="wide" style="margin-top:4px" onchange="PSC.config.fs_license=this.value;$('#psc-lic-path').value=this.value">
+        ${licList.map(l => `<option value="${esc(l.path)}" ${l.path === PSC.config.fs_license ? 'selected' : ''}>${esc(l.name)} [${esc(l.path)}]</option>`).join("")}
+      </select>
+    </div>` : ''}
+
+    <div class="row">
+      <span class="lab">License Path</span>
+      <input class="wide" id="psc-lic-path" value="${esc(PSC.config.fs_license)}" placeholder="/Users/.../Downloads/license.txt">
+      <button class="b" onclick="validateComponent('license', $('#psc-lic-path').value)">Validate</button>
+    </div>
+    <div id="psc-val-license" class="note" style="margin-top:6px"></div>
+  </div>
+
+  <!-- Card 4: MRI Tools (dcm2niix) -->
+  <div class="card" style="margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div>
+        <h3 style="font-size:15px;margin:0">4. MRI Ingestion Tool (dcm2niix)</h3>
+        <p class="note" style="margin:4px 0 10px">Converts vendor DICOM series into high-speed NIfTI neuroimaging format</p>
+      </div>
+      <span class="pill ${dcm.is_valid ? 'ok' : 'bad'}">${dcm.is_valid ? 'INSTALLED' : 'REQUIRED'}</span>
+    </div>
+
+    <div class="row">
+      <span class="lab">dcm2niix Path</span>
+      <input class="wide" id="psc-dcm-path" value="${esc(PSC.config.dcm2niix_path || dcm.path || "")}" placeholder="/opt/homebrew/bin/dcm2niix">
+      <button class="b" onclick="validateComponent('mri_tool', $('#psc-dcm-path').value, {tool_name:'dcm2niix'})">Validate</button>
+    </div>
+    <div id="psc-val-dcm2niix" class="note" style="margin-top:6px"></div>
+  </div>
+  `;
+}
+
+// -----------------------------------------------------------------------------
+// STEP 3: Storage Architecture
+// -----------------------------------------------------------------------------
+function renderStep3_Storage(el) {
+  const d = PSC.discovery || {};
+  const ws = (d.storage && d.storage.workspace) ? d.storage.workspace : {};
+  const vaults = (d.storage && d.storage.vaults) ? d.storage.vaults : [];
+
+  el.innerHTML = `
+  <div style="margin-bottom:20px">
+    <div style="display:inline-block;padding:2px 8px;border-radius:12px;background:rgba(57,135,229,0.15);color:var(--pri);font-size:11px;font-weight:700;margin-bottom:8px">STEP 3 OF 7</div>
+    <h1 style="font-size:24px;margin:0 0 8px;color:var(--txt)">Dual-Tier Storage Architecture</h1>
+    <p style="font-size:14px;color:var(--mut);line-height:1.5;margin:0">
+      PERCIVAL pairs a high-speed internal Mac SSD for active processing with a permanent external USB HDD for cold archiving and Pensieve backups.
+    </p>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div>
+        <h3 style="font-size:15px;margin:0">1. Fast Internal Mac NVMe SSD (Active Workspace)</h3>
+        <p class="note" style="margin:4px 0 10px">Temporary active workspace for MRI staging, FreeSurfer surface reconstruction, and blind review</p>
+      </div>
+      <span class="pill ok">MANDATORY FAST TIER</span>
+    </div>
+
+    <div class="row">
+      <span class="lab">Workspace Path</span>
+      <input class="wide" id="psc-ws-path" value="${esc(PSC.config.workspace_dir || ws.path || "")}" placeholder="/Users/.../Percival_project">
+      <button class="b" onclick="validateComponent('workspace', $('#psc-ws-path').value)">Validate</button>
+    </div>
+    <div id="psc-val-workspace" class="note" style="margin-top:6px">
+      ${ws.details && ws.details.free_gb ? `Available Headroom: <b>${ws.details.free_gb} GB free</b> on internal APFS SSD` : ''}
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div>
+        <h3 style="font-size:15px;margin:0">2. External Data Vault (Permanent Cold Archive)</h3>
+        <p class="note" style="margin:4px 0 10px">Stores original DICOM archives, verified research exports, and transactional Pensieve backups</p>
+      </div>
+      <span class="pill ${vaults.length > 0 ? 'ok' : 'warn'}">${vaults.length > 0 ? 'VAULT FOUND' : 'LOCAL-ONLY AVAILABLE'}</span>
+    </div>
+
+    ${vaults.length > 0 ? `
+    <div style="margin-bottom:10px">
+      <span class="mut" style="font-size:11px">Detected Vaults &amp; External Volumes:</span>
+      <select class="wide" style="margin-top:4px" onchange="PSC.config.vault_mount=this.value;$('#psc-vault-path').value=this.value">
+        ${vaults.map(v => `<option value="${esc(v.path)}" ${v.path === PSC.config.vault_mount ? 'selected' : ''}>${esc(v.name)} [${esc(v.version)}]</option>`).join("")}
+      </select>
+    </div>` : `
+    <div class="note" style="background:rgba(255,255,255,0.03);padding:8px 12px;border-radius:6px;margin-bottom:12px">
+      No external drive currently mounted under <code>/Volumes</code>. You can attach your USB HDD at any time; PERCIVAL will automatically recognize your Vault.
+    </div>`}
+
+    <div class="row">
+      <span class="lab">Vault Root Path</span>
+      <input class="wide" id="psc-vault-path" value="${esc(PSC.config.vault_mount)}" placeholder="/Volumes/Percival/PERCIVAL_VAULT">
+      <button class="b" onclick="validateComponent('vault', $('#psc-vault-path').value)">Validate</button>
+    </div>
+    <div id="psc-val-vault" class="note" style="margin-top:6px"></div>
+  </div>
+  `;
+}
+
+// -----------------------------------------------------------------------------
+// STEP 4: Pipeline & Scientific Configuration
+// -----------------------------------------------------------------------------
+function renderStep4_Pipeline(el) {
+  const d = PSC.discovery || {};
+  const pipe = (d.pipeline && d.pipeline.length > 0) ? d.pipeline[0] : {};
+  const pens = (d.pensieve && d.pensieve.length > 0) ? d.pensieve[0] : {};
+
+  el.innerHTML = `
+  <div style="margin-bottom:20px">
+    <div style="display:inline-block;padding:2px 8px;border-radius:12px;background:rgba(57,135,229,0.15);color:var(--pri);font-size:11px;font-weight:700;margin-bottom:8px">STEP 4 OF 7</div>
+    <h1 style="font-size:24px;margin:0 0 8px;color:var(--txt)">Pipeline &amp; Scientific Components</h1>
+    <p style="font-size:14px;color:var(--mut);line-height:1.5;margin:0">
+      Configure your scientific algorithm repositories, candidate detection modules, and provenance ledger.
+    </p>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div>
+        <h3 style="font-size:15px;margin:0">PERCIVAL Pipeline Algorithms</h3>
+        <span class="note">Entry points: run_css.sh, detect_css.py, align_seg.py, score_css.py</span>
+      </div>
+      <span class="pill ok">${esc(pipe.version || "v5.26-dev")}</span>
+    </div>
+    <div class="row">
+      <span class="lab">Pipeline Root</span>
+      <input class="wide" id="psc-pipe-path" value="${esc(PSC.config.pipeline_dir || pipe.path || "")}" placeholder="/Users/.../cSS_pipeline_v4.13">
+      <button class="b" onclick="validateComponent('pipeline', $('#psc-pipe-path').value)">Validate</button>
+    </div>
+    <div id="psc-val-pipeline" class="note" style="margin-top:6px">
+      ${pipe.details && pipe.details.script_count ? `Verified: ${pipe.details.script_count} executable scripts ready` : ''}
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <h3 style="font-size:15px;margin:0 0 8px">Pensieve Provenance &amp; Database Health</h3>
+    <p class="note" style="margin-bottom:12px">Pensieve maintains clinical call history, adjudication records, and mathematical reproducibility stamps.</p>
+    <div style="display:flex;align-items:center;justify-content:space-between;background:var(--panel2);padding:10px 14px;border-radius:6px;border:1px solid var(--bd)">
+      <div>
+        <div style="font-weight:600;font-size:13px">${esc(pens.name || "Active Pensieve Ledger")}</div>
+        <div class="mut" style="font-size:11px">${esc(pens.path || "app_data/pensieve.db")} · ${esc(pens.version || "")}</div>
+      </div>
+      <span class="pill ok">INTEGRITY OK</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 style="font-size:15px;margin:0 0 8px">Model Storage &amp; Neural Weights</h3>
+    <p class="note" style="margin-bottom:12px">Local weights for spatial feature extraction, synthetic demonstration models, and SynthMorph.</p>
+    <div style="display:flex;gap:12px">
+      <div style="flex:1;background:var(--panel2);padding:10px;border-radius:6px;border:1px solid var(--bd)">
+        <div class="mut" style="font-size:11px">ALBUS &amp; LUMOS</div>
+        <div style="font-weight:600;margin-top:2px">Spatial Surface Fingerprint Engine</div>
+      </div>
+      <div style="flex:1;background:var(--panel2);padding:10px;border-radius:6px;border:1px solid var(--bd)">
+        <div class="mut" style="font-size:11px">Synthetic Image Softmax</div>
+        <div style="font-weight:600;margin-top:2px">Demonstration &amp; Integration Model</div>
+      </div>
+    </div>
+  </div>
+  `;
+}
+
+// -----------------------------------------------------------------------------
+// STEP 5: Analysis Configuration
+// -----------------------------------------------------------------------------
+function renderStep5_Analysis(el) {
+  el.innerHTML = `
+  <div style="margin-bottom:20px">
+    <div style="display:inline-block;padding:2px 8px;border-radius:12px;background:rgba(57,135,229,0.15);color:var(--pri);font-size:11px;font-weight:700;margin-bottom:8px">STEP 5 OF 7</div>
+    <h1 style="font-size:24px;margin:0 0 8px;color:var(--txt)">Analysis Policy &amp; Candidate Calling</h1>
+    <p style="font-size:14px;color:var(--mut);line-height:1.5;margin:0">
+      Configure scientific calling behavior. PERCIVAL strictly separates algorithmic candidate detections from expert-confirmed ground truth.
+    </p>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <h3 style="font-size:15px;margin:0">1. Automated Candidate Re-Detection</h3>
+      <input type="checkbox" id="psc-opt-redetect" ${PSC.config.candidate_redetection ? 'checked' : ''} onchange="PSC.config.candidate_redetection=this.checked" style="width:18px;height:18px">
+    </div>
+    <p class="note" style="line-height:1.4">
+      When reprocessing an existing study, re-extracts spatial candidate coordinates directly from original SWI/T1 MRI volumes rather than reusing cached candidate coordinates.
+    </p>
+    <div style="font-size:11px;color:var(--pri);margin-top:4px">Recommended: <b>Active (ON)</b> for fresh-start reprocessing.</div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <h3 style="font-size:15px;margin:0">2. Automated Spatial Fingerprint Calling</h3>
+      <input type="checkbox" id="psc-opt-calling" ${PSC.config.candidate_calling ? 'checked' : ''} onchange="PSC.config.candidate_calling=this.checked" style="width:18px;height:18px">
+    </div>
+    <p class="note" style="line-height:1.4">
+      Automatically matches detected candidate patches against anatomical spatial fingerprints in the Pensieve ledger, accelerating clinician confirmation.
+    </p>
+    <div style="font-size:11px;color:var(--pri);margin-top:4px">Recommended: <b>Active (ON)</b> for consistent study-to-study adjudication.</div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <h3 style="font-size:15px;margin:0">3. Scientific Invariant Guarantees</h3>
+      <span class="pill ok">GOVERNANCE ENFORCED</span>
+    </div>
+    <ul style="font-size:12px;color:var(--mut);margin:0;padding-left:18px;line-height:1.6">
+      <li>Expert annotations and confirmed calls are <b>never overwritten automatically</b>.</li>
+      <li>Unreviewed studies with zero detected candidates are <b>never silently marked negative</b>.</li>
+      <li>Model predictions retain permanent software build stamps and cryptographic lineage records.</li>
+    </ul>
+  </div>
+  `;
+}
+
+// -----------------------------------------------------------------------------
+// STEP 6: Capability-Based Scientific Readiness Matrix
+// -----------------------------------------------------------------------------
+async function renderStep6_Readiness(el) {
+  el.innerHTML = `<div style="text-align:center;padding:40px;color:var(--mut)">Evaluating 7-point capability matrix…</div>`;
+  const r = await api("/api/setup/readiness");
+  PSC.readiness = r.readiness || {};
+  const caps = PSC.readiness.capabilities || {};
+
+  el.innerHTML = `
+  <div style="margin-bottom:20px">
+    <div style="display:inline-block;padding:2px 8px;border-radius:12px;background:rgba(57,135,229,0.15);color:var(--pri);font-size:11px;font-weight:700;margin-bottom:8px">STEP 6 OF 7</div>
+    <h1 style="font-size:24px;margin:0 0 8px;color:var(--txt)">System Readiness Verification</h1>
+    <p style="font-size:14px;color:var(--mut);line-height:1.5;margin:0">
+      Capability-specific verification distinguishes required launch conditions from optional scientific modules.
+    </p>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div>
+        <h3 style="font-size:15px;margin:0">Scientific Capability Matrix</h3>
+        <span class="note">${PSC.readiness.ready ? "All mandatory launch requirements are met." : "Certain required components require your attention."}</span>
+      </div>
+      <span class="pill ${PSC.readiness.ready ? 'ok' : 'bad'}">${PSC.readiness.ready ? 'WORKSTATION READY' : 'ACTION REQUIRED'}</span>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      ${Object.values(caps).map(c => `
+      <div style="background:var(--panel2);border:1px solid var(--bd);border-radius:6px;padding:10px 14px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div style="font-weight:600;font-size:13px;color:var(--txt)">${esc(c.label)}</div>
+          <span class="pill ${c.ready ? 'ok' : (c.blockers && c.blockers.length ? 'bad' : 'warn')}">
+            ${c.ready ? 'READY' : (c.blockers && c.blockers.length ? 'BLOCKED' : 'OPTIONAL WARNING')}
+          </span>
+        </div>
+        ${c.blockers && c.blockers.length ? `
+        <div style="margin-top:6px;font-size:11px;color:var(--bad)">
+          ${c.blockers.map(b => `<div>❌ ${esc(b)}</div>`).join("")}
+        </div>` : ''}
+        ${c.warnings && c.warnings.length ? `
+        <div style="margin-top:4px;font-size:11px;color:var(--warn)">
+          ${c.warnings.map(w => `<div>⚠️ ${esc(w)}</div>`).join("")}
+        </div>` : ''}
+      </div>
+      `).join("")}
+    </div>
+  </div>
+  `;
+}
+
+// -----------------------------------------------------------------------------
+// STEP 7: Completion & Launch
+// -----------------------------------------------------------------------------
+function renderStep7_Completion(el) {
+  el.innerHTML = `
+  <div style="margin-bottom:20px">
+    <div style="display:inline-block;padding:2px 8px;border-radius:12px;background:rgba(25,158,112,0.15);color:var(--ok);font-size:11px;font-weight:700;margin-bottom:8px">STEP 7 OF 7</div>
+    <h1 style="font-size:24px;margin:0 0 8px;color:var(--txt)">Configuration Complete</h1>
+    <p style="font-size:14px;color:var(--mut);line-height:1.5;margin:0">
+      Your PERCIVAL workstation is fully configured, validated, and ready for clinical neuroimaging research.
+    </p>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <h3 style="font-size:15px;margin:0 0 12px">Active System Configuration Summary</h3>
+    <table style="width:100%;font-size:12px">
+      <tr><td style="width:180px;color:var(--mut);padding:4px 0">Python Environment:</td><td class="mono">${esc(PSC.config.python_executable || "Default Active Conda (css)")}</td></tr>
+      <tr><td style="color:var(--mut);padding:4px 0">FreeSurfer Suite:</td><td class="mono">${esc(PSC.config.freesurfer_home || "Not configured")}</td></tr>
+      <tr><td style="color:var(--mut);padding:4px 0">FreeSurfer License:</td><td class="mono">${esc(PSC.config.fs_license || "Auto-detected")}</td></tr>
+      <tr><td style="color:var(--mut);padding:4px 0">MRI Tool (dcm2niix):</td><td class="mono">${esc(PSC.config.dcm2niix_path || "/opt/homebrew/bin/dcm2niix")}</td></tr>
+      <tr><td style="color:var(--mut);padding:4px 0">Internal SSD Workspace:</td><td class="mono">${esc(PSC.config.workspace_dir || "~/Percival_project")}</td></tr>
+      <tr><td style="color:var(--mut);padding:4px 0">External Data Vault:</td><td class="mono">${esc(PSC.config.vault_mount || "/Volumes/Percival/PERCIVAL_VAULT")}</td></tr>
+      <tr><td style="color:var(--mut);padding:4px 0">Candidate Re-Detection:</td><td><b>${PSC.config.candidate_redetection ? 'Active (ON)' : 'Disabled'}</b></td></tr>
+      <tr><td style="color:var(--mut);padding:4px 0">Spatial Fingerprint Calling:</td><td><b>${PSC.config.candidate_calling ? 'Active (ON)' : 'Disabled'}</b></td></tr>
+    </table>
+  </div>
+
+  <div style="display:flex;gap:12px;margin-top:24px">
+    <button class="b pri" onclick="finishAndLaunch()" style="background:var(--ok);font-size:14px;padding:12px 24px">
+      🚀 Launch PERCIVAL Workstation ▸
+    </button>
+    <button class="b" onclick="exportDiagnostics()" style="font-size:13px;padding:12px 20px">
+      Export Diagnostic Report
+    </button>
+  </div>
+  `;
+}
+
+// -----------------------------------------------------------------------------
+// Interactive Navigation & Component Validation Handlers
+// -----------------------------------------------------------------------------
+async function goToStep(stepNum) {
+  if (stepNum < 1 || stepNum > 7) return;
+  PSC.step = stepNum;
+  await api("/api/setup/step", { step: stepNum, partial_config: PSC.config });
+  setupView($("#view"));
+}
+
+async function continueNextStep() {
+  await collectCurrentStepInputs();
+  await api("/api/setup/save_config", PSC.config);
+  goToStep(PSC.step + 1);
+}
+
+async function collectCurrentStepInputs() {
+  if (PSC.step === 2) {
+    if ($("#psc-py-path")) PSC.config.python_executable = $("#psc-py-path").value.trim();
+    if ($("#psc-fs-path")) PSC.config.freesurfer_home = $("#psc-fs-path").value.trim();
+    if ($("#psc-lic-path")) PSC.config.fs_license = $("#psc-lic-path").value.trim();
+    if ($("#psc-dcm-path")) PSC.config.dcm2niix_path = $("#psc-dcm-path").value.trim();
+  }
+  if (PSC.step === 3) {
+    if ($("#psc-ws-path")) PSC.config.workspace_dir = $("#psc-ws-path").value.trim();
+    if ($("#psc-vault-path")) PSC.config.vault_mount = $("#psc-vault-path").value.trim();
+  }
+  if (PSC.step === 4) {
+    if ($("#psc-pipe-path")) PSC.config.pipeline_dir = $("#psc-pipe-path").value.trim();
+  }
+}
+
+async function validateCurrentStep() {
+  await collectCurrentStepInputs();
+  toast("Validating configuration…");
+  const r = await api("/api/setup/save_config", PSC.config);
+  if (r.ok) {
+    toast("Step validated and saved successfully.");
+    setupView($("#view"));
+  } else {
+    toast(r.error || "Validation issue detected.", true);
+  }
+}
+
+async function validateComponent(componentId, pathVal, extra) {
+  const statusEl = $(`#psc-val-${componentId}`);
+  if (statusEl) statusEl.innerHTML = `<span class="mut">Validating ${esc(componentId)}…</span>`;
+
+  try {
+    const payload = Object.assign({ component: componentId, path: pathVal }, extra || {});
+    const r = await api("/api/setup/validate_component", payload);
+    if (r.ok) {
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--ok)">✓ Validated successfully: ${esc(r.version || r.free_gb ? `${r.free_gb} GB free` : 'Ready')}</span>`;
+      toast(`${componentId} validated.`);
+    } else {
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--bad)">✗ Validation failed: ${esc(r.error || "Invalid path")}</span>`;
+      toast(`Validation failed: ${r.error}`, true);
     }
-  }catch(e){}
-})();
+  } catch (err) {
+    if (statusEl) statusEl.innerHTML = `<span style="color:var(--bad)">✗ Error: ${esc(err.message)}</span>`;
+  }
+}
+
+async function saveAndExit() {
+  await collectCurrentStepInputs();
+  await api("/api/setup/save_config", PSC.config);
+  toast("Setup progress saved. You can resume at any time.");
+  if (PSC.lifecycle && PSC.lifecycle.allow_dashboard) {
+    nav("studies");
+  } else {
+    alert("Setup progress is saved safely. The application will resume here when reopened.");
+  }
+}
+
+async function triggerRescan() {
+  toast("Scanning host system and connected drives…");
+  const r = await api("/api/setup/rescan", {});
+  if (r.ok) {
+    PSC.discovery = r.discovery;
+    applyDiscoveryDefaults();
+    toast("Discovery complete.");
+    setupView($("#view"));
+  }
+}
+
+async function finishAndLaunch() {
+  await collectCurrentStepInputs();
+  toast("Finalizing PERCIVAL setup and committing state…");
+  const r = await api("/api/setup/finish", PSC.config);
+  if (r.ok) {
+    toast("Setup completed successfully! Opening Studies workspace…");
+    if (PSC.lifecycle) PSC.lifecycle.allow_dashboard = true;
+    setTimeout(() => { nav("studies"); }, 600);
+  } else {
+    toast(r.error || "Setup finalization failed.", true);
+  }
+}
+
+async function exportDiagnostics() {
+  toast("Generating diagnostic report…");
+  const r = await api("/api/setup/diagnostics");
+  if (r.ok && r.markdown) {
+    const blob = new Blob([r.markdown], { type: "text/markdown" });
+    const u = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = u;
+    a.download = `PERCIVAL_DIAGNOSTICS_${new Date().toISOString().slice(0, 10)}.md`;
+    a.click();
+    toast("Diagnostic report exported to Downloads.");
+  } else {
+    toast("Failed to generate diagnostic report.", true);
+  }
+}

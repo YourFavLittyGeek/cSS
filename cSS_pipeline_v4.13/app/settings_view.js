@@ -991,16 +991,255 @@ async function renderSectionNotifications(el) {
 }
 
 async function renderSectionSetup(el) {
-  el.innerHTML = `
-    <div class="card" style="padding:18px">
-      <b>Installation &amp; Setup Wizard</b>
-      <p class="note" style="margin:2px 0 14px">Run first-time setup or configure FreeSurfer binaries and research license.</p>
-      <div class="row" style="gap:10px">
-        <button class="b pri" onclick="go('setup')">Open Setup Wizard ▸</button>
-        <button class="b" onclick="systemPanel(el)">Run System Preflight Check</button>
+  el.innerHTML = `<div style="text-align:center;padding:30px;color:var(--mut)"><div class="spin" style="margin:0 auto 12px;width:24px;height:24px;border:2px solid var(--bd);border-top-color:var(--pri);border-radius:50%"></div>Loading System Configuration Center…</div>`;
+
+  try {
+    const [lifeRes, discRes, readRes] = await Promise.all([
+      api("/api/setup/lifecycle"),
+      api("/api/setup/discovery"),
+      api("/api/setup/readiness")
+    ]);
+
+    const life = lifeRes || {};
+    const disc = discRes.discovery || {};
+    const read = readRes.readiness || {};
+    const deps = readRes.dependencies || [];
+    const cfg = life.validated_config || {};
+    const sys = disc.system || {};
+
+    el.innerHTML = `
+    <!-- Top Action Bar -->
+    <div class="card" style="padding:16px 20px;margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+        <div>
+          <h2 style="font-size:17px;margin:0 0 4px">Permanent System Configuration Center</h2>
+          <span class="note">Modify individual paths, swap Python runtimes, revalidate tools, or re-run Guided Setup without losing study data.</span>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="b" onclick="sysConfigRescan()" style="font-size:12px">⟳ Re-scan System</button>
+          <button class="b" onclick="sysConfigRevert()" style="font-size:12px">↺ Revert Changes</button>
+          <button class="b" onclick="exportDiagnostics()" style="font-size:12px">Export Report</button>
+          <button class="b pri" onclick="go('setup')" style="font-size:12px">Guided Setup Wizard ▸</button>
+        </div>
       </div>
     </div>
-  `;
+
+    <!-- 1. System Overview & Host Hardware -->
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <h3 style="font-size:15px;margin:0">1. System Overview &amp; Host Hardware</h3>
+        <span class="pill ok">${esc(sys.os_name || "macOS")} ${esc(sys.os_version || "")} (${esc(sys.architecture || "arm64")})</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;font-size:12px">
+        <div style="background:var(--panel2);padding:8px 10px;border-radius:6px;border:1px solid var(--bd)">
+          <div class="mut">Processor / Architecture</div>
+          <div style="font-weight:600;margin-top:2px">${esc(sys.cpu_brand || "Apple Silicon")}</div>
+        </div>
+        <div style="background:var(--panel2);padding:8px 10px;border-radius:6px;border:1px solid var(--bd)">
+          <div class="mut">Total System Memory</div>
+          <div style="font-weight:600;margin-top:2px">${sys.total_ram_gb || 16} GB RAM</div>
+        </div>
+        <div style="background:var(--panel2);padding:8px 10px;border-radius:6px;border:1px solid var(--bd)">
+          <div class="mut">Internal SSD Headroom</div>
+          <div style="font-weight:600;margin-top:2px">${sys.free_ssd_gb || 0} GB Free</div>
+        </div>
+        <div style="background:var(--panel2);padding:8px 10px;border-radius:6px;border:1px solid var(--bd)">
+          <div class="mut">Setup State</div>
+          <div style="font-weight:600;margin-top:2px">${esc(life.state || "SETUP_COMPLETED")}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. Python Environment -->
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <h3 style="font-size:15px;margin:0">2. Python Scientific Runtime (3.10+)</h3>
+        <span class="pill ${cfg.python_valid !== false ? 'ok' : 'bad'}">${cfg.python_version ? `Python ${esc(cfg.python_version)}` : 'ACTIVE'}</span>
+      </div>
+      <p class="note" style="margin:0 0 10px">Required: numpy, scipy, nibabel, pandas, skimage, matplotlib, pydicom, openpyxl, cryptography</p>
+      <div class="row">
+        <span class="lab">Executable Path</span>
+        <input class="wide mono" id="sc-py-path" value="${esc(cfg.python_executable || "")}" placeholder="/Users/.../miniforge3/envs/css/bin/python3">
+        <button class="b" onclick="sysConfigValidateComponent('python', $('#sc-py-path').value)">Validate</button>
+        <button class="b pri" onclick="sysConfigSaveComponent({python_executable:$('#sc-py-path').value})">Save</button>
+      </div>
+      <div id="sc-val-python" class="note" style="margin-top:4px"></div>
+    </div>
+
+    <!-- 3. Pipeline Installation & Version Rollback -->
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <h3 style="font-size:15px;margin:0">3. PERCIVAL Pipeline Algorithms</h3>
+        <span class="pill ok">${esc(cfg.pipeline_version || "v5.26-dev")}</span>
+      </div>
+      <p class="note" style="margin:0 0 10px">Entry points: run_css.sh, detect_css.py, align_seg.py, score_css.py</p>
+      <div class="row">
+        <span class="lab">Pipeline Root</span>
+        <input class="wide mono" id="sc-pipe-path" value="${esc(cfg.pipeline_dir || "")}" placeholder="/Users/.../cSS_pipeline_v4.13">
+        <button class="b" onclick="sysConfigValidateComponent('pipeline', $('#sc-pipe-path').value)">Validate</button>
+        <button class="b pri" onclick="sysConfigSaveComponent({pipeline_dir:$('#sc-pipe-path').value})">Save</button>
+      </div>
+      <div id="sc-val-pipeline" class="note" style="margin-top:4px"></div>
+    </div>
+
+    <!-- 4. FreeSurfer Suite & License -->
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <h3 style="font-size:15px;margin:0">4. FreeSurfer Suite &amp; License</h3>
+        <span class="pill ${cfg.freesurfer_valid ? 'ok' : 'warn'}">${cfg.freesurfer_valid ? 'VALIDATED' : 'CHECK REQUIRED'}</span>
+      </div>
+      <p class="note" style="margin:0 0 10px">Provides automated cortical segmentation (mri_synthseg) and spatial co-registration</p>
+      <div class="row">
+        <span class="lab">FREESURFER_HOME</span>
+        <input class="wide mono" id="sc-fs-path" value="${esc(cfg.freesurfer_home || S.settings.freesurfer_home || "")}" placeholder="/Applications/freesurfer/8.2.0">
+        <button class="b" onclick="sysConfigValidateComponent('freesurfer', $('#sc-fs-path').value)">Validate</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <span class="lab">License Path</span>
+        <input class="wide mono" id="sc-lic-path" value="${esc(cfg.fs_license || S.settings.fs_license || "")}" placeholder="/Users/.../Downloads/license.txt">
+        <button class="b" onclick="sysConfigValidateComponent('license', $('#sc-lic-path').value)">Validate</button>
+        <button class="b pri" onclick="sysConfigSaveComponent({home:$('#sc-fs-path').value,license:$('#sc-lic-path').value})">Save Pair</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button class="b" onclick="sysConfigTestFreeSurfer($('#sc-fs-path').value, $('#sc-lic-path').value)">Test Execution (mri_convert --version)</button>
+      </div>
+      <div id="sc-val-freesurfer" class="note" style="margin-top:4px"></div>
+    </div>
+
+    <!-- 5. MRI Processing Tools -->
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <h3 style="font-size:15px;margin:0">5. MRI Conversion Tools (dcm2niix)</h3>
+        <span class="pill ok">INSTALLED</span>
+      </div>
+      <div class="row">
+        <span class="lab">dcm2niix Path</span>
+        <input class="wide mono" id="sc-dcm-path" value="${esc(cfg.dcm2niix_path || "/opt/homebrew/bin/dcm2niix")}">
+        <button class="b" onclick="sysConfigValidateComponent('mri_tool', $('#sc-dcm-path').value, {tool_name:'dcm2niix'})">Validate</button>
+      </div>
+      <div id="sc-val-dcm2niix" class="note" style="margin-top:4px"></div>
+    </div>
+
+    <!-- 6. Storage Topology & Vault Integration -->
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <h3 style="font-size:15px;margin:0">6. Dual-Tier Storage Architecture</h3>
+        <span class="pill ok">HYBRID NVME + USB VAULT</span>
+      </div>
+      <div class="row">
+        <span class="lab">SSD Workspace</span>
+        <input class="wide mono" id="sc-ws-path" value="${esc(cfg.workspace_dir || "~/Percival_project")}">
+        <button class="b" onclick="sysConfigValidateComponent('workspace', $('#sc-ws-path').value)">Validate</button>
+        <button class="b pri" onclick="sysConfigSaveComponent({workspace_dir:$('#sc-ws-path').value})">Save</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <span class="lab">External Vault Root</span>
+        <input class="wide mono" id="sc-vault-path" value="${esc(cfg.vault_mount || "/Volumes/Percival/PERCIVAL_VAULT")}">
+        <button class="b" onclick="sysConfigValidateComponent('vault', $('#sc-vault-path').value)">Validate</button>
+        <button class="b pri" onclick="sysConfigSaveComponent({vault_mount:$('#sc-vault-path').value})">Save</button>
+      </div>
+      <div id="sc-val-vault" class="note" style="margin-top:4px"></div>
+    </div>
+
+    <!-- 7. Analysis & Calling Policy -->
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="font-size:15px;margin:0 0 8px">7. Scientific Analysis &amp; Calling Policy</h3>
+      <div class="row" style="margin-bottom:6px">
+        <label style="display:flex;gap:8px;align-items:center;cursor:pointer">
+          <input type="checkbox" id="sc-opt-redetect" ${cfg.candidate_redetection !== false ? 'checked' : ''}>
+          <span><b>Candidate Re-Detection:</b> Always re-extract candidate fingerprints from raw MRI</span>
+        </label>
+      </div>
+      <div class="row">
+        <label style="display:flex;gap:8px;align-items:center;cursor:pointer">
+          <input type="checkbox" id="sc-opt-calling" ${cfg.candidate_calling !== false ? 'checked' : ''}>
+          <span><b>Spatial Fingerprint Calling:</b> Automated matching against historical Pensieve calls</span>
+        </label>
+      </div>
+      <div style="margin-top:10px">
+        <button class="b pri" onclick="sysConfigSaveComponent({candidate_redetection:$('#sc-opt-redetect').checked, candidate_calling:$('#sc-opt-calling').checked})">Save Calling Policy</button>
+      </div>
+    </div>
+
+    <!-- 8. System Dependency Graph -->
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="font-size:15px;margin:0 0 10px">8. System Component Dependency Map</h3>
+      <p class="note" style="margin-bottom:12px">Visual graph of component prerequisites. Modifying one component triggers targeted revalidation of its dependents.</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:10px">
+        ${deps.map(n => `
+        <div style="background:var(--panel2);border:1px solid var(--bd);border-radius:6px;padding:10px">
+          <div style="font-weight:600;font-size:13px;color:var(--txt)">${esc(n.label)}</div>
+          <div class="mut" style="font-size:11px;margin-top:4px">Depends on: ${n.depends_on.length ? n.depends_on.map(d=>`<code>${esc(d)}</code>`).join(", ") : '<em>none (root)</em>'}</div>
+          <div class="mut" style="font-size:11px;margin-top:2px">Dependents: ${n.dependents.length ? n.dependents.map(d=>`<code>${esc(d)}</code>`).join(", ") : '<em>leaf</em>'}</div>
+        </div>
+        `).join("")}
+      </div>
+    </div>
+    `;
+  } catch (err) {
+    el.innerHTML = `<div class="card bad"><h3>Failed to load System Configuration Center</h3><p>${esc(err.message || String(err))}</p></div>`;
+  }
+}
+
+async function sysConfigValidateComponent(comp, p, extra) {
+  const statusEl = $(`#sc-val-${comp}`);
+  if (statusEl) statusEl.innerHTML = `<span class="mut">Validating ${esc(comp)}…</span>`;
+  try {
+    const payload = Object.assign({ component: comp, path: p }, extra || {});
+    const r = await api("/api/setup/validate_component", payload);
+    if (r.ok) {
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--ok)">✓ Validated successfully: ${esc(r.version || r.free_gb ? `${r.free_gb} GB free` : 'Ready')}</span>`;
+      toast(`${comp} validated successfully.`);
+    } else {
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--bad)">✗ Validation failed: ${esc(r.error || "Invalid path")}</span>`;
+      toast(`Validation failed: ${r.error}`, true);
+    }
+  } catch (err) {
+    if (statusEl) statusEl.innerHTML = `<span style="color:var(--bad)">✗ Error: ${esc(err.message)}</span>`;
+  }
+}
+
+async function sysConfigSaveComponent(payload) {
+  toast("Saving configuration component…");
+  const r = await api("/api/setup/save_config", payload);
+  if (r.ok) {
+    toast("Configuration component updated and committed.");
+    if (typeof refresh === "function") refresh();
+    const host = $("#section-inner-host");
+    if (host) renderSectionSetup(host);
+  } else {
+    toast(`Failed to save: ${r.error}`, true);
+  }
+}
+
+async function sysConfigTestFreeSurfer(home, lic) {
+  toast("Testing FreeSurfer execution (mri_convert --version)…");
+  const r = await api("/api/setup/test", { home, license: lic });
+  if (r.ok) {
+    alert(`FreeSurfer Execution Succeeded!\n\nVersion banner:\n${r.version_line}`);
+  } else {
+    alert(`FreeSurfer Execution Failed:\n${r.error}`);
+  }
+}
+
+async function sysConfigRescan() {
+  toast("Re-scanning host system and connected volumes…");
+  await api("/api/setup/rescan", {});
+  toast("Re-scan complete.");
+  const host = $("#section-inner-host");
+  if (host) renderSectionSetup(host);
+}
+
+async function sysConfigRevert() {
+  if (!confirm("Revert to the previous working configuration?")) return;
+  const r = await api("/api/setup/revert", {});
+  if (r.ok) {
+    toast(r.message || "Reverted to previous working configuration.");
+    const host = $("#section-inner-host");
+    if (host) renderSectionSetup(host);
+  } else {
+    toast(r.error || "Reversion failed.", true);
+  }
 }
 
 async function renderSectionSecurity(el) {

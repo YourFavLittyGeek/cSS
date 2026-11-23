@@ -208,7 +208,22 @@ async function updateSidebarVaultStatus(){
     if(b)b.disabled=true;
   }
 }
-function nav(v, sec){if(v==="files"){v="set";if(window.SV)window.SV.currentSection="c_filemanager"}if(sec&&window.SV)window.SV.currentSection=sec;V=VMAP[v]||v;document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on",x.dataset.v===V));const t=TITLES[V]||[V,""];$("#ttl").textContent=t[0];$("#ttls").textContent=t[1];closeSheet();window.scrollTo(0,0);render()}
+function nav(v, sec){
+  if(window.SETUP_LIFECYCLE && !window.SETUP_LIFECYCLE.allow_dashboard && v !== "setup") {
+    toast("Please complete Guided Setup before entering the workspace.", true);
+    v = "setup";
+  }
+  if(v==="files"){v="set";if(window.SV)window.SV.currentSection="c_filemanager"}
+  if(sec&&window.SV)window.SV.currentSection=sec;
+  V=VMAP[v]||v;
+  document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on",x.dataset.v===V));
+  const t=TITLES[V]||[V,""];
+  $("#ttl").textContent=t[0];
+  $("#ttls").textContent=t[1];
+  closeSheet();
+  window.scrollTo(0,0);
+  render();
+}
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>nav(b.dataset.v));
 document.querySelectorAll("#theme button").forEach(b=>b.onclick=async()=>{await api("/api/settings",{theme:b.dataset.t});await refresh()});
 async function handleQuitApplication(){try{const chk=await api("/api/app/shutdown_check");if(!chk.ok){if(!confirm("Quit Percival now?"))return;await api("/api/app/shutdown",{pause_jobs:true});document.body.innerHTML='<div style="display:flex;height:100vh;align-items:center;justify-content:center;font:16px -apple-system,sans-serif;color:#888;background:#111418"><div><h2>Percival has shut down cleanly.</h2><p>All databases flushed. You may close this window.</p></div></div>';return}if(chk.can_quit_immediately){if(!confirm("Quit Percival?\n(All databases and journals will be safely committed)"))return;await api("/api/app/shutdown",{pause_jobs:false});document.body.innerHTML='<div style="display:flex;height:100vh;align-items:center;justify-content:center;font:16px -apple-system,sans-serif;color:#888;background:#111418"><div><h2>Percival has shut down cleanly.</h2><p>All databases flushed. You may close this window.</p></div></div>';return}const running=chk.running_studies||[];const transfers=chk.active_transfers_count||0;const jnl=chk.pending_journal_count||0;$("#dlg").innerHTML=`<h2>Quit Percival Application</h2><p class="note" style="color:var(--bad)">Active background operations detected:</p><div style="background:rgba(255,255,255,0.05);padding:10px 14px;border-radius:6px;margin:10px 0;font-size:13px">${running.length?`<div>• <b>${running.length} studies processing:</b> <span class="mono">${esc(running.join(", "))}</span></div>`:""}${transfers?`<div>• <b>${transfers} background transfers in progress</b></div>`:""}${jnl?`<div>• <b>${jnl} pending journal entries to commit</b></div>`:""}</div><p style="font-size:13px;color:var(--mut)">To prevent data corruption, operations will be safely paused before exit.</p><div class="acts" style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px"><button class="b" id="quit-cancel">Cancel</button><button class="b" id="quit-wait">Wait for finish</button><button class="b danger" id="quit-pause">Pause Operations &amp; Quit</button></div>`;$("#shade").style.display="flex";$("#quit-cancel").onclick=()=>{$("#shade").style.display="none"};$("#quit-wait").onclick=()=>{$("#shade").style.display="none";toast("Waiting for operations to complete before quit.")};$("#quit-pause").onclick=async()=>{$("#shade").style.display="none";toast("Pausing operations and flushing database…");await api("/api/app/shutdown",{pause_jobs:true});document.body.innerHTML='<div style="display:flex;height:100vh;align-items:center;justify-content:center;font:16px -apple-system,sans-serif;color:#888;background:#111418"><div><h2>Percival has shut down cleanly.</h2><p>All processing paused and state saved to recovery ledger. You may close this window.</p></div></div>'}}catch(e){if(confirm(`Quit Percival?\n(${e.message})`)){await api("/api/app/shutdown",{pause_jobs:true})}}}
@@ -973,17 +988,30 @@ function setView(v){const s=S.settings,F=s.features;const L={duplicate_check:"Du
   $("#save").onclick=async()=>{const f={};document.querySelectorAll("[data-ft]").forEach(x=>f[x.dataset.ft]=x.checked);
     const pol=(S.settings.storage_policy||{});pol.remove_local_mri_after_archive=$("#rm-loc").checked;
     const r=await api("/api/settings",{fs_license:$("#lic").value.trim(),freesurfer_home:$("#fs").value.trim(),threads:+$("#thr").value,backup_dir:$("#bk").value.trim(),export_dir:$("#xd").value.trim(),library_dir:$("#lbd").value.trim(),vault_mount:($("#vm")?$("#vm").value.trim():""),app_lock_enabled:($("#app-lock")?$("#app-lock").checked:false),storage_policy:pol,features:f});toast(r.ok?"settings saved":esc(r.error),!r.ok);render()}}
+window.SETUP_LIFECYCLE = null;
 (async()=>{
+  try {
+    const life = await api("/api/setup/lifecycle");
+    window.SETUP_LIFECYCLE = life;
+  } catch(e) {}
+
   let m = (location.hash.match(/^#([a-zA-Z0-9_\-]+)(?::([a-zA-Z0-9_\-]+))?/)||[]);
   let initial = m[1];
   let sub = m[2];
   if(initial === "files") { initial = "set"; sub = "c_filemanager"; }
-  if(!initial){
-    try{
-      const r = await api("/api/setup/first_run");
-      if(r && r.first_run) initial = "setup";
-    }catch(e){}
+
+  // Critical requirement: If dashboard is not allowed, force Guided Setup!
+  if(window.SETUP_LIFECYCLE && !window.SETUP_LIFECYCLE.allow_dashboard) {
+    initial = "setup";
+    sub = null;
+    document.querySelectorAll("nav button").forEach(b => {
+      if (b.dataset.v !== "setup") {
+        b.style.opacity = "0.35";
+        b.title = "Complete Guided Setup first";
+      }
+    });
   }
+
   if(sub && window.SV) window.SV.currentSection = sub;
   nav(initial||"studies", sub);
 })();
