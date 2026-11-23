@@ -325,8 +325,8 @@ async function renderSectionStorageOverview(el) {
         <div>Active Working Space: <b>${dm.mac_internal ? `${dm.mac_internal.active_workspace_gb} GB` : `${bd.active_workspace_mb || 0} MB`}</b></div>
         <div>Temporary Scratch: <b>${dm.mac_internal ? `${dm.mac_internal.temporary_scratch_mb} MB` : `${bd.scratch_mb || 0} MB`}</b></div>
         <div>Pensieve Database: <b>${dm.mac_internal ? `${dm.mac_internal.pensieve_database_mb} MB` : 'Active'}</b></div>
-        <div>Preserved Raw MRI: <b>${dm.mac_internal ? `${round((dm.mac_internal.preserved_raw_bytes || 0) / (1024*1024), 1)} MB` : `${bd.original_mri_mb || 0} MB`}</b></div>
-        <div>Quarantined Files: <b>${dm.mac_internal ? `${round((dm.mac_internal.quarantined_bytes || 0) / (1024*1024), 1)} MB` : `${bd.quarantine_mb || 0} MB`}</b></div>
+        <div>Preserved Raw MRI: <b>${dm.mac_internal ? `${(Math.round(((dm.mac_internal.preserved_raw_bytes || 0) / (1024*1024)) * 10) / 10).toFixed(1)} MB` : `${bd.original_mri_mb || 0} MB`}</b></div>
+        <div>Quarantined Files: <b>${dm.mac_internal ? `${(Math.round(((dm.mac_internal.quarantined_bytes || 0) / (1024*1024)) * 10) / 10).toFixed(1)} MB` : `${bd.quarantine_mb || 0} MB`}</b></div>
         <div>PERCIVAL Managed Total: <b>${dm.mac_internal ? `${dm.mac_internal.percival_managed_gb} GB` : `${mac.percival_managed_gb || 0} GB`}</b></div>
       </div>
     </div>

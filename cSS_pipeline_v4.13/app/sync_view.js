@@ -134,7 +134,7 @@ function renderSyncCenter(v) {
                     <td><b>${esc(it.study_id)}</b></td>
                     <td class="mono" style="font-size:11px">${esc(it.relative_path)}</td>
                     <td class="mono" style="font-size:11px" title="${esc(it.source_path)}">${esc((it.source_path || '').slice(-25))}</td>
-                    <td>${round((it.size_bytes || 0) / (1024 * 1024), 2)} MB</td>
+                    <td>${(Math.round(((it.size_bytes || 0) / (1024 * 1024)) * 100) / 100).toFixed(2)} MB</td>
                     <td><span class="pill pri">Archive</span></td>
                     <td class="note">${esc(it.reason || 'New output')}</td>
                   </tr>
@@ -194,7 +194,7 @@ function renderSyncCenter(v) {
   const bSyncNow = $("#sync-now-btn");
   if (bSyncNow) bSyncNow.onclick = async () => {
     const toCopy = prev.items_to_copy || [];
-    if (!confirm(`Execute Manual Synchronization?\n\nFiles to archive: ${toCopy.length} (${round(prev.total_bytes / (1024 * 1024), 1)} MB)\nDestination: External Data Vault\nIntegrity: In-flight SHA-256 + atomic commit\n\nClick OK to proceed.`)) return;
+    if (!confirm(`Execute Manual Synchronization?\n\nFiles to archive: ${toCopy.length} (${(Math.round(prev.total_bytes / (1024 * 1024) * 10) / 10).toFixed(1)} MB)\nDestination: External Data Vault\nIntegrity: In-flight SHA-256 + atomic commit\n\nClick OK to proceed.`)) return;
 
     bSyncNow.disabled = true;
     bSyncNow.textContent = "Synchronizing…";

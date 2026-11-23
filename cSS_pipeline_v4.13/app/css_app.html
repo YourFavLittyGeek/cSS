@@ -222,17 +222,17 @@ async function updateSidebarVaultStatus(){
   try{
     const [chk, sum] = await Promise.all([
       api("/api/storage/eject_check"),
-      api("/api/transfer/summary")
+      api("/api/transfer/jobs?state=preparing,copying,flushing,verifying,committing,removing_sources,rolling_back,recovering&limit=500")
     ]);
     const st=chk.state||"UNKNOWN";
     p.textContent=st;
     p.className=`pill ${(st==="SAFE TO EJECT"||st==="READY")?"ok":(st==="TRANSFERRING"||st==="VERIFYING"||st==="BUSY")?"pri":(st==="DRIVE NOT CONNECTED"||st==="OFFLINE")?"mut":"warn"}`;
     s.textContent=chk.reason||(st==="DRIVE NOT CONNECTED"?"No Vault drive connected":"");
-    if(b){b.disabled=(st==="DRIVE NOT CONNECTED"||st==="TRANSFERRING"||st==="VERIFYING");b.style.opacity=b.disabled?"0.5":"1";}
+    if(b){b.disabled=!chk.can_eject;b.style.opacity=b.disabled?"0.5":"1";}   /* 1e: the backend decides (journal + open files) */
     if(em){em.disabled=(st==="DRIVE NOT CONNECTED");em.style.opacity=em.disabled?"0.5":"1";}
 
     if(tm&&tt){
-      const act = (sum && sum.active_count) || 0;
+      const act = (sum && sum.ok && sum.jobs) ? sum.jobs.length : 0;   /* 1e: running jobs from the durable journal */
       if(act > 0){
         tm.style.display="flex";
         tt.innerHTML=`<b>${act} transfer(s)</b> active`;
