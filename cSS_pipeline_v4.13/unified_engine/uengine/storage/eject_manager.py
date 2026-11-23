@@ -15,6 +15,7 @@ from .models import DriveSafetyState, EjectCheckResult
 from .storage_paths import StoragePathsService
 from .storage_state import StorageStateService
 from ..safety import volumes_root
+from .activity import journal_activity, open_handles
 
 FORCE_TOKEN_TTL_S = 120
 _FORCE_TOKENS: Dict[str, Dict[str, Any]] = {}    # process-wide: each request builds a new EjectManager
@@ -26,8 +27,10 @@ class EjectManager:
 
     def __init__(self, paths_service: Optional[StoragePathsService] = None,
                  state_service: Optional[StorageStateService] = None,
-                 runner: Optional[Callable[[List[str]], Any]] = None):
+                 runner: Optional[Callable[[List[str]], Any]] = None,
+                 lsof_runner: Optional[Callable[[List[str]], Any]] = None):
         self._runner = runner
+        self._lsof_runner = lsof_runner
         self.paths = paths_service or StoragePathsService()
         self.state = state_service or StorageStateService(self.paths)
         self._preparing_eject = False
@@ -42,7 +45,20 @@ class EjectManager:
                 reason="External Vault is not mounted or already disconnected."
             )
 
-        # Check active transfer jobs targeting Vault
+        mount = vault_info.mount_point or ""
+        details: Dict[str, Any] = {}
+        # 1e: (1) the durable transfer journal - an active job touching this volume is a protected operation
+        act = journal_activity(self.paths.workspace_root, mount) if mount else {"active": [], "parked": []}
+        details["parked_jobs"] = act["parked"]
+        if act["active"]:
+            states = {j["state"] for j in act["active"]}
+            st = DriveSafetyState.VERIFYING if states <= {"verifying", "flushing"} else DriveSafetyState.TRANSFERRING
+            return EjectCheckResult(can_eject=False, state=st,
+                                    reason=f"{len(act['active'])} transfer job(s) are working on this drive; pause or finish them first.",
+                                    active_operations_count=len(act["active"]), active_job_ids=[j["job_id"] for j in act["active"]],
+                                    volume_uuid=vault_info.volume_uuid, details=dict(details, active_jobs=act["active"]))
+
+        # Legacy: active transfer jobs recorded by the pre-1d storage journal (kept; nothing new writes it)
         active_jobs = [j for j in self.state.get_all_jobs(limit=20)
                        if j.get("status") in ("running", "transferring", "verifying", "flushing")]
         if active_jobs:
@@ -66,12 +82,27 @@ class EjectManager:
                 volume_uuid=vault_info.volume_uuid
             )
 
-        # Confirm filesystem writes are cleanly committed
+        # 1e: (2) any process (Percival included) holding a file open on this filesystem
+        if mount and os.path.ismount(mount):
+            holders = open_handles(mount, runner=self._lsof_runner)
+            if holders is None:
+                return EjectCheckResult(can_eject=False, state=DriveSafetyState.UNKNOWN,
+                                        reason="Open files on the drive could not be checked; normal eject is refused.",
+                                        volume_uuid=vault_info.volume_uuid, details=details)
+            if holders:
+                return EjectCheckResult(can_eject=False, state=DriveSafetyState.BUSY,
+                                        reason=f"{len(holders)} program(s) have files open on the drive: "
+                                               + ", ".join(f"{h['command'] or '?'} (pid {h['pid']})" for h in holders[:5]),
+                                        open_handles_count=len(holders), volume_uuid=vault_info.volume_uuid,
+                                        details=dict(details, open_handles=holders))
+        else:
+            details["note"] = "the Vault is not on a separately mounted volume"
+        note = f" {len(details['parked_jobs'])} paused / interrupted job(s) will need this drive to continue." if details.get("parked_jobs") else ""
         return EjectCheckResult(
             can_eject=True,
             state=DriveSafetyState.READY,
-            reason="READY TO EJECT — All transfers and journals committed. Ready for OS unmount.",
-            volume_uuid=vault_info.volume_uuid
+            reason="READY TO EJECT — no transfer is working on the drive and no program has files open on it." + note,
+            volume_uuid=vault_info.volume_uuid, details=details
         )
 
     # ------------------------------------------------------------------ Phase 0: server-side force authorisation
@@ -110,6 +141,27 @@ class EjectManager:
             return f"confirmation does not match: type the volume name '{volume_name}' exactly"
         return None
 
+    def _pause_jobs_on_volume(self, mount_point: str, jobs, wait_s: float = 30.0):
+        try:
+            from ..transfer.journal import TransferJournal
+            jn = TransferJournal(self.paths.workspace_root)
+            try:
+                for j in jobs:
+                    try:
+                        jn.request_control(j["job_id"], "pause")
+                    except Exception:
+                        pass
+            finally:
+                jn.close()
+        except Exception:
+            return journal_activity(self.paths.workspace_root, mount_point)
+        deadline = time.time() + wait_s
+        act = journal_activity(self.paths.workspace_root, mount_point)
+        while act["active"] and time.time() < deadline:
+            time.sleep(0.2)
+            act = journal_activity(self.paths.workspace_root, mount_point)
+        return act
+
     def eject_vault(self, emergency: bool = False, force: bool = False, force_token: str = "",
                     confirm_volume_name: str = "") -> Dict[str, Any]:
         """Perform verified macOS volume unmount with controlled emergency support.
@@ -130,6 +182,16 @@ class EjectManager:
                     "error": f"Refused: {mount_point or '(none)'} is not a mounted volume under {vols}; nothing was unmounted"}
         volume_name = vault_info.volume_name or os.path.basename(mount_point)
 
+        act = journal_activity(self.paths.workspace_root, mount_point)
+        if act["active"] and emergency:
+            # 1e: an emergency eject first asks the jobs on this drive to pause at a safe boundary, then waits
+            act = self._pause_jobs_on_volume(mount_point, act["active"])
+        if act["active"]:
+            # protected operations are running on this drive: never unmounted, not even with a force authorisation
+            return {"ok": False, "state": DriveSafetyState.TRANSFERRING.value,
+                    "error": f"Refused: {len(act['active'])} transfer job(s) are working on this drive "
+                             f"({', '.join(j['job_id'] for j in act['active'][:3])}); pause them first",
+                    "active_job_ids": [j["job_id"] for j in act["active"]]}
         if force:
             why = self._consume_force_token(force_token, mount_point, confirm_volume_name, volume_name)
             if why:
@@ -137,22 +199,16 @@ class EjectManager:
                 return {"ok": False, "state": DriveSafetyState.BLOCKED.value, "error": f"Refused: {why}"}
         else:
             safety = self.check_ejection_safety()
-            if not safety.can_eject:
-                return {"ok": False, "state": safety.state.value, "error": f"Refused: {safety.reason}"}
+            # an emergency eject may still ASK macOS when only other programs hold files (BUSY / UNKNOWN): macOS then
+            # unmounts or refuses, and a refusal leads to the confirmed force flow. Transfers always block (above).
+            if not safety.can_eject and not (emergency and safety.state in (DriveSafetyState.BUSY, DriveSafetyState.UNKNOWN)):
+                return {"ok": False, "state": safety.state.value, "error": f"Refused: {safety.reason}", "details": safety.details}
 
         self._preparing_eject = True
         self.state.record_audit_event("eject_requested", "initiated", details={"mount_point": mount_point, "emergency": emergency, "force": force})
 
         try:
-            # 1. Cooperative pause of active transfers if emergency
-            if emergency:
-                try:
-                    from ..unified_transfer_engine import get_transfer_engine
-                    te = get_transfer_engine()
-                    for j in te.get_active_jobs():
-                        te.pause_job(j.get("job_id", ""))
-                except Exception:
-                    pass
+            # 1. (1e) jobs on this drive were already paused above (journal-based); nothing else writes here
 
             # 2. Flush filesystem buffers
             try:

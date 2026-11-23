@@ -1635,7 +1635,7 @@ def transfer_pool_shutdown(timeout=15.0):
         _TRANSFER_POOL["pool"] = None
 
 def transfer_get(op, q):
-    if op in ("jobs", "job", "assess", "workers"):           # Phase 1d endpoints (uengine/transfer/api.py)
+    if op in ("jobs", "job", "assess", "workers", "vault_check"):   # Phase 1d/1e endpoints (uengine/transfer/api.py)
         try:
             from uengine.transfer import api as TAPI
             return TAPI.handle_get(op, q, transfer_pool())

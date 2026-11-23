@@ -157,7 +157,7 @@ class TransferService:
         for d in {os.path.dirname(f["dst"]) for f in files} | set(empty_dirs):
             try:
                 CP.preflight_destination(os.path.join(d, "x"))
-            except CP.ExclusiveCommitUnsupported as e:
+            except CP.CopyRefused as e:                  # exFAT (no exclusive commit) or a read-only volume
                 raise TransferRefused(str(e))
         job_id = _job_id(op, study_id)
         self.journal.create_job(job_id, op.value, mode.value, files, study_id=study_id, request_id=request_id,

@@ -7,6 +7,7 @@ GET  jobs?state=&limit=          list of job summaries (newest first)
 GET  job?id=                     summary + files + skipped items + last events
 GET  assess?id=                  Phase 1c read-only recovery assessment (hashes files; may take time)
 GET  workers                     worker pool status
+GET  vault_check?path=           1e: read-only Vault verification (default: the configured Vault)
 POST jobs/create   {operation: archive|stage|move, items: [{src, dst}], study_id?, keep_previous?, request_id?}
 POST jobs/pause    {job_id}      cooperative pause at the next safe boundary
 POST jobs/resume   {job_id}      Phase 1c resume (decision recorded) - background
@@ -80,6 +81,9 @@ def handle_get(op: str, q: Dict[str, str], pool) -> Optional[Dict[str, Any]]:
                                  detail=json.loads(e["detail_json"]) if e["detail_json"] else None) for e in events])
     if op == "workers":
         return dict(ok=True, workers=pool.status())
+    if op == "vault_check":                                   # 1e: read-only verification of the configured Vault
+        from ..storage.vault_check import verify_vault
+        return dict(ok=True, vault=verify_vault(q.get("path") or pool.vault or ""))
     return None
 
 

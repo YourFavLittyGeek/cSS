@@ -241,8 +241,20 @@ def _free_name(dst: str, job_tag: str, attempt: int) -> str:
     return os.path.join(d, f"{stem}_restored_{job_tag}{'' if attempt == 1 else f'_{attempt}'}{ext}")
 
 
+class ReadOnlyDestination(CopyRefused):
+    """the destination volume is mounted read-only"""
+
+
 def preflight_destination(dst: str) -> None:
-    """refuse before copying when the destination filesystem is known to lack an exclusive commit"""
+    """refuse before copying when the destination is read-only or its filesystem lacks an exclusive commit"""
+    p = os.path.dirname(dst) or dst
+    while p and not os.path.exists(p):
+        p = os.path.dirname(p)
+    try:
+        if os.statvfs(p or "/").f_flag & getattr(os, "ST_RDONLY", 1):
+            raise ReadOnlyDestination(f"the destination {dst} is on a read-only volume; nothing can be written there")
+    except OSError:
+        pass
     t = fs_type(os.path.dirname(dst) or dst)
     if t in NO_EXCLUSIVE_COMMIT_FS:
         raise ExclusiveCommitUnsupported(

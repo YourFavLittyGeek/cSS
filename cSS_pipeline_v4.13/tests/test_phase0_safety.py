@@ -331,8 +331,9 @@ class TestSync(Base):
 
 # S8 ----------------------------------------------------------------------------------------------------------------------
 class _Paths:
-    def __init__(self, mount):
+    def __init__(self, mount, workspace_root=None):
         self.mount = mount
+        self.workspace_root = workspace_root or tempfile.mkdtemp(prefix="p0ws_")   # 1e: the journal lives here
 
     def get_vault_info(self):
         return VolumeInfo(mount_point=self.mount, volume_name=os.path.basename(self.mount), filesystem="apfs", device_node="disk9s1",
@@ -361,7 +362,8 @@ class TestForceFlags(Base):
         def runner(cmd):
             self.calls.append(list(cmd))
             return types.SimpleNamespace(returncode=0 if "force" in cmd else rc_normal, stdout="", stderr="Resource busy")
-        return EJ.EjectManager(_Paths(self.mount), _State(jobs), runner=runner)
+        no_open_files = lambda cmd: types.SimpleNamespace(returncode=1, stdout="", stderr="")   # 1e: lsof finds nothing
+        return EJ.EjectManager(_Paths(self.mount), _State(jobs), runner=runner, lsof_runner=no_open_files)
 
     def test_s8_force_eject_needs_server_token_and_typed_volume_name(self):
         with mock.patch("os.path.ismount", return_value=True):

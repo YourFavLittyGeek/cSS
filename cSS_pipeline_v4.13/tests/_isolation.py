@@ -134,7 +134,14 @@ def _hook(event, args):
     elif event == "sqlite3.connect":
         db = args[0] if args else None
         if isinstance(db, (str, bytes, os.PathLike)) and os.fspath(db) not in (":memory:", b":memory:", ""):
-            _check(db, "opening an sqlite database")
+            d = os.fsdecode(db) if isinstance(db, bytes) else os.fspath(db)
+            if d.startswith("file:"):                       # sqlite URI: file:<path>?<query>
+                from urllib.parse import parse_qs, unquote
+                path, _, query = d[5:].partition("?")
+                if "ro" in parse_qs(query).get("mode", []):
+                    return                                   # read-only open: never a write
+                d = unquote(path)
+            _check(d, "opening an sqlite database")
     elif event in ("subprocess.Popen", "os.system", "os.exec", "os.posix_spawn", "os.spawn"):
         items = []
         if event == "os.system":

@@ -122,6 +122,7 @@ class EjectCheckResult:
     pending_journal_count: int = 0
     volume_uuid: Optional[str] = None
     timestamp: float = field(default_factory=time.time)
+    details: Dict[str, Any] = field(default_factory=dict)      # 1e: active / parked jobs, open handles
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)

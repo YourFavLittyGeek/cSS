@@ -68,6 +68,8 @@ class TestPhase0Isolation(unittest.TestCase):
             os.replace(os.path.join(ST["root"], "nothing"), os.path.join(missing, "x"))
         with self.assertRaises(_isolation.IsolationViolation):
             sqlite3.connect(os.path.join(missing, "probe.db"))
+        with self.assertRaises(_isolation.IsolationViolation):          # 1e: write-mode sqlite URIs are still refused
+            sqlite3.connect(f"file:{os.path.join(missing, 'probe.db')}?mode=rwc", uri=True)
         self.assertFalse(os.path.exists(missing))
 
     def test_i3_writes_under_volumes_are_refused(self):
