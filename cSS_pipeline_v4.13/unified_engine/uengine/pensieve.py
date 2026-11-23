@@ -199,11 +199,49 @@ CREATE TABLE IF NOT EXISTS scientific_findings (
     created_at REAL NOT NULL
 );
 
+-- 7. Missed cSS Lesions Memory (Expert-drawn in MRI Viewer outside ALBUS)
+CREATE TABLE IF NOT EXISTS missed_lesions_memory (
+    missed_uid TEXT PRIMARY KEY,
+    study_id TEXT NOT NULL,
+    missed_id TEXT NOT NULL,
+    reviewer_id TEXT NOT NULL,
+    vox_i INTEGER NOT NULL,
+    vox_j INTEGER NOT NULL,
+    vox_k INTEGER NOT NULL,
+    x_mm REAL NOT NULL,
+    y_mm REAL NOT NULL,
+    z_mm REAL NOT NULL,
+    plane TEXT,
+    slice_idx INTEGER,
+    shape TEXT,
+    points_json TEXT,
+    comment TEXT,
+    detector_fate TEXT,
+    albus_detected INTEGER DEFAULT 0,
+    created_at REAL NOT NULL,
+    FOREIGN KEY(study_id) REFERENCES studies_memory(study_id) ON DELETE CASCADE
+);
+
+-- 8. Study Review Status & Adjudication
+CREATE TABLE IF NOT EXISTS study_review_status (
+    study_id TEXT PRIMARY KEY,
+    candidate_review_status TEXT DEFAULT 'incomplete',
+    missed_assessment_status TEXT DEFAULT 'incomplete',
+    adjudication_status TEXT DEFAULT 'not_needed',
+    overall_status TEXT DEFAULT 'incomplete',
+    reviewer_id TEXT,
+    completed_at REAL,
+    updated_at REAL NOT NULL,
+    FOREIGN KEY(study_id) REFERENCES studies_memory(study_id) ON DELETE CASCADE
+);
+
 -- Indices for rapid leakage-free retrieval
 CREATE INDEX IF NOT EXISTS idx_cand_study ON candidates_memory(study_id);
 CREATE INDEX IF NOT EXISTS idx_annot_cand ON expert_annotations(candidate_uid);
 CREATE INDEX IF NOT EXISTS idx_corr_comp ON corrections_memory(responsible_component);
 CREATE INDEX IF NOT EXISTS idx_model_comp ON model_evolution(component);
+CREATE INDEX IF NOT EXISTS idx_missed_study ON missed_lesions_memory(study_id);
+CREATE INDEX IF NOT EXISTS idx_review_study ON study_review_status(study_id);
 """
 
 class PensieveCoreMemory:
@@ -761,7 +799,158 @@ class PensieveCoreMemory:
         }
 
     # -------------------------------------------------------------
-    # 7. Leak-Free Training Data Extraction
+    # 7. Missed Lesions Memory & Study Review Completion
+    # -------------------------------------------------------------
+    def record_missed_lesion(self, study_id: str, missed_id: str, reviewer_id: str,
+                             coords_vox: Tuple[int, int, int], coords_mm: Tuple[float, float, float],
+                             slice_idx: int = 0, plane: str = "", shape: str = "point",
+                             points_json: str = "[]", comment: str = "", detector_fate: str = "") -> str:
+        """Record an expert-identified cSS lesion that was missed by ALBUS."""
+        muid = f"{study_id}_missed_{missed_id}"
+        now = time.time()
+        vx, vy, vz = coords_vox
+        mx, my, mz = coords_mm
+
+        if not self.vault.is_connected():
+            payload = {
+                "missed_uid": muid, "study_id": study_id, "missed_id": str(missed_id),
+                "reviewer_id": reviewer_id, "vox_i": int(vx), "vox_j": int(vy), "vox_k": int(vz),
+                "x_mm": float(mx), "y_mm": float(my), "z_mm": float(mz),
+                "plane": plane, "slice_idx": int(slice_idx), "shape": shape,
+                "points_json": points_json, "comment": comment, "detector_fate": detector_fate,
+                "albus_detected": 0, "created_at": now
+            }
+            self.local_journal.record_entry("missed_lesions_memory", "INSERT", payload, study_id, muid, reviewer_id)
+            self.record_expert_annotation(study_id, reviewer_id, "missed_lesion", candidate_uid=None,
+                                          lesion_type="superficial_siderosis", confidence="high",
+                                          provenance=f"missed_in_viewer_{plane}_slice_{slice_idx}")
+            return muid
+
+        with self._get_connection() as con:
+            con.execute("""
+                INSERT OR REPLACE INTO missed_lesions_memory
+                (missed_uid, study_id, missed_id, reviewer_id, vox_i, vox_j, vox_k,
+                 x_mm, y_mm, z_mm, plane, slice_idx, shape, points_json, comment,
+                 detector_fate, albus_detected, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+            """, (muid, study_id, str(missed_id), reviewer_id, int(vx), int(vy), int(vz),
+                  float(mx), float(my), float(mz), plane, int(slice_idx), shape,
+                  points_json, comment, detector_fate, now))
+
+        # Record corresponding expert annotation and correction event
+        self.record_expert_annotation(study_id, reviewer_id, "missed_lesion", candidate_uid=None,
+                                      lesion_type="superficial_siderosis", confidence="high",
+                                      provenance=f"missed_in_viewer_{plane}_slice_{slice_idx}")
+        return muid
+
+    def delete_missed_lesion(self, study_id: str, missed_id: str) -> bool:
+        muid = f"{study_id}_missed_{missed_id}"
+        if not self.vault.is_connected():
+            self.local_journal.record_entry("missed_lesions_memory", "DELETE", {"missed_uid": muid}, study_id, muid)
+            return True
+        with self._get_connection() as con:
+            cur = con.execute("DELETE FROM missed_lesions_memory WHERE missed_uid = ? OR (study_id = ? AND missed_id = ?)",
+                              (muid, study_id, str(missed_id)))
+            return cur.rowcount > 0
+
+    def get_missed_lesions(self, study_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        if not self.vault.is_connected():
+            return []
+        with self._get_connection() as con:
+            if study_id:
+                cur = con.execute("SELECT * FROM missed_lesions_memory WHERE study_id = ? ORDER BY created_at ASC", (study_id,))
+            else:
+                cur = con.execute("SELECT * FROM missed_lesions_memory ORDER BY created_at ASC")
+            return [dict(r) for r in cur.fetchall()]
+
+    def set_study_review_status(self, study_id: str, candidate_review: str = "incomplete",
+                                missed_assessment: str = "incomplete", adjudication: str = "not_needed",
+                                overall_status: str = "incomplete", reviewer_id: Optional[str] = None,
+                                completed_at: Optional[float] = None) -> None:
+        now = time.time()
+        cat = completed_at if (overall_status == "expert_review_completed" and completed_at) else (now if overall_status == "expert_review_completed" else None)
+        if not self.vault.is_connected():
+            payload = {
+                "study_id": study_id, "candidate_review_status": candidate_review,
+                "missed_assessment_status": missed_assessment, "adjudication_status": adjudication,
+                "overall_status": overall_status, "reviewer_id": reviewer_id,
+                "completed_at": cat, "updated_at": now
+            }
+            self.local_journal.record_entry("study_review_status", "INSERT_OR_REPLACE", payload, study_id, None, reviewer_id)
+            return
+
+        with self._get_connection() as con:
+            con.execute("""
+                INSERT OR REPLACE INTO study_review_status
+                (study_id, candidate_review_status, missed_assessment_status, adjudication_status,
+                 overall_status, reviewer_id, completed_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (study_id, candidate_review, missed_assessment, adjudication, overall_status, reviewer_id, cat, now))
+
+    def get_study_review_status(self, study_id: str) -> Dict[str, Any]:
+        default = {
+            "study_id": study_id, "candidate_review_status": "incomplete",
+            "missed_assessment_status": "incomplete", "adjudication_status": "not_needed",
+            "overall_status": "incomplete", "reviewer_id": None, "completed_at": None
+        }
+        if not self.vault.is_connected():
+            return default
+        with self._get_connection() as con:
+            cur = con.execute("SELECT * FROM study_review_status WHERE study_id = ?", (study_id,))
+            r = cur.fetchone()
+            return dict(r) if r else default
+
+    def get_expert_annotations(self, study_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        if not self.vault.is_connected():
+            return []
+        with self._get_connection() as con:
+            if study_id:
+                cur = con.execute("SELECT * FROM expert_annotations WHERE study_id = ? ORDER BY created_at ASC", (study_id,))
+            else:
+                cur = con.execute("SELECT * FROM expert_annotations ORDER BY created_at ASC")
+            return [dict(r) for r in cur.fetchall()]
+
+    def get_status(self) -> Dict[str, Any]:
+        """Telemetry of Pensieve memory contents."""
+        connected = self.vault.is_connected()
+        journal_st = self.local_journal.get_status()
+        if not connected:
+            return {
+                "connected": False,
+                "vault_path": None,
+                "studies_count": 0,
+                "candidates_count": 0,
+                "expert_annotations_count": 0,
+                "missed_lesions_count": 0,
+                "corrections_count": 0,
+                "journal": journal_st
+            }
+        try:
+            with self._get_connection() as con:
+                s_cnt = con.execute("SELECT COUNT(*) FROM studies_memory").fetchone()[0]
+                c_cnt = con.execute("SELECT COUNT(*) FROM candidates_memory").fetchone()[0]
+                a_cnt = con.execute("SELECT COUNT(*) FROM expert_annotations").fetchone()[0]
+                m_cnt = con.execute("SELECT COUNT(*) FROM missed_lesions_memory").fetchone()[0]
+                cor_cnt = con.execute("SELECT COUNT(*) FROM corrections_memory").fetchone()[0]
+            return {
+                "connected": True,
+                "vault_path": self._db_path,
+                "studies_count": s_cnt,
+                "candidates_count": c_cnt,
+                "expert_annotations_count": a_cnt,
+                "missed_lesions_count": m_cnt,
+                "corrections_count": cor_cnt,
+                "journal": journal_st
+            }
+        except Exception as e:
+            return {
+                "connected": True,
+                "error": str(e),
+                "journal": journal_st
+            }
+
+    # -------------------------------------------------------------
+    # 8. Leak-Free Training Data Extraction
     # -------------------------------------------------------------
     def get_training_dataset(self, target_partition: str = "development") -> List[Dict[str, Any]]:
         """Retrieve expert-annotated candidates strictly from the specified partition.

@@ -288,7 +288,46 @@ def label_summary(sid):
                                 reviewer=H[-1]["reviewer"], conflict=len(ks) > 1, calls=last, file=H[-1]["file"]); n_hist += 1
         out = {cid: d["y"] for cid, d in det.items() if d["y"] is not None}
         st = L.review_state(B(), sid, "", pol)
+
+        # Discover reviewer-drawn missed cSS lesions (review/{sid}_missed.csv & Pensieve)
+        missed_detail = {}
+        missed_csv = os.path.join(B(), "review", f"{sid}_missed.csv")
+        if os.path.exists(missed_csv):
+            try:
+                import pandas as _mpd
+                m_df = _mpd.read_csv(missed_csv, dtype=str).fillna("")
+                for _, mr in m_df.iterrows():
+                    mid = str(mr.get("missed_id", "")).strip()
+                    if mid:
+                        missed_detail[f"missed_{mid}"] = dict(
+                            missed_id=mid, reviewer=str(mr.get("reviewer", "")), time=str(mr.get("time", "")),
+                            vox=(int(float(mr["vox_i"])), int(float(mr["vox_j"])), int(float(mr["vox_k"]))) if "vox_i" in mr and mr["vox_i"] else (0,0,0),
+                            mm=(float(mr["x_mm"]), float(mr["y_mm"]), float(mr["z_mm"])) if "x_mm" in mr and mr["x_mm"] else (0.0,0.0,0.0),
+                            plane=str(mr.get("plane", "")), slice_idx=int(float(mr["slice"])) if "slice" in mr and mr["slice"] else 0,
+                            shape=str(mr.get("shape", "point")), points=str(mr.get("points", "[]")),
+                            comment=str(mr.get("comment", "")), detector_fate=str(mr.get("detector_fate", "")),
+                            albus_detected=False, kind="css", y=1
+                        )
+            except Exception: pass
+        try:
+            from uengine.pensieve import get_pensieve
+            p_mem = get_pensieve()
+            for pm in p_mem.get_missed_lesions(sid):
+                mk = f"missed_{pm['missed_id']}"
+                if mk not in missed_detail:
+                    missed_detail[mk] = dict(
+                        missed_id=str(pm["missed_id"]), reviewer=pm.get("reviewer_id", ""), time=str(pm.get("created_at", "")),
+                        vox=(pm.get("vox_i", 0), pm.get("vox_j", 0), pm.get("vox_k", 0)),
+                        mm=(pm.get("x_mm", 0.0), pm.get("y_mm", 0.0), pm.get("z_mm", 0.0)),
+                        plane=str(pm.get("plane", "")), slice_idx=pm.get("slice_idx", 0),
+                        shape=str(pm.get("shape", "point")), points=str(pm.get("points_json", "[]")),
+                        comment=str(pm.get("comment", "")), detector_fate=str(pm.get("detector_fate", "")),
+                        albus_detected=False, kind="css", y=1
+                    )
+        except Exception: pass
+
         res = dict(labels=out, detail=det, css=sum(out.values()), mimic=len(out) - sum(out.values()),
+                   missed_detail=missed_detail, n_missed=len(missed_detail), css_with_missed=sum(out.values()) + len(missed_detail),
                    unused=sum(1 for d in det.values() if d["y"] is None), stale=len(E.get("stale") or []),
                    unrecognised=sorted({d["call"] for d in det.values() if d["kind"] == "unrecognised"}),
                    conflicts=sum(1 for d in det.values() if d["conflict"]), historical=n_hist,
@@ -428,6 +467,17 @@ def _examples(sid, meta, rows=None):
                         component_reasons={k: v["reasons"] for k, v in ev["components"].items() if v["reasons"]},
                         missing=sorted({m for v in ev["components"].values() for m in v.get("missing", [])}),
                         rules=EL.RULES_VERSION, evaluated=time.strftime("%Y-%m-%d %H:%M:%S"), checked=r is not None))
+
+    for mid, md in sorted(lab.get("missed_detail", {}).items()):
+        out.append(dict(study=sid, cand_id=mid, patient=pat, identity=idn["status"], y=1, call="cSS", label_source="expert_missed_lesion",
+                        reviewer=md.get("reviewer", ""), partition="test" if test else "development", status="eligible",
+                        reasons=["LOCKED_TEST"] if test else [],
+                        components=dict(char=False, image=True, fusion=False, meta=True, predictor=False, shadow=True,
+                                        detection=True, segmentation=md.get("shape") in ("pen", "rect", "polygon")),
+                        component_reasons=dict(char=["NO_MEASUREMENTS"], fusion=["NO_MEASUREMENTS"]),
+                        missing=[], rules=EL.RULES_VERSION, evaluated=time.strftime("%Y-%m-%d %H:%M:%S"), checked=True,
+                        albus_detected=False, coords_vox=md.get("vox"), coords_mm=md.get("mm"),
+                        detector_fate=md.get("detector_fate"), comment=md.get("comment", "")))
     return out
 
 
@@ -435,7 +485,9 @@ def selection():
     """v5.24: every study of the project (and reviewed studies found on disk but missing from the study list) with the separate states
     the Training Center shows: registered / processed (candidate list) / reviewed (state) / labelled candidates / eligible / used.
     Eligibility per candidate comes from the Training Eligibility Engine (uengine/percival/eligibility.py)."""
-    S = CTX["SET"]; ex = set(S.get("learner_exclude", [])); arch_ok = S["features"].get("train_include_archived", True); out = []
+    S = CTX["SET"]; ex = set(S.get("learner_exclude", []))
+    arch_ok = S.get("features", {}).get("train_include_archived", True) if isinstance(S.get("features"), dict) else True
+    out = []
     mode = S.get("percival_learn_from", "labelled")
     from uengine.percival.meta import test_assignment
     for p in _study_list():
@@ -446,13 +498,14 @@ def selection():
         if el: reason = ""
         elif mode == "finished" and not rev and lab["css"] + lab["mimic"]: reason = "review not finished (Settings: learn from finished reviews only)"
         elif not os.path.exists(os.path.join(B(), "review", f"{c}_candidates.csv")): reason = "not processed yet (no candidate list)"
-        elif not lab["detail"]: reason = "no expert call yet" + (f" ({lab['stale']} earlier call(s) need confirmation in Review)" if lab["stale"] else "")
+        elif not lab["detail"] and not lab.get("n_missed"): reason = "no expert call yet" + (f" ({lab['stale']} earlier call(s) need confirmation in Review)" if lab["stale"] else "")
         else:
             from uengine.percival.eligibility import REASONS
             codes = sorted({x for e in E for x in e["reasons"][:1]}); reason = "; ".join(REASONS.get(x, x) for x in codes)[:200]
         out.append(dict(code=c, label=CTX["label"](c) if not p["_orphan"] else c, cohort=p.get("cohort", ""), reviewed=rev,
                         processed=os.path.exists(os.path.join(B(), "review", f"{c}_candidates.csv")), n_candidates=lab.get("n_candidates", 0),
                         review_state=lab.get("state_label") or lab.get("state", ""), n_css=lab["css"], n_mimic=lab["mimic"], n_unused=lab["unused"],
+                        n_missed=lab.get("n_missed", 0),
                         n_stale=lab["stale"], n_conflicts=lab.get("conflicts", 0), n_historical=lab.get("historical", 0), label_error=lab.get("error", ""),
                         n_labelled=len(E), n_eligible=len(el), n_eligible_dev=sum(1 for e in el if e["partition"] == "development"),
                         css_dev=sum(1 for e in el if e["partition"] == "development" and e["y"] == 1),
@@ -469,7 +522,7 @@ def candidates_of(sid):
     """Training Center drill-down: every called candidate of one study with its eligibility per component and the reasons in words"""
     from uengine.percival.eligibility import explain
     S = CTX["SET"]; ex = set(S.get("learner_exclude", [])); p = next((x for x in _study_list() if x["code"] == sid), {})
-    arch = bool(p.get("archived")) and not S["features"].get("train_include_archived", True)
+    arch = bool(p.get("archived")) and not (S.get("features", {}).get("train_include_archived", True) if isinstance(S.get("features"), dict) else True)
     E = _examples(sid, dict(excluded=sid in ex, archived_out=arch))
     for e in E: e["reasons_text"] = explain(e["reasons"]); e["component_reasons_text"] = {k: explain(v) for k, v in e["component_reasons"].items()}
     lab = label_summary(sid)
@@ -703,10 +756,19 @@ def _train(reason):
     _run_start(reason)
     try:
         SL = selection(); sel = [s["code"] for s in SL if s["included"]]
-        if not sel: raise ValueError("no study has an eligible expert label yet - Training Center lists every study and the reason it is not used")
+        if not sel:
+            msg = ("No studies currently have eligible expert-reviewed labels for supervised learning. "
+                   "At least 3 expert-confirmed cSS and 3 rejected candidates (or mimics) across at least 10 candidates "
+                   "in the development cohort are required before a valid supervised training cycle can proceed. "
+                   "Please open the Review tab to review detected candidates or mark missed cSS lesions in the MRI viewer.")
+            log(f"training paused: {msg}", 0.0)
+            _transition("insufficient_data", stage="data_needed", error=msg)
+            _run_end("insufficient_data", error=msg)
+            return dict(ok=False, error=msg, stage="data_needed")
+
         if not all(may_read(c) for c in sel): raise ValueError("local learning is not switched on (Percival Intelligence › Switch on)")
         from uengine.percival import datasets as DS, eligibility as EL
-        integ = integrity([x["code"] for x in SL if x["n_labelled"]])     # v5.24: conflicts / duplicates over EVERY labelled study
+        integ = integrity([x["code"] for x in SL if x["n_labelled"] or x.get("n_missed")])     # v5.24: conflicts / duplicates over EVERY labelled study
         dup = set(integ["duplicates"]) & set(sel); rows, exs = [], []
         log(f"cycle started ({reason}): {len(sel)} studies with eligible labels", 0.01)
         S = CTX["SET"]; ex = set(S.get("learner_exclude", []))
@@ -714,13 +776,13 @@ def _train(reason):
             g = {r["cand_id"]: r for r in gather(c, labelled=False)}
             E = _examples(c, dict(excluded=c in ex, duplicate=c in dup), rows=g); exs += E
             for e in E:
-                if e["components"]["meta"]:
+                if e["components"]["meta"] and e["cand_id"] in g:
                     r = dict(g[e["cand_id"]], y=e["y"])
                     if not e["components"]["image"]: r["maps"] = None
                     rows.append(r)
             log(f"{CTX['label'](c)}: {sum(1 for e in E if e['components']['meta'])} eligible of {len(E)} called candidates", 0.01 + 0.06 * (k + 1) / len(sel))
         for s_ in SL:                                   # labelled studies that are left out: recorded in the manifest with their reasons
-            if s_["code"] not in sel and s_["n_labelled"]:
+            if s_["code"] not in sel and (s_["n_labelled"] or s_.get("n_missed")):
                 exs += _examples(s_["code"], dict(excluded=s_["code"] in ex or bool(s_["excluded_why"]), archived_out="archived" in s_["excluded_why"]))
         man = DS.build(exs, EL.RULES_VERSION, P(), extra=dict(settings=dict(learn_from=S.get("percival_learn_from", "labelled"),
                        conflicts=S.get("percival_conflicts", "exclude"), use_historical=S.get("percival_use_historical", True),
@@ -730,11 +792,14 @@ def _train(reason):
         dv = [r for r in rows if not r.get("test")]; tv = [r for r in rows if r.get("test")]
         c1, c0 = sum(r["y"] for r in dv), sum(1 - r["y"] for r in dv); t1, t0 = sum(r["y"] for r in tv), sum(1 - r["y"] for r in tv)
         if min(c1, c0) < 3 or len(dv) < 10:
-            raise ValueError(f"not enough expert labels to learn yet. The development cohort has {c1} cSS and {c0} not-cSS calls "
-                             f"(at least 3 of each and 10 in all are needed); the locked test cohort (patients set aside for testing, never "
-                             f"used to learn) holds {t1} cSS and {t0} not-cSS. Dataset {man['id']}: see Training Center for every study and "
-                             f"candidate that was left out and why. Review more studies that contain cSS (press Y on each cSS candidate) "
-                             f"and start the cycle again.")
+            msg = (f"Insufficient expert labels for supervised meta-learning. The development cohort currently has {c1} cSS "
+                   f"and {c0} not-cSS calls (at least 3 of each and 10 in all are needed); the locked test cohort holds {t1} cSS "
+                   f"and {t0} not-cSS. Dataset {man['id']}: see Training Center for every study and candidate that was left out and why. "
+                   f"Review more studies that contain cSS (press Y on each cSS candidate, or draw missed cSS in the viewer) and start the cycle again.")
+            log(f"training paused: {msg}", 0.075)
+            _transition("insufficient_data", stage="data_needed", error=msg)
+            _run_end("insufficient_data", error=msg, dataset=man["id"])
+            return dict(ok=False, error=msg, stage="data_needed")
         idc = {}
         for c in sel: idc[identity(c)["status"]] = idc.get(identity(c)["status"], 0) + 1
         _transition("running", stage="components")
@@ -1201,6 +1266,7 @@ def state():
                 selection=sel, n_selected=sum(1 for s in sel if s["included"]),
                 labels=dict(css=sum(s["n_css"] for s in sel if s["included"]), mimic=sum(s["n_mimic"] for s in sel if s["included"]),
                             css_dev=sum(s["css_dev"] for s in sel if s["included"]), mimic_dev=sum(s["mimic_dev"] for s in sel if s["included"]),
+                            missed=sum(s.get("n_missed", 0) for s in sel), css_with_missed=sum(s["n_css"] + s.get("n_missed", 0) for s in sel if s["included"]),
                             stale=sum(s["n_stale"] for s in sel), not_in_study_list=sum(1 for s in sel if s["not_in_study_list"])),
                 minimum=dict(studies=MT.MIN_STUDIES, candidates=MT.MIN_CANDIDATES, per_class=MT.MIN_PER_CLASS),
                 since_last=len({s["code"] for s in sel if s["included"]} - set(_jl(P("last_cycle.json"), {}).get("finished", []))),
@@ -1215,6 +1281,11 @@ def state():
                               reviewed_studies=sum(1 for x in sel if x["reviewed"]), called=sum(x["n_labelled"] for x in sel),
                               eligible=sum(x["n_eligible"] for x in sel), eligible_dev=sum(x["n_eligible_dev"] for x in sel),
                               adjudication=sum(x["n_adjudication"] for x in sel), historical=sum(x["n_historical"] for x in sel),
+                              missed_lesions=sum(s.get("n_missed", 0) for s in sel),
+                              valid_mri=sum(1 for x in sel if x["processed"] or not x.get("not_in_study_list")),
+                              awaiting_review=sum(1 for x in sel if x["processed"] and not x["reviewed"]),
+                              eligible_candidate_classification=sum(x["n_eligible"] for x in sel),
+                              eligible_detection=sum(x["n_eligible"] + x.get("n_missed", 0) for x in sel),
                               excluded=sum(x["n_labelled"] - x["n_eligible"] - x["n_adjudication"] for x in sel)))
 
 

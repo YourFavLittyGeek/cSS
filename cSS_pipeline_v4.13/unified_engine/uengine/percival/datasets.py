@@ -14,7 +14,7 @@ v5.24 learning engine (manifest schema percival-dataset/1.1):
   reproduce()         rebuilds a manifest's core from the current reviews and reports whether it is identical (same content hash)."""
 import glob, hashlib, json, os, time
 
-COMPONENTS = ("char", "image", "fusion", "meta", "predictor", "shadow")
+COMPONENTS = ("char", "image", "fusion", "meta", "predictor", "shadow", "detection", "segmentation")
 K_FOLDS, FOLD_SEED = 5, 0                      # = meta.component_oof defaults (patient-grouped CV used for model selection)
 
 
@@ -31,15 +31,18 @@ def _jl(p, d=None):
         with open(p) as f: return json.load(f)
     except Exception: return d
 
+_cid_sort = lambda e: (e["study"], int(e["cand_id"]) if str(e["cand_id"]).isdigit() else 100000 + abs(hash(str(e["cand_id"]))) % 10000)
+_cid_val = lambda cid: int(cid) if str(cid).isdigit() else str(cid)
+
 
 def build(examples, rules_version, store, extra=None):
     """examples: [dict(study, cand_id, patient, y, label_source, reviewer, partition, components {k: ok}, reasons)] (labelled candidates,
     eligible or not). -> manifest (stored as datasets/dsNNN.json unless an identical one exists)"""
-    ex = sorted(examples, key=lambda e: (e["study"], int(e["cand_id"])))
+    ex = sorted(examples, key=_cid_sort)
     check = verify(ex)
     if check["errors"]: raise DatasetError("dataset integrity: " + "; ".join(check["errors"]))
     folds = assign_folds(ex)
-    core = [(e["study"], int(e["cand_id"]), e.get("patient"), e.get("y"), e.get("label_source"), e.get("partition"),
+    core = [(e["study"], _cid_val(e["cand_id"]), e.get("patient"), e.get("y"), e.get("label_source"), e.get("partition"),
              sorted(k for k, v in (e.get("components") or {}).items() if v), sorted(e.get("reasons") or [])) for e in ex]
     h = hashlib.sha256(json.dumps([core, rules_version, FEATURE_SCHEMA, PATCH_SPEC], default=str).encode()).hexdigest()[:16]
     d = os.path.join(store, "datasets"); os.makedirs(d, exist_ok=True)
@@ -66,7 +69,7 @@ def build(examples, rules_version, store, extra=None):
                                                         test=len({e.get('patient') for e in ex if e.get('partition') == 'test'})),
                                           folds={str(f): len(v) for f, v in sorted(_inv(folds).items())}),
              label_sources={s: sum(1 for e in ex if e.get("label_source") == s) for s in sorted({e.get("label_source") for e in ex})},
-             examples=[dict(study=e["study"], cand_id=int(e["cand_id"]), patient=e.get("patient"), y=e.get("y"), label_source=e.get("label_source"),
+             examples=[dict(study=e["study"], cand_id=_cid_val(e["cand_id"]), patient=e.get("patient"), y=e.get("y"), label_source=e.get("label_source"),
                             reviewer=e.get("reviewer", ""), call=e.get("call"), partition=e.get("partition"),
                             split="test" if e.get("partition") == "test" else "train" if e.get("partition") == "development" else None,
                             validation_fold=folds.get(e.get("patient")) if e.get("partition") == "development" else None,
@@ -108,7 +111,7 @@ def assign_folds(ex):
 def verify(ex):
     """integrity of a list of examples: leakage (a patient in development AND test), duplicate candidates -> dict(errors, checks)"""
     dev = {e.get("patient") for e in ex if e.get("partition") == "development"}; tst = {e.get("patient") for e in ex if e.get("partition") == "test"}
-    keys = [(e["study"], int(e["cand_id"])) for e in ex]; dup = sorted({k for k in keys if keys.count(k) > 1}) if len(keys) != len(set(keys)) else []
+    keys = [(e["study"], str(e["cand_id"])) for e in ex]; dup = sorted({k for k in keys if keys.count(k) > 1}) if len(keys) != len(set(keys)) else []
     errors = []
     if dev & tst: errors.append(f"patient leakage: {len(dev & tst)} patient(s) in both development and test")
     if dup: errors.append(f"{len(dup)} candidate(s) listed twice, e.g. {dup[0]}")
@@ -119,13 +122,13 @@ def reproduce(store, did, examples, rules_version):
     """does today's evaluation of the reviews give the same dataset? -> dict(identical, id, stored_hash, rebuilt_hash, differences)"""
     m = load(store, did)
     if not m: return dict(identical=False, error="unknown dataset")
-    ex = sorted(examples, key=lambda e: (e["study"], int(e["cand_id"])))
-    core = [(e["study"], int(e["cand_id"]), e.get("patient"), e.get("y"), e.get("label_source"), e.get("partition"),
+    ex = sorted(examples, key=_cid_sort)
+    core = [(e["study"], _cid_val(e["cand_id"]), e.get("patient"), e.get("y"), e.get("label_source"), e.get("partition"),
              sorted(k for k, v in (e.get("components") or {}).items() if v), sorted(e.get("reasons") or [])) for e in ex]
     h = hashlib.sha256(json.dumps([core, rules_version, FEATURE_SCHEMA, PATCH_SPEC], default=str).encode()).hexdigest()[:16]
     key = lambda e: (e.get("y"), e.get("partition"), e.get("label_source"), sorted(k for k, v in (e.get("components") or {}).items() if v), sorted(e.get("reasons") or []))
-    old = {(e["study"], int(e["cand_id"])): key(e) for e in m["examples"]}
-    new = {(e["study"], int(e["cand_id"])): key(e) for e in ex}
+    old = {(e["study"], str(e["cand_id"])): key(e) for e in m["examples"]}
+    new = {(e["study"], str(e["cand_id"])): key(e) for e in ex}
     diff = [dict(study=k[0], cand_id=k[1], stored=old.get(k), now=new.get(k)) for k in sorted(set(old) | set(new)) if old.get(k) != new.get(k)]
     kinds = {}
     for d in diff:

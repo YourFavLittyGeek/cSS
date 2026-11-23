@@ -30,14 +30,24 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 from scipy import ndimage as ndi
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
+ROOT = os.path.dirname(HERE)
+for p in (ROOT, os.path.join(ROOT, "unified_engine")):
+    if p not in sys.path: sys.path.insert(0, p)
 from css_common import base as _base, save_calls, FP, norm_call, LABELS
 import call_ledger as CL      # v5.15: every reviewer kept; shared ID_calls.csv / ID_score.json = EFFECTIVE calls (policy, default newest)
 
 B = _base()
 CALLS = ["cSS", "Vessel", "Normal", "Artifact", "Unsure", "Near ICH", "Microbleed"]   # v5.7: Microbleed (fine code MB) = not cSS
 # v5.17 Quick Add: optional fine label (css_common.LABELS code) recorded WITH a call; it never changes the call's meaning (see label_schema.py)
-FINE = {"cSS": ("C",), "Vessel": ("V", "VS", "VC", "VT", "VX", "TV"), "Normal": ("N", "NI", "CA", "SAH", "LN", "HI"), "Artifact": ("A", "AM"),
-        "Microbleed": ("MB",), "Unsure": ("U",), "Near ICH": ("H",)}
+FINE = {
+    "cSS": ("C",),
+    "Vessel": ("V", "VS", "VC", "VT", "VX", "PV", "VF", "OV", "TV"),
+    "Normal": ("N", "NI", "CA", "SAH", "LN", "HI", "OH", "OA", "OT"),
+    "Artifact": ("A", "AM", "SU"),
+    "Microbleed": ("MB",),
+    "Unsure": ("U",),
+    "Near ICH": ("H",)
+}
 SEQ_NAMES = {"swi": "SWI", "flair": "FLAIR", "t1": "T1", "t2": "T2", "phase": "Phase (filtered)"}
 LOCK = threading.Lock()
 slug = lambda s: re.sub(r"[^A-Za-z0-9]+", "_", s.strip()).strip("_") or "reviewer"
@@ -451,6 +461,28 @@ class Study:
         pd.DataFrame(rows, columns=["cand_id", "call", "comment", "reviewer", "time"] + FP + ["fine_code"]).to_csv(self.rpath(reviewer), index=False)
         primary(self.sid, reviewer, if_missing=True)                              # kept for display / the "use this reviewer" choice
         CL.materialize(B, self.sid, by=reviewer, rescore=False)                  # v5.15: shared ID_calls.csv = effective calls (no re-score per click)
+
+        # v5.25 Synchronize candidate review calls into PENSIEVE memory
+        try:
+            from uengine.pensieve import get_pensieve
+            p_mem = get_pensieve()
+            for cid_k, cinfo in calls.items():
+                call_norm = norm_call(cinfo.get("call", ""))
+                if call_norm:
+                    call_type = "definite_css" if call_norm == "cSS" else "not_css" if call_norm in ("Vessel", "Normal", "Artifact", "Mimic", "Microbleed") else "uncertain"
+                    lesion_type = cinfo.get("fine") or ("superficial_siderosis" if call_norm == "cSS" else "mimic")
+                    p_mem.record_expert_annotation(
+                        study_id=self.sid,
+                        reviewer_id=reviewer,
+                        call=call_type,
+                        candidate_uid=f"{self.sid}_cand_{cid_k}",
+                        lesion_type=lesion_type,
+                        confidence="high" if call_norm != "Unsure" else "uncertain",
+                        provenance=f"reviewer_web_{cinfo.get('time', now())}"
+                    )
+        except Exception as e_pen:
+            sys.stderr.write(f"[PensieveSync] Candidate call recording notice: {e_pen}\n")
+
         if cand_id is not None:
             v = calls.get(cand_id, {}); lp = f"{B}/review/{self.sid}_review_log.csv"; new = not os.path.exists(lp)
             with open(lp, "a") as f:
@@ -504,12 +536,42 @@ class Study:
             else: fp = pts
             ijk = pts.mean(0) if len(pts) > 1 else np.array(d["ijk"], float)
             n = (self.c2n @ np.r_[ijk, 1.0])[:3]; w = (self.can.affine @ np.r_[ijk, 1.0])[:3]
-            m.loc[len(m)] = [int(m.missed_id.max()) + 1 if len(m) else 1, reviewer, now(), *[int(round(v)) for v in n],
+            new_id = int(m.missed_id.max()) + 1 if len(m) else 1
+            detector_fate_text = self.fate(fp)
+            pts_json = json.dumps([[[round(float(c), 1) for c in q] for q in st] for st in strokes])
+            m.loc[len(m)] = [new_id, reviewer, now(), *[int(round(v)) for v in n],
                              *[str(round(float(v), 1)) for v in w], *[int(round(v)) for v in ijk], str(d.get("comment", ""))[:300],
                              str(d.get("plane", "")), str(d.get("slice", "")), str(d.get("shape", "point")),
-                             json.dumps([[[round(float(c), 1) for c in q] for q in st] for st in strokes]), self.fate(fp)]
-        elif action == "delete": m = m[m.missed_id != int(d["id"])]
-        elif action == "comment": m.loc[m.missed_id == int(d["id"]), "comment"] = str(d.get("comment", ""))[:300]
+                             pts_json, detector_fate_text]
+
+            # v5.25 Synchronize expert-discovered missed cSS lesion into PENSIEVE memory
+            try:
+                from uengine.pensieve import get_pensieve
+                get_pensieve().record_missed_lesion(
+                    study_id=self.sid,
+                    missed_id=str(new_id),
+                    reviewer_id=reviewer,
+                    coords_vox=(int(round(n[0])), int(round(n[1])), int(round(n[2]))),
+                    coords_mm=(float(round(w[0], 1)), float(round(w[1], 1)), float(round(w[2], 1))),
+                    slice_idx=int(d.get("slice", 0) or 0),
+                    plane=str(d.get("plane", "")),
+                    shape=str(d.get("shape", "point")),
+                    points_json=pts_json,
+                    comment=str(d.get("comment", ""))[:300],
+                    detector_fate=detector_fate_text
+                )
+            except Exception as e_pm:
+                sys.stderr.write(f"[PensieveSync] Missed lesion recording notice: {e_pm}\n")
+
+        elif action == "delete":
+            m = m[m.missed_id != int(d["id"])]
+            try:
+                from uengine.pensieve import get_pensieve
+                get_pensieve().delete_missed_lesion(self.sid, str(d["id"]))
+            except Exception:
+                pass
+        elif action == "comment":
+            m.loc[m.missed_id == int(d["id"]), "comment"] = str(d.get("comment", ""))[:300]
         m.to_csv(f"{B}/review/{self.sid}_missed.csv", index=False)
         return m.to_dict("records")
 
@@ -805,6 +867,26 @@ class H(BaseHTTPRequestHandler):
                     fin["audit_css"] = [dict(excl_id=k - AUDIT_OFFSET, rule=str(why.get(k - AUDIT_OFFSET, "")).split(":")[0])
                                         for k, v in sorted(au.items()) if v.get("call") == "cSS"]
                     json.dump(fin, open(final_path(s.sid, rev), "w"), indent=1)
+
+                    # v5.25 Synchronize study review completion status into PENSIEVE memory
+                    try:
+                        from uengine.pensieve import get_pensieve
+                        p_mem = get_pensieve()
+                        cand_done = "all_reviewed" if res["unread"] == 0 else "incomplete"
+                        m_done = "missed_drawn" if int(len(res["missed"])) > 0 else "none_found"
+                        overall = "expert_review_completed" if cand_done == "all_reviewed" else "candidate_review_done"
+                        p_mem.set_study_review_status(
+                            study_id=s.sid,
+                            candidate_review=cand_done,
+                            missed_assessment=m_done,
+                            adjudication="not_needed",
+                            overall_status=overall,
+                            reviewer_id=rev,
+                            completed_at=time.time()
+                        )
+                    except Exception as e_pst:
+                        sys.stderr.write(f"[PensieveSync] Study review status recording notice: {e_pst}\n")
+
                     import css_report
                     out, n, xl = css_report.build(B); res["final"] = fin; res["report"] = f"{out}.csv{xl}"
                 return self._send(res)

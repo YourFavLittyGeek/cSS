@@ -11,12 +11,14 @@ Components and what each needs (besides a usable expert label):
   shadow  Shadow evaluation of a candidate model   the label alone; locked-test patients INCLUDED (shadow only evaluates, never learns) (v1.1)
 Dataset membership: 'development' (used to learn) or 'locked test' (patients set aside permanently; used only to evaluate)."""
 
-RULES_VERSION = "percival-eligibility/1.2"     # 1.1 (v5.24): + predictor, shadow components; missing requirements in words
+RULES_VERSION = "percival-eligibility/1.3"     # 1.1 (v5.24): + predictor, shadow components; missing requirements in words
                                                # 1.2 (v5.25): patient identity must be verified (no study-code substitution)
-COMPONENTS = ("char", "image", "fusion", "meta", "predictor", "shadow")
-LEARNING = ("char", "image", "fusion", "meta")   # the components trained by the Percival training cycle
-NAMES = dict(char="Characteristic ML", image="Image ML", fusion="Fusion", meta="Meta-model + calibration", predictor="Unified Score predictors",
-             shadow="Shadow evaluation")
+                                               # 1.3 (v5.25): task-specific detection & segmentation learning with missed cSS support
+COMPONENTS = ("char", "image", "fusion", "meta", "predictor", "shadow", "detection", "segmentation")
+LEARNING = ("char", "image", "fusion", "meta", "detection", "segmentation")   # the components trained by the Percival training cycle
+NAMES = dict(char="Imaging Features (Charact. ML)", image="MRI Patch (Image ML)", fusion="Integrated Model Evidence",
+             meta="Model Adaptation (Meta-model)", predictor="Unified Score predictors", shadow="Shadow evaluation",
+             detection="Quantitative Candidate Detection", segmentation="Lesion Segmentation Mask")
 
 REASONS = {
     "NOT_REVIEWED": "no expert call for this candidate",
@@ -37,18 +39,20 @@ REASONS = {
     "PATIENT_ID_MISSING": "no patient identity record for this study - patient-level validation is impossible (study-code substitution is refused)",
     "PATIENT_ID_UNVERIFIED": "patient identity not verified (study registered as one patient per study without confirmation) - confirm it in Training Center › Patient identity",
     "PATIENT_ID_CONFLICT": "possible identity conflict: the same examination fingerprint / DICOM study belongs to another patient record",
+    "NO_MASK": "no 2D contour or 3D segmentation mask available for segmentation learning",
 }
 REQUIREMENTS = dict(NOT_REVIEWED="an expert call (cSS or not cSS)", UNCERTAIN="a definite call (cSS or not cSS)", OUT_OF_SCOPE="a definite call",
                     CONFLICT="agreement between reviewers or an adjudicated call", NO_IMAGE="the MRI patch (SWI + candidate mask)",
                     NO_MEASUREMENTS="detector measurements", NO_PREDICTORS="a reliable Unified Score predictor (FreeSurfer anatomy + registration)",
                     NOT_AUTHORIZED="local learning switched on", UNRECOGNISED_CALL="a call this version recognises",
                     PATIENT_ID_MISSING="a patient identity record", PATIENT_ID_UNVERIFIED="a verified patient identity (import grouping or your confirmation)",
-                    PATIENT_ID_CONFLICT="a resolved patient identity conflict")
+                    PATIENT_ID_CONFLICT="a resolved patient identity conflict",
+                    NO_MASK="a valid 2D contour or 3D segmentation mask")
 
 
 def evaluate(c):
     """c: dict(label y (1/0/None), label_kind ('css'|'mimic'|'uncertain'|'out_of_scope'|None), conflict, historical, study_excluded,
-    study_archived, duplicate, authorized, has_image, n_char, test, qc). -> dict(status, reasons, components {k: dict(ok, reasons)}, partition)"""
+    study_archived, duplicate, authorized, has_image, n_char, test, qc, has_mask). -> dict(status, reasons, components {k: dict(ok, reasons)}, partition)"""
     reasons, block = [], None
     kind = c.get("label_kind")
     if kind is None: block = "NOT_REVIEWED"
@@ -71,6 +75,7 @@ def evaluate(c):
             if k in ("image", "fusion") and not c.get("has_image"): r.append("NO_IMAGE")
             if k in ("char", "fusion") and not c.get("n_char"): r.append("NO_MEASUREMENTS")
             if k == "predictor" and not c.get("has_predictors", True): r.append("NO_PREDICTORS")
+            if k == "segmentation" and not c.get("has_mask", True): r.append("NO_MASK")
         comp[k] = dict(ok=not r, reasons=r, missing=[REQUIREMENTS[x] for x in r if x in REQUIREMENTS])
     status = ("not_reviewed" if block == "NOT_REVIEWED" else "needs_adjudication" if block == "CONFLICT" else
               "unrecognised" if block == "UNRECOGNISED_CALL" else

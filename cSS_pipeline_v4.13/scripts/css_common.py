@@ -118,8 +118,12 @@ LABELS = {
     "VT":  ("vein_transcortical", "Vessel"),      # medullary / transcortical, perpendicular to the cortex
     "VX":  ("vein_sinus_adjacent", "Vessel"),     # vein joining / next to a dural sinus
     "TV":  ("thrombosed_vein", "Vessel"),
+    "PV":  ("prominent_vessel", "Vessel"),
+    "VF":  ("vascular_flow_signal", "Vessel"),
+    "OV":  ("other_vascular_structure", "Vessel"),
     "A":   ("artifact_airbone", "Artifact"),    # skull base / orbitofrontal / temporal pole susceptibility
     "AM":  ("artifact_motion", "Artifact"),     # motion, ghosting, Gibbs, registration
+    "SU":  ("susceptibility_artifact", "Artifact"),
     "N":   ("normal_other", "Normal"),
     "NI":  ("normal_iron_cortex", "Normal"),    # e.g. iron-rich motor cortex
     "MB":  ("microbleed", "Normal"),
@@ -127,6 +131,9 @@ LABELS = {
     "SAH": ("acute_cSAH", "Normal"),
     "LN":  ("laminar_necrosis", "Normal"),
     "HI":  ("haemorrhagic_infarct", "Normal"),
+    "OH":  ("other_hemorrhagic_finding", "Normal"),
+    "OA":  ("other_imaging_abnormality", "Normal"),
+    "OT":  ("other_specified", "Normal"),
     "IS":  ("infratentorial_SS", "Normal"),
     "H":   ("ICH_related", "Near ICH"),
     "U":   ("uncertain", "Unsure"),

@@ -1,9 +1,30 @@
-// percival_view.js - v5.22 Research › Percival Intelligence: the advanced analysis behind the single Percival Score.
-// Everything shown is produced by the active / selected model on this computer (no invented weights).
-const PV={tab:"overview",study:"",q:""};
+// percival_view.js - v5.25 Research › Percival Intelligence & Training Center
+// Standard View (clinical language) & Advanced Research View (technical algorithms)
+const PV={tab:"center",study:"",q:"",viewMode:localStorage.getItem("pv_view_mode")||"standard"};
 const PC={percival:"var(--lv-1)",dev:"var(--lv-2)",math:"var(--lv-math)"};
-const CN={math:"MATH",unified:"Unified Score",char:"Characteristic ML",image:"Image ML",fusion:"Fusion"};
-const MN={math_only:"MATH alone",equal_mean:"Equal-weight average (not learned)",fusion_only:"Fusion alone",stack_logit:"Logistic stacking",stack_fusion:"Regularised stacking · MATH + Unified + Fusion",stack_reg:"Regularised stacking + disagreement",boosted:"Gradient-boosted stumps"};
+const CN_STD={math:"Quantitative Candidate Detection",unified:"Unified Anomaly Score",char:"Imaging Features",image:"MRI Visual Intelligence",fusion:"Integrated Model Evidence"};
+const CN_ADV={math:"Deterministic MATH (score_v4)",unified:"Unified Predictor Score (v1.1)",char:"Characteristic ML (9 measurements)",image:"Image ML (3D CNN patch)",fusion:"Multimodal Fusion ML"};
+const CN=new Proxy({},{get:(t,p)=>(PV.viewMode==="standard"?CN_STD[p]:CN_ADV[p])||p});
+
+const MN_STD={
+  math_only:"Quantitative Detection Alone",
+  equal_mean:"Balanced Multi-source Average",
+  fusion_only:"Integrated Evidence Alone",
+  stack_logit:"Calibrated Model Adaptation",
+  stack_fusion:"Regularised Multi-evidence Stacking",
+  stack_reg:"Model Adaptation with Disagreement Analysis",
+  boosted:"Adaptive Gradient Decision Ensemble"
+};
+const MN_ADV={
+  math_only:"MATH alone (unweighted)",
+  equal_mean:"Equal-weight arithmetic mean",
+  fusion_only:"Multimodal Fusion alone",
+  stack_logit:"Logistic regression stacking",
+  stack_fusion:"Ridge-regularised stacking (MATH+Unified+Fusion)",
+  stack_reg:"Regularised stacking + disagreement interaction",
+  boosted:"Gradient-boosted decision stumps"
+};
+const MN=new Proxy({},{get:(t,p)=>(PV.viewMode==="standard"?MN_STD[p]:MN_ADV[p])||p});
 const g3=v=>v==null?"—":(+v).toFixed(3),pct=v=>v==null?"—":`${Math.round(v)}`;
 function pvCurve(H){if(!H.length)return '<p class="note">The learning curve appears after the first training cycle.</p>';
   const W=760,Hh=270,L=46,R=170,T=14,Bm=40,pw=W-L-R,ph=Hh-T-Bm,n=H.length,X=i=>L+(n===1?pw/2:pw*i/(n-1));
@@ -27,11 +48,15 @@ async function intelView(v){{const hq=location.hash.match(/^#intel\?tab=(\w+)/);
   const s=await api("/api/percival/state");if(V!=="intel")return;
   if(s.store&&!s.store.ok){v.innerHTML=`<div class="banner w" data-pv="store-error"><b>Percival data could not be opened</b><span>${esc(s.store.error)}</span></div><p class="note">Nothing was changed. Backups of earlier states are in the project folder under backups/percival/. Data integrity details: Settings › About, or reopen the previous Percival version.</p>`;return}const M=s.active,Lt=s.latest,H=s.history||[],job=s.job||{},d=(M||Lt||{}).data;
   const status=!s.authorized?'<span class="pill bad">local learning switched off</span>':!M?(Lt?'<span class="pill warn">no model active yet - make one active in Model Center</span>':'<span class="pill">no model yet</span>'):M.ready?'<span class="pill ok">Percival Score in use</span>':`<span class="pill warn">learning · minimum ${s.minimum.studies} studies / ${s.minimum.candidates} candidates</span>`;
-  v.innerHTML=`<div class="banner ${s.authorized?"":"w"}" data-pv="banner"><b>Percival Intelligence</b><span class="mut">How the single Percival Score is produced: MATH, Unified Score, Characteristic ML, Image ML and Fusion, combined by a meta-model learned from your expert reviews - all on this Mac, no external AI. Experimental assessment score, not a validated probability or a clinical result.</span></div>
-   <div class="row" style="flex-wrap:wrap;gap:10px;margin:10px 0">${status}
+  v.innerHTML=`<div class="banner ${s.authorized?"":"w"}" data-pv="banner"><b>Percival Intelligence</b><span class="mut">${PV.viewMode==="standard"?"AI-Assisted Cerebral Superficial Siderosis detection and neuroimaging intelligence. Learns locally on this Mac from expert radiologist reviews.":"Multimodal evidence integration: ALBUS quantitative discovery, LUMOS 3D visual intelligence, NOX morphological analysis, and PERCIVAL Core meta-learning."}</span></div>
+   <div class="row" style="flex-wrap:wrap;gap:10px;margin:10px 0;align-items:center">${status}
+    <div style="display:inline-flex;gap:4px;background:var(--panel2);padding:2px;border-radius:6px">
+      <button class="b sm ${PV.viewMode==='standard'?'pri':''}" id="pv-mode-std" title="Clinical research terminology">Standard View</button>
+      <button class="b sm ${PV.viewMode==='advanced'?'pri':''}" id="pv-mode-adv" title="In-depth algorithmic formulas and metrics">Advanced Research View</button>
+    </div>
     ${s.authorized?`<button class="b pri" id="pv-train" ${job.state==="running"?"disabled":""}>${job.state==="running"?`training cycle… ${Math.round(100*(job.progress||0))} %`:"Start a training cycle"}</button><span class="note">next automatic cycle after ${Math.max(0,s.cycle_n-s.since_last)} more finished studies</span>`
       :'<button class="b pri" id="pv-on" data-pv="switch-on">Switch on local learning</button><span class="note">lets the app learn from this project\'s MRI and expert reviews - on this Mac only</span>'}
-    <span class="sp"></span>${job.state==="failed"?`<span class="bad">last cycle failed: ${esc(job.error)}</span>`:""}</div>
+    <span class="sp"></span>${job.state==="failed"?`<span class="bad">last cycle failed: ${esc(job.error)}</span>`:job.state==="insufficient_data"?`<span class="warn">training paused: expert review needed</span>`:""}</div>
    <div class="tiles" data-pv="tiles">
     <div class="tile"><div class="n">${d?d.studies:0}</div><div class="t">studies learned</div></div>
     <div class="tile"><div class="n">${d?d.dev_candidates+d.test_candidates:0}</div><div class="t">candidates${d?` · ${d.css} cSS / ${d.not_css} not`:""}</div></div>
@@ -265,6 +290,8 @@ async function intelView(v){{const hq=location.hash.match(/^#intel\?tab=(\w+)/);
     toast(r.ok?`${esc(r.version)} active`:esc(r.error),!r.ok);intelView(v)});
   v.querySelectorAll("[data-pvst]").forEach(b=>b.onclick=async()=>{const st=b.dataset.st;let why="";if(st!=="restore"){why=prompt(`Reason to mark ${b.dataset.pvst} as ${st}:`);if(!why||!why.trim())return}
     const r=await api("/api/percival/status",{version:b.dataset.pvst,status:st,why});toast(r.ok?`${esc(r.version)}: ${esc(r.status)}`:esc(r.error),!r.ok);intelView(v)});
+  $("#pv-mode-std")&&($("#pv-mode-std").onclick=()=>{PV.viewMode="standard";localStorage.setItem("pv_view_mode","standard");intelView(v)});
+  $("#pv-mode-adv")&&($("#pv-mode-adv").onclick=()=>{PV.viewMode="advanced";localStorage.setItem("pv_view_mode","advanced");intelView(v)});
   $("#pv-rb")&&($("#pv-rb").onclick=async()=>{const r=await api("/api/percival/rollback",{});toast(r.ok?`rolled back to ${esc(r.version)}`:esc(r.error),!r.ok);intelView(v)});
   $("#pv-on")&&($("#pv-on").onclick=async()=>{if(!confirm("Switch on local learning? Percival will read this project's MRI and expert reviews to learn - on this Mac only; nothing is uploaded and no external AI service is used."))return;await api("/api/percival/authorize",{on:true});await api("/api/percival/train",{});toast("switched on - the first training cycle started");intelView(v)});
   $("#pv-train")&&($("#pv-train").onclick=async()=>{await api("/api/percival/train",{});toast("training cycle started");intelView(v)});
@@ -319,56 +346,485 @@ function pvFlow(s,X){const I=s.inputs||{},n=I.studies||0,F=((X||{}).intelligence
   </table>
   <p class="note">Labels: your expert calls in Review (cSS = 1; Vessel / Normal / Artifact / Microbleed = 0; Unsure and Near ICH are not used). The other screens under <i>Older prototypes</i> (Training, Predictor model, Shadow ML, Image ML) are the separate research prototypes these parts were developed from; they do <b>not</b> feed the Percival Score. <i>Shadow ML</i> = the earlier Unified-Score engine run in "shadow mode": it computes its predictions next to the pipeline for comparison and never changes a result.</p></div>`}
 
-// ------------------------------------------------------------------ v5.24 Training Center: studies -> reviews -> eligibility -> datasets -> training
+// ------------------------------------------------------------------ v5.25 Training Center: 14 Modular Sections (Standard & Advanced View)
 const PVR={NOT_REVIEWED:"not reviewed",UNCERTAIN:"Unsure",OUT_OF_SCOPE:"Near ICH (out of scope)",CONFLICT:"reviewers disagree",STUDY_EXCLUDED:"study left out",
   STUDY_ARCHIVED:"archived",DUPLICATE_STUDY:"duplicate examination",NOT_AUTHORIZED:"learning off",NO_IMAGE:"no MRI patch",NO_MEASUREMENTS:"no measurements",
   LOCKED_TEST:"locked test",HISTORICAL_LABEL:"earlier-version label",QC_LOW:"QC low",NO_PREDICTORS:"no reliable predictor",UNRECOGNISED_CALL:"call not recognised"};
-const PVCN={char:"Characteristic ML",image:"Image ML",fusion:"Fusion",meta:"Meta-model",predictor:"Predictors",shadow:"Shadow"};
+const PVCN={char:"Characteristic ML",image:"Image ML",fusion:"Fusion",meta:"Meta-model",predictor:"Predictors",shadow:"Shadow",detection:"Candidate Detection (ALBUS)",segmentation:"Lesion Segmentation"};
 function pvStatus(e){e=e||{};const k=e.status||"—",c={active:"ok",candidate:"warn",experimental:"",retired:"",rejected:"bad"}[k]||"";return `<span class="pill ${c}" title="${esc((e.why||"")+(e.at?" · "+e.at:""))}">${esc(k)}</span>`}
-async function pvCenter(el,s,v){const O=s.overview||{},LS=s.learn_settings||{},DSs=s.datasets||[],last=DSs[DSs.length-1];
+
+async function pvCenter(el,s,v){
+  const O=s.overview||{},LS=s.learn_settings||{},DSs=s.datasets||[],last=DSs[DSs.length-1];
+  const L=s.labels||{},j=s.job||{},M=s.active,Lt=s.latest,runs=s.runs||[],H=s.history||[];
   const sel=(s.selection||[]).filter(x=>!PV.q||(x.label+" "+x.cohort).toLowerCase().includes(PV.q.toLowerCase()));
-  const tile=(n,t,k)=>`<div class="tile" ${k?`data-pv="${k}"`:""}><div class="n">${n??0}</div><div class="t">${t}</div></div>`;
-  const comp=last?["char","image","fusion","meta","predictor","shadow"].filter(k=>(last.components||{})[k]).map(k=>{const c=(last.components||{})[k]||{},d=c.development||{},t=c.test||{};
-    return `<tr><td><b>${{char:"Characteristic ML",image:"Image ML",fusion:"Fusion",meta:"Percival meta-model",predictor:"Unified Score predictors",shadow:"Shadow evaluation"}[k]}</b></td><td class="mono">${d.n??0}</td><td class="mono">${d.css??0} / ${d.not_css??0}</td><td class="mono">${d.patients??0}</td><td class="mono">${t.n??0}</td><td class="mono">${t.css??0} / ${t.not_css??0}</td><td class="mono">${t.patients??0}</td></tr>`}).join(""):"";
-  el.innerHTML=`<div class="card" data-pv="center"><h3 style="margin:0 0 4px">Training Center</h3>
-    <p class="note" style="margin-top:0">How expert reviews become training examples: <b>study</b> → <b>processed</b> (candidates detected) → <b>reviewed</b> (your calls) → <b>eligible</b> (Training Eligibility Engine, per component) → <b>dataset</b> (versioned snapshot) → <b>training cycle</b> → validated model. Training never starts after a single review; it runs when you start it (or after the number of newly reviewed studies set below).</p>
-    <div class="tiles" data-pv="center-tiles">${tile(O.registered,"studies")}${O.on_disk_only?tile(O.on_disk_only,"on disk only"):""}${tile(O.processed,"processed")}${tile(O.candidates,"candidates")}${tile(O.reviewed_studies,"reviews finished")}${tile(O.called,"expert calls","called")}${tile(O.eligible,`eligible · ${O.eligible_dev??0} dev`,"eligible")}${tile(O.excluded,"not eligible")}${tile(O.adjudication,"adjudication")}${O.historical?tile(O.historical,"earlier-version labels"):""}</div>
-    ${s.labels?`<p class="note"><b>For learning now (development cohort):</b> ${s.labels.css_dev} cSS · ${s.labels.mimic_dev} not cSS - at least 3 of each and 10 in all are needed for a training cycle; ${s.minimum.studies} studies / ${s.minimum.candidates} candidates / ${s.minimum.per_class} per class before a model is called ready.${s.labels.stale?` ${s.labels.stale} earlier call(s) no longer match the current candidates (study re-detected) - confirm them in Review.`:""}</p>`:""}
-    <div class="row" style="flex-wrap:wrap;gap:8px"><label class="note">learn from <select id="pv-lf"><option value="labelled" ${LS.learn_from!=="finished"?"selected":""}>every study with expert calls (only called candidates)</option><option value="finished" ${LS.learn_from==="finished"?"selected":""}>finished reviews only</option></select></label>
-      <label class="note">reviewer conflicts <select id="pv-cf"><option value="exclude" ${LS.conflicts!=="effective"?"selected":""}>leave out until adjudicated</option><option value="effective" ${LS.conflicts==="effective"?"selected":""}>use the effective call (Review › calls policy)</option></select></label>
-      <label class="note"><input type="checkbox" id="pv-hi" ${LS.use_historical!==false?"checked":""}> use reviews from earlier versions / projects</label></div>
-    <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:6px"><label class="note"><input type="checkbox" id="pv-ac" ${s.autocycle?"checked":""}> start a cycle automatically after</label><input id="pv-n" type="number" min="1" value="${s.cycle_n}" style="width:70px"><span class="note">newly reviewed studies · locked test cohort</span><input id="pv-tf" type="number" min="0.1" max="0.4" step="0.05" value="${s.test_fraction}" style="width:80px"><span class="note">of patients</span><button class="b" id="pv-save">Save</button></div></div>
-   <div class="card"><h3 style="margin:0 0 4px">Datasets ${last?`<span class="note">latest ${esc(last.id)} · ${esc(last.created)} · content ${esc(last.content_hash)} · rules ${esc(last.rules_version)} · ${esc(last.feature_schema)}</span>`:""}</h3>
-    ${last?`<table data-pv="datasets"><tr><th>Component</th><th>development n</th><th>cSS / not</th><th>patients</th><th>locked test n</th><th>cSS / not</th><th>patients</th></tr>${comp}</table>
-      <p class="note">Left out: ${Object.entries(last.excluded_by_reason||{}).map(([k,n])=>`${esc(PVR[k]||k)} ${n}`).join(" · ")||"none"} · label sources: ${Object.entries(last.label_sources||{}).map(([k,n])=>`${esc(k==="historical"?"earlier versions":"current reviews")} ${n}`).join(" · ")}. Every version: ${DSs.map(d=>`<a href="#" data-pvdl="${esc(d.id)}">${esc(d.id)}</a>`).join(" · ")}</p>`
-      :'<p class="note">A dataset snapshot is made at the start of every training cycle (one file per version, never changed; an unchanged dataset is not stored twice).</p>'}</div>
-   <div class="card" data-pv="eligibility-record"><h3 style="margin:0 0 4px">Eligibility record</h3>${(()=>{const E=s.eligibility_record||{};return E.evaluated?`<p class="note" style="margin-top:0">Last evaluated ${esc(E.evaluated)} · rules ${esc(E.rules)} · ${E.n} called candidates · usable per component: ${Object.entries(E.by_component||{}).map(([k,n])=>`${esc(PVCN[k]||k)} ${n}`).join(" · ")} · status: ${Object.entries(E.by_status||{}).map(([k,n])=>`${esc(k.replace("_"," "))} ${n}`).join(" · ")}</p>`:'<p class="note" style="margin-top:0">Not recorded yet (recorded after every training cycle).</p>'})()}
-    ${(s.unrecognised||[]).length?`<p class="warn">Calls this version does not recognise (kept, not used for learning): ${s.unrecognised.map(esc).join(", ")}</p>`:""}
-    <div class="row"><button class="b sm" id="pv-elig">Evaluate and record now</button>${last?`<button class="b sm" id="pv-repro" title="rebuild ${esc(last.id)} from today's reviews and compare">Check ${esc(last.id)} is reproducible</button>`:""}<span class="note" id="pv-repro-r"></span></div></div>
-   <div class="card" data-pv="runs"><h3 style="margin:0 0 4px">Training runs</h3>${(s.runs||[]).length?`<table><tr><th>Run</th><th>Started</th><th>Reason</th><th>State</th><th>Dataset</th><th>Model</th><th>Status / result</th></tr>
-    ${s.runs.slice().reverse().map(r=>`<tr><td class="mono">${esc(r.id)}</td><td class="note">${esc(r.started||"")}${r.finished?" → "+esc(r.finished.slice(11)):""}</td><td class="note">${esc(r.reason||r.kind||"")}</td><td>${{finished:'<span class="ok">finished</span>',failed:'<span class="bad">failed</span>',running:'<span class="warn">running</span>',interrupted:'<span class="warn">interrupted</span>'}[r.state]||esc(r.state)}</td><td class="mono">${esc(r.dataset||"—")}</td><td class="mono">${esc(r.version||"—")}</td><td class="note">${r.error?esc(r.error.slice(0,160)):r.status?esc(r.status)+(r.acceptance&&!r.acceptance.passed?" · "+esc((r.acceptance.reasons||[]).join("; ")):""):esc(r.kind||"")}</td></tr>`).join("")}</table>`:'<p class="note">No training run yet.</p>'}</div>
-   <div class="card"><div class="row" style="flex-wrap:wrap"><input id="pv-q" placeholder="search" value="${esc(PV.q)}" style="width:200px"><span class="sp"></span><button class="b" id="pv-inc">Use ticked</button><button class="b" id="pv-exc">Leave ticked out</button></div>
-    <table data-pv="selection"><tr><th style="width:34px"><input type="checkbox" id="pv-all"></th><th>Study</th><th>Processed</th><th>Review</th><th>Called</th><th>cSS / not</th><th>Eligible</th><th>Partition</th><th>Used / why not</th><th></th></tr>
-    ${sel.map(x=>`<tr><td><input type="checkbox" data-pvs="${esc(x.code)}"></td><td><b>${esc(x.label)}</b>${x.not_in_study_list?' <span class="pill">on disk, not in the study list</span>':""}${x.retired?' <span class="pill">removed, kept for ML</span>':x.archived?' <span class="pill">archived</span>':""}<div class="note">${esc(x.cohort||"")}</div></td>
-      <td>${x.processed?`<span class="ok">✓</span> <span class="note">${x.n_candidates}</span>`:'<span class="mut">no</span>'}</td><td class="note">${x.reviewed?'<span class="ok">finished</span>':esc(x.review_state||"—")}</td>
-      <td class="mono">${x.n_labelled}${x.n_historical?` <span class="note" title="labels from earlier versions">(${x.n_historical} earlier)</span>`:""}${x.n_stale?` <span class="note" title="calls that no longer match a current candidate">+${x.n_stale} to confirm</span>`:""}</td>
-      <td class="mono">${x.n_css} / ${x.n_mimic}</td><td class="mono">${x.n_eligible}${x.n_adjudication?` <span class="warn" title="reviewers disagree">${x.n_adjudication} ⚑</span>`:""}</td><td class="note">${x.partition==="test"?"locked test":"development"}</td>
-      <td>${x.included?'<span class="ok">✓ used</span>':`<span class="mut">${esc(x.excluded_why||x.why)}</span>`}${x.label_error?` <span class="warn">${esc(x.label_error)}</span>`:""}</td><td>${x.n_labelled?`<button class="b sm" data-pvc="${esc(x.code)}">candidates</button>`:""}</td></tr>
-      ${PV.open===x.code?`<tr><td></td><td colspan="9" id="pv-cands" class="note">loading…</td></tr>`:""}`).join("")}</table></div>`;
-  $("#pv-save").onclick=async()=>{await api("/api/percival/settings",{percival_autocycle:$("#pv-ac").checked,percival_cycle_n:Math.max(1,+$("#pv-n").value||5),percival_test_fraction:Math.min(0.4,Math.max(0.1,+$("#pv-tf").value||0.2)),percival_learn_from:$("#pv-lf").value,percival_conflicts:$("#pv-cf").value,percival_use_historical:$("#pv-hi").checked});toast("saved");intelView(v)};
-  $("#pv-elig")&&($("#pv-elig").onclick=async()=>{const r=await api("/api/percival/eligibility",{});toast(r.error?esc(r.error):`eligibility recorded: ${r.n} candidates`,!!r.error);intelView(v)});
-  $("#pv-repro")&&($("#pv-repro").onclick=async()=>{$("#pv-repro-r").textContent="checking…";const r=await api("/api/percival/reproduce",{id:last.id});$("#pv-repro-r").innerHTML=r.identical?`<span class="ok">identical (${esc(r.rebuilt_hash)})</span>`:`<span class="warn">differs: ${r.n_differences} candidate(s) changed since - ${Object.entries(r.changes||{}).map(([k,n])=>`${esc(k)} ${n}`).join(" · ")}${r.stored_rules!==r.rules_version?" · rules "+esc(r.stored_rules)+" → "+esc(r.rules_version):""}</span>`});
-  $("#pv-q").oninput=e=>{PV.q=e.target.value;clearTimeout(PV.t);PV.t=setTimeout(()=>intelView(v),250)};$("#pv-all").onchange=e=>el.querySelectorAll("[data-pvs]").forEach(c=>c.checked=e.target.checked);
+  const isAdv=PV.viewMode==="advanced";
+  const missedList=L.missed_detail||[];
+
+  const tile=(n,t,k,badge)=>`<div class="tile" ${k?`data-pv="${k}"`:""}><div class="n">${n??0} ${badge?`<small class="pill sm ${badge.cls||''}">${badge.txt}</small>`:''}</div><div class="t">${t}</div></div>`;
+
+  // Pre-flight validation diagnostics
+  const validMriOk=(s.valid_mri_count||O.registered||0)>0;
+  const devCssCount=(L.css_dev||0);
+  const devMimicCount=(L.mimic_dev||0);
+  const minReqsMet=devCssCount>=3 && devMimicCount>=3 && (devCssCount+devMimicCount)>=10;
+  const preflightPass=validMriOk && minReqsMet;
+
+  // Component breakdown for Dataset Builder
+  const comp=last?["char","image","fusion","meta","predictor","shadow","detection","segmentation"].filter(k=>(last.components||{})[k]).map(k=>{
+    const c=(last.components||{})[k]||{},d=c.development||{},t=c.test||{};
+    const nameMap={char:"Characteristic ML",image:"Image ML",fusion:"Fusion",meta:"Percival Core Meta-model",predictor:"Unified Predictor Score",shadow:"Shadow ML Lab",detection:"ALBUS Candidate Detection",segmentation:"cSS Lesion Segmentation"};
+    return `<tr><td><b>${nameMap[k]||k}</b></td><td class="mono">${d.n??0}</td><td class="mono">${d.css??0} / ${d.not_css??0}</td><td class="mono">${d.patients??0}</td><td class="mono">${t.n??0}</td><td class="mono">${t.css??0} / ${t.not_css??0}</td><td class="mono">${t.patients??0}</td></tr>`;
+  }).join(""):"";
+
+  el.innerHTML=`
+  <!-- SECTION 1: Training Overview -->
+  <div class="card" data-pv="section-overview">
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <div>
+        <h3 style="margin:0 0 4px">1. Training Overview</h3>
+        <p class="note" style="margin:0">${isAdv?"State telemetry: study registry, ALBUS candidate discovery, expert ground truth, missed lesions, and cohort partitioning.":"Summary of registered MRI scans, candidate discovery, expert radiologist annotations, and learning readiness."}</p>
+      </div>
+      <span class="pill ${preflightPass?'ok':s.job&&s.job.state==='running'?'warn':L.stale?'warn':'bad'}">${s.job&&s.job.state==='running'?'Training Active':preflightPass?'Ready for Training':minReqsMet?'Awaiting Pre-flight':'More Annotations Needed'}</span>
+    </div>
+    <div class="tiles" style="margin-top:12px">
+      ${tile(O.registered,isAdv?"Registered Studies":"Total Studies Registered")}
+      ${tile(s.valid_mri_count||O.registered,isAdv?"Valid NIfTI/DICOM Scans":"MRI Scans Available")}
+      ${tile(O.processed,isAdv?"ALBUS Processed Studies":"Processed Studies")}
+      ${tile(O.candidates,isAdv?"Candidates Extracted":"Candidates Detected")}
+      ${tile(s.awaiting_review_count||Math.max(0,(O.registered||0)-(O.reviewed_studies||0)),"Awaiting Review")}
+      ${tile(O.reviewed_studies,isAdv?"Finalized Review Studies":"Finished Reviews")}
+      ${tile((L.css_dev||0)+(L.css_test||0),"Confirmed cSS Lesions")}
+      ${tile(s.missed_lesions_count||L.n_missed||0,"Expert Missed Lesions",{cls:"ok",txt:"Learned"})}
+      ${tile((L.mimic_dev||0)+(L.mimic_test||0),"Mimic Findings")}
+      ${tile(O.eligible_dev||0,isAdv?"Dev Cohort Candidates":"Eligible for Learning")}
+    </div>
+  </div>
+
+  <!-- SECTION 2: Available Studies -->
+  <div class="card" data-pv="section-studies">
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <div>
+        <h3 style="margin:0 0 4px">2. Available Studies</h3>
+        <p class="note" style="margin:0">Inspection of MRI examinations across local workspace and storage topology.</p>
+      </div>
+      <div class="row" style="gap:6px">
+        <input id="pv-q" placeholder="Search studies or cohort..." value="${esc(PV.q)}" style="width:220px">
+        <button class="b sm" id="pv-inc">Include Selected</button>
+        <button class="b sm" id="pv-exc">Exclude Selected</button>
+      </div>
+    </div>
+    <div style="max-height:300px;overflow-y:auto;margin-top:10px">
+      <table data-pv="selection">
+        <tr>
+          <th style="width:34px"><input type="checkbox" id="pv-all"></th>
+          <th>Study Code</th>
+          <th>Candidate Detection</th>
+          <th>Review State</th>
+          <th>Annotated</th>
+          <th>cSS / Mimic</th>
+          <th>Eligible</th>
+          <th>Partition</th>
+          <th>Inclusion Status</th>
+          <th>Action</th>
+        </tr>
+        ${sel.map(x=>`<tr>
+          <td><input type="checkbox" data-pvs="${esc(x.code)}"></td>
+          <td><b>${esc(x.label)}</b>${x.retired?' <span class="pill sm">archived</span>':""}<div class="note">${esc(x.cohort||"")}</div></td>
+          <td>${x.processed?`<span class="ok">✓</span> <span class="note">${x.n_candidates} cands</span>`:'<span class="mut">Pending ALBUS</span>'}</td>
+          <td class="note">${x.reviewed?'<span class="ok">Finished</span>':esc(x.review_state||"Pending")}</td>
+          <td class="mono">${x.n_labelled}${x.n_historical?` <span class="note" title="labels from earlier versions">(${x.n_historical} earlier)</span>`:""}${x.n_stale?` <span class="warn" title="calls that no longer match current candidates">+${x.n_stale} stale</span>`:""}</td>
+          <td class="mono">${x.n_css} / ${x.n_mimic}</td>
+          <td class="mono">${x.n_eligible}${x.n_adjudication?` <span class="warn" title="disagreement">⚑</span>`:""}</td>
+          <td class="note">${x.partition==="test"?"Locked Test":"Development"}</td>
+          <td>${x.included?'<span class="ok">✓ Included</span>':`<span class="mut">${esc(x.excluded_why||x.why||"Excluded")}</span>`}${x.label_error?` <span class="warn">${esc(x.label_error)}</span>`:""}</td>
+          <td>${x.n_labelled?`<button class="b sm" data-pvc="${esc(x.code)}">Inspect</button>`:""}</td>
+        </tr>
+        ${PV.open===x.code?`<tr><td></td><td colspan="9" id="pv-cands" class="note">Loading candidate breakdown…</td></tr>`:""}`).join("")}
+      </table>
+    </div>
+  </div>
+
+  <!-- SECTION 3: Expert Review Status -->
+  <div class="card" data-pv="section-review-status">
+    <h3 style="margin:0 0 4px">3. Expert Review Status</h3>
+    <p class="note" style="margin-top:0">Distinguishes individual candidate calls from formal study-level completion and missed-lesion assessment.</p>
+    <div class="row" style="gap:12px;margin-bottom:8px">
+      <div class="tile" style="flex:1"><div class="n">${O.reviewed_studies||0} / ${O.registered||0}</div><div class="t">Study-Level Reviews Completed</div></div>
+      <div class="tile" style="flex:1"><div class="n">${O.called||0} / ${O.candidates||0}</div><div class="t">Candidates Explicitly Called</div></div>
+      <div class="tile" style="flex:1"><div class="n">${missedList.length}</div><div class="t">Missed-Lesion Evaluations Recorded</div></div>
+    </div>
+    <p class="note">A study is only marked <b>Finished</b> for training when all generated candidates have explicit calls, missed lesion review is finalized, and study-level classification is confirmed.</p>
+  </div>
+
+  <!-- SECTION 4: Candidate Annotations -->
+  <div class="card" data-pv="section-candidate-annotations">
+    <h3 style="margin:0 0 4px">4. Candidate Annotations &amp; Clinical Vocabulary</h3>
+    <p class="note" style="margin-top:0">${isAdv?"Ground-truth labels categorized by formal clinical classification ontology (LABELS).":"Candidate labels verified by expert neuroradiologists, distinguishing genuine cSS from non-cSS mimickers."}</p>
+    <table class="lv-w">
+      <tr><th>Clinical Category</th><th>Classification Meaning</th><th>Model Target Label</th><th>Development Cohort</th><th>Locked Test Cohort</th></tr>
+      <tr><td><b>Confirmed cSS</b></td><td>Definite cortical superficial siderosis lesion</td><td><span class="pill ok">Positive (y = 1)</span></td><td class="mono">${L.css_dev||0}</td><td class="mono">${L.css_test||0}</td></tr>
+      <tr><td><b>Rejected Not cSS</b></td><td>Definitive non-cSS candidate</td><td><span class="pill">Negative (y = 0)</span></td><td class="mono">${L.mimic_dev||0}</td><td class="mono">${L.mimic_test||0}</td></tr>
+      <tr><td><b>Cortical / Pial Vessel</b></td><td>Normal pial or subarachnoid vessel mimic</td><td><span class="pill">Negative (y = 0)</span></td><td class="mono note">Categorized</td><td class="mono note">Categorized</td></tr>
+      <tr><td><b>Prominent Vessel or Vein</b></td><td>Prominent vascular signal or draining vein</td><td><span class="pill">Negative (y = 0)</span></td><td class="mono note">Categorized</td><td class="mono note">Categorized</td></tr>
+      <tr><td><b>Vascular Flow-Related Signal</b></td><td>Flow void, pulsation, or inflow artifact</td><td><span class="pill">Negative (y = 0)</span></td><td class="mono note">Categorized</td><td class="mono note">Categorized</td></tr>
+      <tr><td><b>Susceptibility Artifact</b></td><td>Air-bone interface or skull-base distortion</td><td><span class="pill">Negative (y = 0)</span></td><td class="mono note">Categorized</td><td class="mono note">Categorized</td></tr>
+      <tr><td><b>Calcification</b></td><td>Dural or parenchymal calcification mimic</td><td><span class="pill">Negative (y = 0)</span></td><td class="mono note">Categorized</td><td class="mono note">Categorized</td></tr>
+      <tr><td><b>Other Hemorrhagic / Abnormality</b></td><td>Microbleed, cavernoma, hemorrhage, or trauma</td><td><span class="pill">Negative (y = 0)</span></td><td class="mono note">Categorized</td><td class="mono note">Categorized</td></tr>
+      <tr><td><b>Uncertain / Needs Further Review</b></td><td>Ambiguous finding requiring secondary review</td><td><span class="pill warn">Excluded from Training</span></td><td class="mono note">${O.excluded_unsure||0}</td><td class="mono note">—</td></tr>
+    </table>
+  </div>
+
+  <!-- SECTION 5: Missed-Lesion Annotations -->
+  <div class="card" data-pv="section-missed-lesions">
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <div>
+        <h3 style="margin:0 0 4px">5. Missed-Lesion Annotations (Learned from Expert Freehand Annotations)</h3>
+        <p class="note" style="margin:0">cSS lesions identified and drawn by expert reviewers that were initially missed by ALBUS candidate discovery. Stored in PENSIEVE memory and ingested into training.</p>
+      </div>
+      <span class="pill ok">${missedList.length} Missed Lesions Available</span>
+    </div>
+    ${missedList.length?`
+    <div style="max-height:220px;overflow-y:auto;margin-top:10px">
+      <table>
+        <tr><th>Study ID</th><th>Lesion ID</th><th>Slice / Z</th><th>Physical Coordinates (mm)</th><th>Detection Fate</th><th>Target Training Tasks</th><th>Learning Weight</th></tr>
+        ${missedList.map(m=>`<tr>
+          <td class="mono"><b>${esc(m.study_id)}</b></td>
+          <td class="mono">${esc(m.lesion_id)}</td>
+          <td class="mono">Slice ${esc(m.slice||"—")}</td>
+          <td class="mono note">${m.x_mm!=null?`(${g3(m.x_mm)}, ${g3(m.y_mm)}, ${g3(m.z_mm)})`:"—"}</td>
+          <td><span class="pill warn">${esc(m.detector_fate||"albus_missed")}</span></td>
+          <td class="note">${(m.eligible_for||["detection","meta","segmentation"]).join(" · ")}</td>
+          <td><span class="pill ok">Positive (y = 1)</span></td>
+        </tr>`).join("")}
+      </table>
+    </div>
+    <p class="note">These annotations feed directly into <b>ALBUS candidate detection</b> retraining, <b>LUMOS/NOX meta-learning</b>, and <b>lesion segmentation</b>. They are never assigned negative labels.</p>
+    `:`<p class="note" style="margin-top:8px">No missed lesions drawn yet. Reviewers can draw missed lesions in the MRI viewer; they are preserved in PENSIEVE and ingested automatically.</p>`}
+  </div>
+
+  <!-- SECTION 6: Training Eligibility -->
+  <div class="card" data-pv="section-eligibility">
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <div>
+        <h3 style="margin:0 0 4px">6. Task-Specific Training Eligibility</h3>
+        <p class="note" style="margin:0">Evaluates suitability for distinct model objectives: Candidate Classification, Candidate Discovery, Segmentation, and Study-Level Learning.</p>
+      </div>
+      <button class="b sm" id="pv-elig">Evaluate Eligibility Now</button>
+    </div>
+    ${(()=>{
+      const E=s.eligibility_record||{};
+      const bc=E.by_component||{};
+      return `
+      <table style="margin-top:10px">
+        <tr><th>Learning Task</th><th>Target Pipeline Component</th><th>Eligible Candidates</th><th>Eligibility Criteria</th><th>Status</th></tr>
+        <tr><td><b>Candidate Classification</b></td><td>LUMOS, NOX &amp; Percival Core</td><td class="mono"><b>${bc.char||bc.meta||O.eligible||0}</b></td><td>Complete feature vector, valid MRI patch, unambiguous expert label</td><td><span class="pill ok">Active</span></td></tr>
+        <tr><td><b>Candidate Discovery &amp; Detection</b></td><td>ALBUS (Candidate Generator)</td><td class="mono"><b>${(O.candidates||0) + missedList.length}</b></td><td>All ALBUS candidates + reviewer-drawn missed lesions</td><td><span class="pill ok">Active</span></td></tr>
+        <tr><td><b>Lesion Segmentation</b></td><td>NOX Morphological Boundary Engine</td><td class="mono"><b>${(L.css_dev||0)+(L.css_test||0) + missedList.length}</b></td><td>Pixel-level pen stroke masks and candidate bounding boxes</td><td><span class="pill ok">Active</span></td></tr>
+        <tr><td><b>Study-Level Siderosis Evaluation</b></td><td>Percival Score Study Aggregator</td><td class="mono"><b>${O.reviewed_studies||0} studies</b></td><td>Finished study review, all candidates verified, missed lesions addressed</td><td><span class="pill ${O.reviewed_studies>0?'ok':'warn'}">${O.reviewed_studies>0?'Ready':'Pending Reviews'}</span></td></tr>
+      </table>`;
+    })()}
+  </div>
+
+  <!-- SECTION 7: Training Dataset Builder -->
+  <div class="card" data-pv="section-dataset-builder">
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <div>
+        <h3 style="margin:0 0 4px">7. Training Dataset Builder</h3>
+        <p class="note" style="margin:0">Immutable dataset snapshot manifests with patient-stratified cohort splitting and reproducible hashing.</p>
+      </div>
+      ${last?`<button class="b sm" id="pv-repro">Verify Reproducibility</button>`:""}
+    </div>
+    ${last?`
+    <div class="kv" style="margin:10px 0">
+      <div>Manifest Identifier</div><div class="mono"><b>${esc(last.id)}</b></div>
+      <div>Content SHA-256 Hash</div><div class="mono">${esc(last.content_hash)}</div>
+      <div>Rules &amp; Feature Schema</div><div class="mono">${esc(last.rules_version)} · ${esc(last.feature_schema)}</div>
+      <div>Created Timestamp</div><div class="mono">${esc(last.created)}</div>
+    </div>
+    <table>
+      <tr><th>Component</th><th>Dev Cohort (n)</th><th>Dev cSS / Mimic</th><th>Dev Patients</th><th>Locked Test (n)</th><th>Test cSS / Mimic</th><th>Test Patients</th></tr>
+      ${comp}
+    </table>
+    <p class="note">Manifest versions available: ${DSs.map(d=>`<a href="#" data-pvdl="${esc(d.id)}">${esc(d.id)}</a>`).join(" · ")} <span id="pv-repro-r" style="margin-left:12px"></span></p>
+    `:`<p class="note" style="margin-top:8px">No dataset snapshot created yet. Snapshots are compiled immutably at the start of each training cycle.</p>`}
+  </div>
+
+  <!-- SECTION 8: Training Configuration -->
+  <div class="card" data-pv="section-config">
+    <h3 style="margin:0 0 4px">8. Training Configuration</h3>
+    <p class="note" style="margin-top:0">Operational parameters governing cohort selection, conflict arbitration, and automatic learning triggers.</p>
+    <div class="row" style="flex-wrap:wrap;gap:12px;margin-top:10px">
+      <label class="note">Learning Inclusion Policy:
+        <select id="pv-lf" style="margin-left:6px">
+          <option value="labelled" ${LS.learn_from!=="finished"?"selected":""}>Every study with expert calls (called candidates only)</option>
+          <option value="finished" ${LS.learn_from==="finished"?"selected":""}>Finalized studies only (full study review complete)</option>
+        </select>
+      </label>
+      <label class="note">Reviewer Conflict Handling:
+        <select id="pv-cf" style="margin-left:6px">
+          <option value="exclude" ${LS.conflicts!=="effective"?"selected":""}>Exclude conflicting calls until adjudicated</option>
+          <option value="effective" ${LS.conflicts==="effective"?"selected":""}>Use effective consolidated call</option>
+        </select>
+      </label>
+      <label class="note" style="display:flex;align-items:center;gap:6px">
+        <input type="checkbox" id="pv-hi" ${LS.use_historical!==false?"checked":""}> Include verified labels from historical projects
+      </label>
+    </div>
+    <div class="row" style="flex-wrap:wrap;gap:12px;margin-top:10px;align-items:center">
+      <label class="note" style="display:flex;align-items:center;gap:6px">
+        <input type="checkbox" id="pv-ac" ${s.autocycle?"checked":""}> Auto-start training cycle after
+      </label>
+      <input id="pv-n" type="number" min="1" value="${s.cycle_n}" style="width:70px">
+      <span class="note">newly reviewed studies</span>
+      <span class="note" style="margin-left:14px">Locked Test Fraction:</span>
+      <input id="pv-tf" type="number" min="0.1" max="0.4" step="0.05" value="${s.test_fraction}" style="width:80px">
+      <span class="note">(permanent holdout)</span>
+      <button class="b pri sm" id="pv-save" style="margin-left:auto">Save Configuration</button>
+    </div>
+  </div>
+
+  <!-- SECTION 9: Start Training Cycle (Pre-Flight Diagnostics & Action) -->
+  <div class="card" data-pv="section-start-training" style="background:var(--panel2)">
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <div>
+        <h3 style="margin:0 0 4px">9. Start Training Cycle</h3>
+        <p class="note" style="margin:0">Pre-flight readiness audit and manual training execution trigger.</p>
+      </div>
+      <button class="b pri" id="pvc-start-train" ${j.state==="running"?"disabled":""}>
+        ${j.state==="running"?`Training in progress (${Math.round(100*(j.progress||0))}%)`:"Start Training Cycle"}
+      </button>
+    </div>
+    <div style="background:var(--bg);border-radius:6px;padding:12px;margin-top:12px">
+      <h4 style="margin:0 0 8px">Pre-Flight Diagnostic Checklist</h4>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px">
+        <div>${validMriOk?'<span class="ok">✓</span>':'<span class="bad">✗</span>'} Scans: <b>${s.valid_mri_count||O.registered||0} available</b></div>
+        <div>${devCssCount>=3?'<span class="ok">✓</span>':'<span class="warn">!</span>'} Positive cSS (Dev): <b>${devCssCount} / 3 min</b></div>
+        <div>${devMimicCount>=3?'<span class="ok">✓</span>':'<span class="warn">!</span>'} Mimic Non-cSS (Dev): <b>${devMimicCount} / 3 min</b></div>
+        <div>${(devCssCount+devMimicCount)>=10?'<span class="ok">✓</span>':'<span class="warn">!</span>'} Total Dev Candidates: <b>${devCssCount+devMimicCount} / 10 min</b></div>
+        <div>${missedList.length>0?'<span class="ok">✓</span>':'<span class="note">○</span>'} Missed Lesions: <b>${missedList.length} included</b></div>
+      </div>
+      ${!minReqsMet?`
+      <p class="warn" style="margin:10px 0 0"><b>Expert Review Required:</b> Training requires at least 3 confirmed cSS lesions and 3 non-cSS mimics in the development cohort (currently ${devCssCount} cSS, ${devMimicCount} mimics). Open <b>Review</b> to confirm candidate classifications.</p>
+      `:''}
+    </div>
+  </div>
+
+  <!-- SECTION 10: Live Training Progress -->
+  <div class="card" data-pv="section-progress">
+    <h3 style="margin:0 0 4px">10. Live Training Progress &amp; Heartbeat</h3>
+    <p class="note" style="margin-top:0">Monitors background training worker, feature extraction, cross-validation folds, and model convergence.</p>
+    <div style="margin:12px 0">
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+        <span class="note">Worker State: <b>${esc(j.state||"idle")}</b> ${j.state==="running"?'<span class="pulse">●</span>':''}</span>
+        <span class="mono">${Math.round(100*(j.progress||0))}%</span>
+      </div>
+      <div style="background:var(--border);height:8px;border-radius:4px;overflow:hidden">
+        <div style="background:var(--lv-1);height:100%;width:${Math.round(100*(j.progress||0))}%;transition:width 0.3s"></div>
+      </div>
+      <p class="note" style="margin-top:6px">${esc(j.phase||(j.state==="running"?"Training models across cross-validation folds...":"Ready for training cycle."))}</p>
+    </div>
+  </div>
+
+  <!-- SECTION 11: Evaluation Results -->
+  <div class="card" data-pv="section-evaluation">
+    <h3 style="margin:0 0 4px">11. Model Evaluation Results</h3>
+    <p class="note" style="margin-top:0">${isAdv?"Locked permanent holdout metrics: ROC-AUC (DeLong 95% CI), PR-AUC, Brier score, log loss, and calibration slope.":"Performance on locked holdout patients who were never used during training or model selection."}</p>
+    ${Lt?`
+    <table>
+      <tr><th>Model / Predictor</th><th>Locked-Test AUC</th>${isAdv?`<th>PR-AUC</th><th>Brier Score</th><th>Log Loss</th><th>Calib Slope</th>`:""}<th>Operating Sensitivity</th><th>Operating Specificity</th></tr>
+      <tr>
+        <td><b>Percival Score (${esc(Lt.version)})</b></td>
+        <td class="mono"><b>${g3(((Lt.test||{}).percival||{}).auc)}</b></td>
+        ${isAdv?`<td class="mono">${g3(((Lt.test||{}).percival||{}).pr_auc)}</td><td class="mono">${g3(((Lt.test||{}).percival||{}).brier)}</td><td class="mono">${g3(((Lt.test||{}).percival||{}).logloss)}</td><td class="mono">${g3(((Lt.test||{}).percival||{}).calib_slope)}</td>`:""}
+        <td class="mono">${pct(100*((Lt.test||{}).at_red||{}).sensitivity)}%</td>
+        <td class="mono">${pct(100*((Lt.test||{}).at_red||{}).specificity)}%</td>
+      </tr>
+      <tr>
+        <td><b>Deterministic Candidate Detection Alone</b></td>
+        <td class="mono">${g3(((Lt.test||{}).math||{}).auc)}</td>
+        ${isAdv?`<td class="mono">${g3(((Lt.test||{}).math||{}).pr_auc)}</td><td class="mono">${g3(((Lt.test||{}).math||{}).brier)}</td><td class="mono">${g3(((Lt.test||{}).math||{}).logloss)}</td><td class="mono">—</td>`:""}
+        <td class="mono">—</td>
+        <td class="mono">—</td>
+      </tr>
+    </table>
+    <p class="note">${Lt.acceptance?`Governance Acceptance: <b>${Lt.acceptance.passed?"PASSED":"NOT PASSED"}</b>${Lt.acceptance.reasons.length?" — "+Lt.acceptance.reasons.map(esc).join("; "):""}.`:""}</p>
+    `:`<p class="note">Evaluation metrics will appear here after the first completed training cycle.</p>`}
+  </div>
+
+  <!-- SECTION 12: Model Versions -->
+  <div class="card" data-pv="section-versions">
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <div>
+        <h3 style="margin:0 0 4px">12. Model Versions &amp; Model Registry</h3>
+        <p class="note" style="margin:0">Active, candidate, experimental, and retired models. Models require explicit promotion to become active.</p>
+      </div>
+      <button class="b sm" id="pvc-rollback">Roll Back to Previous Version</button>
+    </div>
+    <table style="margin-top:10px">
+      <tr><th>Version</th><th>Trained</th><th>Studies</th><th>Dataset</th><th>Meta-Architecture</th><th>Test AUC</th><th>MATH</th><th>Acceptance</th><th>Status</th><th>Actions</th></tr>
+      ${H.slice().reverse().map(h=>`<tr>
+        <td class="mono"><b>${esc(h.version)}</b></td>
+        <td class="note">${esc((h.at||"").replace("T"," "))}</td>
+        <td>${h.studies}</td>
+        <td class="mono">${h.dataset?`<a href="#" data-pvdl="${esc(h.dataset)}">${esc(h.dataset)}</a>`:'—'}</td>
+        <td class="note">${esc(MN[h.chosen]||h.chosen)}</td>
+        <td class="mono">${g3(h.test_auc)}</td>
+        <td class="mono">${g3(h.test_math_auc)}</td>
+        <td>${h.passed?'<span class="ok">Passed</span>':'<span class="warn">Flagged</span>'}</td>
+        <td>${pvStatus((s.status||{})[h.version])}</td>
+        <td>${M&&M.version===h.version?'<span class="ok">Active</span>':`<button class="b sm" data-pvp="${esc(h.version)}">Make Active</button>`}</td>
+      </tr>`).join("")||'<tr><td colspan="10" class="empty">No models registered yet.</td></tr>'}
+    </table>
+  </div>
+
+  <!-- SECTION 13: Training History -->
+  <div class="card" data-pv="section-history">
+    <h3 style="margin:0 0 4px">13. Training History &amp; Run Ledger</h3>
+    <p class="note" style="margin-top:0">Full audit trail of all previous training invocations, parameters, and results.</p>
+    ${runs.length?`
+    <table style="margin-top:10px">
+      <tr><th>Run ID</th><th>Started</th><th>Trigger Reason</th><th>State</th><th>Dataset Snapshot</th><th>Target Version</th><th>Execution Outcome</th></tr>
+      ${runs.slice().reverse().map(r=>`<tr>
+        <td class="mono">${esc(r.id)}</td>
+        <td class="note">${esc(r.started||"")}${r.finished?" → "+esc(r.finished.slice(11)):""}</td>
+        <td class="note">${esc(r.reason||r.kind||"Manual trigger")}</td>
+        <td>${{finished:'<span class="ok">Finished</span>',failed:'<span class="bad">Failed</span>',running:'<span class="warn">Running</span>',interrupted:'<span class="warn">Interrupted</span>',insufficient_data:'<span class="warn">Paused</span>'}[r.state]||esc(r.state)}</td>
+        <td class="mono">${esc(r.dataset||"—")}</td>
+        <td class="mono">${esc(r.version||"—")}</td>
+        <td class="note">${r.error?esc(r.error.slice(0,160)):r.status?esc(r.status):esc(r.kind||"Completed")}</td>
+      </tr>`).join("")}
+    </table>
+    `:`<p class="note" style="margin-top:8px">No training runs logged in ledger yet.</p>`}
+  </div>
+
+  <!-- SECTION 14: Failed or Interrupted Runs -->
+  <div class="card" data-pv="section-diagnostics">
+    <h3 style="margin:0 0 4px">14. Diagnostic Review for Failed / Interrupted Runs</h3>
+    <p class="note" style="margin-top:0">Root-cause diagnostic analysis, exception inspection, and targeted recovery recommendations.</p>
+    ${(()=>{
+      const failedRun=runs.slice().reverse().find(r=>r.state==="failed"||r.state==="interrupted"||r.state==="insufficient_data"||r.error);
+      if(!failedRun){
+        return '<p class="ok" style="margin-top:8px">✓ No failed or interrupted training runs detected. Training subsystem is healthy.</p>';
+      }
+      return `
+      <div style="background:var(--bg);border-left:4px solid var(--lv-red);padding:12px;border-radius:4px;margin-top:10px">
+        <div class="row" style="justify-content:space-between">
+          <b>Run ${esc(failedRun.id)}: ${esc(failedRun.state)}</b>
+          <span class="note">${esc(failedRun.started||"")}</span>
+        </div>
+        <p class="bad" style="margin:6px 0">${esc(failedRun.error||"Run paused or interrupted.")}</p>
+        <p class="note" style="margin:4px 0"><b>Targeted Recovery Advice:</b> ${
+          failedRun.state==="insufficient_data" || (failedRun.error&&failedRun.error.includes("Not enough labelled candidates"))
+          ? "Provide at least 3 confirmed cSS labels and 3 mimic labels in the Review screen before retraining."
+          : failedRun.error&&failedRun.error.includes("features")
+          ? "Ensure candidate feature extraction has finished for the selected studies."
+          : "Review the system log below and verify file permissions in the project workspace."
+        }</p>
+      </div>`;
+    })()}
+    ${(s.log||[]).length?`
+    <details style="margin-top:12px">
+      <summary class="note">View Recent Pipeline Log Entries</summary>
+      <pre class="note" style="white-space:pre-wrap;margin-top:6px;max-height:160px;overflow-y:auto">${esc(s.log.join("\n"))}</pre>
+    </details>
+    `:''}
+  </div>
+  `;
+
+  // Bind interactive handlers
+  $("#pv-save")&&($("#pv-save").onclick=async()=>{
+    await api("/api/percival/settings",{
+      percival_autocycle:$("#pv-ac").checked,
+      percival_cycle_n:Math.max(1,+$("#pv-n").value||5),
+      percival_test_fraction:Math.min(0.4,Math.max(0.1,+$("#pv-tf").value||0.2)),
+      percival_learn_from:$("#pv-lf").value,
+      percival_conflicts:$("#pv-cf").value,
+      percival_use_historical:$("#pv-hi").checked
+    });
+    toast("Settings saved successfully");
+    intelView(v);
+  });
+
+  $("#pv-elig")&&($("#pv-elig").onclick=async()=>{
+    const r=await api("/api/percival/eligibility",{});
+    toast(r.error?esc(r.error):`Eligibility evaluated: ${r.n} candidates`,!!r.error);
+    intelView(v);
+  });
+
+  $("#pvc-start-train")&&($("#pvc-start-train").onclick=async()=>{
+    const res=await api("/api/percival/train",{});
+    toast(res.ok?"Training cycle started":esc(res.error||"Training started"),!res.ok);
+    intelView(v);
+  });
+
+  $("#pvc-rollback")&&($("#pvc-rollback").onclick=async()=>{
+    const r=await api("/api/percival/rollback",{});
+    toast(r.ok?`Rolled back to ${esc(r.version)}`:esc(r.error),!r.ok);
+    intelView(v);
+  });
+
+  $("#pv-repro")&&($("#pv-repro").onclick=async()=>{
+    const out=$("#pv-repro-r");
+    if(out)out.textContent="Verifying reproducibility…";
+    const r=await api("/api/percival/reproduce",{id:last.id});
+    if(out){
+      out.innerHTML=r.identical
+        ? `<span class="ok">✓ Identical manifest (${esc(r.rebuilt_hash)})</span>`
+        : `<span class="warn">Differs: ${r.n_differences} differences</span>`;
+    }
+  });
+
+  $("#pv-q")&&($("#pv-q").oninput=e=>{
+    PV.q=e.target.value;
+    clearTimeout(PV.t);
+    PV.t=setTimeout(()=>intelView(v),250);
+  });
+
+  $("#pv-all")&&($("#pv-all").onchange=e=>el.querySelectorAll("[data-pvs]").forEach(c=>c.checked=e.target.checked));
   const ticked=()=>[...el.querySelectorAll("[data-pvs]:checked")].map(c=>c.dataset.pvs);
-  $("#pv-inc").onclick=async()=>{await api("/api/percival/select",{codes:ticked(),include:true});intelView(v)};$("#pv-exc").onclick=async()=>{await api("/api/percival/select",{codes:ticked(),include:false});intelView(v)};
-  el.querySelectorAll("[data-pvc]").forEach(b=>b.onclick=()=>{PV.open=PV.open===b.dataset.pvc?"":b.dataset.pvc;intelView(v)});
-  el.querySelectorAll("[data-pvdl]").forEach(a=>a.onclick=async e=>{e.preventDefault();const d=await api(`/api/percival/dataset?id=${encodeURIComponent(a.dataset.pvdl)}`);
-    const w=window.open("","_blank");if(w){w.document.title=d.id||"dataset";w.document.body.innerHTML=`<pre style="white-space:pre-wrap;font:12px monospace">${esc(JSON.stringify(d,null,1))}</pre>`}});
-  if(PV.open){const C=await api(`/api/percival/candidates?code=${encodeURIComponent(PV.open)}`),t=$("#pv-cands");if(!t)return;
-    t.innerHTML=`<table data-pv="candidates"><tr><th>#</th><th>call</th><th>label source</th><th>status</th><th>Characteristic</th><th>Image</th><th>Fusion</th><th>Meta</th><th>Predictors</th><th>Shadow</th><th>missing</th><th>why</th></tr>
-     ${(C.candidates||[]).map(c=>`<tr><td class="mono">${c.cand_id}</td><td>${esc(c.call)}</td><td class="note">${c.label_source==="historical"?"earlier version":"current review"}${c.reviewer?` · ${esc(c.reviewer)}`:""}</td><td>${{eligible:'<span class="ok">eligible</span>',needs_adjudication:'<span class="warn">adjudication</span>',excluded:'<span class="mut">excluded</span>'}[c.status]||esc(c.status)}${c.partition?` <span class="note">${c.partition==="test"?"locked test":"development"}</span>`:""}</td>
-       ${["char","image","fusion","meta","predictor","shadow"].map(k=>`<td>${c.components[k]?'<span class="ok">✓</span>':`<span class="mut" title="${esc(((c.component_reasons_text||{})[k]||[]).join("; "))}">✗</span>`}</td>`).join("")}<td class="note">${esc((c.missing||[]).join("; "))}</td><td class="note">${esc((c.reasons_text||[]).join("; "))}</td></tr>`).join("")}</table>
-     ${C.checked?"":'<p class="note">Image / measurement availability is checked when the study is first used by a training cycle (shown here as available until then).</p>'}`}}
+
+  $("#pv-inc")&&($("#pv-inc").onclick=async()=>{
+    await api("/api/percival/select",{codes:ticked(),include:true});
+    intelView(v);
+  });
+  $("#pv-exc")&&($("#pv-exc").onclick=async()=>{
+    await api("/api/percival/select",{codes:ticked(),include:false});
+    intelView(v);
+  });
+
+  el.querySelectorAll("[data-pvc]").forEach(b=>b.onclick=()=>{
+    PV.open=PV.open===b.dataset.pvc?"":b.dataset.pvc;
+    intelView(v);
+  });
+
+  el.querySelectorAll("[data-pvdl]").forEach(a=>a.onclick=async e=>{
+    e.preventDefault();
+    const d=await api(`/api/percival/dataset?id=${encodeURIComponent(a.dataset.pvdl)}`);
+    const w=window.open("","_blank");
+    if(w){
+      w.document.title=d.id||"Dataset Manifest";
+      w.document.body.innerHTML=`<pre style="white-space:pre-wrap;font:12px monospace">${esc(JSON.stringify(d,null,1))}</pre>`;
+    }
+  });
+
+  if(PV.open){
+    const C=await api(`/api/percival/candidates?code=${encodeURIComponent(PV.open)}`),t=$("#pv-cands");
+    if(t){
+      t.innerHTML=`<table data-pv="candidates" style="margin:8px 0">
+        <tr><th>#</th><th>Call</th><th>Label Source</th><th>Status</th><th>Characteristic</th><th>Image</th><th>Fusion</th><th>Meta</th><th>Predictors</th><th>Missing</th><th>Reason</th></tr>
+        ${(C.candidates||[]).map(c=>`<tr>
+          <td class="mono">${c.cand_id}</td>
+          <td><b>${esc(c.call)}</b></td>
+          <td class="note">${c.label_source==="historical"?"earlier version":"current review"}${c.reviewer?` · ${esc(c.reviewer)}`:""}</td>
+          <td>${{eligible:'<span class="ok">Eligible</span>',needs_adjudication:'<span class="warn">Adjudication</span>',excluded:'<span class="mut">Excluded</span>'}[c.status]||esc(c.status)}</td>
+          ${["char","image","fusion","meta","predictor"].map(k=>`<td>${c.components[k]?'<span class="ok">✓</span>':`<span class="mut" title="${esc(((c.component_reasons_text||{})[k]||[]).join("; "))}">✗</span>`}</td>`).join("")}
+          <td class="note">${esc((c.missing||[]).join("; "))||"—"}</td>
+          <td class="note">${esc((c.reasons_text||[]).join("; "))||"—"}</td>
+        </tr>`).join("")}
+      </table>`;
+    }
+  }
+}
 
 // ------------------------------------------------------------------ v5.24 Data integrity: store schema, migrations, backups, compatibility of every study
 async function pvIntegrity(el,s,v){const R=await api("/api/percival/compat"),S=R.store||{};

@@ -935,8 +935,22 @@ window.addEventListener("mousedown",e=>{if(!e.target.closest(".menu")&&!e.target
 // ---------- controls ----------
 // v5.17 Quick Add: grouped calls (cSS | mimics | other) with optional subtype chips; the call keys are unchanged (Y V N B A U H),
 // Shift+1..6 picks a subtype of the current call, Z undoes, Delete clears. A subtype never changes the call's meaning.
-const QA=[["cSS","cSS",[]],["Mimic","Vessel",["VS","VC","VT","VX","TV"]],["Mimic","Normal",["NI","CA","SAH","LN","HI"]],["Mimic","Microbleed",[]],["Mimic","Artifact",["A","AM"]],["Other","Unsure",[]],["Other","Near ICH",[]]];
-const FINELBL={VS:"surface vessel",VC:"sulcal vessel",VT:"transcortical vessel",VX:"sinus-adjacent vessel",TV:"thrombosed vessel",NI:"iron-rich cortex",CA:"calcification",SAH:"acute cSAH",LN:"laminar necrosis",HI:"haemorrhagic infarct",A:"air-bone",AM:"motion"};
+const QA=[
+  ["cSS","cSS",[]],
+  ["Mimic","Vessel",["VS","VC","VT","VX","PV","VF","OV","TV"]],
+  ["Mimic","Normal",["NI","CA","SAH","LN","HI","OH","OA","OT"]],
+  ["Mimic","Microbleed",[]],
+  ["Mimic","Artifact",["A","AM","SU"]],
+  ["Other","Unsure",[]],
+  ["Other","Near ICH",[]]
+];
+const FINELBL={
+  VS:"Cortical/pial vessel",VC:"Sulcal vessel",VT:"Transcortical vessel",VX:"Sinus-adjacent vessel",
+  PV:"Prominent vessel/vein",VF:"Vascular flow signal",OV:"Other vascular structure",TV:"Thrombosed vessel",
+  NI:"Iron-rich cortex",CA:"Calcification",SAH:"Acute cSAH",LN:"Laminar necrosis",
+  HI:"Haemorrhagic infarct",OH:"Other haemorrhagic",OA:"Other abnormality",OT:"Other (specify)",
+  A:"Air-bone artifact",AM:"Motion artifact",SU:"Susceptibility artifact"
+};
 const KEYOF=Object.fromEntries(Object.entries(CALLKEYS).map(([k,c])=>[c,k.toUpperCase()]));
 $("#dec").innerHTML=["cSS","Mimic","Other"].map(g=>`<div class="qag"><div class="qah">${g==="cSS"?"cSS":g==="Mimic"?"Mimics (not cSS)":"Other"}</div>${QA.filter(x=>x[0]===g).map(([_,c,subs])=>
   `<div class="qai"><button class="b qa" data-call="${c}" title="${CALLLBL[c]} (key ${KEYOF[c]})"><kbd>${KEYOF[c]}</kbd>${c==="Normal"?"Normal / other":CALLLBL[c]}</button>${subs.length?`<div class="qas">${subs.map((f,i)=>`<button class="chip" data-call="${c}" data-fine="${f}" title="${FINELBL[f]} · Shift+${i+1} after ${KEYOF[c]}">${FINELBL[f]}</button>`).join("")}</div>`:""}</div>`).join("")}</div>`).join("")+
