@@ -120,7 +120,21 @@ table.svt td.sv{text-align:center}table.svt img.th,table.svt .th0{display:block;
 <div id="app"><aside id="side"><div class="brand"><img id="logo" src="/icon_dark.png" alt=""><b>Percival</b></div>
 <nav><button data-v="studies"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v16"/></svg><span class="l">Studies</span><b class="cnt" id="cnt_studies"></b></button><button data-v="add"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span class="l">Add studies</span><b class="cnt" id="cnt_add"></b></button><button data-v="act"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><span class="l">Activity</span><b class="cnt" id="cnt_act"></b></button><button data-v="read"><svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><span class="l">Review</span><b class="cnt" id="cnt_read"></b></button><button data-v="qc"><svg viewBox="0 0 24 24"><path d="M12 3c-4 0-7 3-7 7 0 2.5 1.2 4.2 2.6 5.4.8.7 1.4 1.7 1.4 2.8V20h6v-1.8c0-1.1.6-2.1 1.4-2.8C17.8 14.2 19 12.5 19 10c0-4-3-7-7-7z"/><path d="M9 13l2 2 4-4"/></svg><span class="l">Anatomy QC</span><b class="cnt" id="cnt_qc"></b></button><div class="grp">Research</div><button data-v="intel"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M8 13l3 3 5-7"/></svg><span class="l">Percival Intelligence</span><b class="cnt" id="cnt_intel"></b></button><div class="grp" data-proto style="padding-top:6px" title="Separate research prototypes; they do not feed the Percival Score">Older prototypes</div><button data-v="train" data-proto><svg viewBox="0 0 24 24"><path d="M3 20h18M6 16l4-5 4 3 5-7"/><circle cx="19" cy="7" r="1.5"/></svg><span class="l">Labels &amp; image eval</span><b class="cnt" id="cnt_train"></b></button><button data-v="uni" data-proto><svg viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg><span class="l">Unified Score model</span><b class="cnt" id="cnt_uni"></b></button><button data-v="shadow" data-proto><svg viewBox="0 0 24 24"><path d="M3 12h18M12 3v18"/><circle cx="12" cy="12" r="8"/></svg><span class="l">Stage-1 engine</span><b class="cnt" id="cnt_shadow"></b></button><button data-v="imageml" data-proto><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 15l5-5 4 4 3-3 6 6"/><circle cx="16" cy="8" r="1.5"/></svg><span class="l">Synthetic image model</span><b class="cnt" id="cnt_imageml"></b></button><div class="grp">&nbsp;</div><button data-v="setup"><svg viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg><span class="l">Setup Wizard</span><b class="cnt" id="cnt_setup"></b></button><button data-v="set"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span class="l">Settings</span><b class="cnt" id="cnt_set"></b></button></nav>
 <div class="foot"><div>Project</div><div class="proj" id="projname">—</div><div id="awakebox" style="margin-top:8px"></div>
-<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--bd)">
+<div id="side-vault-box" style="margin-top:10px;padding:8px 10px;background:var(--panel2);border:1px solid var(--bd);border-radius:6px;font-size:11px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+    <span style="font-weight:600;display:flex;align-items:center;gap:4px">
+      <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" fill="none" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><line x1="6" y1="12" x2="6" y2="12"/><line x1="10" y1="12" x2="10" y2="12"/></svg>
+      Vault HDD
+    </span>
+    <span id="side-vault-pill" class="pill" style="font-size:9px;padding:1px 5px">Checking…</span>
+  </div>
+  <div id="side-vault-sub" class="note" style="font-size:10px;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Discovering…</div>
+  <div style="display:flex;gap:4px">
+    <button id="side-vault-eject" class="b sm" style="flex:1;padding:2px 4px;font-size:10px" title="Safely unmount external drive">Eject ⏏</button>
+    <button id="side-vault-view" class="b sm" style="padding:2px 6px;font-size:10px" title="Open Storage Center">⚙</button>
+  </div>
+</div>
+<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--bd)">
   <button id="side-quit" class="b danger" style="width:100%;display:flex;align-items:center;justify-content:center;gap:7px;padding:7px 10px;font-size:12px;font-weight:600;border-radius:6px;cursor:pointer" title="Safely shutdown Percival (Cmd+Q)">
     <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
       <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
@@ -178,12 +192,37 @@ async function refresh(){S=await api("/api/state");$("#ver").textContent=`pipeli
   $("#awk").onchange=async e=>{await api("/api/settings",{awake:e.target.checked});await refresh()};
   const P=S.patients.filter(p=>!p.archived&&!p.retired),att=P.filter(p=>["failed","stopped","decision"].includes(p.status)).length,run=P.filter(p=>["running","paused","starting","waiting"].includes(p.status)).length;
   $("#cnt_act").textContent=att?String(att):run?String(run):"";$("#cnt_act").classList.toggle("att",!!att);$("#cnt_studies").textContent=P.length?String(P.length):"";
-  const lc=$("#logcode"),cur=lc.value;lc.innerHTML=S.patients.filter(p=>!p.retired).map(p=>`<option value="${esc(p.code)}">${esc(sid(p.code))}</option>`).join("");if(cur)lc.value=cur;else if(S.queue.running)lc.value=S.queue.running}
+  const lc=$("#logcode"),cur=lc.value;lc.innerHTML=S.patients.filter(p=>!p.retired).map(p=>`<option value="${esc(p.code)}">${esc(sid(p.code))}</option>`).join("");if(cur)lc.value=cur;else if(S.queue.running)lc.value=S.queue.running;
+  await updateSidebarVaultStatus();}
+async function updateSidebarVaultStatus(){
+  const p=$("#side-vault-pill"),s=$("#side-vault-sub"),b=$("#side-vault-eject");if(!p||!s)return;
+  try{
+    const chk=await api("/api/storage/eject_check");
+    const st=chk.state||"UNKNOWN";
+    p.textContent=st==="SAFE_TO_EJECT"?"SAFE TO EJECT":(st==="IN_USE"?"IN USE":(st==="DISCONNECTED"?"OFFLINE":st));
+    p.className=`pill ${st==="SAFE_TO_EJECT"?"ok":(st==="IN_USE"?"pri":(st==="DISCONNECTED"?"mut":"warn"))}`;
+    s.textContent=chk.reason||(st==="DISCONNECTED"?"No Vault drive":"");
+    if(b){b.disabled=(st==="DISCONNECTED"||st==="IN_USE");b.style.opacity=b.disabled?"0.5":"1";}
+  }catch(e){
+    p.textContent="OFFLINE";p.className="pill mut";s.textContent="External Vault disconnected";
+    if(b)b.disabled=true;
+  }
+}
 function nav(v, sec){if(v==="files"){v="set";if(window.SV)window.SV.currentSection="c_filemanager"}if(sec&&window.SV)window.SV.currentSection=sec;V=VMAP[v]||v;document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on",x.dataset.v===V));const t=TITLES[V]||[V,""];$("#ttl").textContent=t[0];$("#ttls").textContent=t[1];closeSheet();window.scrollTo(0,0);render()}
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>nav(b.dataset.v));
 document.querySelectorAll("#theme button").forEach(b=>b.onclick=async()=>{await api("/api/settings",{theme:b.dataset.t});await refresh()});
 async function handleQuitApplication(){try{const chk=await api("/api/app/shutdown_check");if(!chk.ok){if(!confirm("Quit Percival now?"))return;await api("/api/app/shutdown",{pause_jobs:true});document.body.innerHTML='<div style="display:flex;height:100vh;align-items:center;justify-content:center;font:16px -apple-system,sans-serif;color:#888;background:#111418"><div><h2>Percival has shut down cleanly.</h2><p>All databases flushed. You may close this window.</p></div></div>';return}if(chk.can_quit_immediately){if(!confirm("Quit Percival?\n(All databases and journals will be safely committed)"))return;await api("/api/app/shutdown",{pause_jobs:false});document.body.innerHTML='<div style="display:flex;height:100vh;align-items:center;justify-content:center;font:16px -apple-system,sans-serif;color:#888;background:#111418"><div><h2>Percival has shut down cleanly.</h2><p>All databases flushed. You may close this window.</p></div></div>';return}const running=chk.running_studies||[];const transfers=chk.active_transfers_count||0;const jnl=chk.pending_journal_count||0;$("#dlg").innerHTML=`<h2>Quit Percival Application</h2><p class="note" style="color:var(--bad)">Active background operations detected:</p><div style="background:rgba(255,255,255,0.05);padding:10px 14px;border-radius:6px;margin:10px 0;font-size:13px">${running.length?`<div>• <b>${running.length} studies processing:</b> <span class="mono">${esc(running.join(", "))}</span></div>`:""}${transfers?`<div>• <b>${transfers} background transfers in progress</b></div>`:""}${jnl?`<div>• <b>${jnl} pending journal entries to commit</b></div>`:""}</div><p style="font-size:13px;color:var(--mut)">To prevent data corruption, operations will be safely paused before exit.</p><div class="acts" style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px"><button class="b" id="quit-cancel">Cancel</button><button class="b" id="quit-wait">Wait for finish</button><button class="b danger" id="quit-pause">Pause Operations &amp; Quit</button></div>`;$("#shade").style.display="flex";$("#quit-cancel").onclick=()=>{$("#shade").style.display="none"};$("#quit-wait").onclick=()=>{$("#shade").style.display="none";toast("Waiting for operations to complete before quit.")};$("#quit-pause").onclick=async()=>{$("#shade").style.display="none";toast("Pausing operations and flushing database…");await api("/api/app/shutdown",{pause_jobs:true});document.body.innerHTML='<div style="display:flex;height:100vh;align-items:center;justify-content:center;font:16px -apple-system,sans-serif;color:#888;background:#111418"><div><h2>Percival has shut down cleanly.</h2><p>All processing paused and state saved to recovery ledger. You may close this window.</p></div></div>'}}catch(e){if(confirm(`Quit Percival?\n(${e.message})`)){await api("/api/app/shutdown",{pause_jobs:true})}}}
 $("#side-quit")&&($("#side-quit").onclick=handleQuitApplication);
+$("#side-vault-eject")&&($("#side-vault-eject").onclick=async()=>{
+  if(!confirm("Safely eject and unmount external Data Vault drive?"))return;
+  toast("Unmounting external drive…");
+  try{
+    const r=await api("/api/storage/eject",{emergency:false});
+    if(r.ok){toast(r.message||"Drive unmounted safely.");await refresh();}
+    else{toast(r.error||"Eject failed.",1);}
+  }catch(e){toast("Eject failed: "+e.message,1);}
+});
+$("#side-vault-view")&&($("#side-vault-view").onclick=()=>{nav("files");});
 document.addEventListener("keydown",e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="q"){e.preventDefault();handleQuitApplication()}});
 $("#logclose").onclick=()=>$("#log").style.display="none";$("#logcode").onchange=loadLog;
 $("#logcopy").onclick=()=>{navigator.clipboard.writeText($("#logtext").textContent);toast("log copied")};

@@ -11,6 +11,8 @@ import shutil
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+from .unified_transfer_engine import get_transfer_engine
+
 
 def compute_sha256(path: str) -> str:
     h = hashlib.sha256()
@@ -59,9 +61,10 @@ class StagingManager:
         }
 
     def stage_study(self, study_code: str, source_files: List[str], verify: bool = True) -> Dict[str, Any]:
-        """Copy input MRI/NIfTI files from external drive or raw source to fast local SSD staging."""
+        """Copy input MRI/NIfTI files from external drive or raw source to fast local SSD staging via UnifiedTransferEngine."""
         target_dir = os.path.join(self.staging_dir, study_code)
         os.makedirs(target_dir, exist_ok=True)
+        engine = get_transfer_engine(os.path.join(self.base_dir, "app_data", "transfers"))
 
         staged_files: List[Dict[str, Any]] = []
         for src in source_files:
@@ -70,21 +73,20 @@ class StagingManager:
 
             base_name = os.path.basename(src)
             dest = os.path.join(target_dir, base_name)
-            tmp_dest = dest + ".tmp"
 
-            shutil.copy2(src, tmp_dest)
-            os.replace(tmp_dest, dest)
+            ok, msg, p_info = engine.transfer_path(
+                src=src,
+                dst=dest,
+                operation="stage",
+                study_id=study_code,
+                verify_sha=verify,
+                preserve_source=True,
+                prefer_clone=True
+            )
+            if not ok:
+                raise IOError(f"Staging transfer failed for {base_name}: {msg}")
 
-            src_hash = compute_sha256(src) if verify else ""
             dest_hash = compute_sha256(dest) if verify else ""
-
-            if verify and src_hash != dest_hash:
-                try:
-                    os.remove(dest)
-                except Exception:
-                    pass
-                raise IOError(f"Staging checksum mismatch for {base_name}: source {src_hash} != staged {dest_hash}")
-
             staged_files.append({
                 "source": src,
                 "staged": dest,
@@ -108,8 +110,9 @@ class StagingManager:
         vault_dest_dir: str,
         verify: bool = True,
     ) -> Dict[str, Any]:
-        """Atomically transfer completed analysis outputs to external Data Vault with checksum verification."""
+        """Atomically transfer completed analysis outputs to external Data Vault via UnifiedTransferEngine."""
         os.makedirs(vault_dest_dir, exist_ok=True)
+        engine = get_transfer_engine(os.path.join(self.base_dir, "app_data", "transfers"))
         archived_files: List[Dict[str, Any]] = []
 
         for src in output_files:
@@ -117,21 +120,20 @@ class StagingManager:
                 continue
             base_name = os.path.basename(src)
             dest = os.path.join(vault_dest_dir, base_name)
-            tmp_dest = dest + ".tmp"
 
-            shutil.copy2(src, tmp_dest)
-            os.replace(tmp_dest, dest)
+            ok, msg, p_info = engine.transfer_path(
+                src=src,
+                dst=dest,
+                operation="archive",
+                study_id=study_code,
+                verify_sha=verify,
+                preserve_source=True,
+                prefer_clone=False
+            )
+            if not ok:
+                raise IOError(f"Archival transfer failed for {base_name}: {msg}")
 
-            src_hash = compute_sha256(src) if verify else ""
             dest_hash = compute_sha256(dest) if verify else ""
-
-            if verify and src_hash != dest_hash:
-                try:
-                    os.remove(dest)
-                except Exception:
-                    pass
-                raise IOError(f"Archival checksum mismatch for {base_name}: local {src_hash} != vault {dest_hash}")
-
             archived_files.append({
                 "local": src,
                 "vault": dest,

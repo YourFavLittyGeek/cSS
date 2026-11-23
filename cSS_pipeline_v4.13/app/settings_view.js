@@ -499,6 +499,8 @@ async function renderSectionVault(el) {
         <button class="b sm" id="sv-reindex" ${!status.connected ? "disabled" : ""}>Rebuild File Index</button>
         <button class="b sm" id="sv-change">Choose Drive or Folder…</button>
         <button class="b sm" id="sv-create">Create New Vault…</button>
+        <button class="b sm" id="sv-eject-btn" ${!status.connected ? "disabled" : ""}>Safely Eject Drive ⏏</button>
+        <button class="b sm bad" id="sv-emergency-eject-btn" ${!status.connected ? "disabled" : ""}>Emergency Interruption &amp; Eject</button>
       </div>
     </div>
 
@@ -562,6 +564,20 @@ async function renderSectionVault(el) {
       renderSectionVault(el);
     }
   };
+  $("#sv-eject-btn") && ($("#sv-eject-btn").onclick = async () => {
+    if (!confirm("Safely eject and unmount external Data Vault drive?")) return;
+    toast("Unmounting external drive…");
+    const r = await api("/api/storage/eject", { emergency: false });
+    toast(r.ok ? r.message : r.error, !r.ok);
+    renderSectionVault(el);
+  });
+  $("#sv-emergency-eject-btn") && ($("#sv-emergency-eject-btn").onclick = async () => {
+    if (!confirm("EMERGENCY UNMOUNT WARNING:\nThis will safely interrupt active PERCIVAL operations, commit the recovery journal, and request unmount.\n\nProceed?")) return;
+    toast("Interrupting operations and unmounting…");
+    const r = await api("/api/storage/eject", { emergency: true });
+    toast(r.ok ? r.message : r.error, !r.ok);
+    renderSectionVault(el);
+  });
   el.querySelectorAll("[data-vdrive]").forEach(btn => {
     btn.onclick = async () => {
       btn.disabled = true;
@@ -644,26 +660,78 @@ async function renderSectionLocations(el) {
 // Section C.13: Automatic Transfer & Migration
 // ----------------------------------------------------------------------------
 async function renderSectionTransfer(el) {
-  const [qRes, polRes, previewRes] = await Promise.all([
+  const [qRes, polRes, previewRes, jobsRes] = await Promise.all([
     api("/api/transfer/queue"),
     api("/api/transfer/policies"),
-    api("/api/storage/free_space_preview")
+    api("/api/storage/free_space_preview"),
+    api("/api/storage/jobs?limit=15")
   ]);
 
   const queue = qRes.queue || [];
   const policies = polRes.policies || {};
   const prev = previewRes || {};
+  const journalJobs = (jobsRes && jobsRes.jobs) ? jobsRes.jobs : [];
 
   el.innerHTML = `
-    <!-- Free Up Mac Space Card -->
+    <!-- Top Sync Center Control Header -->
     <div class="card" style="padding:18px;background:var(--panel2);border:1px solid var(--acc);margin-bottom:18px">
+      <div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <div>
+          <b style="font-size:16px">Sync &amp; Transfer Operational Centre</b>
+          <p class="note" style="margin:2px 0 0">Synchronize study workspaces between Mac SSD and External Data Vault with SHA-256 integrity.</p>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="b pri" id="st-sync-preview-btn">🔍 Preview Sync with Vault</button>
+          <button class="b" id="st-proc-btn">Process Next Transfer</button>
+        </div>
+      </div>
+      <div id="st-sync-preview-box" style="display:none;margin-top:14px;padding:12px;background:var(--panel);border-radius:6px;border:1px solid var(--line)"></div>
+    </div>
+
+    <!-- Active & Recent Transfers from Authoritative Journal -->
+    <div class="card" style="padding:18px;margin-bottom:18px">
+      <div class="row" style="justify-content:space-between;margin-bottom:10px">
+        <b>Transfer Activity &amp; Journal History (${journalJobs.length} records)</b>
+        <span class="note">Backed by transactional SQLite journal on SSD</span>
+      </div>
+      ${journalJobs.length === 0 ? `<div class="note">No transfers recorded in active journal.</div>` : `
+        <table>
+          <thead>
+            <tr><th>Job ID</th><th>Study</th><th>Op</th><th>Files</th><th>Progress</th><th>Rate</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            ${journalJobs.map(j => {
+              const pct = j.total_bytes > 0 ? Math.round((j.completed_bytes / j.total_bytes) * 100) : 0;
+              return `
+              <tr>
+                <td class="mono" style="font-size:11px">${esc(j.job_id)}</td>
+                <td><b>${esc(j.study_id)}</b></td>
+                <td>${esc(j.operation)}</td>
+                <td>${j.completed_files}/${j.total_files}</td>
+                <td>
+                  <div style="display:flex;align-items:center;gap:6px">
+                    <div class="bar" style="width:70px;height:6px"><i style="width:${pct}%;background:var(--acc)"></i></div>
+                    <span style="font-size:11px">${pct}%</span>
+                  </div>
+                </td>
+                <td style="font-size:11px">${j.current_mb_s ? `${j.current_mb_s.toFixed(1)} MB/s` : (j.avg_mb_s ? `${j.avg_mb_s.toFixed(1)} avg` : '—')}</td>
+                <td><span class="pill ${j.status==='completed'?'ok':j.status==='failed'?'bad':j.status==='running'?'pri':'warn'}">${esc(j.status)}</span></td>
+              </tr>`;
+            }).join("")}
+          </tbody>
+        </table>
+      `}
+    </div>
+
+    <!-- Free Up Mac Space Card -->
+    <div class="card" style="padding:18px;margin-bottom:18px">
       <div class="row" style="justify-content:space-between;align-items:center">
         <div>
-          <b style="font-size:16px">Free Up Mac Space</b>
+          <b>Free Up Mac Space (Eligible Temporary Cleanups)</b>
           <p class="note" style="margin:2px 0 0">Reclaim local storage by cleaning verified temporary data and staged caches.</p>
         </div>
-        <button class="b pri" id="st-free-btn" ${prev.total_reclaimable_mb > 0 ? '' : 'disabled'}>
-          Reclaim ${prev.total_reclaimable_gb || 0} GB Now
+        <button class="b" id="st-free-btn" ${prev.total_reclaimable_mb > 0 ? '' : 'disabled'}>
+          Reclaim ${prev.total_reclaimable_gb || 0} GB
         </button>
       </div>
       <div class="note" style="margin-top:8px">
@@ -671,36 +739,9 @@ async function renderSectionTransfer(el) {
       </div>
     </div>
 
-    <!-- Transfer Queue -->
-    <div class="card" style="padding:18px;margin-bottom:18px">
-      <div class="row" style="justify-content:space-between;margin-bottom:10px">
-        <b>Durable Transfer Queue (${queue.length} jobs)</b>
-        <button class="b sm" id="st-proc-btn">Process Next Transfer</button>
-      </div>
-      ${queue.length === 0 ? `<div class="note">Queue is currently empty. All data is synchronized.</div>` : `
-        <table>
-          <thead>
-            <tr><th>Job ID</th><th>Study</th><th>Action</th><th>Files</th><th>Size</th><th>Status</th></tr>
-          </thead>
-          <tbody>
-            ${queue.slice(0, 10).map(j => `
-              <tr>
-                <td class="mono" style="font-size:11px">${esc(j.job_id)}</td>
-                <td><b>${esc(j.study_code)}</b></td>
-                <td>${esc(j.action)}</td>
-                <td>${j.total_files}</td>
-                <td>${(j.total_bytes / (1024**2)).toFixed(1)} MB</td>
-                <td><span class="pill ${j.status==='completed'?'ok':j.status==='failed'?'bad':'warn'}">${esc(j.status)}</span></td>
-              </tr>
-            `).join("")}
-          </tbody>
-        </table>
-      `}
-    </div>
-
     <!-- Archival Policies -->
     <div class="card" style="padding:18px">
-      <b>Category Transfer Policies</b>
+      <b>Category Archival Policies</b>
       <p class="note" style="margin:2px 0 12px">Automatic background migration rules when studies finish processing.</p>
       <div class="row">
         <label style="display:flex;align-items:center;gap:8px">
@@ -710,6 +751,40 @@ async function renderSectionTransfer(el) {
       </div>
     </div>
   `;
+
+  // Sync Preview handler
+  $("#st-sync-preview-btn").onclick = async () => {
+    const box = $("#st-sync-preview-box");
+    box.style.display = "block";
+    box.innerHTML = `<span class="mut">Scanning study workspaces and comparing with Vault…</span>`;
+    try {
+      const prevRes = await api("/api/storage/sync_preview?mode=manual");
+      if (!prevRes.can_proceed && prevRes.destination_available_gb === 0) {
+        box.innerHTML = `<div class="bad"><b>Cannot sync:</b> ${esc(prevRes.message)}</div>`;
+        return;
+      }
+      box.innerHTML = `
+        <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+          <b>Sync Preview: ${prevRes.to_copy_count} files to archive (${prevRes.total_mb} MB)</b>
+          <button class="b pri sm" id="st-sync-exec-btn" ${prevRes.to_copy_count > 0 ? '' : 'disabled'}>Execute Synchronisation ▶</button>
+        </div>
+        <div style="font-size:12px;margin-bottom:6px">
+          • <b>Files to copy:</b> ${prevRes.to_copy_count} | • <b>Identical (skipped):</b> ${prevRes.skipped_count} | • <b>Conflicts:</b> ${prevRes.conflict_count}
+        </div>
+        ${prevRes.conflict_count > 0 ? `<div class="warn" style="font-size:12px;margin-top:4px">⚠ Conflicts detected! Both copies exist with different sizes. Manual resolution required.</div>` : ''}
+      `;
+      if ($("#st-sync-exec-btn")) {
+        $("#st-sync-exec-btn").onclick = async () => {
+          toast("Executing synchronisation…");
+          const r = await api("/api/storage/sync_execute", { preview: prevRes });
+          toast(r.ok ? r.message : r.error, !r.ok);
+          renderSectionTransfer(el);
+        };
+      }
+    } catch (e) {
+      box.innerHTML = `<div class="bad">Sync preview error: ${esc(e.message)}</div>`;
+    }
+  };
 
   $("#st-free-btn").onclick = async () => {
     if (!confirm(`Reclaim ${prev.total_reclaimable_gb} GB from local Mac SSD?`)) return;

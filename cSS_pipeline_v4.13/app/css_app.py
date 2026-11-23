@@ -1284,6 +1284,22 @@ def storage_get(op, q):
             return ov
         if op == "diagnostics":
             return dict(ok=True, tests=StorageService.run_storage_diagnostics(B, vault_root=vault_root))
+        if op == "eject_check":
+            from uengine.storage import StoragePathsService, EjectManager
+            em = EjectManager(StoragePathsService(B, vault_root))
+            return em.check_ejection_safety().to_dict()
+        if op == "sync_preview":
+            from uengine.storage import StoragePathsService, SyncManager
+            sm = SyncManager(StoragePathsService(B, vault_root))
+            return sm.generate_sync_preview(study_ids=q.get("study_ids"), mode=q.get("mode", "manual")).to_dict()
+        if op == "audit":
+            from uengine.storage import StoragePathsService, StorageStateService
+            ss = StorageStateService(StoragePathsService(B, vault_root))
+            return dict(ok=True, events=ss.get_audit_events(limit=int(q.get("limit", 50)), study_id=q.get("study_id")))
+        if op == "jobs":
+            from uengine.storage import StoragePathsService, StorageStateService
+            ss = StorageStateService(StoragePathsService(B, vault_root))
+            return dict(ok=True, jobs=ss.get_all_jobs(limit=int(q.get("limit", 50))))
         if op == "studies": return dict(studies=fm.list_studies(filter_status=q.get("status")))
         if op == "tree": return fm.browse_study_tree(q.get("code", ""))
         if op == "advisor": return sa.generate_recommendations()
@@ -1305,6 +1321,14 @@ def storage_post(op, d):
         if op == "stage": return fm.stage_study(d.get("code", ""))
         if op == "archive": return fm.archive_study(d.get("code", ""))
         if op == "verify": return fm.verify_study_checksums(d.get("code", ""))
+        if op == "eject":
+            from uengine.storage import StoragePathsService, EjectManager
+            em = EjectManager(StoragePathsService(B, vault_root))
+            return em.eject_vault(emergency=bool(d.get("emergency", False)))
+        if op == "sync_execute":
+            from uengine.storage import StoragePathsService, SyncManager
+            sm = SyncManager(StoragePathsService(B, vault_root))
+            return sm.execute_sync(d.get("preview", {}))
         if op == "clean": return fm.clean_staging(d.get("code", ""))
         if op == "prune": return sa.execute_prune(d.get("action", ""), int(d.get("days", 7)))
         if op == "delete": return fm.delete_study(d.get("code", ""), target=d.get("target", "local"))
@@ -1332,6 +1356,8 @@ def workspace_get(op, q):
     try:
         from uengine.study_workspace_manager import StudyWorkspaceManager
         swm = StudyWorkspaceManager(B, vault_root=SET.get("vault_mount"))
+        if op == "discover":
+            return dict(ok=True, discovered=swm.discover_source_studies())
         if op == "queue":
             return dict(ok=True, queue=swm.get_queue())
         if op == "studies":
@@ -1347,6 +1373,9 @@ def workspace_post(op, d):
     try:
         from uengine.study_workspace_manager import StudyWorkspaceManager
         swm = StudyWorkspaceManager(B, vault_root=SET.get("vault_mount"))
+        if op == "register":
+            rec = swm.register_study(d.get("study_id", ""), d.get("original_mri_location", ""), metadata=d.get("metadata"))
+            return dict(ok=True, study=rec)
         if op == "stage":
             ok, msg, rec = swm.stage_study(d.get("study_id", ""), d.get("source_paths"))
             return dict(ok=ok, message=msg, study=rec)

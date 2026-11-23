@@ -14,6 +14,7 @@ import time
 import shutil
 import hashlib
 from typing import Dict, Any, List, Optional
+from .unified_transfer_engine import get_transfer_engine
 
 
 TRANSFER_CATEGORIES = [
@@ -148,31 +149,50 @@ class TransferManager:
         target_vault_dir = os.path.join(self.vault_root, "Processed_MRI", code)
         os.makedirs(target_vault_dir, exist_ok=True)
 
+        engine = get_transfer_engine(os.path.join(self.base_dir, "app_data", "transfers"))
+
+        def update_job_progress(p_dict):
+            job["transferred_bytes"] = p_dict.get("completed_bytes", 0)
+            job["progress_pct"] = p_dict.get("percent", 0.0)
+            job["current_mb_s"] = p_dict.get("current_mb_s", 0.0)
+            job["avg_mb_s"] = p_dict.get("avg_mb_s", 0.0)
+            job["eta_seconds"] = p_dict.get("eta_seconds", 0.0)
+            self._save_queue(q)
+
         try:
-            # Transfer candidate file
+            # Transfer candidate file via UnifiedTransferEngine
             rev_file = os.path.join(self.base_dir, "review", f"{code}_candidates.csv")
             if os.path.isfile(rev_file):
                 dst_file = os.path.join(self.vault_root, "Candidates", "ALBUS", f"{code}_candidates.csv")
-                os.makedirs(os.path.dirname(dst_file), exist_ok=True)
-                shutil.copy2(rev_file, dst_file)
-                if file_sha256(rev_file) != file_sha256(dst_file):
-                    os.remove(dst_file)
-                    raise RuntimeError(f"Checksum mismatch for {code}_candidates.csv")
+                ok, msg, _ = engine.transfer_path(
+                    src=rev_file,
+                    dst=dst_file,
+                    operation="archive",
+                    study_id=code,
+                    verify_sha=True,
+                    preserve_source=True
+                )
+                if not ok:
+                    raise IOError(f"Candidate file transfer failed: {msg}")
 
-            # Transfer subjects folder
+            # Transfer subjects folder via UnifiedTransferEngine
             subj_dir = os.path.join(self.base_dir, "subjects", code)
             if os.path.isdir(subj_dir):
-                for root, _, files in os.walk(subj_dir):
-                    rel = os.path.relpath(root, subj_dir)
-                    dst_root = target_vault_dir if rel == "." else os.path.join(target_vault_dir, rel)
-                    os.makedirs(dst_root, exist_ok=True)
-                    for f in files:
-                        sp = os.path.join(root, f)
-                        dp = os.path.join(dst_root, f)
-                        shutil.copy2(sp, dp)
+                ok, msg, p_info = engine.transfer_path(
+                    src=subj_dir,
+                    dst=target_vault_dir,
+                    operation="archive",
+                    study_id=code,
+                    verify_sha=True,
+                    preserve_source=True,
+                    prefer_clone=False,
+                    on_progress=update_job_progress
+                )
+                if not ok:
+                    raise IOError(f"Subjects transfer failed: {msg}")
 
             job["status"] = "completed"
-            job["progress_pct"] = 100
+            job["progress_pct"] = 100.0
             job["completed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
             self._save_queue(q)
             return {"ok": True, "job_id": job["job_id"], "status": "completed"}

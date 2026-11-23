@@ -17,6 +17,8 @@ import hashlib
 from enum import Enum
 from typing import Dict, List, Optional, Any, Tuple, Set
 
+from .unified_transfer_engine import get_transfer_engine, UnifiedTransferEngine
+
 
 class StudyLifecycleState(str, Enum):
     DISCOVERED = "Discovered"
@@ -278,6 +280,61 @@ class StudyWorkspaceManager:
             studies = [s for s in studies if s.get("state") == state]
         return sorted(studies, key=lambda x: x.get("updated_at", 0), reverse=True)
 
+    def discover_source_studies(self, search_paths: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """Discover original MRI studies from source locations without modifying or copying them."""
+        paths_to_scan = search_paths or [
+            "/Volumes/Percival/Dicom",
+            os.path.join(self.vault_root, "original_mri") if self.vault_root else "",
+            os.path.join(self.vault_root, "MRI", "Originals") if self.vault_root else "",
+            os.path.join(self.base_dir, "raw", "import_source_preserved"),
+            os.path.join(self.base_dir, "app_data", "import_src")
+        ]
+        discovered = []
+        seen_paths = set()
+
+        for base_p in paths_to_scan:
+            if not base_p or not os.path.isdir(base_p):
+                continue
+            try:
+                for entry in sorted(os.listdir(base_p)):
+                    if entry.startswith("."):
+                        continue
+                    sp = os.path.join(base_p, entry)
+                    if sp in seen_paths:
+                        continue
+                    seen_paths.add(sp)
+
+                    if os.path.isdir(sp):
+                        # Count DICOM and NIfTI files
+                        all_files = [os.path.join(r, f) for r, _, fs in os.walk(sp) for f in fs if not f.startswith(".")]
+                        dicom_files = [f for f in all_files if f.lower().endswith((".dcm", ".ima")) or "dicom" in f.lower()]
+                        nifti_files = [f for f in all_files if f.lower().endswith((".nii", ".nii.gz"))]
+                        total_sz = sum(os.path.getsize(f) for f in all_files if os.path.isfile(f))
+
+                        if len(dicom_files) > 0 or len(nifti_files) > 0 or len(all_files) > 0:
+                            # Detect series
+                            subdirs = [d for d in os.listdir(sp) if os.path.isdir(os.path.join(sp, d)) and not d.startswith(".")]
+                            is_registered = entry in self._ledger
+
+                            discovered.append({
+                                "study_id": entry,
+                                "source_path": sp,
+                                "source_type": "DICOM" if len(dicom_files) >= len(nifti_files) else "NIfTI",
+                                "total_files": len(all_files),
+                                "dicom_count": len(dicom_files),
+                                "nifti_count": len(nifti_files),
+                                "total_size_bytes": total_sz,
+                                "total_size_mb": round(total_sz / (1024 * 1024), 2),
+                                "series_detected": subdirs if subdirs else ["single_folder"],
+                                "is_registered": is_registered,
+                                "current_state": self._ledger[entry]["state"] if is_registered else "Discovered",
+                                "readable": os.access(sp, os.R_OK)
+                            })
+            except Exception:
+                continue
+
+        return discovered
+
     # -------------------------------------------------------------------------
     # Capacity Estimation & Staging (Mac SSD)
     # -------------------------------------------------------------------------
@@ -353,6 +410,7 @@ class StudyWorkspaceManager:
         if not paths and rec.get("original_mri_location"):
             paths = [rec["original_mri_location"]]
 
+        engine = get_transfer_engine(os.path.join(self.base_dir, "app_data", "transfers"))
         staged_manifest = {}
         total_bytes = 0
         file_count = 0
@@ -362,39 +420,39 @@ class StudyWorkspaceManager:
                 if not os.path.exists(p):
                     raise FileNotFoundError(f"Source path not found: {p}")
 
-                if os.path.isfile(p):
-                    fname = os.path.basename(p)
-                    dest = os.path.join(ws_dir, fname)
-                    shutil.copy2(p, dest + ".tmp")
-                    os.replace(dest + ".tmp", dest)
-                    csum = compute_file_sha256(dest) if verify else ""
-                    staged_manifest[fname] = {"source": p, "dest": dest, "sha256": csum, "size": os.path.getsize(dest)}
-                    total_bytes += os.path.getsize(dest)
-                    file_count += 1
-                elif os.path.isdir(p):
-                    for root, _, files in os.walk(p):
-                        for f in files:
-                            if f.startswith("."):
-                                continue
-                            sp = os.path.join(root, f)
-                            rel = os.path.relpath(sp, p)
-                            dest = os.path.join(ws_dir, rel)
-                            os.makedirs(os.path.dirname(dest), exist_ok=True)
-                            shutil.copy2(sp, dest + ".tmp")
-                            os.replace(dest + ".tmp", dest)
-                            csum = compute_file_sha256(dest) if verify else ""
-                            staged_manifest[rel] = {"source": sp, "dest": dest, "sha256": csum, "size": os.path.getsize(dest)}
-                            total_bytes += os.path.getsize(dest)
-                            file_count += 1
+                ok, msg, p_info = engine.transfer_path(
+                    src=p,
+                    dst=ws_dir,
+                    operation="stage",
+                    study_id=study_id,
+                    verify_sha=verify,
+                    preserve_source=True,
+                    prefer_clone=True
+                )
+                if not ok:
+                    raise IOError(f"UnifiedTransferEngine staging failed: {msg}")
+
+                total_bytes += p_info.get("completed_bytes", 0)
+                file_count += p_info.get("completed_files", 0)
+
+            # Re-index staged directory files for checksum ledger
+            for root, _, files in os.walk(ws_dir):
+                for f in files:
+                    if f.startswith("."):
+                        continue
+                    fp = os.path.join(root, f)
+                    rel = os.path.relpath(fp, ws_dir)
+                    csum = compute_file_sha256(fp) if verify else ""
+                    staged_manifest[rel] = {"dest": fp, "sha256": csum, "size": os.path.getsize(fp)}
 
             rec["checksums"] = {k: v["sha256"] for k, v in staged_manifest.items()}
-            rec["file_count"] = file_count
-            rec["total_size_bytes"] = total_bytes
+            rec["file_count"] = len(staged_manifest)
+            rec["total_size_bytes"] = sum(v["size"] for v in staged_manifest.values())
             rec["updated_at"] = time.time()
 
             self.transition_state(study_id, StudyLifecycleState.STAGED.value, reason="staging_complete")
             self.transition_state(study_id, StudyLifecycleState.READY_FOR_PROCESSING.value, reason="ready_for_processing")
-            return True, f"Successfully staged {file_count} files for study {study_id}", rec
+            return True, f"Successfully staged {rec['file_count']} files for study {study_id}", rec
         except Exception as e:
             self.transition_state(study_id, StudyLifecycleState.ERROR.value, reason=f"Staging failed: {e}")
             return False, f"Staging failed: {e}", {}
@@ -476,25 +534,19 @@ class StudyWorkspaceManager:
         os.makedirs(dest_dir, exist_ok=True)
         rec["hdd_archive_location"] = dest_dir
 
-        archived_files = {}
+        engine = get_transfer_engine(os.path.join(self.base_dir, "app_data", "transfers"))
         try:
-            for root, _, files in os.walk(ws_dir):
-                for f in files:
-                    if f.startswith("."):
-                        continue
-                    src = os.path.join(root, f)
-                    rel = os.path.relpath(src, ws_dir)
-                    tgt = os.path.join(dest_dir, rel)
-                    os.makedirs(os.path.dirname(tgt), exist_ok=True)
-                    shutil.copy2(src, tgt + ".tmp")
-                    os.replace(tgt + ".tmp", tgt)
-
-                    if verify:
-                        s_hash = compute_file_sha256(src)
-                        t_hash = compute_file_sha256(tgt)
-                        if s_hash != t_hash:
-                            raise IOError(f"Archive checksum failure on {rel}: {s_hash} != {t_hash}")
-                        archived_files[rel] = t_hash
+            ok, msg, p_info = engine.transfer_path(
+                src=ws_dir,
+                dst=dest_dir,
+                operation="archive",
+                study_id=study_id,
+                verify_sha=verify,
+                preserve_source=True,
+                prefer_clone=False  # Cross-device SSD-to-HDD uses bounded streaming
+            )
+            if not ok:
+                raise IOError(f"Archive transfer failed: {msg}")
 
             rec["archive_status"] = "archived_and_verified"
             self.transition_state(study_id, StudyLifecycleState.ARCHIVED.value, reason="archive_verified")

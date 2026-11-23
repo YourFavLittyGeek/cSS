@@ -48,7 +48,13 @@ def sha256(path, chunk=1 << 20):
 
 
 def _cp(a, b):
-    if subprocess.run(["cp", "-c", a, b], capture_output=True).returncode != 0: shutil.copy2(a, b)
+    try:
+        if os.stat(a).st_dev == os.stat(os.path.dirname(b)).st_dev:
+            if subprocess.run(["cp", "-c", a, b], capture_output=True).returncode == 0:
+                return
+    except Exception:
+        pass
+    shutil.copyfile(a, b)
 
 
 def _files_of(src):

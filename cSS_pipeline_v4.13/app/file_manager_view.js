@@ -3,6 +3,7 @@
 // Rename, New Folder, Delete, Archive, Restore, Verify SHA-256) across local NVMe SSD and Data Vault.
 
 const FM = {
+  viewMode: "studies", // "studies" or "files"
   currentCategory: "working",
   currentSubpath: "",
   search: "",
@@ -11,20 +12,28 @@ const FM = {
   selected: new Set(),
   categories: {},
   overview: null,
-  items: []
+  items: [],
+  studies: [],
+  selectedStudy: null
 };
 
 async function filesView(v) {
   v.innerHTML = `<div class="card" style="padding:20px;text-align:center"><span class="mut">Loading File Manager…</span></div>`;
   
   try {
-    const catRes = await api("/api/files/categories");
+    const [catRes, ovRes, studiesRes] = await Promise.all([
+      api("/api/files/categories"),
+      api("/api/files/overview"),
+      api("/api/workspace/studies")
+    ]);
     if (catRes.ok && catRes.categories) {
       FM.categories = catRes.categories;
     }
-    const ovRes = await api("/api/files/overview");
     if (ovRes) {
       FM.overview = ovRes;
+    }
+    if (studiesRes && studiesRes.studies) {
+      FM.studies = studiesRes.studies;
     }
   } catch (e) {
     v.innerHTML = `<div class="card bad">Failed to load storage topology: ${esc(e.message)}</div>`;
@@ -84,6 +93,58 @@ async function renderFileManager(v) {
       </div>
     </div>
 
+    <!-- Mode Switcher & Tools -->
+    <div class="row" style="margin-bottom:12px;gap:8px;align-items:center">
+      <button class="b ${FM.viewMode==='studies'?'pri':''}" id="fm-mode-studies">🗂 Study Workspaces (${FM.studies.length})</button>
+      <button class="b ${FM.viewMode==='files'?'pri':''}" id="fm-mode-files">📁 Directory Files Browser</button>
+      <span class="sp"></span>
+      <button class="b sm" id="fm-discover-btn">🔍 Discover Unregistered MRI Studies</button>
+    </div>
+
+    ${FM.viewMode === "studies" ? `
+      <!-- Study Workspaces Table View -->
+      <div class="card" style="padding:16px;margin:0">
+        <div class="row" style="justify-content:space-between;margin-bottom:12px">
+          <b>Authoritative Study Workspace Ledger (${FM.studies.length} registered)</b>
+          <div class="note">Managed by central StudyWorkspaceManager with 18 lifecycle phases</div>
+        </div>
+        ${FM.studies.length === 0 ? `
+          <div style="text-align:center;padding:30px;color:var(--mut)">
+            No studies registered in active workspace yet.
+            <div style="margin-top:8px"><button class="b pri sm" id="fm-discover-cta">Discover Original Studies from Disk ▶</button></div>
+          </div>
+        ` : `
+          <div style="overflow-x:auto">
+            <table>
+              <thead>
+                <tr>
+                  <th>Study ID</th><th>Lifecycle State</th><th>Original MRI Location</th><th>Workspace Path</th><th>Archive Status</th><th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${FM.studies.map(s => `
+                  <tr>
+                    <td><b>${esc(s.study_id)}</b></td>
+                    <td><span class="pill ${s.state==='Archived'?'ok':s.state==='Ready for processing'?'pri':'warn'}">${esc(s.state)}</span></td>
+                    <td class="mono" style="font-size:11px">${esc(s.original_mri_location || '—')}</td>
+                    <td class="mono" style="font-size:11px">${esc(s.active_workspace_location || '—')}</td>
+                    <td><span class="pill ${s.archive_status==='archived_and_verified'?'ok':'mut'}">${esc(s.archive_status || 'not_archived')}</span></td>
+                    <td>
+                      <div class="row" style="gap:4px;margin:0">
+                        <button class="b sm pri" data-ws-stage="${esc(s.study_id)}" title="Stage to SSD">Stage</button>
+                        <button class="b sm" data-ws-archive="${esc(s.study_id)}" title="Archive to Vault">Archive</button>
+                        <button class="b sm bad" data-ws-clean="${esc(s.study_id)}" title="Clean eligible SSD workspace">Clean</button>
+                      </div>
+                    </td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          </div>
+        `}
+        <div id="fm-discovered-box" style="display:none;margin-top:16px;padding:12px;background:var(--panel2);border-radius:6px;border:1px solid var(--line)"></div>
+      </div>
+    ` : `
     <!-- Main Two-Column File Manager Interface -->
     <div style="display:flex;gap:16px;align-items:flex-start">
       <!-- Left Category Navigation Sidebar -->
@@ -97,6 +158,7 @@ async function renderFileManager(v) {
           `).join("")}
         </div>
       </div>
+    `}
 
       <!-- Right Main Browser Pane -->
       <div class="card" style="flex:1;margin:0;padding:16px">
@@ -178,6 +240,113 @@ async function renderFileManager(v) {
       </div>
     </div>
   `;
+
+  // View mode switcher bindings
+  const bStudies = $("#fm-mode-studies"), bFiles = $("#fm-mode-files");
+  if (bStudies) bStudies.onclick = async () => {
+    FM.viewMode = "studies";
+    const res = await api("/api/workspace/studies");
+    if (res && res.studies) FM.studies = res.studies;
+    renderFileManager(v);
+  };
+  if (bFiles) bFiles.onclick = () => {
+    FM.viewMode = "files";
+    renderFileManager(v);
+  };
+
+  // Study workspace action handlers
+  v.querySelectorAll("[data-ws-stage]").forEach(b => {
+    b.onclick = async () => {
+      const sid = b.dataset.wsStage;
+      toast(`Staging ${sid} to local SSD…`);
+      const r = await api("/api/workspace/stage", { study_id: sid });
+      toast(r.ok ? r.message : r.error, !r.ok);
+      const res = await api("/api/workspace/studies");
+      if (res && res.studies) FM.studies = res.studies;
+      renderFileManager(v);
+    };
+  });
+
+  v.querySelectorAll("[data-ws-archive]").forEach(b => {
+    b.onclick = async () => {
+      const sid = b.dataset.wsArchive;
+      toast(`Archiving ${sid} to Data Vault…`);
+      const r = await api("/api/workspace/archive", { study_id: sid });
+      toast(r.ok ? r.message : r.error, !r.ok);
+      const res = await api("/api/workspace/studies");
+      if (res && res.studies) FM.studies = res.studies;
+      renderFileManager(v);
+    };
+  });
+
+  v.querySelectorAll("[data-ws-clean]").forEach(b => {
+    b.onclick = async () => {
+      const sid = b.dataset.wsClean;
+      if (!confirm(`Clean local SSD workspace for ${sid}?\n(Archive copy must be verified with SHA-256 first)`)) return;
+      toast(`Cleaning workspace for ${sid}…`);
+      const r = await api("/api/workspace/clean", { study_id: sid });
+      toast(r.ok ? r.message : r.error, !r.ok);
+      const res = await api("/api/workspace/studies");
+      if (res && res.studies) FM.studies = res.studies;
+      renderFileManager(v);
+    };
+  });
+
+  // Discovery handlers
+  const discHandler = async () => {
+    const box = $("#fm-discovered-box");
+    if (!box) return;
+    box.style.display = "block";
+    box.innerHTML = `<span class="mut">Scanning external drive and local storage for original MRI studies…</span>`;
+    try {
+      const r = await api("/api/workspace/discover");
+      const list = r.discovered || [];
+      const unreg = list.filter(d => !d.is_registered);
+      box.innerHTML = `
+        <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+          <b>Discovered ${list.length} Original MRI Studies (${unreg.length} unregistered)</b>
+          <button class="b sm" id="fm-disc-close">✕ Close</button>
+        </div>
+        ${unreg.length === 0 ? `<div class="note">All discovered studies are already registered.</div>` : `
+          <div style="max-height:220px;overflow-y:auto">
+            <table>
+              <thead><tr><th>Study</th><th>Type</th><th>Files</th><th>Size</th><th>Source Path</th><th>Action</th></tr></thead>
+              <tbody>
+                ${unreg.map(u => `
+                  <tr>
+                    <td><b>${esc(u.study_id)}</b></td>
+                    <td><span class="pill pri">${esc(u.source_type)}</span></td>
+                    <td>${u.total_files}</td>
+                    <td>${u.total_size_mb} MB</td>
+                    <td class="mono" style="font-size:10px">${esc(u.source_path)}</td>
+                    <td><button class="b sm pri" data-reg-id="${esc(u.study_id)}" data-reg-path="${esc(u.source_path)}">+ Register</button></td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          </div>
+        `}
+      `;
+      $("#fm-disc-close") && ($("#fm-disc-close").onclick = () => { box.style.display = "none"; });
+      box.querySelectorAll("[data-reg-id]").forEach(rb => {
+        rb.onclick = async () => {
+          const sid = rb.dataset.regId;
+          const spath = rb.dataset.regPath;
+          toast(`Registering ${sid}…`);
+          const regRes = await api("/api/workspace/register", { study_id: sid, original_mri_location: spath });
+          toast(regRes.ok ? `Registered ${sid}` : "Registration failed", !regRes.ok);
+          const sRes = await api("/api/workspace/studies");
+          if (sRes && sRes.studies) FM.studies = sRes.studies;
+          discHandler();
+        };
+      });
+    } catch (e) {
+      box.innerHTML = `<div class="bad">Discovery failed: ${esc(e.message)}</div>`;
+    }
+  };
+
+  $("#fm-discover-btn") && ($("#fm-discover-btn").onclick = discHandler);
+  $("#fm-discover-cta") && ($("#fm-discover-cta").onclick = discHandler);
 
   // Bind category clicks
   v.querySelectorAll("[data-cat]").forEach(b => {

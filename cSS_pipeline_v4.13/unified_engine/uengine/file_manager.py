@@ -13,6 +13,8 @@ import shutil
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+from .unified_transfer_engine import get_transfer_engine
+
 STATUS_LOCAL_ONLY = "LOCAL_ONLY"
 STATUS_STAGED = "STAGED"
 STATUS_ARCHIVED = "ARCHIVED"
@@ -606,17 +608,29 @@ class FileManager:
                 else:
                     os.remove(target_path)
 
+        engine = get_transfer_engine(os.path.join(self.base_dir, "app_data", "transfers"))
         try:
-            if os.path.isdir(src):
-                shutil.copytree(src, target_path)
-            else:
-                shutil.copy2(src, target_path)
-            return {"ok": True, "source": src, "target_path": target_path, "bytes": os.path.getsize(target_path) if os.path.isfile(target_path) else 0}
+            ok, msg, p_info = engine.transfer_path(
+                src=src,
+                dst=target_path,
+                operation="copy",
+                verify_sha=True,
+                preserve_source=True
+            )
+            if not ok:
+                return {"ok": False, "error": f"Copy failed: {msg}"}
+            return {
+                "ok": True,
+                "source": src,
+                "target_path": target_path,
+                "bytes": p_info.get("completed_bytes", 0),
+                "sha256": p_info.get("verification_status")
+            }
         except Exception as e:
             return {"ok": False, "error": f"Copy failed: {str(e)}"}
 
     def move_item(self, src: str, dst_dir: str, conflict_mode: str = "keep_both") -> Dict[str, Any]:
-        """Move a file or directory with conflict handling."""
+        """Move a file or directory with verified destination and conflict handling."""
         src = os.path.abspath(src)
         dst_dir = os.path.abspath(dst_dir)
         if not os.path.exists(src):
@@ -643,9 +657,18 @@ class FileManager:
                 else:
                     os.remove(target_path)
 
+        engine = get_transfer_engine(os.path.join(self.base_dir, "app_data", "transfers"))
         try:
-            shutil.move(src, target_path)
-            return {"ok": True, "source": src, "target_path": target_path}
+            ok, msg, p_info = engine.transfer_path(
+                src=src,
+                dst=target_path,
+                operation="move",
+                verify_sha=True,
+                preserve_source=False
+            )
+            if not ok:
+                return {"ok": False, "error": f"Move failed: {msg}"}
+            return {"ok": True, "source": src, "target_path": target_path, "bytes": p_info.get("completed_bytes", 0)}
         except Exception as e:
             return {"ok": False, "error": f"Move failed: {str(e)}"}
 
