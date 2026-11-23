@@ -20,11 +20,35 @@ import json
 import shutil
 import hashlib
 import subprocess
+from enum import Enum
 from typing import Dict, Any, List, Optional, Callable, Tuple
 from dataclasses import dataclass, asdict
 
+try:
+    import fcntl
+    HAS_F_FULLFSYNC = hasattr(fcntl, "F_FULLFSYNC")
+except ImportError:
+    fcntl = None
+    HAS_F_FULLFSYNC = False
 
-DEFAULT_CHUNK_SIZE = 4 * 1024 * 1024  # 4 MB optimal buffer for USB 3.0 / Apple Silicon
+
+DEFAULT_CHUNK_SIZE = 4 * 1024 * 1024  # 4 MB optimal streaming buffer
+
+
+class TransferState(str, Enum):
+    QUEUED = "Queued"
+    PREPARING = "Preparing"
+    COPYING = "Copying"
+    FLUSHING = "Flushing"
+    VERIFYING = "Verifying"
+    COMMITTING = "Committing"
+    COMPLETED = "Completed"
+    PAUSED = "Paused"
+    CANCEL_REQUESTED = "Cancel requested"
+    CANCELLED = "Cancelled"
+    INTERRUPTED = "Interrupted"
+    FAILED = "Failed"
+    NEEDS_ATTENTION = "Needs attention"
 
 
 def compute_sha256(path: str, chunk_size: int = DEFAULT_CHUNK_SIZE) -> str:
@@ -34,6 +58,21 @@ def compute_sha256(path: str, chunk_size: int = DEFAULT_CHUNK_SIZE) -> str:
         while chunk := f.read(chunk_size):
             h.update(chunk)
     return h.hexdigest()
+
+
+def flush_durability(fd: int) -> Tuple[bool, str]:
+    """Flush file descriptor to disk ensuring full physical sync when supported."""
+    if sys.platform == "darwin" and HAS_F_FULLFSYNC and fcntl:
+        try:
+            fcntl.fcntl(fd, fcntl.F_FULLFSYNC)
+            return True, "F_FULLFSYNC"
+        except Exception:
+            pass
+    try:
+        os.fsync(fd)
+        return True, "os.fsync"
+    except Exception as e:
+        return False, f"flush_failed: {e}"
 
 
 def is_same_filesystem(src: str, dst: str) -> bool:
@@ -60,11 +99,14 @@ class TransferProgress:
     completed_files: int = 0
     total_bytes: int = 0
     completed_bytes: int = 0
+    current_file: str = ""
+    current_phase: str = TransferState.PREPARING.value
     current_mb_s: float = 0.0
     avg_mb_s: float = 0.0
-    eta_seconds: float = 0.0
-    status: str = "pending"  # pending, transferring, paused, completed, failed, cancelled
+    eta_seconds: Optional[float] = None
+    status: str = TransferState.PREPARING.value
     verification_status: str = "unverified"  # unverified, verified, mismatch
+    durability_level: str = "standard"       # F_FULLFSYNC, os.fsync, unverified
     error: Optional[str] = None
     retry_count: int = 0
     start_time: float = 0.0
@@ -73,6 +115,8 @@ class TransferProgress:
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
         d["percent"] = round((self.completed_bytes / self.total_bytes * 100.0) if self.total_bytes > 0 else 0.0, 1)
+        d["speed_str"] = f"{round(self.current_mb_s, 1)} MB/s" if self.current_mb_s > 0 else f"{round(self.avg_mb_s, 1)} MB/s"
+        d["eta_str"] = f"{int(self.eta_seconds)}s" if self.eta_seconds is not None and self.eta_seconds > 0 else "—"
         return d
 
 
@@ -104,17 +148,104 @@ class UnifiedTransferEngine:
                 pass
         return None
 
+    def get_active_jobs(self) -> List[Dict[str, Any]]:
+        return [job.to_dict() for job in self._active_jobs.values()]
+
+    def list_manifest_jobs(self, limit: int = 50) -> List[Dict[str, Any]]:
+        jobs = []
+        if os.path.isdir(self.manifest_dir):
+            files = sorted(
+                [os.path.join(self.manifest_dir, f) for f in os.listdir(self.manifest_dir) if f.endswith(".manifest.json")],
+                key=os.path.getmtime,
+                reverse=True
+            )
+            for mf in files[:limit]:
+                try:
+                    with open(mf, "r") as f:
+                        d = json.load(f)
+                        prog = d.get("progress", {})
+                        prog["updated_at"] = d.get("updated_at")
+                        jobs.append(prog)
+                except Exception:
+                    pass
+        return jobs
+
+    def scan_interrupted_transfers(self, search_dirs: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """Scan target and workspace directories for orphan .part files and uncommitted transfers."""
+        dirs = search_dirs or [self.state_dir, os.path.dirname(self.state_dir)]
+        interrupted = []
+        seen = set()
+
+        # Check manifests with non-completed status
+        if os.path.isdir(self.manifest_dir):
+            for mf_name in os.listdir(self.manifest_dir):
+                if not mf_name.endswith(".manifest.json"):
+                    continue
+                mf_path = os.path.join(self.manifest_dir, mf_name)
+                try:
+                    with open(mf_path, "r") as f:
+                        data = json.load(f)
+                    prog = data.get("progress", {})
+                    st = prog.get("status")
+                    if st in (TransferState.INTERRUPTED.value, TransferState.FAILED.value,
+                              TransferState.PAUSED.value, "transferring", "pending"):
+                        job_id = data.get("job_id", mf_name)
+                        if job_id not in seen:
+                            seen.add(job_id)
+                            interrupted.append({
+                                "job_id": job_id,
+                                "study_id": data.get("study_id", "UNKNOWN"),
+                                "source": data.get("source"),
+                                "destination": data.get("destination"),
+                                "status": st,
+                                "last_confirmed_state": prog.get("current_phase", "Unknown"),
+                                "has_part_file": False,
+                                "completed_files": prog.get("completed_files", 0),
+                                "total_files": prog.get("total_files", 0),
+                                "source_available": os.path.exists(data.get("source", "")),
+                                "recommended_action": "Resume transfer from manifest checkpoint" if os.path.exists(data.get("source", "")) else "Verify source drive connectivity"
+                            })
+                except Exception:
+                    pass
+
+        # Check for .part files on disk
+        for d in dirs:
+            if not d or not os.path.isdir(d):
+                continue
+            for root, _, files in os.walk(d):
+                for f in files:
+                    if f.endswith(".part"):
+                        full_p = os.path.join(root, f)
+                        dest_final = full_p[:-5]
+                        sz = os.path.getsize(full_p)
+                        interrupted.append({
+                            "job_id": f"part_{os.path.basename(dest_final)}",
+                            "study_id": os.path.basename(root),
+                            "source": "Disk temporary .part",
+                            "destination": dest_final,
+                            "part_file_path": full_p,
+                            "part_file_size": sz,
+                            "status": TransferState.INTERRUPTED.value,
+                            "last_confirmed_state": "Interrupted during stream copy",
+                            "has_part_file": True,
+                            "source_available": True,
+                            "recommended_action": "Quarantine or recopy from verified source"
+                        })
+        return interrupted
+
     def pause_job(self, job_id: str) -> bool:
         if job_id in self._active_jobs:
             self._pause_flags[job_id] = True
-            self._active_jobs[job_id].status = "paused"
+            self._active_jobs[job_id].status = TransferState.PAUSED.value
+            self._active_jobs[job_id].current_phase = TransferState.PAUSED.value
             return True
         return False
 
     def cancel_job(self, job_id: str) -> bool:
         if job_id in self._active_jobs:
             self._cancel_flags[job_id] = True
-            self._active_jobs[job_id].status = "cancelled"
+            self._active_jobs[job_id].status = TransferState.CANCELLED.value
+            self._active_jobs[job_id].current_phase = TransferState.CANCELLED.value
             return True
         return False
 
@@ -125,17 +256,17 @@ class UnifiedTransferEngine:
         verify_sha: bool = True,
         progress_callback: Optional[Callable[[int, float], None]] = None,
         chunk_size: int = DEFAULT_CHUNK_SIZE
-    ) -> Tuple[bool, str, int]:
-        """Copy a single file atomically with bounded streaming, in-flight SHA-256 and progress tracking.
+    ) -> Tuple[bool, str, int, str]:
+        """Copy a single file atomically with bounded streaming, in-flight SHA-256, .part staging, and flush durability.
         
-        Returns: (success: bool, sha256_hash: str, bytes_copied: int)
+        Returns: (success: bool, sha256_hash: str, bytes_copied: int, durability_level: str)
         """
         if not os.path.isfile(src):
             raise FileNotFoundError(f"Source file not found: {src}")
 
         dst_dir = os.path.dirname(os.path.abspath(dst))
         os.makedirs(dst_dir, exist_ok=True)
-        tmp_dst = dst + f".tmp_{int(time.time() * 1000)}"
+        part_dst = dst + ".part"
 
         file_size = os.path.getsize(src)
         bytes_copied = 0
@@ -143,9 +274,10 @@ class UnifiedTransferEngine:
 
         t_last = time.perf_counter()
         bytes_last = 0
+        durability_level = "standard"
 
         try:
-            with open(src, "rb") as fin, open(tmp_dst, "wb") as fout:
+            with open(src, "rb") as fin, open(part_dst, "wb") as fout:
                 while chunk := fin.read(chunk_size):
                     h_src.update(chunk)
                     fout.write(chunk)
@@ -159,10 +291,14 @@ class UnifiedTransferEngine:
                         t_last = now
                         bytes_last = bytes_copied
 
+                # Flush and commit to physical medium
+                ok_flush, dur_method = flush_durability(fout.fileno())
+                durability_level = dur_method
+
             computed_sha = h_src.hexdigest()
 
-            # Atomic replace
-            os.replace(tmp_dst, dst)
+            # Atomic replace from .part to final destination
+            os.replace(part_dst, dst)
 
             # Optional destination read-back verification for high-security archival
             if verify_sha and os.path.exists(dst):
@@ -172,12 +308,12 @@ class UnifiedTransferEngine:
                         os.remove(dst)
                     raise IOError(f"Integrity check failed: source {computed_sha} != destination {dst_sha}")
 
-            return True, computed_sha, bytes_copied
+            return True, computed_sha, bytes_copied, durability_level
 
         except Exception as e:
-            if os.path.exists(tmp_dst):
+            if os.path.exists(part_dst):
                 try:
-                    os.remove(tmp_dst)
+                    os.remove(part_dst)
                 except Exception:
                     pass
             raise e
@@ -272,14 +408,19 @@ class UnifiedTransferEngine:
             for s_abs, rel_p, s_size in source_files:
                 # Check cancellation or pause
                 if self._cancel_flags.get(job_id):
-                    progress.status = "cancelled"
+                    progress.status = TransferState.CANCELLED.value
+                    progress.current_phase = TransferState.CANCELLED.value
                     save_manifest_state()
                     return False, f"Transfer cancelled by user: {job_id}", progress.to_dict()
 
                 if self._pause_flags.get(job_id):
-                    progress.status = "paused"
+                    progress.status = TransferState.PAUSED.value
+                    progress.current_phase = TransferState.PAUSED.value
                     save_manifest_state()
                     return False, f"Transfer paused: {job_id}", progress.to_dict()
+
+                progress.current_file = rel_p
+                progress.current_phase = TransferState.COPYING.value
 
                 if os.path.isfile(src):
                     if os.path.isdir(dst) or dst.endswith(os.sep) or dst.endswith("/"):
@@ -301,12 +442,15 @@ class UnifiedTransferEngine:
 
                 # Execute file transfer
                 copied_sha = ""
+                dur_level = "standard"
                 if can_clone and s_size > 0:
                     try:
-                        # Attempt fast APFS clone
-                        subprocess.run(["/bin/cp", "-c", s_abs, t_target + ".tmp"], check=True, capture_output=True)
-                        os.replace(t_target + ".tmp", t_target)
+                        # Attempt fast APFS clone with .part
+                        part_clone = t_target + ".part"
+                        subprocess.run(["/bin/cp", "-c", s_abs, part_clone], check=True, capture_output=True)
+                        os.replace(part_clone, t_target)
                         copied_sha = compute_sha256(t_target) if verify_sha else ""
+                        dur_level = "apfs_clone"
                         progress.completed_bytes += s_size
                     except Exception:
                         # Fallback to streaming if clone fails
@@ -315,7 +459,7 @@ class UnifiedTransferEngine:
                             if on_progress:
                                 on_progress(progress.to_dict())
 
-                        _, copied_sha, _ = self.copy_file_streaming(
+                        _, copied_sha, _, dur_level = self.copy_file_streaming(
                             s_abs, t_target, verify_sha=verify_sha, progress_callback=on_chunk
                         )
                         progress.completed_bytes += s_size
@@ -326,11 +470,12 @@ class UnifiedTransferEngine:
                         if on_progress:
                             on_progress(progress.to_dict())
 
-                    _, copied_sha, _ = self.copy_file_streaming(
+                    _, copied_sha, _, dur_level = self.copy_file_streaming(
                         s_abs, t_target, verify_sha=verify_sha, progress_callback=on_chunk
                     )
                     progress.completed_bytes += s_size
 
+                progress.durability_level = dur_level
                 progress.completed_files += 1
                 elapsed = time.time() - progress.start_time
                 if elapsed > 0:
@@ -343,6 +488,7 @@ class UnifiedTransferEngine:
                     "target": t_target,
                     "size": s_size,
                     "sha256": copied_sha,
+                    "durability": dur_level,
                     "completed_at": time.time()
                 }
 
@@ -351,13 +497,16 @@ class UnifiedTransferEngine:
                     if on_progress:
                         on_progress(progress.to_dict())
 
-            progress.status = "completed"
+            progress.current_phase = TransferState.COMPLETED.value
+            progress.status = TransferState.COMPLETED.value
             progress.verification_status = "verified" if verify_sha else "unverified"
             progress.end_time = time.time()
             save_manifest_state()
+            if on_progress:
+                on_progress(progress.to_dict())
 
             # Handle safe move (delete source ONLY after destination is completely verified)
-            if not preserve_source and operation == "move" and progress.status == "completed":
+            if not preserve_source and operation == "move" and progress.status == TransferState.COMPLETED.value:
                 if os.path.isfile(src):
                     os.remove(src)
                 elif os.path.isdir(src):
@@ -366,7 +515,8 @@ class UnifiedTransferEngine:
             return True, f"Successfully transferred {progress.completed_files} files ({progress.completed_bytes} bytes)", progress.to_dict()
 
         except Exception as e:
-            progress.status = "failed"
+            progress.status = TransferState.FAILED.value
+            progress.current_phase = TransferState.FAILED.value
             progress.error = str(e)
             progress.retry_count += 1
             save_manifest_state()

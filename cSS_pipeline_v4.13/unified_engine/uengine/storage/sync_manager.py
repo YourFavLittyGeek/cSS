@@ -137,3 +137,72 @@ class SyncManager:
             "transferred_bytes": total_bytes,
             "message": f"Successfully synchronized {transferred} files to external Vault."
         }
+
+    def get_sync_policy(self) -> Dict[str, Any]:
+        """Load persistent synchronization policy and category configurations."""
+        import json
+        policy_file = os.path.join(self.paths.workspace_root, "app_data", "transfers", "sync_policy.json")
+        default_policy = {
+            "categories": {
+                "original_mri": {"enabled": True, "immutable": True, "description": "Original raw MRI datasets (Read-only, immutable permanent archive)"},
+                "processed_mri": {"enabled": True, "immutable": False, "description": "Coregistered and skull-stripped MRI volumes"},
+                "expert_annotations": {"enabled": True, "immutable": False, "description": "Clinician labels, boundary calls, and confirmed lesions"},
+                "reports": {"enabled": True, "immutable": False, "description": "Generated diagnostic sheets, PDF/XLSX summaries"},
+                "pensieve": {"enabled": True, "immutable": False, "description": "Pensieve SQLite online verified database snapshots"},
+                "scratch": {"enabled": False, "immutable": False, "description": "Temporary resampling buffers and intermediate tensors (Excluded)"},
+                "caches": {"enabled": False, "immutable": False, "description": "Regenerable viewer tiles and image thumbnails (Excluded)"}
+            },
+            "auto_triggers": {
+                "on_study_completed": True,
+                "on_review_completed": True,
+                "on_app_idle": False,
+                "on_drive_reconnect": True,
+                "schedule_interval_minutes": 60
+            },
+            "conflict_policy": "quarantine", # quarantine, keep_both, ask
+            "updated_at": time.time()
+        }
+        if os.path.isfile(policy_file):
+            try:
+                with open(policy_file, "r") as f:
+                    data = json.load(f)
+                    default_policy.update(data)
+            except Exception:
+                pass
+        return default_policy
+
+    def save_sync_policy(self, policy: Dict[str, Any]) -> Dict[str, Any]:
+        """Save updated synchronization policy."""
+        import json
+        policy_file = os.path.join(self.paths.workspace_root, "app_data", "transfers", "sync_policy.json")
+        os.makedirs(os.path.dirname(policy_file), exist_ok=True)
+        policy["updated_at"] = time.time()
+        with open(policy_file + ".tmp", "w") as f:
+            json.dump(policy, f, indent=2)
+        os.replace(policy_file + ".tmp", policy_file)
+        return {"ok": True, "policy": policy}
+
+    def get_sync_overview(self) -> Dict[str, Any]:
+        """Compile a high-level summary of synchronization health and pending data."""
+        vault_info = self.paths.get_vault_info()
+        preview = self.generate_sync_preview(mode="check")
+        policy = self.get_sync_policy()
+
+        audit_events = self.state.get_audit_events(limit=5)
+        last_sync = next((e for e in audit_events if e.get("action") == "sync_completed"), None)
+
+        return {
+            "ok": True,
+            "external_connected": vault_info.is_connected if vault_info else False,
+            "vault_mount": vault_info.mount_point if vault_info else "None",
+            "last_successful_sync": last_sync.get("timestamp") if last_sync else None,
+            "next_scheduled_sync": time.time() + (policy.get("auto_triggers", {}).get("schedule_interval_minutes", 60) * 60),
+            "pending_items_count": len(preview.items_to_copy),
+            "pending_bytes": preview.total_bytes,
+            "pending_mb": round(preview.total_bytes / (1024 * 1024), 1),
+            "conflicts_count": len(preview.items_conflicting),
+            "skipped_count": len(preview.items_skipped),
+            "can_proceed": preview.can_proceed,
+            "status_message": preview.message,
+            "policy": policy
+        }

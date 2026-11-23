@@ -288,6 +288,19 @@ function renderStep1_Welcome(el) {
         </div>
         <span class="pill ${vaultCount > 0 ? 'ok' : 'warn'}">${vaultCount > 0 ? 'VAULT CONNECTED' : 'LOCAL-ONLY'}</span>
       </div>
+
+      ${d.discovered_studies && d.discovered_studies.length > 0 ? `
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--panel2);border-radius:6px;border:1px solid var(--bd)">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:16px">🗂</span>
+          <div>
+            <div style="font-weight:600;font-size:13px">Preserved Original MRI Studies Detected</div>
+            <div class="mut" style="font-size:11px">${d.discovered_studies.length} original MRI studies preserved on disk · Immutable raw source preservation</div>
+          </div>
+        </div>
+        <span class="pill ok">${d.discovered_studies.length} PRESERVED</span>
+      </div>
+      ` : ""}
     </div>
   </div>
 

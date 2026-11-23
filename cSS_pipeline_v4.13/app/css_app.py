@@ -1335,13 +1335,31 @@ def storage_get(op, q):
             force = str(q.get("force", "")).lower() in ("1", "true")
             ov = StorageService.get_overview(B, vault_root=vault_root, force_refresh=force)
             ov["fm_overview"] = fm.get_storage_overview()
+            try:
+                from uengine.storage import StoragePathsService, StorageIntelligence
+                si = StorageIntelligence(StoragePathsService(B, vault_root))
+                ov["detailed_metrics"] = si.get_detailed_storage_metrics()
+            except Exception:
+                pass
             return ov
+        if op == "detailed_metrics":
+            from uengine.storage import StoragePathsService, StorageIntelligence
+            si = StorageIntelligence(StoragePathsService(B, vault_root))
+            return si.get_detailed_storage_metrics()
         if op == "diagnostics":
             return dict(ok=True, tests=StorageService.run_storage_diagnostics(B, vault_root=vault_root))
         if op == "eject_check":
             from uengine.storage import StoragePathsService, EjectManager
             em = EjectManager(StoragePathsService(B, vault_root))
             return em.check_ejection_safety().to_dict()
+        if op == "sync_overview":
+            from uengine.storage import StoragePathsService, SyncManager
+            sm = SyncManager(StoragePathsService(B, vault_root))
+            return sm.get_sync_overview()
+        if op == "sync_policy":
+            from uengine.storage import StoragePathsService, SyncManager
+            sm = SyncManager(StoragePathsService(B, vault_root))
+            return dict(ok=True, policy=sm.get_sync_policy())
         if op == "sync_preview":
             from uengine.storage import StoragePathsService, SyncManager
             sm = SyncManager(StoragePathsService(B, vault_root))
@@ -1378,11 +1396,15 @@ def storage_post(op, d):
         if op == "eject":
             from uengine.storage import StoragePathsService, EjectManager
             em = EjectManager(StoragePathsService(B, vault_root))
-            return em.eject_vault(emergency=bool(d.get("emergency", False)))
+            return em.eject_vault(emergency=bool(d.get("emergency", False)), force=bool(d.get("force", False)))
         if op == "sync_execute":
             from uengine.storage import StoragePathsService, SyncManager
             sm = SyncManager(StoragePathsService(B, vault_root))
             return sm.execute_sync(d.get("preview", {}))
+        if op == "sync_policy":
+            from uengine.storage import StoragePathsService, SyncManager
+            sm = SyncManager(StoragePathsService(B, vault_root))
+            return sm.save_sync_policy(d.get("policy", {}))
         if op == "clean": return fm.clean_staging(d.get("code", ""))
         if op == "prune": return sa.execute_prune(d.get("action", ""), int(d.get("days", 7)))
         if op == "delete": return fm.delete_study(d.get("code", ""), target=d.get("target", "local"))
@@ -1420,6 +1442,8 @@ def workspace_get(op, q):
             return dict(ok=True, study=swm.get_study(q.get("study_id", "")))
         if op == "capacity":
             return dict(ok=True, capacity=swm.estimate_capacity(q.get("study_id", "")))
+        if op == "reconcile":
+            return swm.reconcile_studies()
         return dict(ok=False, error=f"unknown workspace op {op}")
     except Exception as e: return dict(ok=False, error=str(e))
 
@@ -1430,6 +1454,8 @@ def workspace_post(op, d):
         if op == "register":
             rec = swm.register_study(d.get("study_id", ""), d.get("original_mri_location", ""), metadata=d.get("metadata"))
             return dict(ok=True, study=rec)
+        if op == "batch_register":
+            return swm.batch_register_discovered(d.get("study_ids"))
         if op == "stage":
             ok, msg, rec = swm.stage_study(d.get("study_id", ""), d.get("source_paths"))
             return dict(ok=ok, message=msg, study=rec)
@@ -1553,8 +1579,30 @@ def _perform_safe_shutdown(pause_jobs: bool = True):
 def transfer_get(op, q):
     try:
         from uengine.transfer_manager import TransferManager
+        from uengine.unified_transfer_engine import get_transfer_engine
         tm = TransferManager(B, vault_root=SET.get("vault_mount"))
+        engine = get_transfer_engine(os.path.join(B, "app_data", "transfers"))
         if op == "queue": return dict(ok=True, queue=tm.get_queue())
+        if op == "active": return dict(ok=True, active=engine.get_active_jobs())
+        if op == "history": return dict(ok=True, history=engine.list_manifest_jobs(limit=int(q.get("limit", 50))))
+        if op == "interrupted": return dict(ok=True, interrupted=engine.scan_interrupted_transfers())
+        if op == "summary":
+            active = engine.get_active_jobs()
+            hist = engine.list_manifest_jobs(limit=100)
+            completed_cnt = sum(1 for j in hist if j.get("status") in ("Completed", "completed"))
+            failed_cnt = sum(1 for j in hist if j.get("status") in ("Failed", "failed"))
+            interrupted_list = engine.scan_interrupted_transfers()
+            total_active_bytes = sum(j.get("total_bytes", 0) for j in active)
+            return dict(
+                ok=True,
+                active_count=len(active),
+                queued_count=len(tm.get_queue()),
+                completed_count=completed_cnt,
+                failed_count=failed_cnt,
+                interrupted_count=len(interrupted_list),
+                total_active_bytes=total_active_bytes,
+                active=active
+            )
         if op == "policies": return dict(ok=True, policies=tm.get_policies())
         return dict(ok=False, error=f"unknown transfer op {op}")
     except Exception as e: return dict(ok=False, error=str(e))
@@ -1562,11 +1610,19 @@ def transfer_get(op, q):
 def transfer_post(op, d):
     try:
         from uengine.transfer_manager import TransferManager
+        from uengine.unified_transfer_engine import get_transfer_engine
         tm = TransferManager(B, vault_root=SET.get("vault_mount"))
+        engine = get_transfer_engine(os.path.join(B, "app_data", "transfers"))
         if op == "enqueue":
             return tm.enqueue_study(str(d.get("study_code", "")), action=str(d.get("action", "archive")))
         if op == "process_next":
             return tm.process_next()
+        if op == "pause":
+            ok = engine.pause_job(str(d.get("job_id", "")))
+            return dict(ok=ok)
+        if op == "cancel":
+            ok = engine.cancel_job(str(d.get("job_id", "")))
+            return dict(ok=ok)
         if op == "policies":
             return tm.update_policies(d.get("policies", {}))
         return dict(ok=False, error=f"unknown transfer post op {op}")

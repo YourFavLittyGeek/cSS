@@ -16,38 +16,38 @@ const SV = {
 };
 
 const SETTINGS_SECTIONS = [
-  // Group A: Application
-  { id: "a_general", group: "A. Application", num: 1, title: "General & Appearance", desc: "Display themes, system awake locks, and project identity.", keywords: "theme dark light awake keepawake name project" },
-  { id: "a_notif", group: "A. Application", num: 2, title: "Notifications", desc: "Alert banners, notification curtain, and audible system alerts.", keywords: "notifications alerts sound banners finished failed" },
-  { id: "a_setup", group: "A. Application", num: 3, title: "Installation & Setup", desc: "System readiness, FreeSurfer installation, and licences.", keywords: "setup wizard freesurfer licence installation preflight" },
-  { id: "a_security", group: "A. Application", num: 4, title: "Security & Permissions", desc: "Application passphrase lock, patient name protection, and identity vault.", keywords: "security lock password passphrase filevault privacy incognito permissions" },
+  // Group 1: General
+  { id: "a_general", group: "1. General", title: "General & Appearance", desc: "Display themes, system awake locks, and project identity.", keywords: "theme dark light awake keepawake name project" },
+  { id: "a_notif", group: "1. General", title: "Notifications & Alerts", desc: "Alert banners, notification curtain, and audible system alerts.", keywords: "notifications alerts sound banners finished failed" },
+  { id: "a_security", group: "1. General", title: "Security & Permissions", desc: "Application passphrase lock, patient name protection, and identity vault.", keywords: "security lock password passphrase filevault privacy incognito permissions" },
 
-  // Group B: Processing & Performance
-  { id: "b_processing", group: "B. Processing & Performance", num: 5, title: "Processing Configuration", desc: "Pathway fallback logic, automatic retry heuristics, and re-run rules.", keywords: "pathway synthseg synthmorph recon-all retry auto_path rerun" },
-  { id: "b_hardware", group: "B. Processing & Performance", num: 6, title: "CPU, GPU & Memory", desc: "Concurrency, multi-threading allocation, and RAM pressure zones.", keywords: "threads cpu memory ram parallel gpu concurrency" },
-  { id: "b_scratch", group: "B. Processing & Performance", num: 7, title: "Scratch & Temporary Storage", desc: "Intermediate resampling buffer paths, quotas, and fast cleanup.", keywords: "scratch temp temporary buffer quota" },
-  { id: "b_pipeline", group: "B. Processing & Performance", num: 8, title: "Pipeline Configuration", desc: "Quality indicators, duplicate checks, and radiologist review viewer settings.", keywords: "pipeline features duplicate qc_snapshot preflight reviewer" },
+  // Group 2: System Resources
+  { id: "b_hardware", group: "2. System Resources", title: "CPU, GPU & Memory", desc: "Concurrency, multi-threading allocation, and RAM pressure zones.", keywords: "threads cpu memory ram parallel gpu concurrency" },
+  { id: "b_processing", group: "2. System Resources", title: "Processing Configuration", desc: "Pathway fallback logic, automatic retry heuristics, and re-run rules.", keywords: "pathway synthseg synthmorph recon-all retry auto_path rerun" },
+  { id: "b_scratch", group: "2. System Resources", title: "Scratch & Temporary Storage", desc: "Intermediate resampling buffer paths, quotas, and fast cleanup.", keywords: "scratch temp temporary buffer quota" },
+  { id: "e_health", group: "2. System Resources", title: "Startup Health & Diagnostics", desc: "19-point diagnostic engine, degraded mode telemetry, and self-repair.", keywords: "health diagnostics 19-point check degraded repair" },
 
-  // Group C: Storage & Data Management
-  { id: "c_overview", group: "C. Storage & Data Management", num: 9, title: "Storage Overview", desc: "Live visual capacity bars for Mac Internal SSD and External Data Vault.", keywords: "storage overview bars capacity disk mac hdd free space usage gb tb" },
-  { id: "c_filemanager", group: "C. Storage & Data Management", num: 10, title: "File Manager", desc: "Full-page storage browser, study discovery, transfers, and file operations.", keywords: "file manager files browse copy move rename delete archive restore verify sha256" },
-  { id: "c_vault", group: "C. Storage & Data Management", num: 11, title: "PERCIVAL Data Vault", desc: "External permanent research archive, stable volume UUID, and Finder integration.", keywords: "vault data_vault external drive hdd finder uuid manifest verify connect" },
-  { id: "c_locations", group: "C. Storage & Data Management", num: 12, title: "Storage Locations & Destinations", desc: "Independent folder destinations for all 10 managed scientific data categories.", keywords: "locations destinations paths working_dir scratch originals subjects albus exports" },
-  { id: "c_transfer", group: "C. Storage & Data Management", num: 13, title: "Automatic Transfer & Migration", desc: "Category-specific archival policies, transfer queue, and Free Up Mac Space.", keywords: "transfer migration queue free_space mac move copy auto archive policies" },
-  { id: "c_cleaning", group: "C. Storage & Data Management", num: 14, title: "Cleaning Manager", desc: "Lifecycle retention by days, quarantine inspection, study/cohort deletion.", keywords: "clean cleaning retention days purge quarantine restore delete prune history" },
-  { id: "c_archive", group: "C. Storage & Data Management", num: 15, title: "Archiving & Retention", desc: "Cold storage retention schedules and preservation safeguards.", keywords: "archive retention permanent policy schedule" },
-  { id: "c_backup", group: "C. Storage & Data Management", num: 16, title: "Backup & Integrity", desc: "Zero-corruption Pensieve database snapshots and journal integrity.", keywords: "backup pensieve snapshot restore database integrity" },
+  // Group 3: Pipeline Configuration
+  { id: "a_setup", group: "3. Pipeline Configuration", title: "Installation & Setup Center", desc: "Targeted discovery, Python 3.11, FreeSurfer 8.2, licenses, and readiness matrix.", keywords: "setup wizard freesurfer licence installation preflight discovery validation" },
+  { id: "b_pipeline", group: "3. Pipeline Configuration", title: "Pipeline & Reviewer Settings", desc: "Quality indicators, duplicate checks, and radiologist review viewer settings.", keywords: "pipeline features duplicate qc_snapshot preflight reviewer" },
+  { id: "d_models", group: "3. Pipeline Configuration", title: "Neural Models & Checkpoints", desc: "Active and historical neural network weights, calibrations, and checkpoints.", keywords: "models checkpoints weights calibration albus lumos nox percival" },
+  { id: "d_advanced", group: "3. Pipeline Configuration", title: "Advanced Prototypes", desc: "Shadow ML laboratory, unified scoring prototypes, and experimental flags.", keywords: "shadow_ml research experimental prototypes unified_score" },
 
-  // Group D: Research & Scientific Data
-  { id: "d_pensieve", group: "D. Research & Scientific Data", num: 17, title: "Pensieve Core Memory", desc: "SQLite transactional database, candidate identities, and missed lesion ledger.", keywords: "pensieve memory sqlite candidates missed_lesions journal provenance" },
-  { id: "d_training", group: "D. Research & Scientific Data", num: 18, title: "Training & Dataset Management", desc: "Supervised label datasets, patient-grouped splits, and leakage prevention.", keywords: "training datasets splits leakage cross-validation manifest" },
-  { id: "d_models", group: "D. Research & Scientific Data", num: 19, title: "Models & Checkpoints", desc: "Active and historical neural network weights, calibrations, and checkpoints.", keywords: "models checkpoints weights calibration albus lumos nox percival" },
-  { id: "d_advanced", group: "D. Research & Scientific Data", num: 20, title: "Advanced Research Settings", desc: "Shadow ML laboratory, unified scoring prototypes, and experimental flags.", keywords: "shadow_ml research experimental prototypes unified_score" },
+  // Group 4: Storage & Data Management
+  { id: "c_overview", group: "4. Storage & Data Management", title: "Storage Overview", desc: "Authoritative capacity metrics distinguishing volume, archive, workspace, and Pensieve.", keywords: "storage overview bars capacity disk mac hdd free space usage gb tb" },
+  { id: "c_filemanager", group: "4. Storage & Data Management", title: "File Manager Workspace", desc: "Three-part research-data workspace, categories, operations, and details inspector.", keywords: "file manager files browse copy move rename delete archive restore verify sha256" },
+  { id: "c_vault", group: "4. Storage & Data Management", title: "PERCIVAL Data Vault", desc: "External permanent research archive, stable volume UUID, and Finder integration.", keywords: "vault data_vault external drive hdd finder uuid manifest verify connect" },
+  { id: "c_locations", group: "4. Storage & Data Management", title: "Storage Locations & Paths", desc: "Independent folder destinations for all 10 managed scientific data categories.", keywords: "locations destinations paths working_dir scratch originals subjects albus exports" },
+  { id: "c_transfer", group: "4. Storage & Data Management", title: "Transfer Center & Migration", desc: "Active transfers, queue order, searchable history, and crash recovery.", keywords: "transfer migration queue free_space mac move copy auto archive policies" },
+  { id: "c_cleaning", group: "4. Storage & Data Management", title: "Retention & Cleanup", desc: "Lifecycle retention by days, quarantine inspection, and safe eligible cleaning.", keywords: "clean cleaning retention days purge quarantine restore delete prune history" },
+  { id: "c_archive", group: "4. Storage & Data Management", title: "Archiving & Verification", desc: "Cold storage retention schedules and SHA-256 preservation safeguards.", keywords: "archive retention permanent policy schedule" },
+  { id: "c_backup", group: "4. Storage & Data Management", title: "Backup & Durability", desc: "Zero-corruption Pensieve database snapshots and journal integrity.", keywords: "backup pensieve snapshot restore database integrity" },
 
-  // Group E: System & Recovery
-  { id: "e_recovery", group: "E. System & Recovery", num: 21, title: "Recovery Centre", desc: "Crash recovery, interrupted run resumption, and transactional job logs.", keywords: "recovery resume crash interrupted jobs transactions" },
-  { id: "e_health", group: "E. System & Recovery", num: 22, title: "Startup Health & Diagnostics", desc: "19-point diagnostic engine, degraded mode telemetry, and self-repair.", keywords: "health diagnostics 19-point check degraded repair" },
-  { id: "e_activity", group: "E. System & Recovery", num: 23, title: "Activity & Operation History", desc: "Audit logs, migration journals, and data lifecycle transaction records.", keywords: "activity history audit log journal operations" },
+  // Group 5: Research & Scientific Data
+  { id: "d_pensieve", group: "5. Research & Scientific Data", title: "Pensieve Core Memory", desc: "SQLite transactional database, candidate identities, and missed lesion ledger.", keywords: "pensieve memory sqlite candidates missed_lesions journal provenance" },
+  { id: "d_training", group: "5. Research & Scientific Data", title: "Training Datasets", desc: "Supervised label datasets, patient-grouped splits, and leakage prevention.", keywords: "training datasets splits leakage cross-validation manifest" },
+  { id: "e_activity", group: "5. Research & Scientific Data", title: "Activity & Provenance Audit", desc: "Audit logs, migration journals, and data lifecycle transaction records.", keywords: "activity history audit log journal operations" },
+  { id: "e_recovery", group: "5. Research & Scientific Data", title: "Recovery Center", desc: "Crash recovery, interrupted run resumption, and transactional job logs.", keywords: "recovery resume crash interrupted jobs transactions" }
 ];
 
 async function settingsControlCentre(v, initialSection) {
@@ -89,7 +89,7 @@ function renderSettingsLayout(v) {
         
         <!-- Search Settings Toolbar -->
         <div>
-          <input id="set-search-input" value="${esc(SV.searchQuery)}" placeholder="🔍 Search all 23 settings…" style="width:100%;font-size:13px;padding:8px 10px">
+          <input id="set-search-input" value="${esc(SV.searchQuery)}" placeholder="🔍 Search System Control Centre…" style="width:100%;font-size:13px;padding:8px 10px">
         </div>
 
         <!-- Section Navigation Links -->
@@ -101,7 +101,6 @@ function renderSettingsLayout(v) {
               <div style="display:flex;flex-direction:column;gap:2px">
                 ${items.map(it => `
                   <button class="b sm ${SV.currentSection === it.id ? "pri" : ""}" data-set-sec="${it.id}" style="justify-content:flex-start;text-align:left;padding:7px 10px;border-radius:6px;width:100%;display:flex;align-items:center;gap:8px">
-                    <span style="opacity:0.6;font-family:monospace;font-size:11px;min-width:18px">${it.num}.</span>
                     <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;flex:1">${esc(it.title)}</span>
                   </button>
                 `).join("")}
@@ -184,7 +183,7 @@ async function renderSettingsSection(v) {
   const headerHtml = `
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;border-bottom:1px solid var(--line);padding-bottom:12px">
       <div>
-        <div class="note" style="font-size:12px;margin-bottom:2px">${esc(secMeta.group)} › Section ${secMeta.num}</div>
+        <div class="note" style="font-size:12px;margin-bottom:2px">Settings › ${esc(secMeta.group)} › ${esc(secMeta.title)}</div>
         <h2 style="margin:0;font-size:20px;font-weight:700">${esc(secMeta.title)}</h2>
         <div class="mut" style="font-size:13px;margin-top:4px">${esc(secMeta.desc)}</div>
       </div>
@@ -286,6 +285,7 @@ async function renderSectionStorageOverview(el) {
   const mac = data.mac_internal || {};
   const v = data.external_vault || {};
   const bd = mac.breakdown || {};
+  const dm = data.detailed_metrics || {};
 
   const macClass = mac.tier === "EMERGENCY" ? "bad" : mac.tier === "CRITICAL" ? "warn" : "ok";
   const vaultClass = v.connected ? (v.tier === "EMERGENCY" ? "bad" : v.tier === "CRITICAL" ? "warn" : "ok") : "bad";
@@ -322,12 +322,12 @@ async function renderSectionStorageOverview(el) {
 
       <!-- Category Breakdown -->
       <div style="background:var(--panel2);border-radius:8px;padding:12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;font-size:12.5px">
-        <div>Active Working Space: <b>${bd.active_workspace_mb || 0} MB</b></div>
-        <div>Temporary Scratch: <b>${bd.scratch_mb || 0} MB</b></div>
-        <div>Multi-Study Staging: <b>${bd.staging_mb || 0} MB</b></div>
-        <div>Original MRI Data: <b>${bd.original_mri_mb || 0} MB</b></div>
-        <div>Quarantined Files: <b>${bd.quarantine_mb || 0} MB</b></div>
-        <div>PERCIVAL Managed Total: <b>${mac.percival_managed_gb || 0} GB</b></div>
+        <div>Active Working Space: <b>${dm.mac_internal ? `${dm.mac_internal.active_workspace_gb} GB` : `${bd.active_workspace_mb || 0} MB`}</b></div>
+        <div>Temporary Scratch: <b>${dm.mac_internal ? `${dm.mac_internal.temporary_scratch_mb} MB` : `${bd.scratch_mb || 0} MB`}</b></div>
+        <div>Pensieve Database: <b>${dm.mac_internal ? `${dm.mac_internal.pensieve_database_mb} MB` : 'Active'}</b></div>
+        <div>Preserved Raw MRI: <b>${dm.mac_internal ? `${round((dm.mac_internal.preserved_raw_bytes || 0) / (1024*1024), 1)} MB` : `${bd.original_mri_mb || 0} MB`}</b></div>
+        <div>Quarantined Files: <b>${dm.mac_internal ? `${round((dm.mac_internal.quarantined_bytes || 0) / (1024*1024), 1)} MB` : `${bd.quarantine_mb || 0} MB`}</b></div>
+        <div>PERCIVAL Managed Total: <b>${dm.mac_internal ? `${dm.mac_internal.percival_managed_gb} GB` : `${mac.percival_managed_gb || 0} GB`}</b></div>
       </div>
     </div>
 
@@ -357,15 +357,19 @@ async function renderSectionStorageOverview(el) {
       <div class="note" style="margin-bottom:12px">${esc(v.status_message || "")}</div>
 
       <div style="background:var(--panel2);border-radius:8px;padding:12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;font-size:12.5px">
-        <div>PERCIVAL_VAULT Size: <b>${v.vault_usage_gb || 0} GB</b></div>
-        <div>Pending Transfers: <b>${v.pending_transfers || 0}</b></div>
-        <div>Archive Status: <b>${esc(v.archive_status || "Offline")}</b></div>
-        <div>Hardware Identity: <span class="mono">${esc((v.volume_uuid || "—").slice(0, 16))}</span></div>
+        <div>PERCIVAL Vault Managed: <b>${dm.external_vault && dm.external_vault.connected ? `${dm.external_vault.percival_managed_gb} GB` : `${v.vault_usage_gb || 0} GB`}</b></div>
+        <div>Original MRI Archive: <b>${dm.external_vault && dm.external_vault.connected ? `${dm.external_vault.original_mri_archive_gb} GB` : '—'}</b></div>
+        <div>Verified Study Archive: <b>${dm.external_vault && dm.external_vault.connected ? `${dm.external_vault.verified_archive_gb} GB` : '—'}</b></div>
+        <div>Pensieve Versioned Backups: <b>${dm.external_vault && dm.external_vault.connected ? `${dm.external_vault.pensieve_backup_mb} MB` : '—'}</b></div>
+        <div>Unregistered Data on Volume: <b>${dm.external_vault && dm.external_vault.connected ? `${dm.external_vault.unregistered_gb} GB` : '—'}</b></div>
+        <div>Hardware UUID: <span class="mono">${esc((v.volume_uuid || "—").slice(0, 16))}</span></div>
       </div>
 
-      <div class="row" style="margin-top:14px;gap:8px">
+      <div class="row" style="margin-top:14px;gap:8px;flex-wrap:wrap">
         ${v.connected ? `<button class="b sm" id="so-open-finder">Reveal Vault in Finder</button>` : ''}
         <button class="b sm" id="so-reconnect">Detect / Connect Drive…</button>
+        <button class="b sm pri" onclick="nav('sync')">Open Sync Center ▸</button>
+        <button class="b sm" onclick="nav('transfer')">Open Transfer Center ▸</button>
       </div>
     </div>
   `;

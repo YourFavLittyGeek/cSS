@@ -388,6 +388,15 @@ class InstallationDiscoveryService:
         storage = self.discover_storage_topology()
         pensieve = self.discover_pensieve_databases()
 
+        # Discover preserved original MRI studies
+        discovered_studies = []
+        try:
+            from ..study_workspace_manager import StudyWorkspaceManager
+            swm = StudyWorkspaceManager(self.workspace_root, vault_root=self.vault_root)
+            discovered_studies = swm.discover_source_studies()
+        except Exception:
+            discovered_studies = []
+
         return {
             "timestamp": os.path.getmtime(self.workspace_root) if os.path.isdir(self.workspace_root) else 0.0,
             "system": sys_info,
@@ -400,5 +409,6 @@ class InstallationDiscoveryService:
                 "workspace": storage["workspace"].to_dict(),
                 "vaults": [v.to_dict() for v in storage["vaults"]]
             },
-            "pensieve": [c.to_dict() for c in pensieve]
+            "pensieve": [c.to_dict() for c in pensieve],
+            "discovered_studies": discovered_studies
         }

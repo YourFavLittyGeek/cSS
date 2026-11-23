@@ -668,3 +668,85 @@ class StudyWorkspaceManager:
                 item["updated_at"] = time.time()
                 break
         self._save_queue()
+
+    def reconcile_studies(self) -> Dict[str, Any]:
+        """Reconcile filesystem discovered studies, registered ledger studies, manifests, and archives."""
+        discovered = self.discover_source_studies()
+        discovered_map = {d["study_id"]: d for d in discovered}
+        ledger_map = dict(self._ledger)
+
+        registered = []
+        unregistered = []
+        missing_sources = []
+        missing_workspaces = []
+        unverified_archives = []
+
+        # Check registered studies
+        for sid, rec in ledger_map.items():
+            src = rec.get("original_mri_location")
+            ws = rec.get("active_workspace_location")
+            arch = rec.get("hdd_archive_location")
+
+            src_exists = os.path.exists(src) if src else False
+            ws_exists = os.path.exists(ws) if ws else False
+            arch_exists = os.path.exists(arch) if arch else False
+
+            if not src_exists and not arch_exists:
+                missing_sources.append({"study_id": sid, "source": src})
+            if rec.get("state") in ("Staged", "Ready for processing", "Processing", "Under expert review") and not ws_exists:
+                missing_workspaces.append({"study_id": sid, "workspace": ws})
+            if arch_exists and rec.get("archive_status") != "archived_and_verified":
+                unverified_archives.append({"study_id": sid, "archive": arch})
+
+            registered.append({
+                "study_id": sid,
+                "state": rec.get("state"),
+                "source_exists": src_exists,
+                "workspace_exists": ws_exists,
+                "archive_exists": arch_exists,
+                "archive_status": rec.get("archive_status", "not_archived")
+            })
+
+        # Check discovered studies not in ledger
+        for sid, disc in discovered_map.items():
+            if sid not in ledger_map:
+                unregistered.append(disc)
+
+        return {
+            "ok": True,
+            "total_discovered": len(discovered),
+            "total_registered": len(ledger_map),
+            "unregistered_count": len(unregistered),
+            "registered": registered,
+            "unregistered": unregistered,
+            "missing_sources": missing_sources,
+            "missing_workspaces": missing_workspaces,
+            "unverified_archives": unverified_archives
+        }
+
+    def batch_register_discovered(self, study_ids: Optional[List[str]] = None) -> Dict[str, Any]:
+        """Safely register discovered studies into the ledger preserving provenance."""
+        discovered = self.discover_source_studies()
+        target_ids = set(study_ids) if study_ids else None
+        registered_count = 0
+
+        for item in discovered:
+            sid = item["study_id"]
+            if target_ids and sid not in target_ids:
+                continue
+            if sid not in self._ledger:
+                self.register_study(
+                    study_id=sid,
+                    original_mri_location=item["source_path"],
+                    initial_state=StudyLifecycleState.REGISTERED.value,
+                    metadata={
+                        "source_type": item.get("source_type"),
+                        "total_files": item.get("total_files"),
+                        "total_size_bytes": item.get("total_size_bytes"),
+                        "dicom_count": item.get("dicom_count"),
+                        "nifti_count": item.get("nifti_count"),
+                        "discovered_at": time.time()
+                    }
+                )
+                registered_count += 1
+        return {"ok": True, "registered_count": registered_count, "total_ledger": len(self._ledger)}

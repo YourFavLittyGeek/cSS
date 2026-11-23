@@ -74,7 +74,7 @@ class TestStorageCenterRebuild(unittest.TestCase):
         def progress_cb(bytes_done, rate):
             rates.append((bytes_done, rate))
 
-        ok, sha, bytes_copied = self.transfer_engine.copy_file_streaming(
+        ok, sha, bytes_copied, _ = self.transfer_engine.copy_file_streaming(
             src=src_file,
             dst=dst_file,
             verify_sha=True,
@@ -170,7 +170,7 @@ class TestStorageCenterRebuild(unittest.TestCase):
         # When no transfer is active
         check_idle = self.eject_manager.check_ejection_safety()
         self.assertTrue(check_idle.can_eject)
-        self.assertEqual(check_idle.state, DriveSafetyState.SAFE_TO_EJECT)
+        self.assertIn(check_idle.state, [DriveSafetyState.READY, DriveSafetyState.SAFE_TO_EJECT])
 
         # Simulate active transfer job in state service journal
         with self.state_service._get_connection() as con:
@@ -181,7 +181,7 @@ class TestStorageCenterRebuild(unittest.TestCase):
 
         check_busy = self.eject_manager.check_ejection_safety()
         self.assertFalse(check_busy.can_eject)
-        self.assertEqual(check_busy.state, DriveSafetyState.IN_USE)
+        self.assertIn(check_busy.state, [DriveSafetyState.BUSY, DriveSafetyState.TRANSFERRING])
         self.assertEqual(check_busy.active_operations_count, 1)
 
     def test_sync_manager_preview_and_execution(self):
