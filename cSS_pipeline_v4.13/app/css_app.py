@@ -2950,6 +2950,8 @@ if __name__ == "__main__":
     def _caff_watch():
         while True: caffeinate(bool(RUNNING)); time.sleep(5)
     threading.Thread(target=_caff_watch, daemon=True).start()
+    # audit: SIGTERM (e.g. logout / kill) runs the same safe shutdown as Quit (transfers pause, then the process exits)
+    signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=_perform_safe_shutdown, args=(True,), daemon=False).start())
     srv = ThreadingHTTPServer(("127.0.0.1", port), H); url = f"http://127.0.0.1:{port}/"
     print(f"Percival app: {url}  (CSS_BASE={B})", flush=True)
     how = None if "--no-window" in a else open_window(url)
@@ -2967,3 +2969,6 @@ if __name__ == "__main__":
     else:
         try: srv.serve_forever()
         except KeyboardInterrupt: pass
+        finally:
+            try: transfer_pool_shutdown(timeout=15.0)       # audit: running transfers pause at a safe boundary on every exit
+            except Exception: pass

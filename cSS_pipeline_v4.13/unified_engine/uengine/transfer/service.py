@@ -456,7 +456,15 @@ class TransferService:
         jn.transition_job(job_id, J.ROLLING_BACK, error=f"{type(exc).__name__}: {exc}")
         unsafe = False
         for rec in reversed(jn.get_files(job_id)):
-            unsafe |= self._undo_file(job_id, rec, rep) == "unsafe"
+            try:
+                out = self._undo_file(job_id, rec, rep)
+            except Exception as e:
+                # audit: a failure DURING rollback (permission, I/O) never escapes and never guesses: the file keeps its
+                # journaled ROLLING_BACK intent, nothing unproven is deleted, and the job needs a human / 1c discard
+                rep["errors"].append(f"rollback of {rec['rel_path']} could not be completed: {type(e).__name__}: {e}")
+                out = "unsafe"
+            # a committed file changed by someone else during the failing job was left in place: report it, not "failed"
+            unsafe |= out in ("unsafe", "kept")
         self._remove_created_dirs(job_id)
         return unsafe
 
@@ -633,6 +641,8 @@ class TransferService:
                 try:
                     self.journal.transition_job(job["job_id"], J.INTERRUPTED, expected=[job["state"]],
                                                 detail={"reason": "owner process gone", "was": job["state"]})
+                    if job.get("control"):                     # audit: a pause request never outlives its owner
+                        self.journal.set_job(job["job_id"], control=None)
                     out.append(job["job_id"])
                 except Exception:
                     pass
@@ -769,7 +779,8 @@ class TransferService:
         spec = json.loads(job["spec_json"])
         if job["study_id"] and op in PIPELINE_GUARDED_OPS and study_processing_active(self.base, job["study_id"]):
             raise TransferRefused(f"study {job['study_id']} is being processed by the pipeline")
-        jn.set_job(job_id, recovery_decision="resume", recovery_attempts=int(job["recovery_attempts"] or 0) + 1)
+        jn.set_job(job_id, recovery_decision="resume", recovery_attempts=int(job["recovery_attempts"] or 0) + 1,
+                   control=None)                            # audit: a stale pause request of a previous run is dropped
         jn.transition_job(job_id, J.RECOVERING, owner_pid=os.getpid(), detail={"decision": "resume"})
         crash("recover.after_decision")
         rep = self._report(job_id)
@@ -861,7 +872,8 @@ class TransferService:
         a = self.assess(job_id)
         if a["unavailable"]:
             raise TransferRefused(f"job {job_id} cannot be discarded now: " + "; ".join(a["unavailable"]))
-        jn.set_job(job_id, recovery_decision="discard", recovery_attempts=int(job["recovery_attempts"] or 0) + 1)
+        jn.set_job(job_id, recovery_decision="discard", recovery_attempts=int(job["recovery_attempts"] or 0) + 1,
+                   control=None)
         jn.transition_job(job_id, J.RECOVERING, owner_pid=os.getpid(), detail={"decision": "discard"})
         crash("recover.after_decision")
         rep = self._report(job_id)

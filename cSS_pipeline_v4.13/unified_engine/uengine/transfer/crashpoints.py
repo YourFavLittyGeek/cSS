@@ -22,6 +22,18 @@ def crash(name: str) -> None:
             if n == name:
                 import time
                 time.sleep(float(sec or 0.1))
+    fail = os.environ.get("PERCIVAL_TEST_FAIL_AT")          # audit: "name[:N]=errno" raise OSError at that point
+    if fail:
+        for item in fail.split(","):
+            point, _, eno = item.strip().partition("=")
+            n, _, k = point.partition(":")
+            if n == name:
+                key = "fail:" + name
+                _COUNTS[key] = _COUNTS.get(key, 0) + 1
+                if _COUNTS[key] == int(k or 1):
+                    import errno as _e
+                    code = int(eno) if eno.isdigit() else getattr(_e, eno or "EIO")
+                    raise OSError(code, os.strerror(code) + " (injected by test)")
     spec = os.environ.get("PERCIVAL_TEST_CRASH_AT")
     if not spec:
         return
