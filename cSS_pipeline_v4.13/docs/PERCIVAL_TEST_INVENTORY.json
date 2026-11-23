@@ -1,0 +1,1870 @@
+{
+  "manifest_version": "5.25.0",
+  "project": "PERCIVAL",
+  "mission_id": "PERCIVAL-FINAL-ACCEPTANCE-CORRECTIONS-2026",
+  "reconciliation_summary": {
+    "tests_suite_count": 57,
+    "unified_engine_suite_count": 205,
+    "unittest_total_unique": 262,
+    "pipeline_check_assertions_count": 32,
+    "grand_total_executable_verifications": 294,
+    "historical_count_reconciliation": {
+      "reported_277": "Derived from earlier baseline configuration: 205 engine tests + 40 initial unit tests + 32 pipeline checks = 277.",
+      "reported_293": "Derived after adding 16 expanded unit tests (56 unit tests + 205 engine tests + 32 pipeline checks = 293).",
+      "current_canonical_294": "Current frozen baseline: 57 unit tests (including test_21_vault_prefix_containment) + 205 engine tests + 32 pipeline checks = 294 total verifications."
+    }
+  },
+  "suites": {
+    "unit_and_integration_tests": {
+      "count": 57,
+      "directory": "cSS_pipeline_v4.13/tests",
+      "tests": [
+        {
+          "id": "test_adversarial_scientific_acceptance.TestAdversarialScientificAcceptance.test_albus_causal_failure_analysis_and_adaptation",
+          "module": "test_adversarial_scientific_acceptance",
+          "file": "tests/test_adversarial_scientific_acceptance.py",
+          "class": "TestAdversarialScientificAcceptance",
+          "method": "test_albus_causal_failure_analysis_and_adaptation"
+        },
+        {
+          "id": "test_adversarial_scientific_acceptance.TestAdversarialScientificAcceptance.test_governance_persistent_promotion_and_rollback",
+          "module": "test_adversarial_scientific_acceptance",
+          "file": "tests/test_adversarial_scientific_acceptance.py",
+          "class": "TestAdversarialScientificAcceptance",
+          "method": "test_governance_persistent_promotion_and_rollback"
+        },
+        {
+          "id": "test_adversarial_scientific_acceptance.TestAdversarialScientificAcceptance.test_lumos_depth_gradient_distinguishes_subpial_from_deep_vessel",
+          "module": "test_adversarial_scientific_acceptance",
+          "file": "tests/test_adversarial_scientific_acceptance.py",
+          "class": "TestAdversarialScientificAcceptance",
+          "method": "test_lumos_depth_gradient_distinguishes_subpial_from_deep_vessel"
+        },
+        {
+          "id": "test_adversarial_scientific_acceptance.TestAdversarialScientificAcceptance.test_nox_analytical_surface_area_and_inertia_tensor",
+          "module": "test_adversarial_scientific_acceptance",
+          "file": "tests/test_adversarial_scientific_acceptance.py",
+          "class": "TestAdversarialScientificAcceptance",
+          "method": "test_nox_analytical_surface_area_and_inertia_tensor"
+        },
+        {
+          "id": "test_adversarial_scientific_acceptance.TestAdversarialScientificAcceptance.test_pensieve_does_not_merge_distinct_adjacent_lesions",
+          "module": "test_adversarial_scientific_acceptance",
+          "file": "tests/test_adversarial_scientific_acceptance.py",
+          "class": "TestAdversarialScientificAcceptance",
+          "method": "test_pensieve_does_not_merge_distinct_adjacent_lesions"
+        },
+        {
+          "id": "test_adversarial_scientific_acceptance.TestAdversarialScientificAcceptance.test_percival_core_irls_convergence_and_missing_data",
+          "module": "test_adversarial_scientific_acceptance",
+          "file": "tests/test_adversarial_scientific_acceptance.py",
+          "class": "TestAdversarialScientificAcceptance",
+          "method": "test_percival_core_irls_convergence_and_missing_data"
+        },
+        {
+          "id": "test_adversarial_scientific_acceptance.TestAdversarialScientificAcceptance.test_shadow_deliberate_degradation_rejected",
+          "module": "test_adversarial_scientific_acceptance",
+          "file": "tests/test_adversarial_scientific_acceptance.py",
+          "class": "TestAdversarialScientificAcceptance",
+          "method": "test_shadow_deliberate_degradation_rejected"
+        },
+        {
+          "id": "test_adversarial_scientific_acceptance.TestAdversarialScientificAcceptance.test_shadow_identical_predictions_rejected",
+          "module": "test_adversarial_scientific_acceptance",
+          "file": "tests/test_adversarial_scientific_acceptance.py",
+          "class": "TestAdversarialScientificAcceptance",
+          "method": "test_shadow_identical_predictions_rejected"
+        },
+        {
+          "id": "test_albus.TestAlbusDiscovery.test_candidate_discovery_and_pensieve_registration",
+          "module": "test_albus",
+          "file": "tests/test_albus.py",
+          "class": "TestAlbusDiscovery",
+          "method": "test_candidate_discovery_and_pensieve_registration"
+        },
+        {
+          "id": "test_albus.TestAlbusDiscovery.test_formulas",
+          "module": "test_albus",
+          "file": "tests/test_albus.py",
+          "class": "TestAlbusDiscovery",
+          "method": "test_formulas"
+        },
+        {
+          "id": "test_albus.TestAlbusDiscovery.test_learning_from_pensieve",
+          "module": "test_albus",
+          "file": "tests/test_albus.py",
+          "class": "TestAlbusDiscovery",
+          "method": "test_learning_from_pensieve"
+        },
+        {
+          "id": "test_final_scientific_acceptance.TestFinalScientificAcceptance.test_albus_locked_test_isolation_and_damping",
+          "module": "test_final_scientific_acceptance",
+          "file": "tests/test_final_scientific_acceptance.py",
+          "class": "TestFinalScientificAcceptance",
+          "method": "test_albus_locked_test_isolation_and_damping"
+        },
+        {
+          "id": "test_final_scientific_acceptance.TestFinalScientificAcceptance.test_lumos_darboux_orientation_and_near_zero_reference",
+          "module": "test_final_scientific_acceptance",
+          "file": "tests/test_final_scientific_acceptance.py",
+          "class": "TestFinalScientificAcceptance",
+          "method": "test_lumos_darboux_orientation_and_near_zero_reference"
+        },
+        {
+          "id": "test_final_scientific_acceptance.TestFinalScientificAcceptance.test_nox_sphericity_vs_second_moment_isotropy",
+          "module": "test_final_scientific_acceptance",
+          "file": "tests/test_final_scientific_acceptance.py",
+          "class": "TestFinalScientificAcceptance",
+          "method": "test_nox_sphericity_vs_second_moment_isotropy"
+        },
+        {
+          "id": "test_final_scientific_acceptance.TestFinalScientificAcceptance.test_pensieve_identity_and_durable_journal",
+          "module": "test_final_scientific_acceptance",
+          "file": "tests/test_final_scientific_acceptance.py",
+          "class": "TestFinalScientificAcceptance",
+          "method": "test_pensieve_identity_and_durable_journal"
+        },
+        {
+          "id": "test_final_scientific_acceptance.TestFinalScientificAcceptance.test_percival_core_irls_unpenalized_intercept_and_feature_identity",
+          "module": "test_final_scientific_acceptance",
+          "file": "tests/test_final_scientific_acceptance.py",
+          "class": "TestFinalScientificAcceptance",
+          "method": "test_percival_core_irls_unpenalized_intercept_and_feature_identity"
+        },
+        {
+          "id": "test_lumos.TestLumosIntelligence.test_checkpoint_persistence_in_vault",
+          "module": "test_lumos",
+          "file": "tests/test_lumos.py",
+          "class": "TestLumosIntelligence",
+          "method": "test_checkpoint_persistence_in_vault"
+        },
+        {
+          "id": "test_lumos.TestLumosIntelligence.test_patch_analysis_and_uncertainty",
+          "module": "test_lumos",
+          "file": "tests/test_lumos.py",
+          "class": "TestLumosIntelligence",
+          "method": "test_patch_analysis_and_uncertainty"
+        },
+        {
+          "id": "test_lumos.TestLumosIntelligence.test_unavailable_handling",
+          "module": "test_lumos",
+          "file": "tests/test_lumos.py",
+          "class": "TestLumosIntelligence",
+          "method": "test_unavailable_handling"
+        },
+        {
+          "id": "test_lumos_core_ablations.TestLumosCoreAblations.test_run_ablation_hierarchy",
+          "module": "test_lumos_core_ablations",
+          "file": "tests/test_lumos_core_ablations.py",
+          "class": "TestLumosCoreAblations",
+          "method": "test_run_ablation_hierarchy"
+        },
+        {
+          "id": "test_master_end_to_end_rebuild.TestMasterEndToEndRebuild.test_complete_scientific_lifecycle",
+          "module": "test_master_end_to_end_rebuild",
+          "file": "tests/test_master_end_to_end_rebuild.py",
+          "class": "TestMasterEndToEndRebuild",
+          "method": "test_complete_scientific_lifecycle"
+        },
+        {
+          "id": "test_nox.TestNoxEngine.test_custom_experimental_feature_discovery",
+          "module": "test_nox",
+          "file": "tests/test_nox.py",
+          "class": "TestNoxEngine",
+          "method": "test_custom_experimental_feature_discovery"
+        },
+        {
+          "id": "test_nox.TestNoxEngine.test_measurement_families",
+          "module": "test_nox",
+          "file": "tests/test_nox.py",
+          "class": "TestNoxEngine",
+          "method": "test_measurement_families"
+        },
+        {
+          "id": "test_pensieve.TestPensieveCoreMemory.test_component_query_interfaces",
+          "module": "test_pensieve",
+          "file": "tests/test_pensieve.py",
+          "class": "TestPensieveCoreMemory",
+          "method": "test_component_query_interfaces"
+        },
+        {
+          "id": "test_pensieve.TestPensieveCoreMemory.test_expert_annotations_and_corrections",
+          "module": "test_pensieve",
+          "file": "tests/test_pensieve.py",
+          "class": "TestPensieveCoreMemory",
+          "method": "test_expert_annotations_and_corrections"
+        },
+        {
+          "id": "test_pensieve.TestPensieveCoreMemory.test_leak_free_partition_isolation",
+          "module": "test_pensieve",
+          "file": "tests/test_pensieve.py",
+          "class": "TestPensieveCoreMemory",
+          "method": "test_leak_free_partition_isolation"
+        },
+        {
+          "id": "test_pensieve.TestPensieveCoreMemory.test_study_and_candidate_memory",
+          "module": "test_pensieve",
+          "file": "tests/test_pensieve.py",
+          "class": "TestPensieveCoreMemory",
+          "method": "test_study_and_candidate_memory"
+        },
+        {
+          "id": "test_percival_core.TestPercivalCore.test_epoximise_absorbed_interaction",
+          "module": "test_percival_core",
+          "file": "tests/test_percival_core.py",
+          "class": "TestPercivalCore",
+          "method": "test_epoximise_absorbed_interaction"
+        },
+        {
+          "id": "test_percival_core.TestPercivalCore.test_full_evidence_evaluation",
+          "module": "test_percival_core",
+          "file": "tests/test_percival_core.py",
+          "class": "TestPercivalCore",
+          "method": "test_full_evidence_evaluation"
+        },
+        {
+          "id": "test_percival_core.TestPercivalCore.test_missing_input_safeguard",
+          "module": "test_percival_core",
+          "file": "tests/test_percival_core.py",
+          "class": "TestPercivalCore",
+          "method": "test_missing_input_safeguard"
+        },
+        {
+          "id": "test_shadow_and_governance.TestShadowAndGovernance.test_governance_rejection_on_sensitivity_loss",
+          "module": "test_shadow_and_governance",
+          "file": "tests/test_shadow_and_governance.py",
+          "class": "TestShadowAndGovernance",
+          "method": "test_governance_rejection_on_sensitivity_loss"
+        },
+        {
+          "id": "test_shadow_and_governance.TestShadowAndGovernance.test_shadow_experiment_and_proposal",
+          "module": "test_shadow_and_governance",
+          "file": "tests/test_shadow_and_governance.py",
+          "class": "TestShadowAndGovernance",
+          "method": "test_shadow_experiment_and_proposal"
+        },
+        {
+          "id": "test_twenty_failure_scenarios.TestTwentyFailureScenarios.test_01_missing_mri_sequence",
+          "module": "test_twenty_failure_scenarios",
+          "file": "tests/test_twenty_failure_scenarios.py",
+          "class": "TestTwentyFailureScenarios",
+          "method": "test_01_missing_mri_sequence"
+        },
+        {
+          "id": "test_twenty_failure_scenarios.TestTwentyFailureScenarios.test_02_corrupted_mri",
+          "module": "test_twenty_failure_scenarios",
+          "file": "tests/test_twenty_failure_scenarios.py",
+          "class": "TestTwentyFailureScenarios",
+          "method": "test_02_corrupted_mri"
+        },
+        {
+          "id": "test_twenty_failure_scenarios.TestTwentyFailureScenarios.test_03_invalid_voxel_spacing",
+          "module": "test_twenty_failure_scenarios",
+          "file": "tests/test_twenty_failure_scenarios.py",
+          "class": "TestTwentyFailureScenarios",
+          "method": "test_03_invalid_voxel_spacing"
+        },
+        {
+          "id": "test_twenty_failure_scenarios.TestTwentyFailureScenarios.test_04_empty_candidate_mask",
+          "module": "test_twenty_failure_scenarios",
+          "file": "tests/test_twenty_failure_scenarios.py",
+          "class": "TestTwentyFailureScenarios",
+          "method": "test_04_empty_candidate_mask"
+        },
+        {
+          "id": "test_twenty_failure_scenarios.TestTwentyFailureScenarios.test_05_planar_candidate_mask",
+          "module": "test_twenty_failure_scenarios",
+          "file": "tests/test_twenty_failure_scenarios.py",
+          "class": "TestTwentyFailureScenarios",
+          "method": "test_05_planar_candidate_mask"
+        },
+        {
+          "id": "test_twenty_failure_scenarios.TestTwentyFailureScenarios.test_06_missing_lumos_evidence",
+          "module": "test_twenty_failure_scenarios",
+          "file": "tests/test_twenty_failure_scenarios.py",
+          "class": "TestTwentyFailureScenarios",
+          "method": "test_06_missing_lumos_evidence"
+        },
+        {
+          "id": "test_twenty_failure_scenarios.TestTwentyFailureScenarios.test_07_missing_nox_features",
+          "module": "test_twenty_failure_scenarios",
+          "file": "tests/test_twenty_failure_scenarios.py",
+          "class": "TestTwentyFailureScenarios",
+          "method": "test_07_missing_nox_features"
+        },
+        {
+          "id": "test_twenty_failure_scenarios.TestTwentyFailureScenarios.test_08_core_convergence_failure",
+          "module": "test_twenty_failure_scenarios",
+          "file": "tests/test_twenty_failure_scenarios.py",
+          "class": "TestTwentyFailureScenarios",
+          "method": "test_08_core_convergence_failure"
+        },
+        {
+          "id": "test_twenty_failure_scenarios.TestTwentyFailureScenarios.test_09_pensieve_database_unavailable",
+          "module": "test_twenty_failure_scenarios",
+          "file": "tests/test_twenty_failure_scenarios.py",
+          "class": "TestTwentyFailureScenarios",
+          "method": "test_09_pensieve_database_unavailable"
+        },
+        {
+          "id": "test_twenty_failure_scenarios.TestTwentyFailureScenarios.test_10_external_drive_disconnected",
+          "module": "test_twenty_failure_scenarios",
+          "file": "tests/test_twenty_failure_scenarios.py",
+          "class": "TestTwentyFailureScenarios",
+          "method": "test_10_external_drive_disconnected"
+        },
+        {
+          "id": "test_twenty_failure_scenarios.TestTwentyFailureScenarios.test_11_external_drive_read_only",
+          "module": "test_twenty_failure_scenarios",
+          "file": "tests/test_twenty_failure_scenarios.py",
+          "class": "TestTwentyFailureScenarios",
+          "method": "test_11_external_drive_read_only"
+        },
+        {
+          "id": "test_twenty_failure_scenarios.TestTwentyFailureScenarios.test_12_insufficient_disk_space",
+          "module": "test_twenty_failure_scenarios",
+          "file": "tests/test_twenty_failure_scenarios.py",
+          "class": "TestTwentyFailureScenarios",
+          "method": "test_12_insufficient_disk_space"
+        },
+        {
+          "id": "test_twenty_failure_scenarios.TestTwentyFailureScenarios.test_13_interrupted_training",
+          "module": "test_twenty_failure_scenarios",
+          "file": "tests/test_twenty_failure_scenarios.py",
+          "class": "TestTwentyFailureScenarios",
+          "method": "test_13_interrupted_training"
+        },
+        {
+          "id": "test_twenty_failure_scenarios.TestTwentyFailureScenarios.test_14_interrupted_model_promotion_rollback",
+          "module": "test_twenty_failure_scenarios",
+          "file": "tests/test_twenty_failure_scenarios.py",
+          "class": "TestTwentyFailureScenarios",
+          "method": "test_14_interrupted_model_promotion_rollback"
+        },
+        {
+          "id": "test_twenty_failure_scenarios.TestTwentyFailureScenarios.test_15_application_crash_journal_durability",
+          "module": "test_twenty_failure_scenarios",
+          "file": "tests/test_twenty_failure_scenarios.py",
+          "class": "TestTwentyFailureScenarios",
+          "method": "test_15_application_crash_journal_durability"
+        },
+        {
+          "id": "test_twenty_failure_scenarios.TestTwentyFailureScenarios.test_16_failed_journal_synchronization_retry",
+          "module": "test_twenty_failure_scenarios",
+          "file": "tests/test_twenty_failure_scenarios.py",
+          "class": "TestTwentyFailureScenarios",
+          "method": "test_16_failed_journal_synchronization_retry"
+        },
+        {
+          "id": "test_twenty_failure_scenarios.TestTwentyFailureScenarios.test_17_invalid_model_checkpoint",
+          "module": "test_twenty_failure_scenarios",
+          "file": "tests/test_twenty_failure_scenarios.py",
+          "class": "TestTwentyFailureScenarios",
+          "method": "test_17_invalid_model_checkpoint"
+        },
+        {
+          "id": "test_twenty_failure_scenarios.TestTwentyFailureScenarios.test_18_incompatible_model_version",
+          "module": "test_twenty_failure_scenarios",
+          "file": "tests/test_twenty_failure_scenarios.py",
+          "class": "TestTwentyFailureScenarios",
+          "method": "test_18_incompatible_model_version"
+        },
+        {
+          "id": "test_twenty_failure_scenarios.TestTwentyFailureScenarios.test_19_duplicate_study_ingestion",
+          "module": "test_twenty_failure_scenarios",
+          "file": "tests/test_twenty_failure_scenarios.py",
+          "class": "TestTwentyFailureScenarios",
+          "method": "test_19_duplicate_study_ingestion"
+        },
+        {
+          "id": "test_twenty_failure_scenarios.TestTwentyFailureScenarios.test_20_application_restart_during_recovery",
+          "module": "test_twenty_failure_scenarios",
+          "file": "tests/test_twenty_failure_scenarios.py",
+          "class": "TestTwentyFailureScenarios",
+          "method": "test_20_application_restart_during_recovery"
+        },
+        {
+          "id": "test_twenty_failure_scenarios.TestTwentyFailureScenarios.test_21_vault_prefix_containment",
+          "module": "test_twenty_failure_scenarios",
+          "file": "tests/test_twenty_failure_scenarios.py",
+          "class": "TestTwentyFailureScenarios",
+          "method": "test_21_vault_prefix_containment"
+        },
+        {
+          "id": "test_vault.TestPercivalDataVault.test_integrity_and_stats",
+          "module": "test_vault",
+          "file": "tests/test_vault.py",
+          "class": "TestPercivalDataVault",
+          "method": "test_integrity_and_stats"
+        },
+        {
+          "id": "test_vault.TestPercivalDataVault.test_migration_and_backup",
+          "module": "test_vault",
+          "file": "tests/test_vault.py",
+          "class": "TestPercivalDataVault",
+          "method": "test_migration_and_backup"
+        },
+        {
+          "id": "test_vault.TestPercivalDataVault.test_reconnection_and_eject",
+          "module": "test_vault",
+          "file": "tests/test_vault.py",
+          "class": "TestPercivalDataVault",
+          "method": "test_reconnection_and_eject"
+        },
+        {
+          "id": "test_vault.TestPercivalDataVault.test_vault_creation_and_dirs",
+          "module": "test_vault",
+          "file": "tests/test_vault.py",
+          "class": "TestPercivalDataVault",
+          "method": "test_vault_creation_and_dirs"
+        }
+      ]
+    },
+    "unified_engine_deep_tests": {
+      "count": 205,
+      "directory": "cSS_pipeline_v4.13/unified_engine/tests",
+      "tests": [
+        {
+          "id": "test_ablation.TestAblation.test_negative_control",
+          "module": "test_ablation",
+          "file": "unified_engine/tests/test_ablation.py",
+          "class": "TestAblation",
+          "method": "test_negative_control"
+        },
+        {
+          "id": "test_ablation.TestAblation.test_nonoverlap_set",
+          "module": "test_ablation",
+          "file": "unified_engine/tests/test_ablation.py",
+          "class": "TestAblation",
+          "method": "test_nonoverlap_set"
+        },
+        {
+          "id": "test_ablation.TestAblation.test_permutation_keeps_math_and_patient_sets",
+          "module": "test_ablation",
+          "file": "unified_engine/tests/test_ablation.py",
+          "class": "TestAblation",
+          "method": "test_permutation_keeps_math_and_patient_sets"
+        },
+        {
+          "id": "test_ablation.TestAblation.test_permutation_null",
+          "module": "test_ablation",
+          "file": "unified_engine/tests/test_ablation.py",
+          "class": "TestAblation",
+          "method": "test_permutation_null"
+        },
+        {
+          "id": "test_ablation.TestAblation.test_reproducible",
+          "module": "test_ablation",
+          "file": "unified_engine/tests/test_ablation.py",
+          "class": "TestAblation",
+          "method": "test_reproducible"
+        },
+        {
+          "id": "test_auc_investigation.TestAUCInvestigation.test_between_patient_confounder_is_not_discrimination",
+          "module": "test_auc_investigation",
+          "file": "unified_engine/tests/test_auc_investigation.py",
+          "class": "TestAUCInvestigation",
+          "method": "test_between_patient_confounder_is_not_discrimination"
+        },
+        {
+          "id": "test_auc_investigation.TestAUCInvestigation.test_equal_prevalence_much_smaller_effect",
+          "module": "test_auc_investigation",
+          "file": "unified_engine/tests/test_auc_investigation.py",
+          "class": "TestAUCInvestigation",
+          "method": "test_equal_prevalence_much_smaller_effect"
+        },
+        {
+          "id": "test_auc_investigation.TestAUCInvestigation.test_genuine_signal_is_seen_within_patients",
+          "module": "test_auc_investigation",
+          "file": "unified_engine/tests/test_auc_investigation.py",
+          "class": "TestAUCInvestigation",
+          "method": "test_genuine_signal_is_seen_within_patients"
+        },
+        {
+          "id": "test_auc_investigation.TestAUCInvestigation.test_mechanism_needs_no_features",
+          "module": "test_auc_investigation",
+          "file": "unified_engine/tests/test_auc_investigation.py",
+          "class": "TestAUCInvestigation",
+          "method": "test_mechanism_needs_no_features"
+        },
+        {
+          "id": "test_auc_investigation.TestAUCInvestigation.test_original_uscore_pure_noise_varying_prevalence",
+          "module": "test_auc_investigation",
+          "file": "unified_engine/tests/test_auc_investigation.py",
+          "class": "TestAUCInvestigation",
+          "method": "test_original_uscore_pure_noise_varying_prevalence"
+        },
+        {
+          "id": "test_auc_investigation.TestAUCInvestigation.test_patient_grouped_fold_wise_and_within_are_unbiased_on_noise",
+          "module": "test_auc_investigation",
+          "file": "unified_engine/tests/test_auc_investigation.py",
+          "class": "TestAUCInvestigation",
+          "method": "test_patient_grouped_fold_wise_and_within_are_unbiased_on_noise"
+        },
+        {
+          "id": "test_characteristics.TestCharacteristics.test_design_matrix_marks_incomplete_rows",
+          "module": "test_characteristics",
+          "file": "unified_engine/tests/test_characteristics.py",
+          "class": "TestCharacteristics",
+          "method": "test_design_matrix_marks_incomplete_rows"
+        },
+        {
+          "id": "test_characteristics.TestCharacteristics.test_design_row_transforms_and_indicator",
+          "module": "test_characteristics",
+          "file": "unified_engine/tests/test_characteristics.py",
+          "class": "TestCharacteristics",
+          "method": "test_design_row_transforms_and_indicator"
+        },
+        {
+          "id": "test_characteristics.TestCharacteristics.test_gate_dropped_is_not_measured",
+          "module": "test_characteristics",
+          "file": "unified_engine/tests/test_characteristics.py",
+          "class": "TestCharacteristics",
+          "method": "test_gate_dropped_is_not_measured"
+        },
+        {
+          "id": "test_characteristics.TestCharacteristics.test_refuses_scores_flags_ids_model_outputs",
+          "module": "test_characteristics",
+          "file": "unified_engine/tests/test_characteristics.py",
+          "class": "TestCharacteristics",
+          "method": "test_refuses_scores_flags_ids_model_outputs"
+        },
+        {
+          "id": "test_characteristics.TestCharacteristics.test_statuses",
+          "module": "test_characteristics",
+          "file": "unified_engine/tests/test_characteristics.py",
+          "class": "TestCharacteristics",
+          "method": "test_statuses"
+        },
+        {
+          "id": "test_end_to_end.TestEndToEnd.test_checks_clean_on_clean_data",
+          "module": "test_end_to_end",
+          "file": "unified_engine/tests/test_end_to_end.py",
+          "class": "TestEndToEnd",
+          "method": "test_checks_clean_on_clean_data"
+        },
+        {
+          "id": "test_end_to_end.TestEndToEnd.test_every_comparator_on_identical_population",
+          "module": "test_end_to_end",
+          "file": "unified_engine/tests/test_end_to_end.py",
+          "class": "TestEndToEnd",
+          "method": "test_every_comparator_on_identical_population"
+        },
+        {
+          "id": "test_end_to_end.TestEndToEnd.test_pure_noise_end_to_end",
+          "module": "test_end_to_end",
+          "file": "unified_engine/tests/test_end_to_end.py",
+          "class": "TestEndToEnd",
+          "method": "test_pure_noise_end_to_end"
+        },
+        {
+          "id": "test_end_to_end.TestEndToEnd.test_refuses_non_synthetic",
+          "module": "test_end_to_end",
+          "file": "unified_engine/tests/test_end_to_end.py",
+          "class": "TestEndToEnd",
+          "method": "test_refuses_non_synthetic"
+        },
+        {
+          "id": "test_end_to_end.TestEndToEnd.test_reproducible",
+          "module": "test_end_to_end",
+          "file": "unified_engine/tests/test_end_to_end.py",
+          "class": "TestEndToEnd",
+          "method": "test_reproducible"
+        },
+        {
+          "id": "test_end_to_end.TestEndToEnd.test_runs_without_fold_failures",
+          "module": "test_end_to_end",
+          "file": "unified_engine/tests/test_end_to_end.py",
+          "class": "TestEndToEnd",
+          "method": "test_runs_without_fold_failures"
+        },
+        {
+          "id": "test_end_to_end.TestEndToEnd.test_signal_recovered_within_patients",
+          "module": "test_end_to_end",
+          "file": "unified_engine/tests/test_end_to_end.py",
+          "class": "TestEndToEnd",
+          "method": "test_signal_recovered_within_patients"
+        },
+        {
+          "id": "test_engine_provenance.TestEngineProvenance.test_engine_is_inside_the_repository",
+          "module": "test_engine_provenance",
+          "file": "unified_engine/tests/test_engine_provenance.py",
+          "class": "TestEngineProvenance",
+          "method": "test_engine_is_inside_the_repository"
+        },
+        {
+          "id": "test_engine_provenance.TestEngineProvenance.test_pinned_sources_unchanged",
+          "module": "test_engine_provenance",
+          "file": "unified_engine/tests/test_engine_provenance.py",
+          "class": "TestEngineProvenance",
+          "method": "test_pinned_sources_unchanged"
+        },
+        {
+          "id": "test_engine_provenance.TestEngineProvenance.test_rule_constants_and_columns",
+          "module": "test_engine_provenance",
+          "file": "unified_engine/tests/test_engine_provenance.py",
+          "class": "TestEngineProvenance",
+          "method": "test_rule_constants_and_columns"
+        },
+        {
+          "id": "test_engine_provenance.TestEngineProvenance.test_verbatim_blocks_pinned",
+          "module": "test_engine_provenance",
+          "file": "unified_engine/tests/test_engine_provenance.py",
+          "class": "TestEngineProvenance",
+          "method": "test_verbatim_blocks_pinned"
+        },
+        {
+          "id": "test_evaluation.TestMetrics.test_auc_and_ap",
+          "module": "test_evaluation",
+          "file": "unified_engine/tests/test_evaluation.py",
+          "class": "TestMetrics",
+          "method": "test_auc_and_ap"
+        },
+        {
+          "id": "test_evaluation.TestMetrics.test_bootstrap_resamples_patients",
+          "module": "test_evaluation",
+          "file": "unified_engine/tests/test_evaluation.py",
+          "class": "TestMetrics",
+          "method": "test_bootstrap_resamples_patients"
+        },
+        {
+          "id": "test_evaluation.TestMetrics.test_calibration",
+          "module": "test_evaluation",
+          "file": "unified_engine/tests/test_evaluation.py",
+          "class": "TestMetrics",
+          "method": "test_calibration"
+        },
+        {
+          "id": "test_evaluation.TestMetrics.test_confusion_and_threshold",
+          "module": "test_evaluation",
+          "file": "unified_engine/tests/test_evaluation.py",
+          "class": "TestMetrics",
+          "method": "test_confusion_and_threshold"
+        },
+        {
+          "id": "test_evaluation.TestMetrics.test_cross_validate_identical_folds_and_training_thresholds",
+          "module": "test_evaluation",
+          "file": "unified_engine/tests/test_evaluation.py",
+          "class": "TestMetrics",
+          "method": "test_cross_validate_identical_folds_and_training_thresholds"
+        },
+        {
+          "id": "test_evaluation.TestMetrics.test_decomposition_identity",
+          "module": "test_evaluation",
+          "file": "unified_engine/tests/test_evaluation.py",
+          "class": "TestMetrics",
+          "method": "test_decomposition_identity"
+        },
+        {
+          "id": "test_evaluation.TestMetrics.test_kappa",
+          "module": "test_evaluation",
+          "file": "unified_engine/tests/test_evaluation.py",
+          "class": "TestMetrics",
+          "method": "test_kappa"
+        },
+        {
+          "id": "test_funnel.TestFunnel.test_fates_and_completeness",
+          "module": "test_funnel",
+          "file": "unified_engine/tests/test_funnel.py",
+          "class": "TestFunnel",
+          "method": "test_fates_and_completeness"
+        },
+        {
+          "id": "test_funnel.TestFunnel.test_inclusion_probabilities",
+          "module": "test_funnel",
+          "file": "unified_engine/tests/test_funnel.py",
+          "class": "TestFunnel",
+          "method": "test_inclusion_probabilities"
+        },
+        {
+          "id": "test_funnel.TestFunnel.test_review_web_design_matches_source",
+          "module": "test_funnel",
+          "file": "unified_engine/tests/test_funnel.py",
+          "class": "TestFunnel",
+          "method": "test_review_web_design_matches_source"
+        },
+        {
+          "id": "test_funnel.TestFunnel.test_selection_report_on_synthetic",
+          "module": "test_funnel",
+          "file": "unified_engine/tests/test_funnel.py",
+          "class": "TestFunnel",
+          "method": "test_selection_report_on_synthetic"
+        },
+        {
+          "id": "test_funnel.TestFunnel.test_weights_never_invented",
+          "module": "test_funnel",
+          "file": "unified_engine/tests/test_funnel.py",
+          "class": "TestFunnel",
+          "method": "test_weights_never_invented"
+        },
+        {
+          "id": "test_fusion.TestFusion.test_components_kept_separate_and_quality_withholds",
+          "module": "test_fusion",
+          "file": "unified_engine/tests/test_fusion.py",
+          "class": "TestFusion",
+          "method": "test_components_kept_separate_and_quality_withholds"
+        },
+        {
+          "id": "test_fusion.TestFusion.test_disagreement_visible",
+          "module": "test_fusion",
+          "file": "unified_engine/tests/test_fusion.py",
+          "class": "TestFusion",
+          "method": "test_disagreement_visible"
+        },
+        {
+          "id": "test_fusion.TestFusion.test_incremental_value_detects_real_increment",
+          "module": "test_fusion",
+          "file": "unified_engine/tests/test_fusion.py",
+          "class": "TestFusion",
+          "method": "test_incremental_value_detects_real_increment"
+        },
+        {
+          "id": "test_fusion.TestFusion.test_no_unified_score_without_gate_d",
+          "module": "test_fusion",
+          "file": "unified_engine/tests/test_fusion.py",
+          "class": "TestFusion",
+          "method": "test_no_unified_score_without_gate_d"
+        },
+        {
+          "id": "test_fusion.TestFusion.test_offset_design_prevents_double_counting",
+          "module": "test_fusion",
+          "file": "unified_engine/tests/test_fusion.py",
+          "class": "TestFusion",
+          "method": "test_offset_design_prevents_double_counting"
+        },
+        {
+          "id": "test_image_ml.TestInference.test_bundled_model_is_healthy_and_selected",
+          "module": "test_image_ml",
+          "file": "unified_engine/tests/test_image_ml.py",
+          "class": "TestInference",
+          "method": "test_bundled_model_is_healthy_and_selected"
+        },
+        {
+          "id": "test_image_ml.TestInference.test_inference_record",
+          "module": "test_image_ml",
+          "file": "unified_engine/tests/test_image_ml.py",
+          "class": "TestInference",
+          "method": "test_inference_record"
+        },
+        {
+          "id": "test_image_ml.TestInference.test_invalid_images_not_scorable",
+          "module": "test_image_ml",
+          "file": "unified_engine/tests/test_image_ml.py",
+          "class": "TestInference",
+          "method": "test_invalid_images_not_scorable"
+        },
+        {
+          "id": "test_image_ml.TestInference.test_missing_or_bad_model_withholds_predictions",
+          "module": "test_image_ml",
+          "file": "unified_engine/tests/test_image_ml.py",
+          "class": "TestInference",
+          "method": "test_missing_or_bad_model_withholds_predictions"
+        },
+        {
+          "id": "test_image_ml.TestInference.test_missing_patches_reported",
+          "module": "test_image_ml",
+          "file": "unified_engine/tests/test_image_ml.py",
+          "class": "TestInference",
+          "method": "test_missing_patches_reported"
+        },
+        {
+          "id": "test_image_ml.TestInference.test_model_failure_writes_nothing_and_keeps_previous_result",
+          "module": "test_image_ml",
+          "file": "unified_engine/tests/test_image_ml.py",
+          "class": "TestInference",
+          "method": "test_model_failure_writes_nothing_and_keeps_previous_result"
+        },
+        {
+          "id": "test_image_ml.TestInference.test_offline_no_network_connection",
+          "module": "test_image_ml",
+          "file": "unified_engine/tests/test_image_ml.py",
+          "class": "TestInference",
+          "method": "test_offline_no_network_connection"
+        },
+        {
+          "id": "test_image_ml.TestInference.test_predictions_track_truth_on_synthetic_data",
+          "module": "test_image_ml",
+          "file": "unified_engine/tests/test_image_ml.py",
+          "class": "TestInference",
+          "method": "test_predictions_track_truth_on_synthetic_data"
+        },
+        {
+          "id": "test_image_ml.TestInference.test_synthetic_only",
+          "module": "test_image_ml",
+          "file": "unified_engine/tests/test_image_ml.py",
+          "class": "TestInference",
+          "method": "test_synthetic_only"
+        },
+        {
+          "id": "test_image_ml.TestModel.test_corrupt_edited_incompatible_missing",
+          "module": "test_image_ml",
+          "file": "unified_engine/tests/test_image_ml.py",
+          "class": "TestModel",
+          "method": "test_corrupt_edited_incompatible_missing"
+        },
+        {
+          "id": "test_image_ml.TestModel.test_feature_set_change_is_incompatible",
+          "module": "test_image_ml",
+          "file": "unified_engine/tests/test_image_ml.py",
+          "class": "TestModel",
+          "method": "test_feature_set_change_is_incompatible"
+        },
+        {
+          "id": "test_image_ml.TestModel.test_health_and_card",
+          "module": "test_image_ml",
+          "file": "unified_engine/tests/test_image_ml.py",
+          "class": "TestModel",
+          "method": "test_health_and_card"
+        },
+        {
+          "id": "test_image_ml.TestModel.test_reproducible_prediction",
+          "module": "test_image_ml",
+          "file": "unified_engine/tests/test_image_ml.py",
+          "class": "TestModel",
+          "method": "test_reproducible_prediction"
+        },
+        {
+          "id": "test_image_ml.TestModel.test_signal_learned_and_negative_control_null",
+          "module": "test_image_ml",
+          "file": "unified_engine/tests/test_image_ml.py",
+          "class": "TestModel",
+          "method": "test_signal_learned_and_negative_control_null"
+        },
+        {
+          "id": "test_imaging_geometry.TestGate.test_4d_refused",
+          "module": "test_imaging_geometry",
+          "file": "unified_engine/tests/test_imaging_geometry.py",
+          "class": "TestGate",
+          "method": "test_4d_refused"
+        },
+        {
+          "id": "test_imaging_geometry.TestGate.test_bad_affines",
+          "module": "test_imaging_geometry",
+          "file": "unified_engine/tests/test_imaging_geometry.py",
+          "class": "TestGate",
+          "method": "test_bad_affines"
+        },
+        {
+          "id": "test_imaging_geometry.TestGate.test_clean",
+          "module": "test_imaging_geometry",
+          "file": "unified_engine/tests/test_imaging_geometry.py",
+          "class": "TestGate",
+          "method": "test_clean"
+        },
+        {
+          "id": "test_imaging_geometry.TestGate.test_header_codes_zero_refused",
+          "module": "test_imaging_geometry",
+          "file": "unified_engine/tests/test_imaging_geometry.py",
+          "class": "TestGate",
+          "method": "test_header_codes_zero_refused"
+        },
+        {
+          "id": "test_imaging_geometry.TestGate.test_isotropic_any_si_axis_2_is_ok",
+          "module": "test_imaging_geometry",
+          "file": "unified_engine/tests/test_imaging_geometry.py",
+          "class": "TestGate",
+          "method": "test_isotropic_any_si_axis_2_is_ok"
+        },
+        {
+          "id": "test_imaging_geometry.TestGate.test_obliquity",
+          "module": "test_imaging_geometry",
+          "file": "unified_engine/tests/test_imaging_geometry.py",
+          "class": "TestGate",
+          "method": "test_obliquity"
+        },
+        {
+          "id": "test_imaging_geometry.TestGate.test_qform_sform_disagree_refused",
+          "module": "test_imaging_geometry",
+          "file": "unified_engine/tests/test_imaging_geometry.py",
+          "class": "TestGate",
+          "method": "test_qform_sform_disagree_refused"
+        },
+        {
+          "id": "test_imaging_geometry.TestGate.test_same_grid",
+          "module": "test_imaging_geometry",
+          "file": "unified_engine/tests/test_imaging_geometry.py",
+          "class": "TestGate",
+          "method": "test_same_grid"
+        },
+        {
+          "id": "test_imaging_geometry.TestGate.test_slice_axis_not_si_refused",
+          "module": "test_imaging_geometry",
+          "file": "unified_engine/tests/test_imaging_geometry.py",
+          "class": "TestGate",
+          "method": "test_slice_axis_not_si_refused"
+        },
+        {
+          "id": "test_imaging_geometry.TestGate.test_voxel_envelope",
+          "module": "test_imaging_geometry",
+          "file": "unified_engine/tests/test_imaging_geometry.py",
+          "class": "TestGate",
+          "method": "test_voxel_envelope"
+        },
+        {
+          "id": "test_imaging_geometry.TestGate.test_zooms_disagree_with_affine_refused",
+          "module": "test_imaging_geometry",
+          "file": "unified_engine/tests/test_imaging_geometry.py",
+          "class": "TestGate",
+          "method": "test_zooms_disagree_with_affine_refused"
+        },
+        {
+          "id": "test_imaging_geometry.TestInvariance.test_oblique_grid_samples_the_same_world_object",
+          "module": "test_imaging_geometry",
+          "file": "unified_engine/tests/test_imaging_geometry.py",
+          "class": "TestInvariance",
+          "method": "test_oblique_grid_samples_the_same_world_object"
+        },
+        {
+          "id": "test_imaging_geometry.TestInvariance.test_storage_order_does_not_change_world_samples",
+          "module": "test_imaging_geometry",
+          "file": "unified_engine/tests/test_imaging_geometry.py",
+          "class": "TestInvariance",
+          "method": "test_storage_order_does_not_change_world_samples"
+        },
+        {
+          "id": "test_imaging_geometry.TestProduction.test_orientation_block_is_css_qc_and_matches_replica_and_detector",
+          "module": "test_imaging_geometry",
+          "file": "unified_engine/tests/test_imaging_geometry.py",
+          "class": "TestProduction",
+          "method": "test_orientation_block_is_css_qc_and_matches_replica_and_detector"
+        },
+        {
+          "id": "test_imaging_geometry.TestProduction.test_pinned_sources",
+          "module": "test_imaging_geometry",
+          "file": "unified_engine/tests/test_imaging_geometry.py",
+          "class": "TestProduction",
+          "method": "test_pinned_sources"
+        },
+        {
+          "id": "test_imaging_index.TestIndex.test_acquisition_whitelist",
+          "module": "test_imaging_index",
+          "file": "unified_engine/tests/test_imaging_index.py",
+          "class": "TestIndex",
+          "method": "test_acquisition_whitelist"
+        },
+        {
+          "id": "test_imaging_index.TestIndex.test_clean_study_record",
+          "module": "test_imaging_index",
+          "file": "unified_engine/tests/test_imaging_index.py",
+          "class": "TestIndex",
+          "method": "test_clean_study_record"
+        },
+        {
+          "id": "test_imaging_index.TestIndex.test_cli",
+          "module": "test_imaging_index",
+          "file": "unified_engine/tests/test_imaging_index.py",
+          "class": "TestIndex",
+          "method": "test_cli"
+        },
+        {
+          "id": "test_imaging_index.TestIndex.test_deterministic",
+          "module": "test_imaging_index",
+          "file": "unified_engine/tests/test_imaging_index.py",
+          "class": "TestIndex",
+          "method": "test_deterministic"
+        },
+        {
+          "id": "test_imaging_index.TestIndex.test_missing_channels_are_absent_not_zero",
+          "module": "test_imaging_index",
+          "file": "unified_engine/tests/test_imaging_index.py",
+          "class": "TestIndex",
+          "method": "test_missing_channels_are_absent_not_zero"
+        },
+        {
+          "id": "test_imaging_index.TestIndex.test_refused_swi_makes_nothing_usable",
+          "module": "test_imaging_index",
+          "file": "unified_engine/tests/test_imaging_index.py",
+          "class": "TestIndex",
+          "method": "test_refused_swi_makes_nothing_usable"
+        },
+        {
+          "id": "test_imaging_index.TestIndex.test_registration_state_propagates",
+          "module": "test_imaging_index",
+          "file": "unified_engine/tests/test_imaging_index.py",
+          "class": "TestIndex",
+          "method": "test_registration_state_propagates"
+        },
+        {
+          "id": "test_imaging_index.TestIndex.test_stale_offgrid_misregistered_channels",
+          "module": "test_imaging_index",
+          "file": "unified_engine/tests/test_imaging_index.py",
+          "class": "TestIndex",
+          "method": "test_stale_offgrid_misregistered_channels"
+        },
+        {
+          "id": "test_imaging_index.TestIndex.test_tampered_index_detected",
+          "module": "test_imaging_index",
+          "file": "unified_engine/tests/test_imaging_index.py",
+          "class": "TestIndex",
+          "method": "test_tampered_index_detected"
+        },
+        {
+          "id": "test_imaging_index.TestRefusal.test_generator_refuses_a_real_looking_folder",
+          "module": "test_imaging_index",
+          "file": "unified_engine/tests/test_imaging_index.py",
+          "class": "TestRefusal",
+          "method": "test_generator_refuses_a_real_looking_folder"
+        },
+        {
+          "id": "test_imaging_index.TestRefusal.test_non_syn_study_code_refused_on_synthetic_base",
+          "module": "test_imaging_index",
+          "file": "unified_engine/tests/test_imaging_index.py",
+          "class": "TestRefusal",
+          "method": "test_non_syn_study_code_refused_on_synthetic_base"
+        },
+        {
+          "id": "test_imaging_index.TestRefusal.test_non_synthetic_base_refused_before_reading",
+          "module": "test_imaging_index",
+          "file": "unified_engine/tests/test_imaging_index.py",
+          "class": "TestRefusal",
+          "method": "test_non_synthetic_base_refused_before_reading"
+        },
+        {
+          "id": "test_imaging_patches.TestContent.test_frame_separates_subpial_sheet_from_surface_tube",
+          "module": "test_imaging_patches",
+          "file": "unified_engine/tests/test_imaging_patches.py",
+          "class": "TestContent",
+          "method": "test_frame_separates_subpial_sheet_from_surface_tube"
+        },
+        {
+          "id": "test_imaging_patches.TestContent.test_native_slices_outside_the_array_are_invalid",
+          "module": "test_imaging_patches",
+          "file": "unified_engine/tests/test_imaging_patches.py",
+          "class": "TestContent",
+          "method": "test_native_slices_outside_the_array_are_invalid"
+        },
+        {
+          "id": "test_imaging_patches.TestContent.test_native_stack_axes_and_validity",
+          "module": "test_imaging_patches",
+          "file": "unified_engine/tests/test_imaging_patches.py",
+          "class": "TestContent",
+          "method": "test_native_stack_axes_and_validity"
+        },
+        {
+          "id": "test_imaging_patches.TestContent.test_native_values_come_only_from_their_own_slice",
+          "module": "test_imaging_patches",
+          "file": "unified_engine/tests/test_imaging_patches.py",
+          "class": "TestContent",
+          "method": "test_native_values_come_only_from_their_own_slice"
+        },
+        {
+          "id": "test_imaging_patches.TestContent.test_rows_and_skip",
+          "module": "test_imaging_patches",
+          "file": "unified_engine/tests/test_imaging_patches.py",
+          "class": "TestContent",
+          "method": "test_rows_and_skip"
+        },
+        {
+          "id": "test_imaging_patches.TestFidelity.test_pinned_extractor_required",
+          "module": "test_imaging_patches",
+          "file": "unified_engine/tests/test_imaging_patches.py",
+          "class": "TestFidelity",
+          "method": "test_pinned_extractor_required"
+        },
+        {
+          "id": "test_imaging_patches.TestFidelity.test_surface_patch_bit_identical_to_production_cli",
+          "module": "test_imaging_patches",
+          "file": "unified_engine/tests/test_imaging_patches.py",
+          "class": "TestFidelity",
+          "method": "test_surface_patch_bit_identical_to_production_cli"
+        },
+        {
+          "id": "test_imaging_patches.TestInvariance.test_storage_order_gives_the_same_patches",
+          "module": "test_imaging_patches",
+          "file": "unified_engine/tests/test_imaging_patches.py",
+          "class": "TestInvariance",
+          "method": "test_storage_order_gives_the_same_patches"
+        },
+        {
+          "id": "test_imaging_patches.TestRefusalAndProvenance.test_non_synthetic_refused",
+          "module": "test_imaging_patches",
+          "file": "unified_engine/tests/test_imaging_patches.py",
+          "class": "TestRefusalAndProvenance",
+          "method": "test_non_synthetic_refused"
+        },
+        {
+          "id": "test_imaging_patches.TestRefusalAndProvenance.test_refused_geometry_and_missing_frame_block_every_object",
+          "module": "test_imaging_patches",
+          "file": "unified_engine/tests/test_imaging_patches.py",
+          "class": "TestRefusalAndProvenance",
+          "method": "test_refused_geometry_and_missing_frame_block_every_object"
+        },
+        {
+          "id": "test_imaging_patches.TestRefusalAndProvenance.test_unusable_channel_is_absent_everywhere",
+          "module": "test_imaging_patches",
+          "file": "unified_engine/tests/test_imaging_patches.py",
+          "class": "TestRefusalAndProvenance",
+          "method": "test_unusable_channel_is_absent_everywhere"
+        },
+        {
+          "id": "test_imaging_patches.TestRefusalAndProvenance.test_writes_only_its_folder_and_is_reproducible",
+          "module": "test_imaging_patches",
+          "file": "unified_engine/tests/test_imaging_patches.py",
+          "class": "TestRefusalAndProvenance",
+          "method": "test_writes_only_its_folder_and_is_reproducible"
+        },
+        {
+          "id": "test_imaging_registration.TestLTA.test_lta_made_for_another_image_refused",
+          "module": "test_imaging_registration",
+          "file": "unified_engine/tests/test_imaging_registration.py",
+          "class": "TestLTA",
+          "method": "test_lta_made_for_another_image_refused"
+        },
+        {
+          "id": "test_imaging_registration.TestLTA.test_missing_stale_garbage",
+          "module": "test_imaging_registration",
+          "file": "unified_engine/tests/test_imaging_registration.py",
+          "class": "TestLTA",
+          "method": "test_missing_stale_garbage"
+        },
+        {
+          "id": "test_imaging_registration.TestLTA.test_non_rigid_refused",
+          "module": "test_imaging_registration",
+          "file": "unified_engine/tests/test_imaging_registration.py",
+          "class": "TestLTA",
+          "method": "test_non_rigid_refused"
+        },
+        {
+          "id": "test_imaging_registration.TestLTA.test_reg_json_cost_threshold_is_css_qc",
+          "module": "test_imaging_registration",
+          "file": "unified_engine/tests/test_imaging_registration.py",
+          "class": "TestLTA",
+          "method": "test_reg_json_cost_threshold_is_css_qc"
+        },
+        {
+          "id": "test_imaging_registration.TestLTA.test_rigid_params",
+          "module": "test_imaging_registration",
+          "file": "unified_engine/tests/test_imaging_registration.py",
+          "class": "TestLTA",
+          "method": "test_rigid_params"
+        },
+        {
+          "id": "test_imaging_registration.TestLTA.test_type0_and_type1_give_the_same_ras2ras",
+          "module": "test_imaging_registration",
+          "file": "unified_engine/tests/test_imaging_registration.py",
+          "class": "TestLTA",
+          "method": "test_type0_and_type1_give_the_same_ras2ras"
+        },
+        {
+          "id": "test_imaging_registration.TestResidualShift.test_beyond_search_is_misregistered",
+          "module": "test_imaging_registration",
+          "file": "unified_engine/tests/test_imaging_registration.py",
+          "class": "TestResidualShift",
+          "method": "test_beyond_search_is_misregistered"
+        },
+        {
+          "id": "test_imaging_registration.TestResidualShift.test_contrast_agnostic",
+          "module": "test_imaging_registration",
+          "file": "unified_engine/tests/test_imaging_registration.py",
+          "class": "TestResidualShift",
+          "method": "test_contrast_agnostic"
+        },
+        {
+          "id": "test_imaging_registration.TestResidualShift.test_noise_only_channel_unmeasurable",
+          "module": "test_imaging_registration",
+          "file": "unified_engine/tests/test_imaging_registration.py",
+          "class": "TestResidualShift",
+          "method": "test_noise_only_channel_unmeasurable"
+        },
+        {
+          "id": "test_imaging_registration.TestResidualShift.test_shift_recovered_and_classified",
+          "module": "test_imaging_registration",
+          "file": "unified_engine/tests/test_imaging_registration.py",
+          "class": "TestResidualShift",
+          "method": "test_shift_recovered_and_classified"
+        },
+        {
+          "id": "test_leakage.TestLeakage.test_copied_model_output_detected",
+          "module": "test_leakage",
+          "file": "unified_engine/tests/test_leakage.py",
+          "class": "TestLeakage",
+          "method": "test_copied_model_output_detected"
+        },
+        {
+          "id": "test_leakage.TestLeakage.test_forbidden_predictors_refused",
+          "module": "test_leakage",
+          "file": "unified_engine/tests/test_leakage.py",
+          "class": "TestLeakage",
+          "method": "test_forbidden_predictors_refused"
+        },
+        {
+          "id": "test_leakage.TestLeakage.test_label_copy_detected",
+          "module": "test_leakage",
+          "file": "unified_engine/tests/test_leakage.py",
+          "class": "TestLeakage",
+          "method": "test_label_copy_detected"
+        },
+        {
+          "id": "test_leakage.TestLeakage.test_partition_and_duplicates",
+          "module": "test_leakage",
+          "file": "unified_engine/tests/test_leakage.py",
+          "class": "TestLeakage",
+          "method": "test_partition_and_duplicates"
+        },
+        {
+          "id": "test_leakage.TestLeakage.test_repeat_exam_leakage_is_real_and_prevented",
+          "module": "test_leakage",
+          "file": "unified_engine/tests/test_leakage.py",
+          "class": "TestLeakage",
+          "method": "test_repeat_exam_leakage_is_real_and_prevented"
+        },
+        {
+          "id": "test_leakage.TestLeakage.test_schema_ranges",
+          "module": "test_leakage",
+          "file": "unified_engine/tests/test_leakage.py",
+          "class": "TestLeakage",
+          "method": "test_schema_ranges"
+        },
+        {
+          "id": "test_leakage.TestLeakage.test_test_labels_and_test_features_never_used_in_fitting",
+          "module": "test_leakage",
+          "file": "unified_engine/tests/test_leakage.py",
+          "class": "TestLeakage",
+          "method": "test_test_labels_and_test_features_never_used_in_fitting"
+        },
+        {
+          "id": "test_math_preservation.TestMath.test_each_rule_fires",
+          "module": "test_math_preservation",
+          "file": "unified_engine/tests/test_math_preservation.py",
+          "class": "TestMath",
+          "method": "test_each_rule_fires"
+        },
+        {
+          "id": "test_math_preservation.TestMath.test_engine_never_produces_e30",
+          "module": "test_math_preservation",
+          "file": "unified_engine/tests/test_math_preservation.py",
+          "class": "TestMath",
+          "method": "test_engine_never_produces_e30"
+        },
+        {
+          "id": "test_math_preservation.TestMath.test_first_match_order_and_switches",
+          "module": "test_math_preservation",
+          "file": "unified_engine/tests/test_math_preservation.py",
+          "class": "TestMath",
+          "method": "test_first_match_order_and_switches"
+        },
+        {
+          "id": "test_math_preservation.TestMath.test_patient_score_parse",
+          "module": "test_math_preservation",
+          "file": "unified_engine/tests/test_math_preservation.py",
+          "class": "TestMath",
+          "method": "test_patient_score_parse"
+        },
+        {
+          "id": "test_math_preservation.TestMath.test_recorded_values_authoritative_and_consistency",
+          "module": "test_math_preservation",
+          "file": "unified_engine/tests/test_math_preservation.py",
+          "class": "TestMath",
+          "method": "test_recorded_values_authoritative_and_consistency"
+        },
+        {
+          "id": "test_math_preservation.TestMath.test_review_priority_is_the_snapshot_function",
+          "module": "test_math_preservation",
+          "file": "unified_engine/tests/test_math_preservation.py",
+          "class": "TestMath",
+          "method": "test_review_priority_is_the_snapshot_function"
+        },
+        {
+          "id": "test_math_preservation.TestMath.test_review_tier_verbatim",
+          "module": "test_math_preservation",
+          "file": "unified_engine/tests/test_math_preservation.py",
+          "class": "TestMath",
+          "method": "test_review_tier_verbatim"
+        },
+        {
+          "id": "test_math_preservation.TestMath.test_score_and_evidence_verbatim_equals_replica",
+          "module": "test_math_preservation",
+          "file": "unified_engine/tests/test_math_preservation.py",
+          "class": "TestMath",
+          "method": "test_score_and_evidence_verbatim_equals_replica"
+        },
+        {
+          "id": "test_ml.TestML.test_contributions_sum",
+          "module": "test_ml",
+          "file": "unified_engine/tests/test_ml.py",
+          "class": "TestML",
+          "method": "test_contributions_sum"
+        },
+        {
+          "id": "test_ml.TestML.test_irls_equals_direct_optimisation",
+          "module": "test_ml",
+          "file": "unified_engine/tests/test_ml.py",
+          "class": "TestML",
+          "method": "test_irls_equals_direct_optimisation"
+        },
+        {
+          "id": "test_ml.TestML.test_legacy_adapters_run_verbatim",
+          "module": "test_ml",
+          "file": "unified_engine/tests/test_ml.py",
+          "class": "TestML",
+          "method": "test_legacy_adapters_run_verbatim"
+        },
+        {
+          "id": "test_ml.TestML.test_math_recalibration_is_monotone",
+          "module": "test_ml",
+          "file": "unified_engine/tests/test_ml.py",
+          "class": "TestML",
+          "method": "test_math_recalibration_is_monotone"
+        },
+        {
+          "id": "test_ml.TestML.test_nested_selection_and_balanced_option",
+          "module": "test_ml",
+          "file": "unified_engine/tests/test_ml.py",
+          "class": "TestML",
+          "method": "test_nested_selection_and_balanced_option"
+        },
+        {
+          "id": "test_ml.TestML.test_offset_removes_double_counting",
+          "module": "test_ml",
+          "file": "unified_engine/tests/test_ml.py",
+          "class": "TestML",
+          "method": "test_offset_removes_double_counting"
+        },
+        {
+          "id": "test_ml.TestML.test_penalty_shrinks_and_intercept_unpenalised",
+          "module": "test_ml",
+          "file": "unified_engine/tests/test_ml.py",
+          "class": "TestML",
+          "method": "test_penalty_shrinks_and_intercept_unpenalised"
+        },
+        {
+          "id": "test_ml.TestML.test_preprocessing_fitted_on_training_rows_only",
+          "module": "test_ml",
+          "file": "unified_engine/tests/test_ml.py",
+          "class": "TestML",
+          "method": "test_preprocessing_fitted_on_training_rows_only"
+        },
+        {
+          "id": "test_nested_leakage.TestFusionCrossFitting.test_fusion_heldout_invariant_to_heldout_labels",
+          "module": "test_nested_leakage",
+          "file": "unified_engine/tests/test_nested_leakage.py",
+          "class": "TestFusionCrossFitting",
+          "method": "test_fusion_heldout_invariant_to_heldout_labels"
+        },
+        {
+          "id": "test_nested_leakage.TestNestedCrossFit.test_fitted_quantities_invariant_to_heldout_features_and_images",
+          "module": "test_nested_leakage",
+          "file": "unified_engine/tests/test_nested_leakage.py",
+          "class": "TestNestedCrossFit",
+          "method": "test_fitted_quantities_invariant_to_heldout_features_and_images"
+        },
+        {
+          "id": "test_nested_leakage.TestNestedCrossFit.test_heldout_predictions_and_fitted_quantities_invariant_to_heldout_labels",
+          "module": "test_nested_leakage",
+          "file": "unified_engine/tests/test_nested_leakage.py",
+          "class": "TestNestedCrossFit",
+          "method": "test_heldout_predictions_and_fitted_quantities_invariant_to_heldout_labels"
+        },
+        {
+          "id": "test_nested_leakage.TestNestedCrossFit.test_outer_folds_partition_patients",
+          "module": "test_nested_leakage",
+          "file": "unified_engine/tests/test_nested_leakage.py",
+          "class": "TestNestedCrossFit",
+          "method": "test_outer_folds_partition_patients"
+        },
+        {
+          "id": "test_nested_leakage.TestNestedCrossFit.test_report_is_complete_and_honest",
+          "module": "test_nested_leakage",
+          "file": "unified_engine/tests/test_nested_leakage.py",
+          "class": "TestNestedCrossFit",
+          "method": "test_report_is_complete_and_honest"
+        },
+        {
+          "id": "test_nested_leakage.TestPatientIdentity.test_all_examinations_of_a_patient_in_one_partition",
+          "module": "test_nested_leakage",
+          "file": "unified_engine/tests/test_nested_leakage.py",
+          "class": "TestPatientIdentity",
+          "method": "test_all_examinations_of_a_patient_in_one_partition"
+        },
+        {
+          "id": "test_nested_leakage.TestPatientIdentity.test_patient_on_both_sides_refused",
+          "module": "test_nested_leakage",
+          "file": "unified_engine/tests/test_nested_leakage.py",
+          "class": "TestPatientIdentity",
+          "method": "test_patient_on_both_sides_refused"
+        },
+        {
+          "id": "test_nested_leakage.TestPatientIdentity.test_rows_without_patient_refused",
+          "module": "test_nested_leakage",
+          "file": "unified_engine/tests/test_nested_leakage.py",
+          "class": "TestPatientIdentity",
+          "method": "test_rows_without_patient_refused"
+        },
+        {
+          "id": "test_patient_split.TestSplit.test_protected_test_set",
+          "module": "test_patient_split",
+          "file": "unified_engine/tests/test_patient_split.py",
+          "class": "TestSplit",
+          "method": "test_protected_test_set"
+        },
+        {
+          "id": "test_patient_split.TestSplit.test_refuses_without_mapping_and_records_assumption",
+          "module": "test_patient_split",
+          "file": "unified_engine/tests/test_patient_split.py",
+          "class": "TestSplit",
+          "method": "test_refuses_without_mapping_and_records_assumption"
+        },
+        {
+          "id": "test_patient_split.TestSplit.test_repeat_exams_exist_and_stay_together",
+          "module": "test_patient_split",
+          "file": "unified_engine/tests/test_patient_split.py",
+          "class": "TestSplit",
+          "method": "test_repeat_exams_exist_and_stay_together"
+        },
+        {
+          "id": "test_patient_split.TestSplit.test_reproducible_and_seed_dependent",
+          "module": "test_patient_split",
+          "file": "unified_engine/tests/test_patient_split.py",
+          "class": "TestSplit",
+          "method": "test_reproducible_and_seed_dependent"
+        },
+        {
+          "id": "test_patient_split.TestSplit.test_stratification",
+          "module": "test_patient_split",
+          "file": "unified_engine/tests/test_patient_split.py",
+          "class": "TestSplit",
+          "method": "test_stratification"
+        },
+        {
+          "id": "test_port_fidelity.TestPortFidelity.test_identical_predictions_and_cohort",
+          "module": "test_port_fidelity",
+          "file": "unified_engine/tests/test_port_fidelity.py",
+          "class": "TestPortFidelity",
+          "method": "test_identical_predictions_and_cohort"
+        },
+        {
+          "id": "test_prototype_components.TestCharacteristics.test_status_clip_and_corrupt",
+          "module": "test_prototype_components",
+          "file": "unified_engine/tests/test_prototype_components.py",
+          "class": "TestCharacteristics",
+          "method": "test_status_clip_and_corrupt"
+        },
+        {
+          "id": "test_prototype_components.TestInputs.test_sanitize",
+          "module": "test_prototype_components",
+          "file": "unified_engine/tests/test_prototype_components.py",
+          "class": "TestInputs",
+          "method": "test_sanitize"
+        },
+        {
+          "id": "test_prototype_components.TestLearned.test_offset_increment_and_contributions",
+          "module": "test_prototype_components",
+          "file": "unified_engine/tests/test_prototype_components.py",
+          "class": "TestLearned",
+          "method": "test_offset_increment_and_contributions"
+        },
+        {
+          "id": "test_prototype_components.TestMathComponent.test_inconsistent_and_not_scorable",
+          "module": "test_prototype_components",
+          "file": "unified_engine/tests/test_prototype_components.py",
+          "class": "TestMathComponent",
+          "method": "test_inconsistent_and_not_scorable"
+        },
+        {
+          "id": "test_prototype_components.TestMathComponent.test_recalibration_monotone",
+          "module": "test_prototype_components",
+          "file": "unified_engine/tests/test_prototype_components.py",
+          "class": "TestMathComponent",
+          "method": "test_recalibration_monotone"
+        },
+        {
+          "id": "test_prototype_components.TestMathComponent.test_recorded_is_authoritative_and_verbatim_when_absent",
+          "module": "test_prototype_components",
+          "file": "unified_engine/tests/test_prototype_components.py",
+          "class": "TestMathComponent",
+          "method": "test_recorded_is_authoritative_and_verbatim_when_absent"
+        },
+        {
+          "id": "test_prototype_components.TestMathComponent.test_regression_against_verbatim_on_synthetic_rows",
+          "module": "test_prototype_components",
+          "file": "unified_engine/tests/test_prototype_components.py",
+          "class": "TestMathComponent",
+          "method": "test_regression_against_verbatim_on_synthetic_rows"
+        },
+        {
+          "id": "test_prototype_fusion.TestFusion.test_all_modes_fit_and_predict",
+          "module": "test_prototype_fusion",
+          "file": "unified_engine/tests/test_prototype_fusion.py",
+          "class": "TestFusion",
+          "method": "test_all_modes_fit_and_predict"
+        },
+        {
+          "id": "test_prototype_fusion.TestFusion.test_categories_follow_rules",
+          "module": "test_prototype_fusion",
+          "file": "unified_engine/tests/test_prototype_fusion.py",
+          "class": "TestFusion",
+          "method": "test_categories_follow_rules"
+        },
+        {
+          "id": "test_prototype_fusion.TestFusion.test_component_swap",
+          "module": "test_prototype_fusion",
+          "file": "unified_engine/tests/test_prototype_fusion.py",
+          "class": "TestFusion",
+          "method": "test_component_swap"
+        },
+        {
+          "id": "test_prototype_fusion.TestFusion.test_leakage_and_separation",
+          "module": "test_prototype_fusion",
+          "file": "unified_engine/tests/test_prototype_fusion.py",
+          "class": "TestFusion",
+          "method": "test_leakage_and_separation"
+        },
+        {
+          "id": "test_prototype_fusion.TestFusion.test_math_only_preserves_math_order",
+          "module": "test_prototype_fusion",
+          "file": "unified_engine/tests/test_prototype_fusion.py",
+          "class": "TestFusion",
+          "method": "test_math_only_preserves_math_order"
+        },
+        {
+          "id": "test_prototype_fusion.TestFusion.test_patient_level_is_separate",
+          "module": "test_prototype_fusion",
+          "file": "unified_engine/tests/test_prototype_fusion.py",
+          "class": "TestFusion",
+          "method": "test_patient_level_is_separate"
+        },
+        {
+          "id": "test_prototype_fusion.TestFusion.test_reproducible_and_persistent",
+          "module": "test_prototype_fusion",
+          "file": "unified_engine/tests/test_prototype_fusion.py",
+          "class": "TestFusion",
+          "method": "test_reproducible_and_persistent"
+        },
+        {
+          "id": "test_prototype_fusion.TestFusion.test_trace_arithmetic",
+          "module": "test_prototype_fusion",
+          "file": "unified_engine/tests/test_prototype_fusion.py",
+          "class": "TestFusion",
+          "method": "test_trace_arithmetic"
+        },
+        {
+          "id": "test_prototype_scenarios.TestScenarios.test_borderline_is_not_forced",
+          "module": "test_prototype_scenarios",
+          "file": "unified_engine/tests/test_prototype_scenarios.py",
+          "class": "TestScenarios",
+          "method": "test_borderline_is_not_forced"
+        },
+        {
+          "id": "test_prototype_scenarios.TestScenarios.test_corrupted_inputs",
+          "module": "test_prototype_scenarios",
+          "file": "unified_engine/tests/test_prototype_scenarios.py",
+          "class": "TestScenarios",
+          "method": "test_corrupted_inputs"
+        },
+        {
+          "id": "test_prototype_scenarios.TestScenarios.test_difficult_mimic_ranks_below_css",
+          "module": "test_prototype_scenarios",
+          "file": "unified_engine/tests/test_prototype_scenarios.py",
+          "class": "TestScenarios",
+          "method": "test_difficult_mimic_ranks_below_css"
+        },
+        {
+          "id": "test_prototype_scenarios.TestScenarios.test_extreme_values_are_clipped_and_flagged",
+          "module": "test_prototype_scenarios",
+          "file": "unified_engine/tests/test_prototype_scenarios.py",
+          "class": "TestScenarios",
+          "method": "test_extreme_values_are_clipped_and_flagged"
+        },
+        {
+          "id": "test_prototype_scenarios.TestScenarios.test_missing_inputs_make_uncertain_not_negative",
+          "module": "test_prototype_scenarios",
+          "file": "unified_engine/tests/test_prototype_scenarios.py",
+          "class": "TestScenarios",
+          "method": "test_missing_inputs_make_uncertain_not_negative"
+        },
+        {
+          "id": "test_prototype_scenarios.TestScenarios.test_positive_and_negatives",
+          "module": "test_prototype_scenarios",
+          "file": "unified_engine/tests/test_prototype_scenarios.py",
+          "class": "TestScenarios",
+          "method": "test_positive_and_negatives"
+        },
+        {
+          "id": "test_prototype_scenarios.TestScenarios.test_unexpected_inputs",
+          "module": "test_prototype_scenarios",
+          "file": "unified_engine/tests/test_prototype_scenarios.py",
+          "class": "TestScenarios",
+          "method": "test_unexpected_inputs"
+        },
+        {
+          "id": "test_prototype_scenarios.TestScenarios.test_unscorable_and_outside_model",
+          "module": "test_prototype_scenarios",
+          "file": "unified_engine/tests/test_prototype_scenarios.py",
+          "class": "TestScenarios",
+          "method": "test_unscorable_and_outside_model"
+        },
+        {
+          "id": "test_registry_shadow.TestRegistry.test_bundled_model_healthy",
+          "module": "test_registry_shadow",
+          "file": "unified_engine/tests/test_registry_shadow.py",
+          "class": "TestRegistry",
+          "method": "test_bundled_model_healthy"
+        },
+        {
+          "id": "test_registry_shadow.TestRegistry.test_configured_model_and_user_dir",
+          "module": "test_registry_shadow",
+          "file": "unified_engine/tests/test_registry_shadow.py",
+          "class": "TestRegistry",
+          "method": "test_configured_model_and_user_dir"
+        },
+        {
+          "id": "test_registry_shadow.TestRegistry.test_missing_corrupt_incompatible",
+          "module": "test_registry_shadow",
+          "file": "unified_engine/tests/test_registry_shadow.py",
+          "class": "TestRegistry",
+          "method": "test_missing_corrupt_incompatible"
+        },
+        {
+          "id": "test_registry_shadow.TestRegistry.test_never_overwrites_and_policy",
+          "module": "test_registry_shadow",
+          "file": "unified_engine/tests/test_registry_shadow.py",
+          "class": "TestRegistry",
+          "method": "test_never_overwrites_and_policy"
+        },
+        {
+          "id": "test_registry_shadow.TestShadow.test_corrupted_rows_and_missing_lists",
+          "module": "test_registry_shadow",
+          "file": "unified_engine/tests/test_registry_shadow.py",
+          "class": "TestShadow",
+          "method": "test_corrupted_rows_and_missing_lists"
+        },
+        {
+          "id": "test_registry_shadow.TestShadow.test_demo_base_refuses_a_real_folder_and_has_no_labels",
+          "module": "test_registry_shadow",
+          "file": "unified_engine/tests/test_registry_shadow.py",
+          "class": "TestShadow",
+          "method": "test_demo_base_refuses_a_real_folder_and_has_no_labels"
+        },
+        {
+          "id": "test_registry_shadow.TestShadow.test_ml_failure_falls_back",
+          "module": "test_registry_shadow",
+          "file": "unified_engine/tests/test_registry_shadow.py",
+          "class": "TestShadow",
+          "method": "test_ml_failure_falls_back"
+        },
+        {
+          "id": "test_registry_shadow.TestShadow.test_patient_keys_and_registration",
+          "module": "test_registry_shadow",
+          "file": "unified_engine/tests/test_registry_shadow.py",
+          "class": "TestShadow",
+          "method": "test_patient_keys_and_registration"
+        },
+        {
+          "id": "test_registry_shadow.TestShadow.test_real_study_never_gets_the_synthetic_model",
+          "module": "test_registry_shadow",
+          "file": "unified_engine/tests/test_registry_shadow.py",
+          "class": "TestShadow",
+          "method": "test_real_study_never_gets_the_synthetic_model"
+        },
+        {
+          "id": "test_registry_shadow.TestShadow.test_reproducible",
+          "module": "test_registry_shadow",
+          "file": "unified_engine/tests/test_registry_shadow.py",
+          "class": "TestShadow",
+          "method": "test_reproducible"
+        },
+        {
+          "id": "test_registry_shadow.TestShadow.test_synthetic_applied_and_separated",
+          "module": "test_registry_shadow",
+          "file": "unified_engine/tests/test_registry_shadow.py",
+          "class": "TestShadow",
+          "method": "test_synthetic_applied_and_separated"
+        },
+        {
+          "id": "test_schema.TestSchema.test_every_detector_column_classified_exactly_once",
+          "module": "test_schema",
+          "file": "unified_engine/tests/test_schema.py",
+          "class": "TestSchema",
+          "method": "test_every_detector_column_classified_exactly_once"
+        },
+        {
+          "id": "test_schema.TestSchema.test_forbidden_predictors",
+          "module": "test_schema",
+          "file": "unified_engine/tests/test_schema.py",
+          "class": "TestSchema",
+          "method": "test_forbidden_predictors"
+        },
+        {
+          "id": "test_schema.TestSchema.test_initial_feature_set",
+          "module": "test_schema",
+          "file": "unified_engine/tests/test_schema.py",
+          "class": "TestSchema",
+          "method": "test_initial_feature_set"
+        },
+        {
+          "id": "test_schema.TestSchema.test_legacy_model_inputs_classified",
+          "module": "test_schema",
+          "file": "unified_engine/tests/test_schema.py",
+          "class": "TestSchema",
+          "method": "test_legacy_model_inputs_classified"
+        },
+        {
+          "id": "test_schema.TestSchema.test_overlap_matrix",
+          "module": "test_schema",
+          "file": "unified_engine/tests/test_schema.py",
+          "class": "TestSchema",
+          "method": "test_overlap_matrix"
+        },
+        {
+          "id": "test_schema.TestSchema.test_role_counts_recorded",
+          "module": "test_schema",
+          "file": "unified_engine/tests/test_schema.py",
+          "class": "TestSchema",
+          "method": "test_role_counts_recorded"
+        },
+        {
+          "id": "test_schema.TestSchema.test_rule_use_matches_exclusion_source",
+          "module": "test_schema",
+          "file": "unified_engine/tests/test_schema.py",
+          "class": "TestSchema",
+          "method": "test_rule_use_matches_exclusion_source"
+        },
+        {
+          "id": "test_schema.TestSchema.test_score_v4_inputs",
+          "module": "test_schema",
+          "file": "unified_engine/tests/test_schema.py",
+          "class": "TestSchema",
+          "method": "test_score_v4_inputs"
+        },
+        {
+          "id": "test_synthetic.TestSynthetic.test_failed_registration_has_no_list_and_labels_follow_design",
+          "module": "test_synthetic",
+          "file": "unified_engine/tests/test_synthetic.py",
+          "class": "TestSynthetic",
+          "method": "test_failed_registration_has_no_list_and_labels_follow_design"
+        },
+        {
+          "id": "test_synthetic.TestSynthetic.test_fates_come_from_the_verbatim_rules",
+          "module": "test_synthetic",
+          "file": "unified_engine/tests/test_synthetic.py",
+          "class": "TestSynthetic",
+          "method": "test_fates_come_from_the_verbatim_rules"
+        },
+        {
+          "id": "test_synthetic.TestSynthetic.test_labelled_synthetic_and_reproducible",
+          "module": "test_synthetic",
+          "file": "unified_engine/tests/test_synthetic.py",
+          "class": "TestSynthetic",
+          "method": "test_labelled_synthetic_and_reproducible"
+        },
+        {
+          "id": "test_synthetic.TestSynthetic.test_pure_noise_has_no_class_signal_in_any_column",
+          "module": "test_synthetic",
+          "file": "unified_engine/tests/test_synthetic.py",
+          "class": "TestSynthetic",
+          "method": "test_pure_noise_has_no_class_signal_in_any_column"
+        },
+        {
+          "id": "test_synthetic_cohort.TestCohort.test_files_tables_and_truth_separation",
+          "module": "test_synthetic_cohort",
+          "file": "unified_engine/tests/test_synthetic_cohort.py",
+          "class": "TestCohort",
+          "method": "test_files_tables_and_truth_separation"
+        },
+        {
+          "id": "test_synthetic_cohort.TestCohort.test_reader_rows_use_the_v2_schema",
+          "module": "test_synthetic_cohort",
+          "file": "unified_engine/tests/test_synthetic_cohort.py",
+          "class": "TestCohort",
+          "method": "test_reader_rows_use_the_v2_schema"
+        },
+        {
+          "id": "test_synthetic_cohort.TestCohort.test_reproducible",
+          "module": "test_synthetic_cohort",
+          "file": "unified_engine/tests/test_synthetic_cohort.py",
+          "class": "TestCohort",
+          "method": "test_reproducible"
+        },
+        {
+          "id": "test_synthetic_cohort.TestCohort.test_truth_recovered_through_the_pipeline",
+          "module": "test_synthetic_cohort",
+          "file": "unified_engine/tests/test_synthetic_cohort.py",
+          "class": "TestCohort",
+          "method": "test_truth_recovered_through_the_pipeline"
+        },
+        {
+          "id": "test_synthetic_cohort.TestNegativeControl.test_signal_zero_images_are_independent_of_labels",
+          "module": "test_synthetic_cohort",
+          "file": "unified_engine/tests/test_synthetic_cohort.py",
+          "class": "TestNegativeControl",
+          "method": "test_signal_zero_images_are_independent_of_labels"
+        },
+        {
+          "id": "test_synthetic_cohort.TestPhysics.test_blooming_grows_with_echo_time_and_field",
+          "module": "test_synthetic_cohort",
+          "file": "unified_engine/tests/test_synthetic_cohort.py",
+          "class": "TestPhysics",
+          "method": "test_blooming_grows_with_echo_time_and_field"
+        },
+        {
+          "id": "test_synthetic_cohort.TestPhysics.test_every_kind_is_rendered_dark_where_it_should_be",
+          "module": "test_synthetic_cohort",
+          "file": "unified_engine/tests/test_synthetic_cohort.py",
+          "class": "TestPhysics",
+          "method": "test_every_kind_is_rendered_dark_where_it_should_be"
+        },
+        {
+          "id": "test_synthetic_cohort.TestPhysics.test_noise_and_bias",
+          "module": "test_synthetic_cohort",
+          "file": "unified_engine/tests/test_synthetic_cohort.py",
+          "class": "TestPhysics",
+          "method": "test_noise_and_bias"
+        },
+        {
+          "id": "test_synthetic_cohort.TestPhysics.test_phase_sign_follows_source_and_vendor",
+          "module": "test_synthetic_cohort",
+          "file": "unified_engine/tests/test_synthetic_cohort.py",
+          "class": "TestPhysics",
+          "method": "test_phase_sign_follows_source_and_vendor"
+        },
+        {
+          "id": "test_synthetic_cohort.TestPhysics.test_quality_truth",
+          "module": "test_synthetic_cohort",
+          "file": "unified_engine/tests/test_synthetic_cohort.py",
+          "class": "TestPhysics",
+          "method": "test_quality_truth"
+        },
+        {
+          "id": "test_synthetic_cohort.TestPhysics.test_thick_slices_dilute_thin_sheets",
+          "module": "test_synthetic_cohort",
+          "file": "unified_engine/tests/test_synthetic_cohort.py",
+          "class": "TestPhysics",
+          "method": "test_thick_slices_dilute_thin_sheets"
+        },
+        {
+          "id": "test_synthetic_cohort.TestReaders.test_difficulty_raises_indeterminate",
+          "module": "test_synthetic_cohort",
+          "file": "unified_engine/tests/test_synthetic_cohort.py",
+          "class": "TestReaders",
+          "method": "test_difficulty_raises_indeterminate"
+        },
+        {
+          "id": "test_synthetic_cohort.TestReaders.test_error_and_indeterminate_rates_match_the_model",
+          "module": "test_synthetic_cohort",
+          "file": "unified_engine/tests/test_synthetic_cohort.py",
+          "class": "TestReaders",
+          "method": "test_error_and_indeterminate_rates_match_the_model"
+        },
+        {
+          "id": "test_synthetic_cohort.TestReaders.test_insufficient_quality_concentrated_in_bad_studies",
+          "module": "test_synthetic_cohort",
+          "file": "unified_engine/tests/test_synthetic_cohort.py",
+          "class": "TestReaders",
+          "method": "test_insufficient_quality_concentrated_in_bad_studies"
+        },
+        {
+          "id": "test_synthetic_cohort.TestThresholdRecheck.test_residual_shift_thresholds_on_varied_acquisitions",
+          "module": "test_synthetic_cohort",
+          "file": "unified_engine/tests/test_synthetic_cohort.py",
+          "class": "TestThresholdRecheck",
+          "method": "test_residual_shift_thresholds_on_varied_acquisitions"
+        }
+      ]
+    },
+    "pipeline_verification_checks": {
+      "count": 32,
+      "script": "cSS_pipeline_v4.13/tests/check_percival.py",
+      "description": "32 sequential invariant checks covering synthetic cohort generation, training cycles, patient-grouped cross-validation, locked test cohort isolation, socket guard offline enforcement, and model registry promotion/rollback."
+    }
+  }
+}

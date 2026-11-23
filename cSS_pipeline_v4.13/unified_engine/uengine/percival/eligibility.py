@@ -11,7 +11,8 @@ Components and what each needs (besides a usable expert label):
   shadow  Shadow evaluation of a candidate model   the label alone; locked-test patients INCLUDED (shadow only evaluates, never learns) (v1.1)
 Dataset membership: 'development' (used to learn) or 'locked test' (patients set aside permanently; used only to evaluate)."""
 
-RULES_VERSION = "percival-eligibility/1.1"     # 1.1 (v5.24): + predictor, shadow components; missing requirements in words
+RULES_VERSION = "percival-eligibility/1.2"     # 1.1 (v5.24): + predictor, shadow components; missing requirements in words
+                                               # 1.2 (v5.25): patient identity must be verified (no study-code substitution)
 COMPONENTS = ("char", "image", "fusion", "meta", "predictor", "shadow")
 LEARNING = ("char", "image", "fusion", "meta")   # the components trained by the Percival training cycle
 NAMES = dict(char="Characteristic ML", image="Image ML", fusion="Fusion", meta="Meta-model + calibration", predictor="Unified Score predictors",
@@ -33,11 +34,16 @@ REASONS = {
     "QC_LOW": "study image quality flagged by QC (still used; reported)",
     "NO_PREDICTORS": "no reliable Unified Score predictor (anatomy / registration missing or unreliable)",
     "UNRECOGNISED_CALL": "expert call not recognised by this version (kept, listed in Data integrity)",
+    "PATIENT_ID_MISSING": "no patient identity record for this study - patient-level validation is impossible (study-code substitution is refused)",
+    "PATIENT_ID_UNVERIFIED": "patient identity not verified (study registered as one patient per study without confirmation) - confirm it in Training Center › Patient identity",
+    "PATIENT_ID_CONFLICT": "possible identity conflict: the same examination fingerprint / DICOM study belongs to another patient record",
 }
 REQUIREMENTS = dict(NOT_REVIEWED="an expert call (cSS or not cSS)", UNCERTAIN="a definite call (cSS or not cSS)", OUT_OF_SCOPE="a definite call",
                     CONFLICT="agreement between reviewers or an adjudicated call", NO_IMAGE="the MRI patch (SWI + candidate mask)",
                     NO_MEASUREMENTS="detector measurements", NO_PREDICTORS="a reliable Unified Score predictor (FreeSurfer anatomy + registration)",
-                    NOT_AUTHORIZED="local learning switched on", UNRECOGNISED_CALL="a call this version recognises")
+                    NOT_AUTHORIZED="local learning switched on", UNRECOGNISED_CALL="a call this version recognises",
+                    PATIENT_ID_MISSING="a patient identity record", PATIENT_ID_UNVERIFIED="a verified patient identity (import grouping or your confirmation)",
+                    PATIENT_ID_CONFLICT="a resolved patient identity conflict")
 
 
 def evaluate(c):
@@ -53,6 +59,9 @@ def evaluate(c):
     for flag, code in (("study_excluded", "STUDY_EXCLUDED"), ("study_archived", "STUDY_ARCHIVED"), ("duplicate", "DUPLICATE_STUDY")):
         if c.get(flag) and block is None: block = code
     if not c.get("authorized", True) and block is None: block = "NOT_AUTHORIZED"
+    idn = c.get("identity", "verified")             # v5.25: verified | declared | assumed | unconfirmed | missing | conflict
+    if block is None and idn not in ("verified", "declared"):
+        block = {"missing": "PATIENT_ID_MISSING", "conflict": "PATIENT_ID_CONFLICT"}.get(idn, "PATIENT_ID_UNVERIFIED")
     if c.get("historical"): reasons.append("HISTORICAL_LABEL")
     if c.get("qc") == "insufficient_quality": reasons.append("QC_LOW")
     comp = {}
@@ -65,6 +74,7 @@ def evaluate(c):
         comp[k] = dict(ok=not r, reasons=r, missing=[REQUIREMENTS[x] for x in r if x in REQUIREMENTS])
     status = ("not_reviewed" if block == "NOT_REVIEWED" else "needs_adjudication" if block == "CONFLICT" else
               "unrecognised" if block == "UNRECOGNISED_CALL" else
+              "identity_unverified" if block in ("PATIENT_ID_MISSING", "PATIENT_ID_UNVERIFIED", "PATIENT_ID_CONFLICT") else
               "excluded" if block else "eligible")
     if status == "eligible" and c.get("test"): reasons.append("LOCKED_TEST")
     return dict(status=status, reasons=([block] if block else []) + reasons, components=comp,

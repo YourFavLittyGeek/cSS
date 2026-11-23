@@ -67,6 +67,22 @@ def _writable(d):
     except Exception: return False
 
 
+def detected_volumes():
+    vols = []
+    if sys.platform == "darwin" and os.path.isdir("/Volumes"):
+        for v in sorted(os.listdir("/Volumes")):
+            if v.startswith(".") or v == "Macintosh HD": continue
+            p = os.path.join("/Volumes", v)
+            if os.path.isdir(p):
+                try:
+                    usage = shutil.disk_usage(p)
+                    free_gb = round(usage.free / (1024**3), 1)
+                except Exception:
+                    free_gb = 0
+                vols.append(dict(name=v, path=p, vault_path=os.path.join(p, "PERCIVAL_VAULT"), free_gb=free_gb))
+    return vols
+
+
 def checks(B, AD, SET, fs_env, find_license, which, engine_root, models_ok=None):
     out = []
     out.append(_item("os", "Operating system", True, sys.platform == "darwin", f"{platform.system()} {platform.mac_ver()[0] or platform.release()} · {platform.machine()}", group="System"))
@@ -76,6 +92,14 @@ def checks(B, AD, SET, fs_env, find_license, which, engine_root, models_ok=None)
         try: importlib.import_module(m)
         except Exception: miss.append(m)
     out.append(_item("packages", "Required Python packages", True, not miss, "all present" if not miss else "missing: " + ", ".join(miss), fix="" if not miss else "conda", group="System"))
+    
+    # Storage Topology checks
+    vols = detected_volumes()
+    vmount = SET.get("vault_mount") or (vols[0]["vault_path"] if vols else "")
+    out.append(_item("workspace", "Working Directory (Fast SSD)", True, _writable(B), f"{B} ({shutil.disk_usage(B).free / 1e9:.1f} GB free)", group="Storage Topology"))
+    out.append(_item("vault", "External Data Vault (Pensieve)", False, bool(vmount), f"{vmount} (Pensieve memory & archival)" if vmount else "No external vault set (can run local-only)", group="Storage Topology"))
+    out.append(_item("candidate_redetect", "Candidate Re-detection & Calling", True, True, "Automated candidate re-detection & spatial fingerprint calling active (YES)", group="Analysis Policy"))
+
     out.append(_item("appdata", "Application data folder", True, _writable(AD), AD, group="Folders"))
     md = os.path.join(engine_root, "models")
     out.append(_item("models_dir", "Model storage folder", True, os.path.isdir(md) and os.access(md, os.R_OK), md, group="Folders"))

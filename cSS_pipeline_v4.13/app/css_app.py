@@ -1077,13 +1077,21 @@ def pg_init():
         try: return RCG.state(B, c, (pget(c) or {}).get("cohort", "")).get("state") == "reviewed"
         except Exception: return False
     def patient_of(c):
-        u = IDG.ID().by_file_key(c); return (IDG.ID().R["studies"].get(u) or {}).get("patient_uuid") or c
+        """v5.25: the patient record of a study, or None - never the study code (that substitution hid unmapped repeat examinations)"""
+        u = IDG.ID().by_file_key(c); return (IDG.ID().R["studies"].get(u) or {}).get("patient_uuid") or None
+    def identity_of(c):
+        from uengine.imaging.index import is_synthetic_study
+        I = IDG.ID(); u = I.by_file_key(c); st = I.identity_status(u)
+        if u and u in I.identity_conflicts(): st = dict(st, status="conflict", detail="the same examination fingerprint / DICOM study belongs to another patient record")
+        elif is_synthetic_study(B, c) and st.get("status") in ("assumed", "unconfirmed"):
+            st = dict(st, status="declared", detail="synthetic development cohort (known truth, no clinical identity)")
+        return dict(st, study_uuid=u, patient=(I.R["studies"].get(u) or {}).get("patient_uuid"))
     def fingerprint_of(c):
         u = IDG.ID().by_file_key(c); return (IDG.ID().R["studies"].get(u) or {}).get("fingerprint", "") or (pget(c) or {}).get("fingerprint", "")
     def other_projects():                                  # v5.24 review recovery: enabled earlier projects on this Mac (patients.json only)
         import known_projects as KP
         return [dict(path=c["path"], kind=c["kind"], patients=KP._pats(c["path"])) for c in KP.candidates(B, SET, PM.studies_on_disk) if c["enabled"]]
-    PG.init(B=B, SC=SC, SET=SET, patients=lambda: list(PAT), is_reviewed=reviewed, label=study_label, patient_of=patient_of, fingerprint_of=fingerprint_of,
+    PG.init(B=B, SC=SC, SET=SET, patients=lambda: list(PAT), is_reviewed=reviewed, label=study_label, patient_of=patient_of, identity_of=identity_of, fingerprint_of=fingerprint_of,
             save_settings=lambda: jsave("settings.json", SET), notify=lambda t, x: notify_c("done", "training", t, x), other_projects=other_projects)
 def pg_get(op, q):
     if op == "state": return PG.state()
@@ -1099,8 +1107,14 @@ def pg_get(op, q):
     if op == "runs": return dict(runs=PG.runs())                                               # v5.24 training runs
     if op == "run": return PG._jl(PG.P("runs", os.path.basename(q.get("id", "")) + ".json"), dict(error="unknown run"))
     if op == "registry": return dict(registry=PG.registry())
+    if op == "identity": return PG.identity_report()                                         # v5.25 patient identity per study
+    if op == "job": return PG.job_state()                                                    # v5.25 live training job (heartbeat, ETA, resources)
     if op == "eligibility": return PG._jl(PG.P("eligibility", "current.json"), dict(error="not evaluated yet"))
     if op == "shadow": return PG.shadow_summaries()                                          # v5.24 Percival shadow mode                        # only on request: reads other projects' patients.json
+    if op == "pensieve": return PG.pensieve_state()                                          # v5.25 PENSIEVE Core Memory
+    if op == "pensieve_query": return PG.pensieve_query(q.get("component", "albus"))
+    if op == "vault": return PG.vault_status()                                               # v5.25 PERCIVAL DATA VAULT status
+    if op == "shadow_lab": return PG.shadow_lab_state()                                      # v5.25 SHADOW ML Research Lab
     if op == "dataset":
         from uengine.percival import datasets as DS
         return DS.load(PG.P(), q.get("id", "")) or dict(error="unknown dataset")
@@ -1129,8 +1143,197 @@ def pg_post(op, d):
             if "percival_use_historical" in d: SET["percival_use_historical"] = bool(d["percival_use_historical"])
             jsave("settings.json", SET); return dict(ok=True)
         if op == "score": return PG.score_study(str(d.get("code", ""))) or dict(ok=False, error="no active model or no candidates")
+        if op == "confirm_identity":                                                              # v5.25 patient identity (audited, reversible)
+            I = IDG.ID(); codes = [str(c) for c in d.get("codes", [])]; us = [I.by_file_key(c) for c in codes]
+            if not codes or not all(us): return dict(ok=False, error="unknown study")
+            if d.get("undo"): return dict(ok=True, n=I.unconfirm_identity(us, str(d.get("by") or "app user"), str(d.get("why") or "")))
+            return dict(ok=True, n=I.confirm_identity(us, str(d.get("by") or "app user"), str(d.get("statement") or "")))
+        if op == "job":                                                                           # v5.25 Training Center job control
+            a = str(d.get("action", ""))
+            if a == "cancel": return PG.cancel_training(by=str(d.get("by") or "app user"))
+            if a == "retry": return PG.train_async("retry from the start (previous run " + str(d.get("run", "")) + ")")
+            return dict(ok=False, error="unknown job action")
+        if op == "vault_connect": return PG.vault_connect(str(d.get("path", "")))
+        if op == "vault_create": return PG.vault_create(str(d.get("destination", "")), name=str(d.get("name", "PERCIVAL_VAULT")))
+        if op == "vault_eject": return PG.vault_eject()
+        if op == "vault_backup": return PG.vault_backup(str(d.get("destination", "")))
+        if op == "shadow_run": return PG.shadow_run_trial(str(d.get("target", "ALBUS")), str(d.get("hypothesis", "")), d.get("config", {}))
+        if op == "score_unified": return PG.score_study_unified(str(d.get("study_id", "")))
         return dict(ok=False, error=f"unknown {op}")
     except Exception as e: return dict(ok=False, error=f"{type(e).__name__}: {e}"[:400])
+# ------------------------------------------------------------------ v5.25 Storage, Health, Wizard, Recovery & Migration APIs
+def files_get(op, q):
+    try:
+        from uengine.file_manager import FileManager
+        fm = FileManager(B, vault_root=SET.get("vault_mount"))
+        if op == "categories":
+            return dict(ok=True, categories=fm.get_categories())
+        if op == "browse":
+            cat = q.get("category", "working")
+            sub = q.get("subpath", "")
+            search = q.get("search", "")
+            sort_by = q.get("sort_by", "name")
+            sort_dir = q.get("sort_dir", "asc")
+            return fm.browse_category_path(cat, sub, search, sort_by, sort_dir)
+        if op == "overview":
+            return fm.get_storage_overview()
+        return dict(ok=False, error=f"unknown {op}")
+    except Exception as e:
+        return dict(ok=False, error=f"file manager error: {type(e).__name__}: {e}")
+
+def files_post(op, d):
+    try:
+        from uengine.file_manager import FileManager
+        fm = FileManager(B, vault_root=SET.get("vault_mount"))
+        if op == "copy":
+            return fm.copy_item(d.get("src", ""), d.get("dst_dir", ""), d.get("conflict_mode", "keep_both"))
+        if op == "move":
+            return fm.move_item(d.get("src", ""), d.get("dst_dir", ""), d.get("conflict_mode", "keep_both"))
+        if op == "rename":
+            return fm.rename_item(d.get("path", ""), d.get("new_name", ""))
+        if op == "mkdir":
+            return fm.create_directory(d.get("parent_dir", ""), d.get("dir_name", ""))
+        if op == "delete":
+            return fm.delete_item(d.get("path", ""), bool(d.get("confirm")))
+        if op == "archive":
+            return fm.archive_entry(d.get("src", ""), d.get("vault_category", "archive"))
+        if op == "restore":
+            return fm.restore_entry(d.get("vault_path", ""), d.get("dst_dir", ""))
+        if op == "verify":
+            p = d.get("path", "")
+            if os.path.isfile(p):
+                from uengine.file_manager import compute_hash
+                h = compute_hash(p)
+                return dict(ok=True, path=p, sha256=h, verified=True)
+            return dict(ok=False, error="Not a regular file")
+        return dict(ok=False, error=f"unknown {op}")
+    except Exception as e:
+        return dict(ok=False, error=f"file operation error: {type(e).__name__}: {e}")
+
+def storage_get(op, q):
+    try:
+        from uengine.file_manager import FileManager
+        from uengine.storage_advisor import StorageAdvisor
+        vault_root = SET.get("vault_mount")
+        fm = FileManager(B, vault_root=vault_root)
+        sa = StorageAdvisor(B, vault_mount=vault_root)
+        if op == "overview": return fm.get_storage_overview()
+        if op == "studies": return dict(studies=fm.list_studies(filter_status=q.get("status")))
+        if op == "tree": return fm.browse_study_tree(q.get("code", ""))
+        if op == "advisor": return sa.generate_recommendations()
+        if op == "capacity": return sa.evaluate_capacity()
+        return dict(error=f"unknown storage op {op}")
+    except Exception as e: return dict(error=f"{type(e).__name__}: {e}")
+
+def storage_post(op, d):
+    try:
+        from uengine.file_manager import FileManager
+        from uengine.storage_advisor import StorageAdvisor
+        vault_root = SET.get("vault_mount")
+        fm = FileManager(B, vault_root=vault_root)
+        sa = StorageAdvisor(B, vault_mount=vault_root)
+        if op == "stage": return fm.stage_study(d.get("code", ""))
+        if op == "archive": return fm.archive_study(d.get("code", ""))
+        if op == "verify": return fm.verify_study_checksums(d.get("code", ""))
+        if op == "clean": return fm.clean_staging(d.get("code", ""))
+        if op == "prune": return sa.execute_prune(d.get("action", ""), int(d.get("days", 7)))
+        if op == "delete": return fm.delete_study(d.get("code", ""), target=d.get("target", "local"))
+        if op == "migrate_plan":
+            from uengine.working_dir_migration import WorkingDirMigrationEngine
+            engine = WorkingDirMigrationEngine(B)
+            return engine.plan_migration(d.get("target_dir", ""))
+        if op == "migrate_execute":
+            from uengine.working_dir_migration import WorkingDirMigrationEngine
+            engine = WorkingDirMigrationEngine(B)
+            res = engine.execute_migration(d.get("target_dir", ""), bool(d.get("verify_checksums", True)))
+            if res.get("ok"):
+                with LOCK:
+                    SET["workspace_dir"] = res["target_dir"]
+                    jsave("settings.json", SET)
+            return res
+        return dict(ok=False, error=f"unknown storage post op {op}")
+    except Exception as e: return dict(ok=False, error=f"{type(e).__name__}: {e}")
+
+def wizard_get(op, q):
+    try:
+        from uengine.wizard import SetupWizard
+        wiz = SetupWizard(B)
+        if op == "state": return wiz.get_state()
+        if op == "step1": return wiz.step1_inspect_system()
+        if op == "step3": return wiz.step3_detect_volumes()
+        if op == "step4": return wiz.step4_scan_legacy_data()
+        return dict(error=f"unknown wizard op {op}")
+    except Exception as e: return dict(error=f"{type(e).__name__}: {e}")
+
+def wizard_post(op, d):
+    try:
+        from uengine.wizard import SetupWizard
+        wiz = SetupWizard(B)
+        if op == "step2": return wiz.step2_configure_storage(local_workspace=d.get("local_workspace"), vault_mount=d.get("vault_mount"), backup_dir=d.get("backup_dir"))
+        if op == "step5": return wiz.step5_generate_migration_plan(active_retention_days=int(d.get("retention_days", 30)), target_vault=d.get("target_vault"))
+        if op == "finalize":
+            r = wiz.step6_finalize(d.get("config", {}))
+            if "settings" in r:
+                with LOCK:
+                    SET.update(r["settings"])
+                    jsave("settings.json", SET)
+            return r
+        if op == "reset": return wiz.reset()
+        return dict(ok=False, error=f"unknown wizard post op {op}")
+    except Exception as e: return dict(ok=False, error=f"{type(e).__name__}: {e}")
+
+def health_get():
+    try:
+        from uengine.health import StartupHealthCheck
+        hc = StartupHealthCheck(B, SET)
+        return hc.run_all(auto_repair=True)
+    except Exception as e: return dict(error=f"{type(e).__name__}: {e}")
+
+def recovery_get(op, q):
+    try:
+        from uengine.recovery import JobRecoveryManager
+        from uengine.vault import TransferQueueManager
+        jrm = JobRecoveryManager(B)
+        tqm = TransferQueueManager(B)
+        if op == "summary": return jrm.get_recovery_summary()
+        if op == "resumable": return dict(resumable=jrm.get_resumable_jobs())
+        if op == "transfers": return dict(transfers=tqm.list_transfers(q.get("status")))
+        return dict(error=f"unknown recovery op {op}")
+    except Exception as e: return dict(error=f"{type(e).__name__}: {e}")
+
+def recovery_post(op, d):
+    try:
+        from uengine.recovery import JobRecoveryManager
+        from uengine.vault import TransferQueueManager, PercivalDataVault
+        jrm = JobRecoveryManager(B)
+        tqm = TransferQueueManager(B)
+        if op == "rollback":
+            jrm.rollback_incomplete_stage(d.get("job_id", ""), d.get("stage", ""))
+            return dict(ok=True)
+        if op == "resume_transfers":
+            v = PercivalDataVault(SET.get("vault_mount"))
+            resumed = tqm.resume_transfers(v)
+            return dict(ok=True, resumed_count=len(resumed), resumed=resumed)
+        return dict(ok=False, error=f"unknown recovery post op {op}")
+    except Exception as e: return dict(ok=False, error=f"{type(e).__name__}: {e}")
+
+def migration_get(op, q):
+    try:
+        from uengine.legacy_migration import LegacyMigrationEngine
+        lme = LegacyMigrationEngine(B)
+        if op == "discover": return lme.discover_legacy_data()
+        if op == "history": return dict(history=lme.get_migration_history())
+        return dict(error=f"unknown migration op {op}")
+    except Exception as e: return dict(error=f"{type(e).__name__}: {e}")
+
+def migration_post(op, d):
+    try:
+        from uengine.legacy_migration import LegacyMigrationEngine
+        lme = LegacyMigrationEngine(B)
+        if op == "plan": return lme.create_migration_plan(d.get("studies", []), default_strategy=d.get("default_strategy", "import_pensieve_only"), custom_strategies=d.get("custom_strategies"))
+        if op == "execute": return lme.execute_migration(d.get("plan", {}), vault_dir=SET.get("vault_mount"), dry_run=bool(d.get("dry_run", False)))
+        return dict(ok=False, error=f"unknown migration post op {op}")
+    except Exception as e: return dict(ok=False, error=f"{type(e).__name__}: {e}")
 # ------------------------------------------------------------------ v5.20 study administration - app/study_admin.py
 def sa_ctx():
     def drop(c):
@@ -1295,7 +1498,22 @@ def setup_get(op, q):
         import setup_gui as SG
         if op == "state":
             items = SG.checks(B, AD, SET, fs_env, find_license, which, os.path.join(os.path.dirname(HERE), "unified_engine"), _image_model_ok)
-            return dict(first_run=SG.first_run(AD), items=items, report=SG.report(items, AD), settings=dict(freesurfer_home=SET.get("freesurfer_home", ""), fs_license=SET.get("fs_license", "")))
+            vols = SG.detected_volumes()
+            def_vault = SET.get("vault_mount") or (vols[0]["vault_path"] if vols else "")
+            return dict(
+                first_run=SG.first_run(AD),
+                items=items,
+                report=SG.report(items, AD),
+                settings=dict(
+                    freesurfer_home=SET.get("freesurfer_home", ""),
+                    fs_license=SET.get("fs_license", ""),
+                    workspace_dir=B,
+                    vault_mount=def_vault,
+                    candidate_redetection=SET.get("candidate_redetection", True),
+                    candidate_calling=SET.get("candidate_calling", True)
+                ),
+                detected_volumes=vols
+            )
         if op == "first_run": return dict(first_run=SG.first_run(AD))
         return dict(error=f"unknown {op}")
     except Exception as e: return dict(error=f"setup unavailable: {type(e).__name__}: {e}"[-300:])
@@ -1313,10 +1531,35 @@ def setup_post(op, d):
             with LOCK:
                 if d.get("home"): SET["freesurfer_home"] = v["home"]
                 if d.get("license"): SET["fs_license"] = l["path"]
+                if "workspace_dir" in d and d["workspace_dir"].strip():
+                    wdir = os.path.abspath(os.path.expanduser(d["workspace_dir"].strip()))
+                    cfg_dir = os.path.expanduser("~/Library/Application Support/Percival Dev")
+                    os.makedirs(cfg_dir, exist_ok=True)
+                    try:
+                        with open(os.path.join(cfg_dir, "project_path"), "w") as pf: pf.write(wdir)
+                    except Exception: pass
+                    SET["workspace_dir"] = wdir
+                if "vault_mount" in d and d["vault_mount"].strip():
+                    vdir = os.path.abspath(os.path.expanduser(d["vault_mount"].strip()))
+                    SET["vault_mount"] = vdir
+                    try:
+                        with open(os.path.expanduser("~/.percival_vault_config.json"), "w") as vf:
+                            json.dump({"vault_path": vdir, "updated_at": datetime.datetime.now().isoformat()}, vf, indent=2)
+                    except Exception: pass
+                if "candidate_redetection" in d:
+                    SET["candidate_redetection"] = bool(d["candidate_redetection"])
+                if "candidate_calling" in d:
+                    SET["candidate_calling"] = bool(d["candidate_calling"])
+                SET["rerun_mode"] = "auto"
                 jsave("settings.json", SET)
-            return dict(ok=True, saved=dict(freesurfer_home=SET.get("freesurfer_home", ""), fs_license=SET.get("fs_license", "")))
+            return dict(ok=True, saved=dict(freesurfer_home=SET.get("freesurfer_home", ""), fs_license=SET.get("fs_license", ""), workspace_dir=SET.get("workspace_dir", B), vault_mount=SET.get("vault_mount", "")))
         if op == "finish":
             items = SG.checks(B, AD, SET, fs_env, find_license, which, os.path.join(os.path.dirname(HERE), "unified_engine"), _image_model_ok)
+            w_state = os.path.join(AD, "wizard_state.json")
+            try:
+                with open(w_state, "w") as wf:
+                    json.dump({"status": "completed", "completed_at": datetime.datetime.now().isoformat()}, wf, indent=2)
+            except Exception: pass
             return dict(ok=True, report=SG.report(items, AD, done=True))
         return dict(ok=False, error=f"unknown {op}")
     except Exception as e: return dict(ok=False, error=f"{type(e).__name__}: {e}"[-300:])
@@ -1755,6 +1998,12 @@ class H(BaseHTTPRequestHandler):
             if u.path.startswith("/api/xs/"): return self.send(xs_get(u.path[8:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/kp/"): return self.send(kp_get(u.path[8:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/percival/"): return self.send(pg_get(u.path[14:], {k: v[0] for k, v in parse_qs(u.query).items()}))
+            if u.path.startswith("/api/storage/"): return self.send(storage_get(u.path[13:], {k: v[0] for k, v in parse_qs(u.query).items()}))
+            if u.path.startswith("/api/files/"): return self.send(files_get(u.path[11:], {k: v[0] for k, v in parse_qs(u.query).items()}))
+            if u.path.startswith("/api/wizard/"): return self.send(wizard_get(u.path[12:], {k: v[0] for k, v in parse_qs(u.query).items()}))
+            if u.path == "/api/health": return self.send(health_get())
+            if u.path.startswith("/api/recovery/"): return self.send(recovery_get(u.path[14:], {k: v[0] for k, v in parse_qs(u.query).items()}))
+            if u.path.startswith("/api/migration/"): return self.send(migration_get(u.path[15:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/id/") and u.path != "/api/id/template.xlsx": return self.send(id_get(u.path[8:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path == "/api/id/template.xlsx":
                 import manifest as MF
@@ -1908,6 +2157,11 @@ class H(BaseHTTPRequestHandler):
             if u.path.startswith("/api/sa/"): return self.send(sa_post(u.path[8:], d))
             if u.path.startswith("/api/kp/"): return self.send(kp_post(u.path[8:], d))
             if u.path.startswith("/api/percival/"): return self.send(pg_post(u.path[14:], d))
+            if u.path.startswith("/api/storage/"): return self.send(storage_post(u.path[13:], d))
+            if u.path.startswith("/api/files/"): return self.send(files_post(u.path[11:], d))
+            if u.path.startswith("/api/wizard/"): return self.send(wizard_post(u.path[12:], d))
+            if u.path.startswith("/api/recovery/"): return self.send(recovery_post(u.path[14:], d))
+            if u.path.startswith("/api/migration/"): return self.send(migration_post(u.path[15:], d))
             if u.path in ("/api/share", "/api/export"):           # explicit warning + confirmation, verified local folder only
                 if d.get("confirm_clinical") is not True: return self.send(dict(ok=False, needs_confirm=True, warning=EXPORT_WARNING,
                                                                      error="export needs your confirmation of the clinical-data warning (dialog pending design approval)"))

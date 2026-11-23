@@ -16,7 +16,7 @@ DETECTOR_SHA256 = "c15b29f69af7af29aae408810ad859f5ba900b7c85ce9ffb7b2970685aee7
 PINNED = {
     "scripts/detect_css.py": DETECTOR_SHA256,
     "scripts/css_tiers.py": "ae88423bdf3b581fd3ef546771690f85bdbc877dff75d1f1386d21efa08cdc2a",
-    "scripts/css_common.py": "4b8362eb0f25773bd88aaf3de8ec667d6f051f731a7905dfeaf0d475410e813b",
+    "scripts/css_common.py": "9fe6a2fb09fbb4d5cbd2fcc472b1c31caf7a271b213b44abb91be174c707355c",
     "scripts/css_features.py": "539f0a56c15d130feb02cfa28a7f47b5e7b05621ba9323b5d9904e157dc5b48e",
     "scripts/css_confidence.py": "46ddbeb5fdfb7e28ef708e1dd233035052ea2b56dd3e4138e95aaa43216179c7",
     "scripts/css_model.py": "6ff8ee522dc1c6d038f0cea67e472cdab634115ae093462d6882acec888b2f08",

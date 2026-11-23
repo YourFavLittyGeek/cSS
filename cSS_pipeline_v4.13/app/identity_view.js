@@ -3,16 +3,16 @@
 const IDV={st:null};
 async function idRefresh(){try{IDV.st=await api("/api/id/state")}catch(e){IDV.st=null}idSwitch()}
 function idSwitch(){const el=$("#idmode");if(!el||!IDV.st)return;const s=IDV.st,std=s.mode==="standard";
-  el.innerHTML=`<span class="seg" data-id="mode" title="Standard: accession number + MRN / name (vault unlocked). Incognito: de-identified study codes only.">
-    <button data-m="standard" class="${std?"on":""}">${std&&!s.unlocked?"🔒 ":""}Standard</button><button data-m="incognito" class="${std?"":"on"}">Incognito</button></span>
-   ${std&&!s.unlocked?'<button class="b sm" id="idunlock" title="identities hidden until the vault is unlocked">Unlock</button>':""}`;
+  el.innerHTML=`<span class="seg" data-id="mode" title="Standard: accession number + MRN / name. Incognito: de-identified study codes only.">
+    <button data-m="standard" class="${std?"on":""}">${std&&s.app_lock_enabled&&!s.unlocked?"🔒 ":""}Standard</button><button data-m="incognito" class="${std?"":"on"}">Incognito</button></span>
+   ${std&&s.app_lock_enabled&&!s.unlocked?'<button class="b sm" id="idunlock" title="identities hidden until the vault is unlocked">Unlock</button>':""}`;
   el.querySelectorAll("[data-m]").forEach(b=>b.onclick=()=>idSetMode(b.dataset.m));$("#idunlock")&&($("#idunlock").onclick=()=>idSetMode("standard"))}
 function idModal(html){const o=document.createElement("div");o.id="id-ov";o.style.cssText="position:fixed;inset:0;background:#0009;z-index:70;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:50px 16px";
   o.innerHTML=`<div class="card" style="width:min(760px,100%);margin:0" data-id="modal">${html}</div>`;o.onclick=e=>{if(e.target===o)o.remove()};document.body.appendChild(o);return o}
 async function idSetMode(m){const s=IDV.st||{};
   if(m==="incognito"){const r=await api("/api/id/mode",{mode:"incognito"});if(!r.ok)return toast(esc(r.error),1);await idRefresh();return render()}
+  if(!s.app_lock_enabled||s.unlocked){const r=await api("/api/id/mode",{mode:"standard"});if(!r.ok)return toast(esc(r.error),1);await idRefresh();return render()}
   if(!s.vault_exists)return idCreateVault();
-  if(s.unlocked){const r=await api("/api/id/mode",{mode:"standard"});if(!r.ok)return toast(esc(r.error),1);await idRefresh();return render()}
   const o=idModal(`<h2>Show patient identities</h2><p class="note">Standard mode shows MRN, patient name and accession number from the encrypted identity vault on this computer.
     Enter the vault passphrase (it is kept in memory only until you quit or switch to Incognito).</p>
     <div class="row"><input type="password" id="id-pw" style="width:300px" autocomplete="off" placeholder="vault passphrase"><button class="b pri" id="id-go">Unlock</button><button class="b" id="id-x">Cancel</button></div><p class="bad" id="id-err"></p>`);

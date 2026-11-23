@@ -19,7 +19,7 @@ if [ -n "$WT" ]; then                      # snapshot of the working tree as a g
   TREE="$(GIT_INDEX_FILE="$IDX" git -C "$REPO" write-tree)"; rm -f "$IDX"; SHORT="wt${TREE:0:7}"
   DIRTY=" + working tree (uncommitted changes INCLUDED; tree $TREE)"
 fi
-VER="v5.24-dev"; NAME="Percival_${VER}_${SHORT}"; STAGE="$(mktemp -d)"; SRC="$STAGE/src"; PKG="$STAGE/$NAME"; APP="$PKG/Percival Dev.app"
+VER="v5.25-dev"; NAME="Percival_${VER}_${SHORT}"; STAGE="$(mktemp -d)"; SRC="$STAGE/src"; PKG="$STAGE/$NAME"; APP="$PKG/Percival Dev.app"
 if [ -n "$WT" ]; then mkdir -p "$SRC" && git -C "$REPO" archive "$TREE:$SUB" | tar -x -C "$SRC"
 else mkdir -p "$SRC" && git -C "$ROOT" archive HEAD . | tar -x -C "$SRC"; fi        # committed files of the package root only
 R="$APP/Contents/Resources"; mkdir -p "$APP/Contents/MacOS" "$R/app/guard" "$R/pipeline/scripts" "$R/pipeline/tests"
@@ -51,8 +51,11 @@ mkdir -p "$R/pipeline/unified_engine"; ( cd "$SRC/unified_engine" && tar cf - --
 cp "$SRC/tests/uscore_synth.py" "$SRC/tests/uscore_synth_columns.json" "$SRC/tests/check_uscore_seeds.py" "$R/pipeline/tests/"
 cp "$SRC/docs/percival_app/INSTALL_AND_USER_GUIDE.md" "$PKG/USER_GUIDE.md"; cp "$SRC/environment.yml" "$PKG/"
 cp "$SRC/app/mac_percival/INSTALL.md" "$PKG/READ ME FIRST.md"; cp "$SRC/app/mac_percival/uninstall_percival_dev.sh" "$PKG/"; chmod +x "$PKG/uninstall_percival_dev.sh"
-mkdir -p "$PKG/docs"; for d in PERCIVAL_ARCHITECTURE LOCAL_AI_ARCHITECTURE ARCHITECTURE_AUDIT_v5.24 ML_TABS_AUDIT_v5.24 ML_ARCHITECTURE_INVESTIGATION_v5.24 IMPLEMENTATION_REPORT_v5.24 IMPLEMENTATION_REPORT_v5.23 RECOVERY_REPORT_2026-11-21 STUDY_ADMINISTRATION; do
+mkdir -p "$PKG/docs"; for d in PERCIVAL_ARCHITECTURE LOCAL_AI_ARCHITECTURE ARCHITECTURE_AUDIT_v5.24 ML_TABS_AUDIT_v5.24 ML_ARCHITECTURE_INVESTIGATION_v5.24 IMPLEMENTATION_REPORT_v5.24 IMPLEMENTATION_REPORT_v5.23 RECOVERY_REPORT_2026-11-21 STUDY_ADMINISTRATION DEVLOG_v5.25; do
   [ -f "$SRC/docs/percival_app/$d.md" ] && cp "$SRC/docs/percival_app/$d.md" "$PKG/docs/"; done
+for g in FIRST_LAUNCH_AND_SETUP_GUIDE STARTUP_HEALTH_CHECK_REFERENCE STORAGE_TOPOLOGY_AND_DATA_VAULT_GUIDE FILE_MANAGER_USER_GUIDE LEGACY_RESEARCH_MIGRATION_GUIDE PENSIEVE_PROTECTION_AND_BACKUP_GUIDE MACOS_HOST_CLEANUP_RECOMMENDATION_REPORT; do
+  [ -f "$SRC/docs/$g.md" ] && cp "$SRC/docs/$g.md" "$PKG/docs/"; done
+[ -f "$SRC/docs/PERCIVAL_FINAL_RELEASE_MANIFEST.json" ] && cp "$SRC/docs/PERCIVAL_FINAL_RELEASE_MANIFEST.json" "$PKG/docs/"
 # the demo app: the same bundle with MODE=demo, its own name and bundle id
 DEMO="$PKG/Percival Demo.app"; cp -R "$APP" "$DEMO"; echo demo > "$DEMO/Contents/Resources/MODE"
 mv "$DEMO/Contents/MacOS/Percival Dev" "$DEMO/Contents/MacOS/Percival Demo"

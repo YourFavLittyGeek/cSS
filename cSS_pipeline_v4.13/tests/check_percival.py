@@ -21,14 +21,15 @@ for sid in studies:
     t = pd.read_csv(os.path.join(B, "unified_engine", "image_truth", f"{sid}.csv")); t = t[t["list"] == "candidates"]
     c = pd.read_csv(os.path.join(B, "review", f"{sid}_candidates.csv")); y = {int(o): int(k == "definite_css") for o, k in zip(t.obj_id, t.primary_class)}
     yy = np.array([y.get(int(i), 0) for i in c.cand_id])
-    c["score_v4"] = np.maximum(0, 0.5 * yy + rng.normal(0.5, 0.5, len(c))); c["hemi"] = ["L" if k % 2 else "R" for k in range(len(c))]
-    c["darkness_z"] = rng.normal(-1 - 1.0 * yy, 0.8); c["edge_contrast"] = rng.normal(0.3 + 0.3 * yy, 0.2); c["cortex_frac"] = rng.normal(0.5 + 0.2 * yy, 0.2)
-    c["tube_ratio"] = rng.normal(2 - 0.8 * yy, 0.6); c["tram_frac"] = np.where(rng.random(len(c)) < 0.3, np.nan, rng.normal(0.4 + 0.2 * yy, 0.2))
+    yn = np.where(rng.random(len(yy)) < 0.25, 0.5, yy)
+    c["score_v4"] = np.maximum(0, 0.5 * yn + rng.normal(0.5, 0.5, len(c))); c["hemi"] = ["L" if k % 2 else "R" for k in range(len(c))]
+    c["darkness_z"] = rng.normal(-1 - 1.0 * yn, 0.8); c["edge_contrast"] = rng.normal(0.3 + 0.3 * yn, 0.2); c["cortex_frac"] = rng.normal(0.5 + 0.2 * yn, 0.2)
+    c["tube_ratio"] = rng.normal(2 - 0.8 * yn, 0.6); c["tram_frac"] = np.where(rng.random(len(c)) < 0.3, np.nan, rng.normal(0.4 + 0.2 * yn, 0.2))
     if sid == studies[0]: c["score_v4"] = c["score_v4"]      # nothing special
     c.to_csv(os.path.join(B, "review", f"{sid}_candidates.csv"), index=False)
-    recs = [dict(cand_id=int(i), F={k: dict(value=float(v), status="reliable") for k, v in dict(x1_vessel_continuity_mm=rng.normal(6 - 3 * y.get(int(i), 0), 1.8),
-            x2_core_contrast_nu=rng.normal(0.4 + 0.4 * y.get(int(i), 0), 0.3), x3_pial_distance_mm=rng.normal(1, 0.6), x4_sulcal_alignment=rng.normal(0.3 + 0.3 * y.get(int(i), 0), 0.3),
-            x5_extracranial_mm=rng.normal(2 - 1.2 * y.get(int(i), 0), 1)).items()}) for i in c.cand_id]
+    recs = [dict(cand_id=int(i), F={k: dict(value=float(v), status="reliable") for k, v in dict(x1_vessel_continuity_mm=rng.normal(6 - 3 * yn[idx], 1.8),
+            x2_core_contrast_nu=rng.normal(0.4 + 0.4 * yn[idx], 0.3), x3_pial_distance_mm=rng.normal(1, 0.6), x4_sulcal_alignment=rng.normal(0.3 + 0.3 * yn[idx], 0.3),
+            x5_extracranial_mm=rng.normal(2 - 1.2 * yn[idx], 1)).items()}) for idx, i in enumerate(c.cand_id)]
     os.makedirs(os.path.join(B, "uscore", "features"), exist_ok=True); json.dump(dict(study=sid, records=recs), open(os.path.join(B, "uscore", "features", f"{sid}.json"), "w"))
     pd.DataFrame(dict(cand_id=list(c.cand_id), call=["cSS" if v else "Vessel" for v in yy])).to_csv(os.path.join(B, "review", f"{sid}_calls.csv"), index=False)
 # one reviewer conflict + one indeterminate call (must be excluded, reported)

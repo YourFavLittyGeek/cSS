@@ -11,15 +11,21 @@ ST = dict(ID=None)
 
 
 def init(B, PAT, SET):
-    ID = IDM.Identity(B); ST["ID"] = ID
-    SET.setdefault("identity_mode", "standard" if ID.vault_exists() else "incognito")      # no vault yet: Standard cannot hold identities
+    app_lock = SET.get("app_lock_enabled", None)
+    ID = IDM.Identity(B, app_lock_enabled=app_lock)
+    ST["ID"] = ID
+    SET.setdefault("identity_mode", "standard" if ID.vault_exists() else "incognito")
+    SET.setdefault("app_lock_enabled", ID.app_lock_enabled)
     ID.migrate_existing(PAT)                                          # additive: uuid + patient per existing study; nothing renamed
     return ID
 
 
 def ID(): return ST["ID"]
 def mode(SET): return SET.get("identity_mode", "standard")
-def reveal(SET): return mode(SET) == "standard" and ID().unlocked()
+def reveal(SET):
+    if not SET.get("app_lock_enabled", False) and not ID().app_lock_enabled:
+        return mode(SET) == "standard"
+    return mode(SET) == "standard" and ID().unlocked()
 
 
 def ensure(PAT):
@@ -28,7 +34,8 @@ def ensure(PAT):
     for p in PAT:
         if not I.by_file_key(p["code"]):
             pu = I.add_patient(by="add studies"); I.add_study(pu, p["code"], p["code"] if not I.by_deid(p["code"]) else I.unique_code(),
-                                                            fingerprint=str(p.get("fingerprint", "")), source="add studies", by="add studies"); n += 1
+                                                            fingerprint=str(p.get("fingerprint", "")), source="add studies", by="add studies",
+                                                            identity_basis=IDM.ASSUMED); n += 1
     if n: I.commit()
     return n
 
@@ -53,7 +60,8 @@ def ident(code, SET):
 
 def state(SET, PAT):
     I = ID(); ex = [ident(p["code"], SET) for p in PAT]
-    return dict(mode=mode(SET), vault_exists=I.vault_exists(), unlocked=I.unlocked(), revealing=reveal(SET), n_studies=len(I.R["studies"]),
+    return dict(mode=mode(SET), vault_exists=I.vault_exists(), unlocked=I.unlocked(), revealing=reveal(SET),
+                app_lock_enabled=SET.get("app_lock_enabled", False), n_studies=len(I.R["studies"]),
                 n_patients=len(I.R["patients"]), accession_missing=sum(1 for v in ex if v.get("accession_missing")),
                 template_columns=MF.COLUMNS)
 
@@ -61,7 +69,8 @@ def state(SET, PAT):
 def set_mode(SET, new, passphrase="", save=None):
     I = ID()
     if new not in ("standard", "incognito"): raise ValueError("mode must be standard or incognito")
-    if new == "incognito": I.lock()
+    if new == "incognito":
+        I.lock()
     elif I.vault_exists() and not I.unlocked():
         if not passphrase: return dict(ok=False, needs_passphrase=True, error="enter the vault passphrase to show patient identities")
         I.unlock(passphrase)
@@ -72,6 +81,14 @@ def set_mode(SET, new, passphrase="", save=None):
 
 def vault(op, d, SET, names=None, verify_dest=None):
     I = ID()
+    if op == "enable_lock":
+        I.enable_app_lock(str(d.get("passphrase", "")))
+        SET["app_lock_enabled"] = True
+        return dict(ok=True, app_lock_enabled=True)
+    if op == "disable_lock":
+        I.disable_app_lock(str(d.get("passphrase", "")))
+        SET["app_lock_enabled"] = False
+        return dict(ok=True, app_lock_enabled=False)
     if op == "create":
         I.create_vault(str(d.get("passphrase", "")))
         n = I.copy_names_into_vault(names() if names else {})

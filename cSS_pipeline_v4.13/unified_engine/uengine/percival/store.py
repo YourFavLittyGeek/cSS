@@ -23,7 +23,7 @@ A store with a NEWER schema than this app supports is never touched (clear messa
 import hashlib, json, os, shutil, time
 
 SCHEMA = 4
-APP_VERSION = "v5.24"
+APP_VERSION = "v5.25"
 
 
 class StoreError(RuntimeError):

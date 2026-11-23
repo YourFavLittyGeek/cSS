@@ -31,6 +31,7 @@ MAX_VAULT_BACKUPS = 20
 
 class VaultLocked(PermissionError): pass
 class IdentityError(ValueError): pass
+ASSUMED = "assumed:one-patient-per-study"
 
 
 def _now(): return datetime.datetime.now().isoformat(timespec="seconds")
@@ -46,10 +47,53 @@ def norm(x): return re.sub(r"\s+", " ", str(x or "").strip())
 
 
 class Identity:
-    def __init__(self, base):
-        self.B = base; self.dir = os.path.join(base, "app_data", "identity"); self.vpath = os.path.join(base, "private", "identity_vault.enc")
-        os.makedirs(self.dir, exist_ok=True); os.makedirs(os.path.dirname(self.vpath), exist_ok=True)
-        self.rpath = os.path.join(self.dir, "registry.json"); self._key = None; self._vault = None; self.R = self._load_registry()
+    def __init__(self, base, app_lock_enabled=None):
+        self.B = base
+        self.dir = os.path.join(base, "app_data", "identity")
+        self.vpath = os.path.join(base, "private", "identity_vault.enc")
+        self.vjson_path = os.path.join(base, "private", "identity_vault.json")
+        os.makedirs(self.dir, exist_ok=True)
+        os.makedirs(os.path.dirname(self.vpath), exist_ok=True)
+        self.rpath = os.path.join(self.dir, "registry.json")
+        
+        # If encrypted vault file exists, app lock is active.
+        # Otherwise, default to False (no mandatory password).
+        if os.path.exists(self.vpath):
+            self.app_lock_enabled = True
+        elif app_lock_enabled is not None:
+            self.app_lock_enabled = bool(app_lock_enabled)
+        else:
+            self.app_lock_enabled = False
+            
+        self._key = None
+        self._salt = None
+        self._vault = None
+        self.R = self._load_registry()
+        self._init_vault_storage()
+
+    def _init_vault_storage(self):
+        """Initialize vault storage. If app lock is disabled, load direct local identity storage."""
+        if not self.app_lock_enabled:
+            # Default mode: No mandatory password or encryption layer
+            if os.path.exists(self.vjson_path):
+                try:
+                    with open(self.vjson_path) as f:
+                        self._vault = json.load(f)
+                except Exception:
+                    self._vault = dict(created=_now(), patients={}, studies={}, history=[])
+            else:
+                self._vault = dict(created=_now(), patients={}, studies={}, history=[])
+            self._key = b"__local_unlocked_default__"
+        else:
+            self._key = None
+            self._vault = None
+
+    def _write_plain_vault(self):
+        tmp = self.vjson_path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(self._vault, f, indent=1)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, self.vjson_path)
 
     # ------------------------------------------------------------------ registry (no direct identifiers)
     def _load_registry(self):
@@ -65,8 +109,13 @@ class Identity:
         os.replace(tmp, self.rpath)
 
     # ------------------------------------------------------------------ vault (encrypted)
-    def vault_exists(self): return os.path.exists(self.vpath)
-    def unlocked(self): return self._key is not None
+    def vault_exists(self):
+        return os.path.exists(self.vpath)
+
+    def unlocked(self):
+        if not self.app_lock_enabled:
+            return True
+        return self._key is not None
 
     def _derive(self, passphrase, salt):
         return hashlib.scrypt(passphrase.encode(), salt=salt, maxmem=MAXMEM, **SCRYPT)
@@ -88,30 +137,75 @@ class Identity:
         return key, salt, obj
 
     def create_vault(self, passphrase):
-        if self.vault_exists(): raise IdentityError("a vault already exists - unlock it, or restore a backup")
+        if self.app_lock_enabled and self.vault_exists(): raise IdentityError("a vault already exists - unlock it, or restore a backup")
         if len(passphrase or "") < 10: raise IdentityError("choose a passphrase of at least 10 characters")
+        self.app_lock_enabled = True
         self._salt = secrets.token_bytes(16); self._key = self._derive(passphrase, self._salt)
-        self._vault = dict(created=_now(), patients={}, studies={}, history=[]); self._write_vault(); return True
+        if self._vault is None:
+            self._vault = dict(created=_now(), patients={}, studies={}, history=[])
+        self._write_vault(); return True
 
     def unlock(self, passphrase):
         if not self.vault_exists(): raise IdentityError("no identity vault yet - create one first")
+        if not self.app_lock_enabled:
+            return True
         with open(self.vpath, "rb") as f: blob = f.read()
         self._key, self._salt, self._vault = self._decrypt(blob, passphrase); return True
 
-    def lock(self): self._key = None; self._vault = None
+    def lock(self):
+        if not self.app_lock_enabled:
+            return
+        self._key = None; self._vault = None
+
+    def enable_app_lock(self, passphrase):
+        """Optionally enable application-level locking with a user passphrase."""
+        if len(passphrase or "") < 10:
+            raise IdentityError("choose a passphrase of at least 10 characters")
+        if self._vault is None:
+            self._init_vault_storage()
+        self.app_lock_enabled = True
+        self._salt = secrets.token_bytes(16)
+        self._key = self._derive(passphrase, self._salt)
+        self._write_vault()
+        if os.path.exists(self.vjson_path):
+            try: os.remove(self.vjson_path)
+            except Exception: pass
+        return True
+
+    def disable_app_lock(self, passphrase=""):
+        """Disable application-level locking (reverts to default unencrypted local storage)."""
+        if self.app_lock_enabled and os.path.exists(self.vpath):
+            if not self.unlocked():
+                if not passphrase:
+                    raise IdentityError("enter current passphrase to disable application lock")
+                self.unlock(passphrase)
+        self.app_lock_enabled = False
+        self._key = b"__local_unlocked_default__"
+        self._write_plain_vault()
+        return True
 
     def unlock_reload(self):
         """discard unsaved vault changes: re-read the vault from disk with the key of this session"""
+        if not self.app_lock_enabled:
+            self._init_vault_storage()
+            return
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
         if self._key is None: return
         with open(self.vpath, "rb") as f: h = json.loads(f.read())
         self._vault = json.loads(AESGCM(self._key).decrypt(base64.b64decode(h["nonce"]), base64.b64decode(h["data"]), VAULT_SCHEMA.encode()))
 
     def _need(self):
+        if not self.app_lock_enabled:
+            if self._vault is None:
+                self._init_vault_storage()
+            return self._vault
         if self._key is None: raise VaultLocked("the identity vault is locked")
         return self._vault
 
     def _write_vault(self):
+        if not self.app_lock_enabled or self._key == b"__local_unlocked_default__":
+            self._write_plain_vault()
+            return
         if self.vault_exists():                                      # versioned backup before every write
             bd = os.path.join(os.path.dirname(self.vpath), "vault_backups"); os.makedirs(bd, exist_ok=True)
             shutil.copy2(self.vpath, os.path.join(bd, f"identity_vault.{datetime.datetime.now():%Y%m%d_%H%M%S_%f}.enc"))
@@ -168,7 +262,8 @@ class Identity:
             V = self._need(); V["patients"][pu] = dict(mrn=norm(mrn), name=norm(name))
         return pu
 
-    def add_study(self, patient_uuid, file_key, deid_code, display_name="", accession="", institution="", dicom_study_uid="", fingerprint="", source="import", by=""):
+    def add_study(self, patient_uuid, file_key, deid_code, display_name="", accession="", institution="", dicom_study_uid="", fingerprint="", source="import", by="",
+                  identity_basis=""):
         if not CODE_RE.fullmatch(file_key or ""): raise IdentityError(f"invalid file key {file_key!r}")
         if self.by_file_key(file_key): raise IdentityError(f"file key {file_key} already belongs to another examination")
         if not norm(deid_code): raise IdentityError("every examination needs a de-identified study code")
@@ -178,7 +273,7 @@ class Identity:
             if self.by_accession(accession, institution): raise IdentityError(f"accession number {accession} already exists" + (f" at {institution}" if institution else ""))
         su = str(uuid.uuid4())
         self.R["studies"][su] = dict(patient_uuid=patient_uuid, file_key=file_key, deid_code=norm(deid_code), display_name=norm(display_name), created=_now(),
-                                     created_by=by, source=source, fingerprint=fingerprint,
+                                     created_by=by, source=source, fingerprint=fingerprint, identity_basis=identity_basis,
                                      dicom_uid_hash=hashlib.sha256(dicom_study_uid.encode()).hexdigest() if dicom_study_uid else "")
         if accession or institution or dicom_study_uid:
             V = self._need(); V["studies"][su] = dict(accession=norm(accession), institution=norm(institution), dicom_study_uid=dicom_study_uid)
@@ -228,9 +323,61 @@ class Identity:
             nm = (names or {}).get(p["code"], "") if self.unlocked() else ""
             pu = self.add_patient(by=by, name=nm) if nm else self.add_patient(by=by)
             self.add_study(pu, p["code"], p["code"] if not self.by_deid(p["code"]) else self.unique_code(), source="existing study (before v5.16)",
-                           fingerprint=str(p.get("fingerprint", "")), by=by); n += 1
+                           fingerprint=str(p.get("fingerprint", "")), by=by, identity_basis=ASSUMED); n += 1
         if n: self.R["history"].append(dict(time=_now(), action="migrate_existing", studies=n, by=by)); self.commit()
         return n
+
+    # ------------------------------------------------------------------ v5.25 patient-identity verification (additive; semantics unchanged)
+    def identity_status(self, study_uuid):
+        """-> dict(status, basis, detail). status: 'verified' (confirmed by a person), 'declared' (patient grouping chosen at import: MRN /
+        DICOM patient id / patient folder), 'assumed' (registered automatically as one patient per study), 'unconfirmed' (registered before
+        v5.25 without a recorded basis), 'missing' (no record). Only verified / declared identities may be used for patient-level validation."""
+        s = self.R["studies"].get(study_uuid) if study_uuid else None
+        if not s: return dict(status="missing", basis="", detail="no identity record")
+        c = s.get("identity_confirmed") or {}
+        if c.get("at"): return dict(status="verified", basis=s.get("identity_basis", ""), detail=f"confirmed by {c.get('by', '?')} on {c['at']}")
+        b = s.get("identity_basis", "")
+        if b.startswith("import:"): return dict(status="declared", basis=b, detail=f"patient grouping chosen at import ({b[7:]})")
+        if b == ASSUMED or s.get("source") == "existing study (before v5.16)":
+            return dict(status="assumed", basis=b or ASSUMED, detail="registered automatically as a separate patient - not verified")
+        return dict(status="unconfirmed", basis=b, detail="registered before v5.25 without a recorded patient-grouping basis")
+
+    def confirm_identity(self, study_uuids, by, statement):
+        """a person confirms that each examination belongs to the patient record it is linked to (audited; reversible)"""
+        if not norm(by): raise IdentityError("say who confirms the patient identity")
+        if not norm(statement): raise IdentityError("the confirmation statement is required")
+        n = 0
+        for su in study_uuids:
+            s = self.R["studies"].get(su)
+            if not s: raise IdentityError(f"unknown examination {su}")
+            s["identity_confirmed"] = dict(at=_now(), by=norm(by), statement=norm(statement)); n += 1
+            self._audit(False, su, s["patient_uuid"], "identity_confirmed", "", "yes", by, statement)
+        self.R["history"].append(dict(time=_now(), action="confirm_identity", studies=n, by=norm(by))); self.commit(); return n
+
+    def unconfirm_identity(self, study_uuids, by, reason):
+        if not norm(reason): raise IdentityError("give a reason")
+        n = 0
+        for su in study_uuids:
+            s = self.R["studies"].get(su)
+            if s and s.pop("identity_confirmed", None):
+                self._audit(False, su, s["patient_uuid"], "identity_confirmed", "yes", "", by, reason); n += 1
+        if n: self.R["history"].append(dict(time=_now(), action="unconfirm_identity", studies=n, by=norm(by))); self.commit()
+        return n
+
+    def identity_conflicts(self):
+        """examinations whose image fingerprint or DICOM study UID (hash) also belongs to an examination of ANOTHER patient record: the same
+        person may exist twice, which would put one patient on both sides of a validation split. -> {study_uuid: [other study_uuids]}"""
+        out = {}
+        for key in ("fingerprint", "dicom_uid_hash"):
+            by = {}
+            for u, s in self.R["studies"].items():
+                v = str(s.get(key) or "")
+                if v and not s.get("retired"): by.setdefault(v, []).append(u)
+            for us in by.values():
+                pats = {self.R["studies"][u]["patient_uuid"] for u in us}
+                if len(pats) > 1:
+                    for u in us: out.setdefault(u, set()).update(x for x in us if x != u)
+        return {u: sorted(v) for u, v in out.items()}
 
     def copy_names_into_vault(self, names, by="migration"):
         """names.csv (code -> name) into the vault for studies that have no name there yet (names.csv itself is not changed)"""

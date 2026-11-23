@@ -1,4 +1,4 @@
-# Percival Dev - read me first (development build v5.24-dev)
+# Percival Dev - read me first (development build v5.25-dev)
 
 **Research software, not a diagnostic device.** Percival learns only on this Mac, from your own MRI and expert reviews. The models it
 comes with were tested on SYNTHETIC data only; nothing in this build is clinically validated. No internet and no external AI service

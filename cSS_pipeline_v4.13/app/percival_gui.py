@@ -36,6 +36,13 @@ def init(**ctx):
     from uengine.percival import store as ST
     try: STORE.update(ok=True, error="", migration=ST.migrate(B())); _interrupted_runs()
     except Exception as e: STORE.update(ok=False, error=str(e), migration=None)
+def identity(sid):
+    """v5.25: patient identity of a study -> dict(status, patient, detail). The app passes identity_of (identity registry: verified /
+    declared / assumed / unconfirmed / missing / conflict). Harnesses that pass only patient_of declare their mapping in code."""
+    if CTX.get("identity_of"): return CTX["identity_of"](sid)
+    p = CTX["patient_of"](sid)
+    return dict(status="declared" if p else "missing", patient=p or None, detail="mapping supplied by the caller" if p else "no patient")
+def identity_ok(sid): return identity(sid)["status"] in ("verified", "declared")
 def B(): return CTX["B"]
 def P(*a):
     if not STORE["ok"]: raise RuntimeError("Percival data store unavailable: " + STORE["error"])
@@ -50,9 +57,134 @@ def _js(p, o):
     with open(tmp, "w") as f: json.dump(o, f, default=float)          # reviewer's score request may write the same file at once)
     os.replace(tmp, p)
 def log(msg, prog=None):
+    """every log line of a running cycle is real work reported by the engine: it also beats the heartbeat and records the stage. A
+    requested cancellation is honoured here (cooperative: the engine stops at its next progress report, before any artifact is written)."""
     with LOCK:
+        now = time.time()
         JOB["log"] = (JOB["log"] + [f"{time.strftime('%H:%M:%S')} {msg}"])[-300:]
-        if prog is not None: JOB["progress"] = prog
+        if prog is not None:
+            JOB["progress"] = max(float(prog), JOB.get("progress", 0.0))           # never backwards
+            JOB.setdefault("samples", []).append((now, JOB["progress"])); JOB["samples"] = JOB["samples"][-60:]
+        if JOB.get("state") in ACTIVE_STATES:
+            JOB["heartbeat"] = now; JOB["stage"] = _stage_of(msg, JOB.get("stage", "")); JOB.pop("stall", None)
+        cancel = JOB.get("cancel") and JOB.get("state") in ACTIVE_STATES
+    if cancel: raise Cancelled("cancelled by " + str(JOB.get("cancel_by", "you")))
+
+
+# ------------------------------------------------------------------ v5.25 Training Center job monitor
+class Cancelled(Exception): pass
+ACTIVE_STATES = ("preparing", "running")
+TERMINAL_STATES = ("finished", "failed", "cancelled", "interrupted")
+TRANSITIONS = dict(idle={"preparing"}, preparing={"running", "failed", "cancelled"}, running={"finished", "failed", "cancelled"},
+                   finished={"preparing"}, failed={"preparing"}, cancelled={"preparing"}, interrupted={"preparing"})
+STATE_LABEL = dict(idle="Idle", preparing="Preparing dataset", running="Training", finished="Completed", failed="Failed", cancelled="Cancelled",
+                   interrupted="Interrupted")
+# stage-aware stall limits (seconds without any reported work): dataset gathering reads MRI patches study by study; a training stage
+# reports at least once per fold (nested cross-fitting: once per inner step). Overridable for tests: CSS_PERCIVAL_STALL_S
+STALL_S = dict(preparing=300, components=600, nested=900, discovery=600, final=600, evaluation=300, registering=120)
+def _stage_of(msg, cur):
+    m = msg.lower()
+    for key, st in (("nested", "nested"), ("meta-model discovery", "discovery"), ("final fit", "final"), ("locked test", "evaluation"),
+                    ("component", "components"), ("image models", "components"), ("characteristic models", "components"),
+                    ("dataset", "preparing"), ("eligible of", "preparing"), ("registered", "registering"), ("cycle started", "preparing")):
+        if key in m: return st
+    return cur or "preparing"
+
+
+def _transition(new, **kw):
+    """state machine of the training job: invalid transitions are refused (a completed job can never become running or stalled)"""
+    with LOCK:
+        old = JOB.get("state", "idle")
+        if new not in TRANSITIONS.get(old, set()): raise RuntimeError(f"invalid training-job transition {old} -> {new}")
+        JOB.update(state=new, **kw); JOB.setdefault("transitions", []).append(dict(frm=old, to=new, at=time.strftime("%Y-%m-%d %H:%M:%S")))
+        if new in TERMINAL_STATES: JOB["ended"] = time.time(); JOB.pop("stall", None)
+
+
+def _proc_resources():
+    """this app's process: CPU % since the previous sample, current resident memory (ps) and peak resident memory (ru_maxrss);
+    system CPU / RAM from the app's sysinfo. GPU: the Percival engine is numpy on the CPU - no GPU is used, so none is monitored
+    (reported as such, never invented). Distinguishes peak RAM from current measured RAM."""
+    import resource, subprocess
+    out = dict(gpu="not used (CPU engine)")
+    try:
+        ru = resource.getrusage(resource.RUSAGE_SELF); cpu_t = ru.ru_utime + ru.ru_stime; now = time.time()
+        prev = JOB.get("_cpu_prev")
+        if prev and now > prev[1]: out["process_cpu_pct"] = round(100 * (cpu_t - prev[0]) / (now - prev[1]), 1)
+        JOB["_cpu_prev"] = (cpu_t, now)
+        peak_bytes = ru.ru_maxrss if sys.platform == "darwin" else ru.ru_maxrss * 1024
+        out["process_ram_peak_gb"] = round(peak_bytes / 1e9, 2)
+        rss = subprocess.run(["ps", "-o", "rss=", "-p", str(os.getpid())], capture_output=True, text=True, timeout=5).stdout.strip()
+        if rss:
+            curr_gb = round(int(rss) / 1e6, 2)
+            out["process_ram_current_gb"] = curr_gb
+            out["process_ram_gb"] = curr_gb
+    except Exception: pass
+    try:
+        si = CTX["sysinfo"]() if CTX.get("sysinfo") else None
+        if si: out.update(system_cpu_pct=si.get("cpu_pct"), system_ram_pct=si.get("mem_pct"), system_ram_used_gb=si.get("mem_used"),
+                          system_ram_total_gb=si.get("mem_total"), disk_free_gb=si.get("disk_free"))
+    except Exception: pass
+    return out
+
+
+def _eta(now):
+    """remaining time from the progress actually reported: rate over the recent samples; range from the spread of recent rates. Marked
+    unreliable early (< 10 % done or < 3 samples) - the cycle's stages do not take equal time."""
+    p = JOB.get("progress", 0.0); st = JOB.get("started") or now; el = now - st; smp = JOB.get("samples", [])
+    if p <= 0 or p >= 1 or len(smp) < 2: return dict(eta_s=None, eta_range_s=None, reliable=False, note="estimating")
+    rem = el * (1 - p) / p
+    rates = [(b[1] - a[1]) / (b[0] - a[0]) for a, b in zip(smp[-10:], smp[-9:]) if b[0] > a[0] and b[1] > a[1]]
+    if len(rates) >= 3:
+        lo_r, hi_r = np.percentile(rates, 25), np.percentile(rates, 75)
+        rng = [(1 - p) / hi_r if hi_r > 0 else None, (1 - p) / lo_r if lo_r > 0 else None]
+    else: rng = [rem * 0.6, rem * 1.8]
+    rel = p >= 0.1 and len(smp) >= 3
+    return dict(eta_s=round(rem), eta_range_s=[None if x is None else round(min(x, 86400 * 3)) for x in rng], reliable=rel,
+                note="" if rel else "early estimate - stages differ in length")
+
+
+def _stall_check(now):
+    """a warning, never a kill: no reported work for longer than the current stage's limit while the job is active"""
+    if JOB.get("state") not in ACTIVE_STATES: JOB.pop("stall", None); return None
+    lim = float(os.environ.get("CSS_PERCIVAL_STALL_S") or STALL_S.get(JOB.get("stage", ""), 600)); age = now - JOB.get("heartbeat", now)
+    th = JOB.get("thread")
+    if th is not None and not th.is_alive():
+        JOB["stall"] = dict(reason="the training thread has stopped without reporting an end (dead worker)", since=time.strftime("%H:%M:%S", time.localtime(JOB.get("heartbeat", now))), age_s=round(age))
+    elif age > lim:
+        JOB["stall"] = dict(reason=f"no progress reported for {age:.0f} s in stage '{JOB.get('stage')}' (limit {lim:.0f} s) - the job is still alive and is not stopped; "
+                                   "cancel it if it does not recover", since=time.strftime("%H:%M:%S", time.localtime(JOB.get("heartbeat", now))), age_s=round(age))
+    else: JOB.pop("stall", None)
+    return JOB.get("stall")
+
+
+def job_state():
+    """live training job for the Training Center: state, stage, progress, elapsed, ETA (+ range, reliability), heartbeat age, stall warning,
+    resources, log tail, run id"""
+    now = time.time()
+    with LOCK:
+        st = _stall_check(now); j = {k: v for k, v in JOB.items() if k not in ("thread", "_cpu_prev", "samples")}
+        start = JOB.get("started"); end = JOB.get("ended") if JOB.get("state") in TERMINAL_STATES else None
+        j.update(state_label=STATE_LABEL.get(JOB.get("state", "idle"), JOB.get("state")), stalled=bool(st),
+                 elapsed_s=round((end or now) - start) if start else None, heartbeat_age_s=round(now - JOB["heartbeat"]) if JOB.get("heartbeat") else None,
+                 run=RUN.get("id"), log=JOB.get("log", [])[-40:], resume_supported=False,
+                 retry_note="retry restarts the cycle from the beginning (no partial-result resume: a cycle is a single reproducible computation)")
+        if JOB.get("state") in ACTIVE_STATES: j.update(eta=_eta(now))
+    j["resources"] = _proc_resources() if j.get("state") in ACTIVE_STATES else JOB.get("resources_last")
+    if j.get("state") in ACTIVE_STATES:
+        with LOCK:
+            JOB["resources_last"] = j["resources"]; pk = JOB.setdefault("resources_peak", {})
+            for k in ("process_cpu_pct", "process_ram_gb", "system_ram_pct"):
+                if isinstance(j["resources"].get(k), (int, float)): pk[k] = max(pk.get(k, 0), j["resources"][k])
+            j["resources_peak"] = dict(pk)
+    return j
+
+
+def cancel_training(by="app user"):
+    with LOCK:
+        if JOB.get("state") not in ACTIVE_STATES: return dict(ok=False, error="no training cycle is running")
+        JOB.update(cancel=True, cancel_by=by, cancel_at=time.strftime("%Y-%m-%d %H:%M:%S"))
+        JOB["log"] = (JOB["log"] + [f"{time.strftime('%H:%M:%S')} cancellation requested by {by} - stopping at the next step; nothing is registered"])[-300:]
+    return dict(ok=True, note="the cycle stops at its next progress report; no model is registered")
 
 
 # ------------------------------------------------------------------ authorisation
@@ -243,7 +375,8 @@ def _gather(sid, labelled=True):
         os.replace(cz + ".tmp", cz)                                               # atomic: a reader never sees a half-written cache
         C = dict(key=key, v=3, rows=rows); _js(cj, C)
     with np.load(cz) as Zf: Z = {k: Zf[k] for k in Zf.files}
-    rows = []; pat = CTX["patient_of"](sid); test = test_assignment(pat, CTX["SET"].get("percival_test_fraction", 0.2))
+    rows = []; pat = CTX["patient_of"](sid) or None
+    test = bool(pat) and test_assignment(pat, CTX["SET"].get("percival_test_fraction", 0.2))   # no patient: never trained on (eligibility)
     for r in C["rows"]:
         rows.append(dict(r, patient=pat, test=test, maps=Z.get(str(r["cand_id"]))))
     if labelled:
@@ -278,8 +411,8 @@ def _examples(sid, meta, rows=None):
     """every CALLED candidate of one study with its eligibility (eligibility.py). rows: gathered rows (training) or None (screen: cache)"""
     from uengine.percival import eligibility as EL
     from uengine.percival.meta import test_assignment
-    S = CTX["SET"]; lab = label_summary(sid); det = lab.get("detail", {}); pat = CTX["patient_of"](sid)
-    test = test_assignment(pat, S.get("percival_test_fraction", 0.2)); cache = rows if rows is not None else (_cached_rows(sid) or {})
+    S = CTX["SET"]; lab = label_summary(sid); det = lab.get("detail", {}); idn = identity(sid); pat = idn.get("patient") or None
+    test = bool(pat) and test_assignment(pat, S.get("percival_test_fraction", 0.2)); cache = rows if rows is not None else (_cached_rows(sid) or {})
     out = []
     for cid, d in sorted(det.items()):
         r = cache.get(cid)
@@ -289,8 +422,8 @@ def _examples(sid, meta, rows=None):
         ev = EL.evaluate(dict(label_kind=d["kind"], conflict=d["conflict"] and S.get("percival_conflicts", "exclude") == "exclude",
                               historical=d["source"] == "historical", study_excluded=meta.get("excluded"), study_archived=meta.get("archived_out"),
                               duplicate=meta.get("duplicate"), authorized=may_read(sid), has_image=has_img is not False, n_char=n_char is None or n_char > 0,
-                              has_predictors=has_pred is not False, test=test, qc=meta.get("qc")))
-        out.append(dict(study=sid, cand_id=cid, patient=pat, y=d["y"], call=d["call"], label_source=d["source"], reviewer=d.get("reviewer", ""),
+                              has_predictors=has_pred is not False, test=test, qc=meta.get("qc"), identity=idn["status"]))
+        out.append(dict(study=sid, cand_id=cid, patient=pat, identity=idn["status"], y=d["y"], call=d["call"], label_source=d["source"], reviewer=d.get("reviewer", ""),
                         partition=ev["partition"], status=ev["status"], reasons=ev["reasons"], components={k: v["ok"] for k, v in ev["components"].items()},
                         component_reasons={k: v["reasons"] for k, v in ev["components"].items() if v["reasons"]},
                         missing=sorted({m for v in ev["components"].values() for m in v.get("missing", [])}),
@@ -327,7 +460,8 @@ def selection():
                         n_adjudication=sum(1 for e in E if e["status"] == "needs_adjudication"), unrecognised=lab.get("unrecognised", []),
                         not_in_study_list=p["_orphan"], archived=bool(p.get("archived")), retired=bool(p.get("retired")),
                         included=bool(el) and not why, excluded_why=why, why=reason,
-                        partition="test" if test_assignment(CTX["patient_of"](c), S.get("percival_test_fraction", 0.2)) else "development"))
+                        identity=identity(c)["status"],
+                        partition=None if not CTX["patient_of"](c) else "test" if test_assignment(CTX["patient_of"](c), S.get("percival_test_fraction", 0.2)) else "development"))
     return out
 
 
@@ -514,9 +648,12 @@ def _env_min():
 
 def train_async(reason="manual"):
     with LOCK:
-        if JOB["state"] == "running": return dict(ok=True, already_running=True)
-        JOB.update(state="running", log=[], progress=0.0, error="", reason=reason, started=time.time())
-    threading.Thread(target=_train, args=(reason,), daemon=True).start(); return dict(ok=True, started=True)
+        if JOB["state"] in ACTIVE_STATES: return dict(ok=True, already_running=True)
+        for k in ("cancel", "cancel_by", "cancel_at", "stall", "ended", "resources_peak", "resources_last", "samples", "transitions"): JOB.pop(k, None)
+    _transition("preparing", log=[], progress=0.0, error="", reason=reason, started=time.time(), heartbeat=time.time(), stage="preparing")
+    th = threading.Thread(target=_train, args=(reason,), daemon=True)
+    with LOCK: JOB["thread"] = th
+    th.start(); return dict(ok=True, started=True)
 
 
 def _code_version():
@@ -559,6 +696,10 @@ def _interrupted_runs():
 
 def _train(reason):
     from uengine.percival import meta as MT
+    if JOB.get("state") != "preparing":
+        with LOCK:
+            for k in ("cancel", "cancel_by", "cancel_at", "stall", "ended", "resources_peak", "resources_last", "samples"): JOB.pop(k, None)
+        _transition("preparing", log=[], progress=0.0, error="", reason=reason, started=time.time(), heartbeat=time.time(), stage="preparing")
     _run_start(reason)
     try:
         SL = selection(); sel = [s["code"] for s in SL if s["included"]]
@@ -594,10 +735,15 @@ def _train(reason):
                              f"used to learn) holds {t1} cSS and {t0} not-cSS. Dataset {man['id']}: see Training Center for every study and "
                              f"candidate that was left out and why. Review more studies that contain cSS (press Y on each cSS candidate) "
                              f"and start the cycle again.")
+        idc = {}
+        for c in sel: idc[identity(c)["status"]] = idc.get(identity(c)["status"], 0) + 1
+        _transition("running", stage="components")
         v = f"v{len(versions()) + 1:03d}"
         M = MT.train_cycle(rows, v, cnn_epochs=int(os.environ.get("CSS_PERCIVAL_EPOCHS", "30")), progress=lambda m, p: log(m, p), mins=_env_min())
         M["data"].update(dataset=man["id"], dataset_hash_manifest=man["content_hash"], eligibility_rules=EL.RULES_VERSION,
                          feature_schema=DS.FEATURE_SCHEMA, patch_spec=DS.PATCH_SPEC, code_version=_code_version())
+        M["data"]["identity"] = dict(idc, policy="only verified / declared patient identities are used (v5.25)")
+        log("registering", 0.9)                                    # last cancellation point: nothing has been written to the registry yet
         M["integrity"] = integ; M["reason"] = reason; M["run_id"] = RUN.get("id"); M["seed"] = 0; M["cnn_epochs"] = int(os.environ.get("CSS_PERCIVAL_EPOCHS", "30")); act = active(); acc = MT.acceptance(M, act); M["acceptance"] = acc
         M["previous_active"] = act["version"] if act else None
         _js(P("registry", v, "model.json"), M)
@@ -614,19 +760,23 @@ def _train(reason):
         else: log(f"{v} registered as {'a candidate (passed the acceptance criteria) - make it active in Model Center' if acc['passed'] else 'experimental: ' + '; '.join(acc['reasons'])}", 0.95)
         _js(P("history.json"), H); _js(P("last_cycle.json"), dict(at=time.strftime("%Y-%m-%d %H:%M:%S"), finished=sorted(sel)))
         CTX["notify"](f"Percival Score model {v} trained", ("made active" if H[-1]["promoted"] else "waiting for your approval" if acc["passed"] else "experimental") + f" · {M['data']['studies']} studies")
-        with LOCK: JOB.update(state="finished", progress=1.0)
+        _transition("finished", progress=1.0, stage="completed")
         _run_end("finished", version=v, dataset=man["id"], acceptance=acc, status=status_all().get(v, {}).get("status"))
         try: eligibility_record()
         except Exception as e_: log(f"eligibility record not written ({type(e_).__name__})")
+    except Cancelled as e:
+        _transition("cancelled", error=str(e), stage="cancelled"); log(f"cycle cancelled ({e}); no model was registered")
+        _run_end("cancelled", error=str(e))
     except Exception as e:
-        with LOCK: JOB.update(state="failed", error=f"{type(e).__name__}: {str(e)[:300]}")
+        try: _transition("failed", error=f"{type(e).__name__}: {str(e)[:300]}", stage="failed")
+        except RuntimeError: pass
         log(f"failed: {e}"); _run_end("failed", error=f"{type(e).__name__}: {str(e)[:500]}", dataset=locals().get("man", {}).get("id") if isinstance(locals().get("man"), dict) else None)
 
 
 def maybe_cycle():
     """controlled cycles: a new training cycle when N newly finished studies have accumulated since the last cycle"""
     S = CTX["SET"]
-    if not S.get("percival_autocycle", True) or not authorized() or JOB["state"] == "running": return False
+    if not S.get("percival_autocycle", True) or not authorized() or JOB["state"] in ACTIVE_STATES: return False
     done = {s["code"] for s in selection() if s["included"]}; last = set(_jl(P("last_cycle.json"), {}).get("finished", []))
     if len(done - last) >= int(S.get("percival_cycle_n", 5)): train_async(f"{len(done - last)} newly finished studies"); return True
     return False
@@ -645,6 +795,56 @@ def score_study(sid, M=None):
     if not rows: return None
     S = MT.score_rows(M, rows); hemi = {r["cand_id"]: r.get("hemi", "") for r in rows}
     for s in S: s["hemi"] = hemi.get(s["cand_id"], "")
+
+    # v5.25 Unified Percival Core Evaluation & PENSIEVE Persistence
+    try:
+        from uengine.percival_core import PercivalCoreIntelligence
+        from uengine.albus import AlbusDiscoveryEngine
+        from uengine.lumos import LumosImageIntelligence
+        from uengine.nox import NoxCharacteristicsEngine
+        from uengine.pensieve import get_pensieve
+        from uengine.vault import get_vault
+
+        _p = get_pensieve()
+        _v = get_vault()
+        _core = PercivalCoreIntelligence(pensieve=_p, vault=_v)
+        _albus = AlbusDiscoveryEngine(pensieve=_p)
+        _lumos = LumosImageIntelligence(pensieve=_p, vault=_v)
+        _nox = NoxCharacteristicsEngine(pensieve=_p)
+
+        for s in S:
+            cid = int(s.get("cand_id", 0))
+            h = str(s.get("hemi", "U"))
+            row_match = next((r for r in rows if int(r.get("cand_id", 0)) == cid), {})
+            vox = (float(row_match.get("ci", 0)), float(row_match.get("cj", 0)), float(row_match.get("ck", 0)))
+            mm = (float(row_match.get("cx", 0)), float(row_match.get("cy", 0)), float(row_match.get("cz", 0)))
+            raw_f = {
+                "pial_distance": float(row_match.get("pdist", 1.0)),
+                "darkness_z": float(row_match.get("darkness_z", -1.5)),
+                "tube_ratio": float(row_match.get("tube_ratio", 1.5)),
+                "cortex_frac": float(row_match.get("cortex_frac", 0.5)),
+                "tram_frac": float(row_match.get("tram_frac", 0.0))
+            }
+            cand_a = _albus.discover_candidate(sid, cid, h, vox, mm, int(row_match.get("vol_vox", 10)), float(row_match.get("vol_mm3", 5.0)), (0,0,0,0,0,0), raw_f)
+            cand_n = _nox.measure_candidate(sid, cid, raw_f)
+            cand_l = _lumos.analyze_patch(sid, cid, row_match.get("patch"))
+            asmt = _core.evaluate_candidate(cand_a, cand_l, cand_n)
+            if asmt.percival_score is not None:
+                s["percival_score"] = asmt.percival_score
+                s["band"] = asmt.band
+                s["status"] = asmt.status
+                s["uncertainty"] = asmt.uncertainty
+            else:
+                s["percival_score"] = None
+                s["band"] = asmt.band
+                s["status"] = asmt.status if asmt.status in ("reliable", "uncertain", "insufficient", "review") else "insufficient"
+                s["uncertainty"] = asmt.uncertainty
+            s["core_percival_score"] = asmt.percival_score
+            s["core_band"] = asmt.band
+            s["core_status"] = asmt.status
+            s["core_uncertainty"] = asmt.uncertainty
+    except Exception as e:
+        log(f"[PercivalCore] Warning: Candidate evaluation note for {sid}: {e}")
     ids = [s["cand_id"] for s in S if s["percival_score"] is not None and s["percival_score"] >= 50]
     study = dict(n_called=len(ids), called_ids=ids, L_score=None, R_score=None, total=None, error="")
     try:                                                   # the study score with the reader's own scoring method, on the candidates Percival calls
@@ -683,6 +883,63 @@ def history_of(sid):
         L["status"] = ("earlier processing" if L.get("run") and L.get("run") != run else "current" if L.get("model") == a else "historical")
         out.append(L)
     return out
+
+
+def score_study_unified(sid):
+    """v5.25: Evaluate candidate rows using the reconstructed PercivalCoreIntelligence pipeline."""
+    from uengine.albus import AlbusDiscoveryEngine
+    from uengine.lumos import LumosImageIntelligence
+    from uengine.nox import NoxCharacteristicsEngine
+    from uengine.percival_core import PercivalCoreIntelligence
+    from uengine.pensieve import get_pensieve
+    from uengine.vault import get_vault
+
+    pensieve = get_pensieve()
+    vault = get_vault()
+    core = PercivalCoreIntelligence(pensieve=pensieve, vault=vault)
+    albus = AlbusDiscoveryEngine(pensieve=pensieve)
+    lumos = LumosImageIntelligence(pensieve=pensieve, vault=vault)
+    nox = NoxCharacteristicsEngine(pensieve=pensieve)
+
+    rows = gather(sid, labelled=False)
+    if not rows:
+        return dict(ok=False, error=f"No candidates found for study {sid}")
+
+    assessments = []
+    for r in rows:
+        cid = int(r.get("cand_id", 0))
+        hemi = str(r.get("hemi", "U"))
+        raw_feats = {
+            "pial_distance": float(r.get("pdist", r.get("pial_distance", 1.0))),
+            "darkness_z": float(r.get("darkness_z", -1.5)),
+            "tube_ratio": float(r.get("tube_ratio", 1.5)),
+            "cortex_frac": float(r.get("cortex_frac", 0.5)),
+            "tram_frac": float(r.get("tram_frac", 0.0)),
+            "skeleton_length": float(r.get("skeleton_length", 4.0))
+        }
+        vox = (float(r.get("ci", 0)), float(r.get("cj", 0)), float(r.get("ck", 0)))
+        mm = (float(r.get("cx", 0)), float(r.get("cy", 0)), float(r.get("cz", 0)))
+
+        cand_albus = albus.discover_candidate(
+            study_id=sid, cand_id=cid, hemi=hemi,
+            centroid_vox=vox, centroid_mm=mm,
+            volume_vox=int(r.get("vol_vox", 10)),
+            volume_mm3=float(r.get("vol_mm3", 5.0)),
+            bbox=(0, 0, 0, 0, 0, 0),
+            raw_features=raw_feats
+        )
+        cand_nox = nox.measure_candidate(sid, cid, raw_feats)
+
+        # Check patch availability
+        patch_data = None
+        if "patch" in r and isinstance(r["patch"], dict):
+            patch_data = r["patch"]
+        cand_lumos = lumos.analyze_patch(sid, cid, patch_data)
+
+        assessment = core.evaluate_candidate(cand_albus, cand_lumos, cand_nox)
+        assessments.append(assessment.__dict__)
+
+    return dict(ok=True, study=sid, count=len(assessments), assessments=assessments)
 
 
 # ------------------------------------------------------------------ v5.24 shadow mode (controlled experimental environment)
@@ -959,3 +1216,134 @@ def state():
                               eligible=sum(x["n_eligible"] for x in sel), eligible_dev=sum(x["n_eligible_dev"] for x in sel),
                               adjudication=sum(x["n_adjudication"] for x in sel), historical=sum(x["n_historical"] for x in sel),
                               excluded=sum(x["n_labelled"] - x["n_eligible"] - x["n_adjudication"] for x in sel)))
+
+
+# -------------------------------------------------------------
+# PERCIVAL DATA VAULT, PENSIEVE & SHADOW ML BACKEND SERVICES
+# -------------------------------------------------------------
+def pensieve_state():
+    from uengine.pensieve import get_pensieve
+    from uengine.vault import get_vault
+    p = get_pensieve()
+    v = get_vault()
+    return {
+        "ok": True,
+        "vault_connected": v.is_connected(),
+        "vault_path": v.root_path,
+        "studies": p.get_all_studies()[:50],
+        "corrections": p.get_all_corrections()[:50],
+        "findings": p.get_all_findings()[:50],
+        "summary": {
+            "albus": p.ask_albus_memory(limit=10),
+            "lumos": p.ask_lumos_memory(limit=10),
+            "nox": p.ask_nox_memory(),
+            "core": p.ask_core_memory(),
+            "shadow": p.ask_shadow_memory()
+        }
+    }
+
+
+def pensieve_query(component):
+    from uengine.pensieve import get_pensieve
+    p = get_pensieve()
+    comp = str(component).lower()
+    if comp == "albus": return p.ask_albus_memory()
+    if comp == "lumos": return p.ask_lumos_memory()
+    if comp == "nox": return p.ask_nox_memory()
+    if comp == "core": return p.ask_core_memory()
+    if comp == "shadow": return p.ask_shadow_memory()
+    return {"error": f"unknown component {component}"}
+
+
+def vault_status():
+    from uengine.vault import get_vault
+    v = get_vault()
+    stats = v.get_storage_stats()
+    integrity = v.verify_integrity() if v.is_connected() else {"ok": False}
+    return {"stats": stats, "integrity": integrity}
+
+
+def vault_connect(path):
+    from uengine.vault import get_vault
+    v = get_vault()
+    ok, msg = v.connect(path)
+    return {"ok": ok, "message": msg, "stats": v.get_storage_stats()}
+
+
+def vault_create(destination, name="PERCIVAL_VAULT"):
+    from uengine.vault import PercivalDataVault
+    try:
+        v = PercivalDataVault.create_vault(destination, name=name)
+        return {"ok": True, "message": f"Vault created at {v.root_path}", "stats": v.get_storage_stats()}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def vault_eject():
+    from uengine.vault import get_vault
+    v = get_vault()
+    ok, msg = v.safe_eject()
+    return {"ok": ok, "message": msg}
+
+
+def vault_backup(destination):
+    from uengine.vault import get_vault
+    v = get_vault()
+    ok, msg = v.create_backup(destination)
+    return {"ok": ok, "message": msg}
+
+
+def shadow_lab_state():
+    from uengine.shadow_lab import ShadowMLLaboratory
+    from uengine.governance import PercivalGovernance
+    lab = ShadowMLLaboratory()
+    gov = PercivalGovernance()
+    return {
+        "experiments": [
+            {
+                "id": e.experiment_id,
+                "hypothesis": e.hypothesis,
+                "target_component": e.target_component,
+                "status": e.status,
+                "baseline": e.metrics_baseline,
+                "experimental": e.metrics_experimental,
+                "runtime_s": e.runtime_s,
+                "artifact": e.data_vault_artifact_path
+            }
+            for e in lab.list_experiments()
+        ],
+        "proposals": [
+            {
+                "proposal_id": p.proposal_id,
+                "experiment_id": p.experiment_id,
+                "target_component": p.target_component,
+                "hypothesis": p.hypothesis,
+                "rationale": p.rationale,
+                "verdict": p.verdict,
+                "sensitivity_loss": p.sensitivity_loss,
+                "false_positive_reduction": p.false_positive_reduction,
+                "promoted_version": p.promoted_version
+            }
+            for p in lab.list_proposals()
+        ],
+        "audit_trail": gov.get_audit_trail()
+    }
+
+
+def shadow_run_trial(target, hypothesis, config):
+    from uengine.shadow_lab import ShadowMLLaboratory
+    from uengine.governance import PercivalGovernance
+    lab = ShadowMLLaboratory()
+    gov = PercivalGovernance()
+    exp = lab.formulate_hypothesis(target, hypothesis, config or {})
+    ok, prop = lab.run_experiment(exp)
+    eval_res = gov.evaluate_proposal(prop) if prop else {}
+    return {
+        "ok": ok,
+        "experiment_id": exp.experiment_id,
+        "metrics_baseline": exp.metrics_baseline,
+        "metrics_experimental": exp.metrics_experimental,
+        "proposal": prop.__dict__ if prop else None,
+        "governance_evaluation": eval_res
+    }
+

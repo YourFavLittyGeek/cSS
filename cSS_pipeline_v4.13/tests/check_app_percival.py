@@ -48,7 +48,7 @@ def wait_job(limit=900):
     t0 = time.time(); time.sleep(1)
     while time.time() - t0 < limit:
         s = get("/api/percival/state")
-        if s["job"].get("state") != "running": return s
+        if s["job"].get("state") not in ("preparing", "running"): return s
         time.sleep(1)
     return get("/api/percival/state")
 chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"

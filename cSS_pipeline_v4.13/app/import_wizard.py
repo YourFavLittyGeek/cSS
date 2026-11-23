@@ -313,9 +313,12 @@ def library_place(plan, e):
 
 def revalidate(plan, ID=None, existing_file_keys=()):
     mode = plan["mode"]; errs = [dict(eid="", msg=m) for m in plan["header_problems"]]; warns = []
-    if mode == "standard" and ID is not None and not ID.unlocked(): errs.append(dict(eid="", msg="unlock the identity vault: Standard mode stores MRN, name and accession only in the encrypted vault"))
-    if mode == "incognito" and ID is not None and not ID.unlocked():
-        errs.append(dict(eid="", msg="enter the vault passphrase: the key (MRN, name, accession number, code) is stored only in the encrypted vault - the screens stay de-identified"))
+    if mode == "standard" and ID is not None:
+        if getattr(ID, "app_lock_enabled", False) and not ID.unlocked():
+            errs.append(dict(eid="", msg="unlock the identity vault: Standard mode stores MRN, name and accession only in the encrypted vault"))
+    if mode == "incognito" and ID is not None:
+        if not ID.vault_exists() or not ID.unlocked():
+            errs.append(dict(eid="", msg="enter the vault passphrase: the key (MRN, name, accession number, code) is stored only in the encrypted vault - the screens stay de-identified"))
     if plan["folder_is"] == "none" and plan["rows"] and any(not r.get("folder") for r in plan["rows"]):
         errs.append(dict(eid="", msg="the folder names are irrelevant: every Excel row must name its examination's folder (column 'folder') - rows " +
                          ", ".join(str(r["row"]) for r in plan["rows"] if not r.get("folder"))[:120] + " have none"))
@@ -603,7 +606,8 @@ def _commit(p, ID, add_to_queue, settings, by, mode, inc, patients, items, out):
                                                                                     mrn=mrn, name=nm, by=by)
         su = ID.add_study(patients[pkey], fk, code, display_name=e["display_name"], accession=i["accession"] if ID.unlocked() else "",
                           institution=e.get("dicom_institution", "") if ID.unlocked() else "", dicom_study_uid=e.get("dicom_study_uid", "") if ID.unlocked() else "",
-                          fingerprint=e.get("fingerprint", ""), source="add studies", by=by)
+                          fingerprint=e.get("fingerprint", ""), source="add studies", by=by,
+                          identity_basis="import:" + pkey.split(":", 1)[0])            # v5.25: mrn | pid | folder (the grouping you chose)
         (reuse_items if reuse else items).append(dict(folder_name=fk, folder="", code=fk, name="", chosen=_neutral_copy(e["chosen"], fk, settings.get("_import_src")),
                           fingerprint=e.get("fingerprint", ""), fingerprint_v1="", radiologist=i["radiologist"], grade_R=i["grade_R"], grade_L=i["grade_L"],
                           pathway=e.get("pathway") or e.get("pathway_rec") or "", pathway_rec=e.get("pathway_rec", ""), pathway_reason=e.get("pathway_reason", ""),

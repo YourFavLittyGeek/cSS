@@ -38,7 +38,7 @@ async function intelView(v){{const hq=location.hash.match(/^#intel\?tab=(\w+)/);
     <div class="tile"><div class="n">${g3((((M||Lt||{}).test||{}).percival||{}).auc)}</div><div class="t">Percival AUC · locked test${d?` (${d.test_patients} patients)`:""}</div></div>
     <div class="tile"><div class="n">${g3((((M||Lt||{}).test||{}).math||{}).auc)}</div><div class="t">MATH alone · same test</div></div>
     <div class="tile"><div class="n">${M?esc(M.version):"—"}</div><div class="t">active model${M?` · ${esc(MN[M.discovery.chosen]||M.discovery.chosen)}`:""}</div></div></div>
-   <div class="subtabs" data-pv="tabs">${[["overview","Overview"],["center",`Training Center (${s.n_selected})`],["models",`Model Center (${s.versions.length})`],["integrity","Data integrity"],["|","Advanced:"],["components","Components & agreement"],["evidence","Evidence & reliability"],["meta","Meta-model"],["explore","Candidate explorer"]].map(([k,l])=>k==="|"?`<span class="note" style="margin:0 4px 0 14px;white-space:nowrap;align-self:center">${l}</span>`:`<button data-pvt="${k}" class="${PV.tab===k?"on":""}">${l}</button>`).join("")}</div><div id="pvb"></div>`;
+   <div class="subtabs" data-pv="tabs">${[["overview","Overview"],["center",`Training Center (${s.n_selected})`],["models",`Model Center (${s.versions.length})`],["pensieve","PENSIEVE Memory"],["shadow","SHADOW ML Lab"],["vault","Data Vault"],["integrity","Data integrity"],["|","Advanced:"],["components","Components & agreement"],["evidence","Evidence & reliability"],["meta","Meta-model"],["explore","Candidate explorer"]].map(([k,l])=>k==="|"?`<span class="note" style="margin:0 4px 0 14px;white-space:nowrap;align-self:center">${l}</span>`:`<button data-pvt="${k}" class="${PV.tab===k?"on":""}">${l}</button>`).join("")}</div><div id="pvb"></div>`;
   const el=$("#pvb"),X=M||Lt;
   if(PV.tab==="overview"){el.innerHTML=pvFlow(s,X)+`<div class="card"><h3 style="margin:0 0 4px">Learning curve</h3><p class="note" style="margin-top:0">One point per training cycle. The locked test cohort (${Math.round(100*s.test_fraction)} % of patients, assigned permanently) is never used for training or selection.</p>${pvCurve(H)}</div>
     ${X?`<div class="card"><h3 style="margin:0 0 6px">Locked test cohort (${esc(X.version)})</h3><table data-pv="test">${PVMH}${pvMetricsRow("Percival Score",(X.test||{}).percival,PC.percival)}${pvMetricsRow("MATH alone",(X.test||{}).math,PC.math)}</table>
@@ -85,6 +85,178 @@ async function intelView(v){{const hq=location.hash.match(/^#intel\?tab=(\w+)/);
     ${(SH.runs||[]).map(r=>`<tr><td class="mono"><b>${esc(r.version)}</b></td><td class="note">${esc(r.at)} · ${r.studies} studies</td><td class="mono">${esc(r.active||"—")}</td><td class="mono">${r.band_agreement==null?"—":Math.round(100*r.band_agreement)+" %"}</td><td class="mono">${r.mean_abs_difference==null?"—":r.mean_abs_difference.toFixed(1)}</td><td class="mono">${r.prospective.n} (${r.prospective.css} cSS)</td><td class="mono">${g3((r.prospective.shadow||{}).auc)}</td><td class="mono" title="${r.prospective.n_fair??0} calls neither model learned from">${r.prospective.n_fair?`${g3((r.prospective.fair_shadow||{}).auc)} vs ${g3((r.prospective.active||{}).auc)} <span class="note">(n ${r.prospective.n_fair})</span>`:'<span class="mut">no calls unseen by both</span>'}</td></tr>`).join("")||'<tr><td colspan="8" class="empty">No shadow run yet.</td></tr>'}</table>
     <p class="note">AUC shadow: on expert calls this version never learned from. Head-to-head: only calls that <b>neither</b> model learned from (otherwise the active model would be judged on its own training data). Synthetic or small projects give unstable numbers; these are not clinical results.</p></div>`);
     if(j.state==="running")setTimeout(()=>V==="intel"&&PV.tab==="models"&&intelView(v),2500)}
+  if(PV.tab==="pensieve"){
+    const ps=await api("/api/percival/pensieve");
+    const summ=ps.summary||{};
+    el.innerHTML=`<div class="card" data-pv="pensieve"><div class="row" style="justify-content:space-between"><div><h3 style="margin:0 0 4px">PENSIEVE: Persistent Shared Core Memory</h3><p class="note" style="margin:0">The long-term scientific memory foundation of the Percival ecosystem. Preserves studies, candidate identities, expert ground truth, missed lesions, and component evolution.</p></div><span class="pill ${ps.vault_connected?'ok':'bad'}">${ps.vault_connected?'Vault Synchronized':'Vault Disconnected'}</span></div>
+    <div class="row" style="margin:12px 0 16px"><div class="tile"><div class="n">${ps.studies?ps.studies.length:0}</div><div class="t">studies remembered</div></div><div class="tile"><div class="n">${ps.corrections?ps.corrections.length:0}</div><div class="t">corrections recorded</div></div><div class="tile"><div class="n">${(summ.albus||{}).missed_lesions_count||0}</div><div class="t">missed lesions flagged</div></div><div class="tile"><div class="n">${ps.findings?ps.findings.length:0}</div><div class="t">scientific findings</div></div></div>
+    <div class="row" style="gap:12px;margin-bottom:16px"><div class="card" style="flex:1"><h4 style="margin:0 0 6px">ALBUS Discovery Memory</h4><p class="note" style="margin:0">${esc((summ.albus||{}).guidance||"No guidance yet")}</p></div><div class="card" style="flex:1"><h4 style="margin:0 0 6px">LUMOS 3D Visual Memory</h4><p class="note" style="margin:0">${esc((summ.lumos||{}).guidance||"No guidance yet")}</p></div><div class="card" style="flex:1"><h4 style="margin:0 0 6px">NOX Quantitative Memory</h4><p class="note" style="margin:0">${esc((summ.nox||{}).guidance||"No guidance yet")}</p></div></div>
+    <h4 style="margin:12px 0 6px">Recent Detection &amp; Review Corrections</h4>
+    <table><tr><th>ID</th><th>Study</th><th>Type</th><th>Component</th><th>Initial AI</th><th>Ground Truth</th><th>Pattern</th></tr>
+    ${(ps.corrections||[]).map(c=>`<tr><td class="mono">${esc(c.correction_id)}</td><td class="mono">${esc(c.study_id)}</td><td><b>${esc(c.event_type)}</b></td><td>${esc(c.responsible_component)}</td><td class="mono">${esc(c.initial_ai_call||"—")}</td><td class="mono"><b>${esc(c.expert_ground_truth)}</b></td><td class="note">${esc(c.failure_pattern||"—")}</td></tr>`).join("")||'<tr><td colspan="7" class="empty">No corrections recorded yet.</td></tr>'}</table>
+    <h4 style="margin:16px 0 6px">Accumulated Scientific Findings</h4>
+    <table><tr><th>ID</th><th>Category</th><th>Hypothesis</th><th>Evidence Strength</th><th>Source</th></tr>
+    ${(ps.findings||[]).map(f=>`<tr><td class="mono">${esc(f.finding_id)}</td><td>${esc(f.category)}</td><td>${esc(f.hypothesis)}</td><td><span class="pill ${f.evidence_strength==='validated'?'ok':'warn'}">${esc(f.evidence_strength)}</span></td><td class="note">${esc(f.created_by)}</td></tr>`).join("")||'<tr><td colspan="5" class="empty">No scientific findings stored yet.</td></tr>'}</table></div>`;
+  }
+  if(PV.tab==="shadow"){
+    const sh=await api("/api/percival/shadow_lab");
+    el.innerHTML=`<div class="card" data-pv="shadow-lab"><div class="row" style="justify-content:space-between"><div><h3 style="margin:0 0 4px">SHADOW ML: Autonomous Experimental Research Laboratory</h3><p class="note" style="margin:0">Continuously searches for pipeline improvements across ALBUS, LUMOS, NOX, and Percival Core. Experiments in an isolated sandbox without altering active clinical diagnostic behavior.</p></div><button class="b pri" id="shd-run">Run Autonomous Trial</button></div>
+    <h4 style="margin:14px 0 6px">Experimental Queue &amp; Completed Trials</h4>
+    <table><tr><th>Exp ID</th><th>Component</th><th>Hypothesis</th><th>Status</th><th>Baseline AUC</th><th>Exp AUC</th><th>Runtime</th></tr>
+    ${(sh.experiments||[]).map(e=>`<tr><td class="mono">${esc(e.id)}</td><td><b>${esc(e.target_component)}</b></td><td>${esc(e.hypothesis)}</td><td><span class="pill ${e.status==='completed'?'ok':'warn'}">${esc(e.status)}</span></td><td class="mono">${g3((e.baseline||{}).auc)}</td><td class="mono"><b>${g3((e.experimental||{}).auc)}</b></td><td class="note">${(e.runtime_s||0).toFixed(2)}s</td></tr>`).join("")||'<tr><td colspan="7" class="empty">No autonomous trials executed yet. Click "Run Autonomous Trial" to explore.</td></tr>'}</table>
+    <h4 style="margin:16px 0 6px">Governance Proposals &amp; Audit Trail</h4>
+    <table><tr><th>Proposal ID</th><th>Target</th><th>Rationale</th><th>Sensitivity Loss</th><th>FP Reduction</th><th>Verdict</th></tr>
+    ${(sh.proposals||[]).map(p=>`<tr><td class="mono">${esc(p.proposal_id)}</td><td><b>${esc(p.target_component)}</b></td><td>${esc(p.rationale)}</td><td class="mono">${(p.sensitivity_loss||0).toFixed(3)}</td><td class="mono">${(p.false_positive_reduction||0).toFixed(1)}/scan</td><td><span class="pill ${p.verdict==='approved'?'ok':'bad'}">${esc(p.verdict)}</span></td></tr>`).join("")||'<tr><td colspan="6" class="empty">No proposals submitted to Governance yet.</td></tr>'}</table></div>`;
+    $("#shd-run")&&($("#shd-run").onclick=async()=>{
+      toast("Starting autonomous trial across ALBUS & Core...");
+      const res=await api("/api/percival/shadow_run",{target:"ALBUS",hypothesis:"Adaptive subpial weighting recovering missed lesions",config:{formula:"formula_adaptive_subpial",threshold:0.45}});
+      toast(res.ok?`Trial completed: Exp AUC ${g3(res.metrics_experimental.auc)}`:esc(res.error),!res.ok);
+      intelView(v);
+    });
+  }
+  if(PV.tab==="vault"){
+    const ov=await api("/api/storage/overview");
+    const stList=(await api("/api/storage/studies")).studies||[];
+    const adv=await api("/api/storage/advisor");
+    const vt=await api("/api/percival/vault");
+    const st=vt.stats||{};
+    const cats=st.categories||{};
+    const fmtGb=b=>(b/(1024**3)).toFixed(2)+" GB";
+    const ssd=ov.local_ssd||{};
+    const cap=adv.capacity||{};
+
+    const statusBadge=s=>{
+      if(s==="SYNCHRONIZED")return '<span class="pill ok">Synchronized</span>';
+      if(s==="LOCAL_ONLY")return '<span class="pill">Mac SSD Only</span>';
+      if(s==="STAGED")return '<span class="pill warn">Staged for Compute</span>';
+      if(s==="ARCHIVED")return '<span class="pill ok">Archived in Vault</span>';
+      if(s==="ARCHIVED_DRIVE_REQUIRED")return '<span class="pill bad">ARCHIVED — DRIVE REQUIRED</span>';
+      return `<span class="pill">${esc(s)}</span>`;
+    };
+
+    el.innerHTML=`<div class="card" data-pv="vault">
+      <div class="row" style="justify-content:space-between">
+        <div>
+          <h3 style="margin:0 0 4px">PERCIVAL Storage Dashboard & File Manager</h3>
+          <p class="note" style="margin:0">Dual-storage topology: Fast local Mac SSD for active compute &amp; authoritative external Data Vault for long-term storage.</p>
+        </div>
+        <span class="pill ${st.connected?'ok':'bad'}">${st.connected?'Data Vault Connected':'EXTERNAL DATA VAULT DISCONNECTED (DEGRADED MODE)'}</span>
+      </div>
+
+      <div class="row" style="margin:12px 0 16px;gap:12px;flex-wrap:wrap">
+        <div class="tile"><div class="n">${ssd.free_gb||0} GB</div><div class="t">Mac SSD free (${ssd.free_pct||0}%)</div></div>
+        <div class="tile"><div class="n">${fmtGb(st.free_bytes||0)}</div><div class="t">Data Vault free</div></div>
+        <div class="tile"><div class="n">${stList.length}</div><div class="t">total studies tracked</div></div>
+        <div class="tile"><div class="n"><span class="pill ${cap.tier==='HEALTHY'?'ok':cap.tier==='WARNING'?'warn':'bad'}">${cap.tier||'OK'}</span></div><div class="t">storage advisor tier</div></div>
+      </div>
+
+      <div class="card" style="margin-bottom:14px">
+        <h4 style="margin:0 0 6px">Active Storage Topology</h4>
+        <div class="kv">
+          <div>Local Workspace (SSD)</div><div class="mono">${esc(ssd.path||"")}</div>
+          <div>External Data Vault</div><div class="mono">${esc(st.root_path||"No vault connected")}</div>
+          <div>Volume UUID</div><div class="mono">${esc(vt.volume_uuid||"Verified Local")}</div>
+          <div>Integrity Check</div><div>${esc(vt.integrity&&vt.integrity.ok?'PRAGMA OK':'CHECK')}</div>
+        </div>
+        ${st.warning?`<p class="bad" style="margin:6px 0 0">${esc(st.warning)}</p>`:""}
+      </div>
+
+      <h4 style="margin:16px 0 6px">File Manager — Studies Across Topology</h4>
+      <table>
+        <tr><th>Study Code</th><th>Lifecycle Status</th><th>Local Size</th><th>Actions</th></tr>
+        ${stList.slice(0,30).map(s=>`<tr>
+          <td class="mono"><b>${esc(s.study_code)}</b></td>
+          <td>${statusBadge(s.status)}</td>
+          <td class="mono">${s.local_size_mb||0} MB</td>
+          <td>
+            <button class="b" data-fm-tree="${esc(s.study_code)}">Files</button>
+            ${s.status!=="SYNCHRONIZED"&&st.connected?`<button class="b" data-fm-arch="${esc(s.study_code)}">Archive</button>`:""}
+            ${s.status!=="STAGED"&&st.connected?`<button class="b" data-fm-stg="${esc(s.study_code)}">Stage</button>`:""}
+            ${st.connected?`<button class="b" data-fm-vrf="${esc(s.study_code)}">Verify SHA-256</button>`:""}
+            <button class="b" data-fm-cln="${esc(s.study_code)}">Clean Staging</button>
+          </td>
+        </tr>`).join("")}
+      </table>
+      ${stList.length>30?`<p class="note">Showing 30 of ${stList.length} studies.</p>`:""}
+
+      <h4 style="margin:20px 0 6px">Storage Intelligence &amp; Reclamation Recommendations</h4>
+      ${(adv.recommendations||[]).length?`<table>
+        <tr><th>Action</th><th>Target Area</th><th>Reclaimable</th><th>Run</th></tr>
+        ${adv.recommendations.map(r=>`<tr>
+          <td><b>${esc(r.action)}</b></td>
+          <td>${esc(r.description)}</td>
+          <td class="mono">${r.reclaimable_mb} MB</td>
+          <td><button class="b pri" data-fm-prune="${esc(r.action)}" data-fm-days="${r.days_threshold}">Reclaim</button></td>
+        </tr>`).join("")}
+      </table>`:'<p class="note">No expired scratch, staging, or failed run artifacts. Storage is fully optimized.</p>'}
+
+      <h4 style="margin:20px 0 6px">Vault Scientific Distribution</h4>
+      <table><tr><th>Category</th><th>Artifacts</th><th>Size</th></tr>
+      <tr><td><b>original_mri</b></td><td>Raw DICOM and NIfTI acquisitions</td><td class="mono">${fmtGb(cats.original_mri||0)}</td></tr>
+      <tr><td><b>processed_mri</b></td><td>Resampled volumes &amp; masks</td><td class="mono">${fmtGb(cats.processed_mri||0)}</td></tr>
+      <tr><td><b>PENSIEVE</b></td><td>Persistent memory database &amp; snapshots</td><td class="mono">${fmtGb(cats.PENSIEVE||0)}</td></tr>
+      <tr><td><b>models</b></td><td>Weights for ALBUS, LUMOS, NOX, Percival Core</td><td class="mono">${fmtGb(cats.models||0)}</td></tr>
+      <tr><td><b>backups</b></td><td>Independent recovery archives</td><td class="mono">${fmtGb(cats.backups||0)}</td></tr></table>
+
+      <div class="row" style="gap:10px;margin-top:16px">
+        <button class="b pri" id="vt-backup">Create Vault Backup</button>
+        <button class="b" id="vt-eject">Safe Eject Storage</button>
+        <button class="b" id="vt-health">Run Full System Health Check</button>
+      </div>
+    </div>`;
+
+    el.querySelectorAll("[data-fm-tree]").forEach(b=>b.onclick=async()=>{
+      const code=b.dataset.fmTree;
+      const t=await api("/api/storage/tree?code="+encodeURIComponent(code));
+      alert(`Study: ${code}\nLocal files (${t.local_files_count}):\n${t.local_files.map(f=>f.name+" ("+f.location+")").join("\n") || "None"}\n\nVault files (${t.vault_files_count}):\n${t.vault_files.map(f=>f.name+" ("+f.location+")").join("\n") || "None"}`);
+    });
+    el.querySelectorAll("[data-fm-arch]").forEach(b=>b.onclick=async()=>{
+      const code=b.dataset.fmArch;
+      const r=await api("/api/storage/archive",{code});
+      toast(r.files_archived?`Archived ${r.files_archived} files to Data Vault`:`Failed to archive: ${r.error||"unknown error"}`,!r.files_archived);
+      intelView(v);
+    });
+    el.querySelectorAll("[data-fm-stg]").forEach(b=>b.onclick=async()=>{
+      const code=b.dataset.fmStg;
+      const r=await api("/api/storage/stage",{code});
+      toast(r.files_staged?`Staged ${r.files_staged} files to local SSD`:r.error,!r.files_staged);
+      intelView(v);
+    });
+    el.querySelectorAll("[data-fm-vrf]").forEach(b=>b.onclick=async()=>{
+      const code=b.dataset.fmVrf;
+      const r=await api("/api/storage/verify",{code});
+      alert(`Study ${code} Checksum Verification:\nAll Match: ${r.all_match?'YES (Identical SHA-256)':'MISMATCH'}\nFiles compared: ${r.common_files_count}`);
+    });
+    el.querySelectorAll("[data-fm-cln]").forEach(b=>b.onclick=async()=>{
+      const code=b.dataset.fmCln;
+      const r=await api("/api/storage/clean",{code});
+      toast(`Cleaned staging: reclaimed ${r.reclaimed_mb} MB`);
+      intelView(v);
+    });
+    el.querySelectorAll("[data-fm-prune]").forEach(b=>b.onclick=async()=>{
+      const act=b.dataset.fmPrune,days=b.dataset.fmDays;
+      const r=await api("/api/storage/prune",{action:act,days:+days});
+      toast(`Reclaimed ${r.reclaimed_mb} MB (${r.items_removed} items)`);
+      intelView(v);
+    });
+    $("#vt-health")&&($("#vt-health").onclick=async()=>{
+      const hc=await api("/api/health");
+      alert(`PERCIVAL Startup Health Check:\nOverall Status: ${hc.status}\nPassed: ${hc.passed} / ${hc.total_checks}\nWarnings: ${hc.warnings}\nDegraded: ${hc.degraded}\nBlocked: ${hc.blocked}\nRepairs Applied: ${hc.repairs_applied.length}`);
+    });
+    $("#vt-backup")&&($("#vt-backup").onclick=async()=>{
+      const dest=prompt("Enter destination directory for scientific backup:");
+      if(!dest||!dest.trim())return;
+      const r=await api("/api/percival/vault_backup",{destination:dest.trim()});
+      toast(r.ok?r.message:esc(r.error),!r.ok);
+      intelView(v);
+    });
+    $("#vt-eject")&&($("#vt-eject").onclick=async()=>{
+      if(!confirm("Safely prepare external Data Vault for disconnection? Active jobs will be checkpointed."))return;
+      const r=await api("/api/percival/vault_eject",{});
+      toast(r.ok?r.message:esc(r.error),!r.ok);
+      intelView(v);
+    });
+  }
   if(PV.tab==="evidence"&&X)el.innerHTML=pvEvidence(X,s);
   if((PV.tab==="components"||PV.tab==="meta"||PV.tab==="evidence")&&!X)el.innerHTML='<div class="card"><p class="note">No model yet - start a training cycle.</p></div>';
   v.querySelectorAll("[data-pvt]").forEach(b=>b.onclick=()=>{PV.tab=b.dataset.pvt;intelView(v)});

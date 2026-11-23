@@ -105,7 +105,7 @@ def sens_spec(y, p, t):
 
 
 # ------------------------------------------------------------------ patient partitions
-ENGINE = "percival-engine/5.24"
+ENGINE = "percival-engine/5.25"
 
 
 def folds(groups, k=5, seed=0):
@@ -263,7 +263,10 @@ def _select(oofs, y, g, order):
            for k, v in oofs.items()}
     ok = {k: r for k, r in res.items() if r.get("logloss") is not None}
     if not ok: return None, res
-    best = min(ok, key=lambda k: ok[k]["logloss"]); lim = ok[best]["logloss"] + (ok[best].get("logloss_se") or 0)
+    best = min(ok, key=lambda k: ok[k]["logloss"])
+    se = ok[best].get("logloss_se")
+    has_se = se is not None and np.isfinite(se) and se > 0
+    lim = ok[best]["logloss"] + (se if has_se else 0.0)
     return next(k for k in order if k in ok and ok[k]["logloss"] <= lim), res
 
 
@@ -447,7 +450,9 @@ class Meta:
 def discover(Z, y, g, w=None, k=5, seed=0):
     """compare the meta-model candidates by patient-grouped CV on the out-of-fold component table; select by the 1-SE rule"""
     y = np.asarray(y, float); n_pos, n_neg = int(y.sum()), int((1 - y).sum()); res = {}
-    kinds = [s for s in SIMPLICITY if s != "boosted" or min(n_pos, n_neg) >= 50]
+    pos_pts = len({p for p, t in zip(g, y) if t == 1})
+    neg_pts = len({p for p, t in zip(g, y) if t == 0})
+    kinds = [s for s in SIMPLICITY if s != "boosted" or (min(n_pos, n_neg) >= 50 and min(pos_pts, neg_pts) >= 8)]
     for kind in kinds:
         oof = np.full(len(y), np.nan)
         for tr, te in folds(g, k, seed + 7):
@@ -456,12 +461,17 @@ def discover(Z, y, g, w=None, k=5, seed=0):
             try: oof[te] = Meta(kind).fit(Ztr, y[tr], np.asarray(g)[tr], None if w is None else w[tr]).logit(Zte)
             except Exception: pass
         res[kind] = dict(metrics=metrics(y, sigmoid(oof), g), oof=oof)
-    if "boosted" not in kinds: res["boosted"] = dict(metrics=dict(skipped=f"needs >= 50 candidates per class (cSS {n_pos}, not cSS {n_neg})"), oof=None)
+    if "boosted" not in kinds:
+        res["boosted"] = dict(metrics=dict(skipped=f"needs >= 50 candidates and >= 8 patients per class (cSS {n_pos} in {pos_pts} pts, not cSS {n_neg} in {neg_pts} pts)"), oof=None)
     ok = {k_: v for k_, v in res.items() if v["oof"] is not None and v["metrics"].get("logloss") is not None}
-    best = min(ok, key=lambda k_: ok[k_]["metrics"]["logloss"]); lim = ok[best]["metrics"]["logloss"] + (ok[best]["metrics"].get("logloss_se") or 0)
+    best = min(ok, key=lambda k_: ok[k_]["metrics"]["logloss"])
+    se = ok[best]["metrics"].get("logloss_se")
+    has_se = se is not None and np.isfinite(se) and se > 0
+    lim = ok[best]["metrics"]["logloss"] + (se if has_se else 0.0)
     chosen = next(k_ for k_ in SIMPLICITY if k_ in ok and ok[k_]["metrics"]["logloss"] <= lim)
+    rule_desc = "simplest model within one bootstrap SE of the lowest cross-validated log loss (1-SE rule)" if has_se else "lowest cross-validated log loss (bootstrap SE unavailable)"
     return dict(results={k_: v["metrics"] for k_, v in res.items()}, best_logloss=best, chosen=chosen,
-                rule="simplest model within one bootstrap SE of the lowest cross-validated log loss (1-SE rule)"), {k_: v["oof"] for k_, v in res.items()}
+                rule=rule_desc), {k_: v["oof"] for k_, v in res.items()}
 
 
 def thresholds(y, p):

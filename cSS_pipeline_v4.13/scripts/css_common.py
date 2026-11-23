@@ -25,23 +25,58 @@ def norm_call(c):
     return "Vessel" if isinstance(c, str) and c.strip() == "Vein" else c
 
 
-def match_calls(cand, calls, tol_vox=2.0, tol_vol=0.15):
+def match_calls(cand, calls, tol_vox=2.0, tol_vol=0.15, ambiguity_margin_vox=0.5):
     """Re-attach reader calls to the CURRENT candidate list by fingerprint (centroid within
     tol_vox voxels, volume within tol_vol), so re-running the detector can never move a call
     onto a different lesion. Returns ({cand_id: call}, n_dropped), or (None, n) for a legacy
-    calls file that has no fingerprint columns."""
+    calls file that has no fingerprint columns.
+    Enhanced safety (v5.25):
+      - Enforces anatomical hemisphere matching when 'hemi' is available.
+      - Detects spatial ambiguity: drops match if two candidates are within ambiguity_margin_vox.
+      - Enforces one-to-one constraint: prevents silent overwrites if multiple calls contend for one candidate."""
     if not all(c in calls.columns for c in FP):
         return None, len(calls)
     out, dropped = {}, 0
     C = cand[["cand_id"] + FP].to_numpy(float)
+    has_hemi = "hemi" in cand.columns and "hemi" in calls.columns
+    cand_hemi = cand["hemi"].astype(str).to_numpy() if has_hemi else None
+
+    matched_cand_to_calls = {}
+
     for _, r in calls.iterrows():
         d = np.sqrt(((C[:, 1:4] - r[FP[:3]].to_numpy(float)) ** 2).sum(1))
         dv = np.abs(C[:, 4] - float(r.volume_mm3)) / max(float(r.volume_mm3), 1.0)
-        ok = np.where((d <= tol_vox) & (dv <= tol_vol))[0]
-        if len(ok):
-            out[int(C[ok[d[ok].argmin()], 0])] = norm_call(r.call)
-        else:
+        valid_mask = (d <= tol_vox) & (dv <= tol_vol)
+        if has_hemi and pd.notna(r.get("hemi")):
+            valid_mask &= (cand_hemi == str(r["hemi"]))
+        ok = np.where(valid_mask)[0]
+        if len(ok) == 0:
             dropped += 1
+            continue
+
+        sorted_order = np.argsort(d[ok])
+        best_idx = ok[sorted_order[0]]
+        best_dist = d[best_idx]
+
+        # Check for ambiguity: multiple candidates equally close
+        if len(ok) > 1:
+            second_best_dist = d[ok[sorted_order[1]]]
+            if (second_best_dist - best_dist) < ambiguity_margin_vox:
+                # Ambiguous: cannot reliably determine which candidate owns the call
+                dropped += 1
+                continue
+
+        cid = int(C[best_idx, 0])
+        call_val = norm_call(r.call)
+        matched_cand_to_calls.setdefault(cid, []).append(call_val)
+
+    for cid, call_list in matched_cand_to_calls.items():
+        if len(set(call_list)) == 1:
+            out[cid] = call_list[0]
+        else:
+            # Conflicting calls matched to same candidate -> drop for manual review
+            dropped += len(call_list)
+
     return out, dropped
 
 
