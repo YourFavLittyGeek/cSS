@@ -538,14 +538,28 @@ def view(plan):
 
 
 def _neutral_copy(chosen, fk, root):
-    """copy the chosen series into the project under NEUTRAL names (APFS clone when possible: no extra disk space) so that no source
-    path - which can hold an MRN or a patient name - is stored by the app: root/<file key>/<TYPE>_series.<ext> (+ sidecar) or
+    """copy the chosen series into the project under NEUTRAL names (fast copy or APFS clone when on same device: no extra disk space)
+    so that no source path - which can hold an MRN or a patient name - is stored by the app: root/<file key>/<TYPE>_series.<ext> (+ sidecar) or
     root/<file key>/<TYPE>/ for a DICOM series"""
     import shutil, subprocess
     if not root: return dict(chosen)
     out = {}; d = os.path.join(root, fk); os.makedirs(d, exist_ok=True)
+    try:
+        dest_dev = os.stat(d).st_dev
+    except Exception:
+        dest_dev = None
+
     def cp(a, b):
-        if subprocess.run(["cp", "-c", a, b], capture_output=True).returncode != 0: shutil.copy2(a, b)
+        try:
+            # Check if same filesystem device before attempting clone
+            if dest_dev is not None and os.stat(a).st_dev == dest_dev:
+                if subprocess.run(["cp", "-c", a, b], capture_output=True).returncode == 0:
+                    return
+        except Exception:
+            pass
+        # High performance copy across filesystems (e.g. ExFAT USB to internal APFS)
+        shutil.copyfile(a, b)
+
     for k, src in chosen.items():
         if os.path.isdir(src):
             t = os.path.join(d, k); os.makedirs(t, exist_ok=True)

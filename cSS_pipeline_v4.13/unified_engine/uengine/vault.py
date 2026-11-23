@@ -382,9 +382,22 @@ class PercivalDataVault:
                 raise ValueError(f"Path containment violation out of vault: {resolved}")
         return resolved
 
+    def pensieve_dir(self) -> str:
+        """Return the dedicated Pensieve directory in the Vault for backups, snapshots, and journals."""
+        p = self.path("Pensieve")
+        for sub in ("Database_Backups", "Journals", "Snapshots", "Historical_Backups", "Manifests"):
+            os.makedirs(os.path.join(p, sub), exist_ok=True)
+        return p
+
     def pensieve_db_path(self) -> str:
-        """Return the authoritative path to the persistent PENSIEVE SQLite database."""
-        return self.path("PENSIEVE", "pensieve.db")
+        """Return the authoritative path to the persistent PENSIEVE SQLite database in the Vault."""
+        p_canon = os.path.join(self.root_path, "Pensieve", "pensieve.db")
+        if os.path.exists(p_canon):
+            return p_canon
+        p_upper = os.path.join(self.root_path, "PENSIEVE", "pensieve.db")
+        if os.path.exists(p_upper):
+            return p_upper
+        return p_canon
 
     def get_storage_stats(self) -> Dict[str, Any]:
         """Return capacity, free space, and category sizes for the storage dashboard."""

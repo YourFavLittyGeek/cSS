@@ -1282,6 +1282,8 @@ def storage_get(op, q):
             ov = StorageService.get_overview(B, vault_root=vault_root, force_refresh=force)
             ov["fm_overview"] = fm.get_storage_overview()
             return ov
+        if op == "diagnostics":
+            return dict(ok=True, tests=StorageService.run_storage_diagnostics(B, vault_root=vault_root))
         if op == "studies": return dict(studies=fm.list_studies(filter_status=q.get("status")))
         if op == "tree": return fm.browse_study_tree(q.get("code", ""))
         if op == "advisor": return sa.generate_recommendations()
@@ -1325,6 +1327,42 @@ def storage_post(op, d):
             return res
         return dict(ok=False, error=f"unknown storage post op {op}")
     except Exception as e: return dict(ok=False, error=f"{type(e).__name__}: {e}")
+
+def workspace_get(op, q):
+    try:
+        from uengine.study_workspace_manager import StudyWorkspaceManager
+        swm = StudyWorkspaceManager(B, vault_root=SET.get("vault_mount"))
+        if op == "queue":
+            return dict(ok=True, queue=swm.get_queue())
+        if op == "studies":
+            return dict(ok=True, studies=swm.list_studies(q.get("state")))
+        if op == "study":
+            return dict(ok=True, study=swm.get_study(q.get("study_id", "")))
+        if op == "capacity":
+            return dict(ok=True, capacity=swm.estimate_capacity(q.get("study_id", "")))
+        return dict(ok=False, error=f"unknown workspace op {op}")
+    except Exception as e: return dict(ok=False, error=str(e))
+
+def workspace_post(op, d):
+    try:
+        from uengine.study_workspace_manager import StudyWorkspaceManager
+        swm = StudyWorkspaceManager(B, vault_root=SET.get("vault_mount"))
+        if op == "stage":
+            ok, msg, rec = swm.stage_study(d.get("study_id", ""), d.get("source_paths"))
+            return dict(ok=ok, message=msg, study=rec)
+        if op == "archive":
+            ok, msg = swm.archive_study(d.get("study_id", ""))
+            return dict(ok=ok, message=msg)
+        if op == "clean":
+            ok, msg = swm.clean_eligible_workspace(d.get("study_id", ""), force=bool(d.get("force", False)))
+            return dict(ok=ok, message=msg)
+        if op == "enqueue":
+            return swm.enqueue_study(d.get("study_id", ""), priority=int(d.get("priority", 0)))
+        if op == "process_next":
+            ok, msg, cur = swm.process_next_in_queue()
+            return dict(ok=ok, message=msg, current=cur)
+        return dict(ok=False, error=f"unknown workspace post op {op}")
+    except Exception as e: return dict(ok=False, error=str(e))
 
 def vault_get(op, q):
     try:
@@ -2271,6 +2309,7 @@ class H(BaseHTTPRequestHandler):
             if u.path.startswith("/api/xs/"): return self.send(xs_get(u.path[8:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/kp/"): return self.send(kp_get(u.path[8:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/percival/"): return self.send(pg_get(u.path[14:], {k: v[0] for k, v in parse_qs(u.query).items()}))
+            if u.path.startswith("/api/workspace/"): return self.send(workspace_get(u.path[15:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/storage/"): return self.send(storage_get(u.path[13:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/vault/"): return self.send(vault_get(u.path[11:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/app/"): return self.send(app_lifecycle_get(u.path[9:], {k: v[0] for k, v in parse_qs(u.query).items()}))
@@ -2435,6 +2474,7 @@ class H(BaseHTTPRequestHandler):
             if u.path.startswith("/api/sa/"): return self.send(sa_post(u.path[8:], d))
             if u.path.startswith("/api/kp/"): return self.send(kp_post(u.path[8:], d))
             if u.path.startswith("/api/percival/"): return self.send(pg_post(u.path[14:], d))
+            if u.path.startswith("/api/workspace/"): return self.send(workspace_post(u.path[15:], d))
             if u.path.startswith("/api/storage/"): return self.send(storage_post(u.path[13:], d))
             if u.path.startswith("/api/vault/"): return self.send(vault_post(u.path[11:], d))
             if u.path.startswith("/api/app/"): return self.send(app_lifecycle_post(u.path[9:], d))

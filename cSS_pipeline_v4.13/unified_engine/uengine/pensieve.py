@@ -22,6 +22,7 @@ import time
 import uuid
 import sqlite3
 import hashlib
+import shutil
 from typing import Dict, List, Optional, Any, Tuple, Union
 from uengine.vault import get_vault, PercivalDataVault
 
@@ -244,8 +245,10 @@ CREATE INDEX IF NOT EXISTS idx_missed_study ON missed_lesions_memory(study_id);
 CREATE INDEX IF NOT EXISTS idx_review_study ON study_review_status(study_id);
 """
 
+DEFAULT_LIVE_PENSIEVE_DB = os.path.expanduser("~/Percival_project/app_data/pensieve.db")
+
 class PensieveCoreMemory:
-    def __init__(self, vault: Optional[Union[PercivalDataVault, str]] = None):
+    def __init__(self, vault: Optional[Union[PercivalDataVault, str]] = None, live_db_path: Optional[str] = None):
         if isinstance(vault, str):
             if os.path.exists(os.path.join(vault, "manifest", "vault_manifest.json")) or os.path.exists(os.path.join(vault, "PERCIVAL_VAULT")):
                 try:
@@ -256,16 +259,32 @@ class PensieveCoreMemory:
                 self.vault = get_vault()
         else:
             self.vault = vault or get_vault()
+
         self.local_journal = DurableLocalJournal()
-        if self.vault.is_connected():
-            self._db_path = self.vault.pensieve_db_path()
-            self._init_db()
+
+        # SSD vs HDD Hybrid Architecture:
+        # Live Pensieve database resides on high-speed Mac SSD for zero-latency review & processing.
+        # Verified backups, snapshots, and journals sync into PERCIVAL_VAULT/Pensieve/ on external HDD.
+        if live_db_path:
+            self._live_db_path = os.path.abspath(live_db_path)
+        elif self.vault and self.vault.root_path and any(p in self.vault.root_path for p in ("/tmp", "/var/folders", "test", "temp")):
+            self._live_db_path = os.path.join(self.vault.root_path, "live_pensieve.db")
         else:
-            self._db_path = None
+            self._live_db_path = DEFAULT_LIVE_PENSIEVE_DB
+
+        self._db_path = self._live_db_path
+        self._init_db()
+
+        if self.vault.is_connected():
+            try:
+                self.vault.pensieve_dir()
+            except Exception:
+                pass
 
     def _get_connection(self) -> sqlite3.Connection:
-        if not self.vault.is_connected() or not self._db_path:
-            raise RuntimeError("Cannot access PENSIEVE: Percival Data Vault is disconnected.")
+        if not self._db_path:
+            self._db_path = self._live_db_path
+        os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
         con = sqlite3.connect(self._db_path, timeout=30.0)
         con.row_factory = sqlite3.Row
         con.execute("PRAGMA foreign_keys = ON;")
@@ -289,6 +308,83 @@ class PensieveCoreMemory:
             except Exception:
                 pass
         return {"ok": True, "flushed": flushed, "closed": True}
+
+    def backup_to_vault(self, notes: Optional[str] = None) -> Dict[str, Any]:
+        """Perform verified online SQLite backup from local Mac SSD into external PERCIVAL_VAULT/Pensieve/."""
+        if not self.vault.is_connected():
+            return {"ok": False, "error": "External Data Vault is disconnected."}
+
+        p_dir = self.vault.pensieve_dir()
+        backup_dir = os.path.join(p_dir, "Database_Backups")
+        os.makedirs(backup_dir, exist_ok=True)
+
+        now_str = time.strftime("%Y%m%d_%H%M%S", time.gmtime())
+        dest_filename = f"pensieve_backup_{now_str}.db"
+        dest_path = os.path.join(backup_dir, dest_filename)
+
+        # 1. Flush WAL on live database
+        self.flush_and_close()
+
+        # 2. SQLite Online Backup API
+        try:
+            with sqlite3.connect(self._live_db_path) as src_con:
+                with sqlite3.connect(dest_path) as dest_con:
+                    src_con.backup(dest_con)
+
+            # 3. Verify backup integrity
+            with sqlite3.connect(dest_path) as verify_con:
+                res = verify_con.execute("PRAGMA integrity_check;").fetchone()
+                if not res or res[0] != "ok":
+                    raise IOError(f"Backup integrity check failed: {res}")
+
+            # 4. Compute SHA-256
+            h = hashlib.sha256()
+            with open(dest_path, "rb") as f:
+                while chunk := f.read(1024 * 1024):
+                    h.update(chunk)
+            csum = h.hexdigest()
+
+            # 5. Also update canonical master mirror in vault
+            master_dest = self.vault.pensieve_db_path()
+            os.makedirs(os.path.dirname(master_dest), exist_ok=True)
+            shutil.copy2(dest_path, master_dest + ".tmp")
+            os.replace(master_dest + ".tmp", master_dest)
+
+            manifest_entry = {
+                "backup_file": dest_filename,
+                "backup_path": dest_path,
+                "sha256": csum,
+                "size_bytes": os.path.getsize(dest_path),
+                "created_at": time.time(),
+                "notes": notes or "Automated verified Vault backup"
+            }
+            manifest_file = os.path.join(p_dir, "Manifests", "backup_history.json")
+            os.makedirs(os.path.dirname(manifest_file), exist_ok=True)
+            history = []
+            if os.path.exists(manifest_file):
+                try:
+                    with open(manifest_file, "r") as f:
+                        history = json.load(f)
+                except Exception:
+                    pass
+            history.append(manifest_entry)
+            with open(manifest_file + ".tmp", "w") as f:
+                json.dump(history, f, indent=2)
+            os.replace(manifest_file + ".tmp", manifest_file)
+
+            return {
+                "ok": True,
+                "backup_path": dest_path,
+                "sha256": csum,
+                "size_bytes": manifest_entry["size_bytes"]
+            }
+        except Exception as e:
+            if os.path.exists(dest_path):
+                try:
+                    os.remove(dest_path)
+                except Exception:
+                    pass
+            return {"ok": False, "error": f"Backup to vault failed: {e}"}
 
     def _init_db(self) -> None:
         """Initialize database tables and indices in the vault."""

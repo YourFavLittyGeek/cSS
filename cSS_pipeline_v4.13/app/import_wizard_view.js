@@ -135,7 +135,20 @@ function iwPreview(){const P=IW.plan,el=$("#iw-prev");if(!el||!P)return;const st
     const nr=P.exams.filter(e=>e.include&&e.dup_choice==="replace").length,nk=P.exams.filter(e=>e.include&&e.dup_choice==="keep_ml").length;let rc="";
     if(nr){rc=prompt(`${nr} existing studies will be PURGED (every file to the Trash) and replaced${P.exams.some(e=>e.include&&e.dup_choice==="replace"&&e.dup_other&&e.dup_other.has_calls)?" - some have reviewer calls (expert labels), which are deleted too":""}.${nk?` ${nk} existing studies keep their results for ML under a new identifier.`:""}\n\nType REPLACE to confirm.`)||"";if(rc.trim()!=="REPLACE")return toast("not imported: REPLACE was not typed",1)}
     else if(nk&&!confirm(`${nk} existing studies will be removed - their results are kept for machine learning under a new identifier (RET-…) and their images go to the Trash. Continue?`))return;
-    const r=await api("/api/id/import/commit",{plan:P.id,confirm:true,cohort:P.processing.cohort,replace_confirm:rc});if(!r.ok)return toast(esc(r.error),1);IW.done=r;IW.plan=null;IW.tab="series";iwDone()})}
+    const btn=$("#iw-imp");if(btn){btn.disabled=true;btn.textContent="Registering & starting import…";}
+    try{
+      const r=await api("/api/id/import/commit",{plan:P.id,confirm:true,cohort:P.processing.cohort,replace_confirm:rc});
+      if(!r.ok){if(btn){btn.disabled=false;btn.textContent=`Import ${P.n_include} examination(s) and start ▶`;}return toast(esc(r.error),1);}
+      toast(`Successfully imported ${r.imported?r.imported.length:P.n_include} examination(s). Starting processing…`);
+      IW.folder="";IW.plan=null;IW.done=null;IW.tab="series";
+      const fIn=$("#iw-f");if(fIn)fIn.value="";
+      const prev=$("#iw-prev");if(prev)prev.innerHTML="";
+      go("act");
+    }catch(err){
+      if(btn){btn.disabled=false;btn.textContent=`Import ${P.n_include} examination(s) and start ▶`;}
+      toast(`Import failed: ${esc(err.message)}`,1);
+    }
+  });}
 function iwMeasure(){const c=$('[data-iw="preview"]'),t=$('[data-iw="exams"]')||$('[data-iw="series-review"]');if(!c||!t)return;      // layout self-check (tests read these)
   c.dataset.overflow=t.scrollWidth>c.clientWidth+2?"yes":"no";const bad=[];
   t.querySelectorAll("td").forEach(td=>{const r=td.getBoundingClientRect();td.querySelectorAll("input,select,button").forEach(x=>{const q=x.getBoundingClientRect();if(q.width&&(q.right>r.right+1||q.left<r.left-1))bad.push(x.tagName.toLowerCase()+(x.type?":"+x.type:""))})});

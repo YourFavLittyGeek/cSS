@@ -145,5 +145,17 @@ class TestPensieveCoreMemory(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(len(self.pensieve.get_missed_lesions("DEV02")), 0)
 
+    def test_backup_to_vault(self):
+        self.pensieve.remember_study("DEV03", "pt_dev3", "synthetic", "development")
+        res = self.pensieve.backup_to_vault("Test automated backup")
+        self.assertTrue(res.get("ok"))
+        self.assertTrue(os.path.exists(res["backup_path"]))
+        self.assertTrue(res.get("sha256"))
+        self.assertGreater(res.get("size_bytes", 0), 0)
+        # Verify Pensieve directory structure in vault
+        p_dir = self.vault.pensieve_dir()
+        self.assertTrue(os.path.isdir(os.path.join(p_dir, "Database_Backups")))
+        self.assertTrue(os.path.isdir(os.path.join(p_dir, "Manifests")))
+
 if __name__ == "__main__":
     unittest.main()

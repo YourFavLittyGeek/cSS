@@ -296,6 +296,7 @@ async function renderSectionStorageOverview(el) {
       <span class="note">Last measured: <b>${esc(data.updated_at || "Just now")}</b></span>
       <div class="row" style="gap:8px;margin:0">
         <button class="b sm" id="so-refresh">↻ Refresh Storage Capacity</button>
+        <button class="b sm" id="so-diagnostics">Run Storage Diagnostics…</button>
         <button class="b sm pri" id="so-free-mac">Free Up Mac Space…</button>
       </div>
     </div>
@@ -375,6 +376,61 @@ async function renderSectionStorageOverview(el) {
     const r = await api("/api/storage/overview?force=1");
     SV.storageData = r;
     renderSectionStorageOverview(el);
+  };
+
+  $("#so-diagnostics").onclick = async () => {
+    const btn = $("#so-diagnostics");
+    btn.disabled = true;
+    btn.textContent = "Running Diagnostics…";
+    try {
+      const res = await api("/api/storage/diagnostics");
+      const tests = res.tests || [];
+      const passCount = tests.filter(t => t.status === "PASS").length;
+      const warnCount = tests.filter(t => t.status === "WARNING").length;
+      const failCount = tests.filter(t => t.status === "FAIL").length;
+      
+      const badge = failCount > 0 ? "bad" : (warnCount > 0 ? "warn" : "ok");
+      const summaryText = `${passCount} PASS · ${warnCount} WARNING · ${failCount} FAIL`;
+
+      $("#dlg").innerHTML = `
+        <h2>Storage &amp; Data Integrity Diagnostics</h2>
+        <div class="row" style="margin-bottom:12px">
+          <span class="pill ${badge}" style="font-weight:700">${summaryText}</span>
+        </div>
+        <div style="max-height:60vh;overflow-y:auto;border:1px solid var(--bd);border-radius:6px">
+          <table style="width:100%;font-size:12.5px;border-collapse:collapse">
+            <thead>
+              <tr style="background:var(--panel2);text-align:left">
+                <th style="padding:8px">Test</th>
+                <th style="padding:8px">Status</th>
+                <th style="padding:8px">Details</th>
+                <th style="padding:8px">Recommended Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${tests.map(t => `
+                <tr style="border-top:1px solid var(--bd)">
+                  <td style="padding:7px 8px"><b>${esc(t.name)}</b></td>
+                  <td style="padding:7px 8px"><span class="pill ${t.status === 'PASS' ? 'ok' : (t.status === 'WARNING' ? 'warn' : 'bad')}">${esc(t.status)}</span></td>
+                  <td style="padding:7px 8px;color:var(--txt)">${esc(t.details)}</td>
+                  <td style="padding:7px 8px;color:var(--mut)">${esc(t.action)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        <div class="acts" style="display:flex;justify-content:flex-end;margin-top:14px">
+          <button class="b pri" id="diag-close">Close</button>
+        </div>
+      `;
+      $("#shade").style.display = "flex";
+      $("#diag-close").onclick = () => { $("#shade").style.display = "none"; };
+    } catch (e) {
+      toast(`Diagnostics failed: ${e.message}`, 1);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Run Storage Diagnostics…";
+    }
   };
 
   $("#so-free-mac").onclick = () => {
