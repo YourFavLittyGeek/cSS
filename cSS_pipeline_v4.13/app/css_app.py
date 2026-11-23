@@ -1303,6 +1303,30 @@ def _safe_path_segment(v):
     """Phase 0: a value that is joined into a file path must be one plain path segment (no traversal)"""
     return isinstance(v, str) and v not in ("", ".", "..") and "/" not in v and "\\" not in v and "\x00" not in v and ".." not in v
 
+def _transfer_guard(scope, op, d):
+    """Phase 1e.2: migrations are disabled; maintenance that could remove, move or clean data an unfinished transfer
+    job still needs (for a resume / discard) is refused. Returns a refusal dict, or None. Read-only journal view."""
+    from uengine.transfer import guards as G
+    d = d if isinstance(d, dict) else {}
+    if (scope, op) in (("storage", "migrate_execute"), ("migration", "execute")):
+        return dict(ok=False, error=G.MIGRATIONS_DISABLED, migration_disabled=True)
+    try:
+        if (scope, op) in (("storage", "prune"), ("storage", "free_space_execute"), ("clean", "execute"), ("clean", "quarantine_purge")):
+            jobs = G.unfinished_jobs(B)
+            return G.refusal(jobs, f"{scope}/{op}") if jobs else None
+        code = {("storage", "delete"): d.get("code"), ("storage", "clean"): d.get("code"),
+                ("clean", "delete_study"): d.get("study_code"), ("workspace", "clean"): d.get("study_id")}.get((scope, op))
+        if code is not None:
+            jobs = G.conflicts_with_study(B, str(code))
+            return G.refusal(jobs, f"{scope}/{op} of {code}") if jobs else None
+        if scope == "files" and op in ("delete", "move", "rename"):
+            p = d.get("path") or d.get("src") or ""
+            jobs = G.conflicts_with_paths(B, [os.path.abspath(p)]) if p else []
+            return G.refusal(jobs, f"files/{op} of {p}") if jobs else None
+    except Exception as e:                                   # cannot tell -> do not allow the destructive operation
+        return dict(ok=False, error=f"Refused: unfinished transfers could not be checked ({type(e).__name__}: {e})")
+    return None
+
 def files_get(op, q):
     try:
         from uengine.file_manager import FileManager
@@ -1323,6 +1347,9 @@ def files_get(op, q):
         return dict(ok=False, error=f"file manager error: {type(e).__name__}: {e}")
 
 def files_post(op, d):
+    _g = _transfer_guard("files", op, d)                   # Phase 1e.2
+    if _g is not None:
+        return _g
     try:
         from uengine.file_manager import FileManager
         fm = FileManager(B, vault_root=SET.get("vault_mount"))
@@ -1414,6 +1441,9 @@ def storage_get(op, q):
     except Exception as e: return dict(error=f"{type(e).__name__}: {e}")
 
 def storage_post(op, d):
+    _g = _transfer_guard("storage", op, d)                   # Phase 1e.2
+    if _g is not None:
+        return _g
     try:
         from uengine.file_manager import FileManager
         from uengine.storage_advisor import StorageAdvisor
@@ -1480,6 +1510,9 @@ def workspace_get(op, q):
     except Exception as e: return dict(ok=False, error=str(e))
 
 def workspace_post(op, d):
+    _g = _transfer_guard("workspace", op, d)                   # Phase 1e.2
+    if _g is not None:
+        return _g
     try:
         from uengine.study_workspace_manager import StudyWorkspaceManager
         swm = StudyWorkspaceManager(B, vault_root=SET.get("vault_mount"))
@@ -1712,6 +1745,9 @@ def clean_get(op, q):
     except Exception as e: return dict(ok=False, error=str(e))
 
 def clean_post(op, d):
+    _g = _transfer_guard("clean", op, d)                   # Phase 1e.2
+    if _g is not None:
+        return _g
     try:
         from uengine.cleaning_manager import CleaningManager
         cm = CleaningManager(B, vault_root=SET.get("vault_mount"))
@@ -1847,6 +1883,9 @@ def migration_get(op, q):
     except Exception as e: return dict(error=f"{type(e).__name__}: {e}")
 
 def migration_post(op, d):
+    _g = _transfer_guard("migration", op, d)                   # Phase 1e.2
+    if _g is not None:
+        return _g
     try:
         from uengine.legacy_migration import LegacyMigrationEngine
         lme = LegacyMigrationEngine(B)
