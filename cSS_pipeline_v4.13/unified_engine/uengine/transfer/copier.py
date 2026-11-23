@@ -36,6 +36,7 @@ try:
 except ImportError:  # pragma: no cover - non-POSIX
     fcntl = None
 
+from .crashpoints import crash
 from .models import CommitMode
 from ..safety import PathPolicy, SafetyError, inside
 from ..unified_transfer_engine import flush_durability
@@ -253,7 +254,8 @@ def preflight_destination(dst: str) -> None:
 # ---------------------------------------------------------------------------------------------- phase 1: stage
 def stage_file(src: str, dst: str, *, policy: PathPolicy, job_tag: str, mode: CommitMode, chunk_size: int = CHUNK,
                control: Optional[Callable[[], Optional[str]]] = None,
-               progress: Optional[Callable[[str, int], None]] = None):
+               progress: Optional[Callable[[str, int], None]] = None,
+               on_created: Optional[Callable[[str, tuple], None]] = None):
     """copy src into a verified, flushed, job-owned .part next to dst. Returns a StagedFile, or a CopyResult when no
     copy is needed (identical destination -> skipped_identical; NEVER_OVERWRITE + different -> conflict)."""
     mode = CommitMode(mode)
@@ -305,6 +307,9 @@ def stage_file(src: str, dst: str, *, policy: PathPolicy, job_tag: str, mode: Co
         except FileExistsError:
             raise StalePartFile(f"{part} appeared concurrently; not ours - left untouched")
         created = True
+        if on_created is not None:                       # 1c write-ahead: the .part's identity is journaled before any data
+            on_created(part, _identity(os.fstat(fd)))
+        crash("stage.after_part_recorded")
         with os.fdopen(fd, "wb") as fout, open(src_c, "rb") as fin:
             while True:
                 if control is not None:
@@ -362,7 +367,8 @@ def discard_staged(staged: StagedFile) -> bool:
 
 # ---------------------------------------------------------------------------------------------- phase 2: commit
 def commit_staged(staged: StagedFile, mode: CommitMode, *, policy: PathPolicy,
-                  _before_commit: Optional[Callable[[], None]] = None) -> CopyResult:
+                  _before_commit: Optional[Callable[[], None]] = None,
+                  on_intent: Optional[Callable[[dict], None]] = None) -> CopyResult:
     """publish a verified .part under its destination name (exclusive). On any failure the .part is removed and the
     destination is exactly as it was (a moved-aside previous version is moved back)."""
     mode = CommitMode(mode)
@@ -377,7 +383,12 @@ def commit_staged(staged: StagedFile, mode: CommitMode, *, policy: PathPolicy,
         target = policy.check_write_target(staged.dst)
         preserved = None
         method = ""
+        def intent(t, preserved_path=None, old_identity=None):
+            if on_intent is not None:                     # 1c write-ahead: journaled BEFORE any rename
+                on_intent(dict(target=t, preserved_path=preserved_path, old_identity=old_identity))
+
         if mode == CommitMode.NEVER_OVERWRITE:
+            intent(target)
             try:
                 method = _rename_exclusive(staged.part, target)
             except FileExistsError:
@@ -389,6 +400,7 @@ def commit_staged(staged: StagedFile, mode: CommitMode, *, policy: PathPolicy,
         elif mode == CommitMode.NEW_NAME:
             attempt = 0
             while True:
+                intent(target)
                 try:
                     method = _rename_exclusive(staged.part, target)
                     break
@@ -406,10 +418,14 @@ def commit_staged(staged: StagedFile, mode: CommitMode, *, policy: PathPolicy,
                 raise CopyRefused(f"{target} is an archived file in the Vault; archives are never replaced")
             if os.path.lexists(target):
                 preserved = policy.check_write_target(f"{target}.replaced-{staged.job_tag}")
+                intent(target, preserved, _identity(os.lstat(target)))
                 try:
                     _rename_exclusive(target, preserved)
                 except FileExistsError:
                     raise CopyError(f"{preserved} already exists; refusing to overwrite a preserved version")
+                crash("commit.after_move_aside")
+            else:
+                intent(target)
             try:
                 method = _rename_exclusive(staged.part, target)
             except BaseException:
@@ -421,6 +437,7 @@ def commit_staged(staged: StagedFile, mode: CommitMode, *, policy: PathPolicy,
                         raise CopyError(f"{target} was created by someone else during the commit; the previous version is "
                                         f"kept at {preserved} - nothing was overwritten")
                 raise
+        crash("commit.after_publish")
         dir_synced = _fsync_dir(os.path.dirname(target))
         st = os.lstat(target)
         if st.st_size != staged.size:
@@ -440,6 +457,46 @@ def _same(path, ident) -> bool:
         return _identity(os.lstat(path)) == ident
     except FileNotFoundError:
         return False
+
+
+def remove_if_identity(path: str, ident, *, policy: PathPolicy, expect_sha256: Optional[str] = None) -> str:
+    """remove path ONLY if it is exactly the recorded file (identity, and content hash when given).
+    -> 'removed' | 'absent' | 'mismatch'  (a mismatch is never removed)"""
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return "absent"
+    if ident is None or _identity(st) != tuple(ident) or not os.path.isfile(path) or os.path.islink(path):
+        return "mismatch"
+    if expect_sha256 is not None and _hash_file(path)[0] != expect_sha256:
+        return "mismatch"
+    policy.check_write_target(path)
+    os.remove(path)
+    _fsync_dir(os.path.dirname(path))
+    return "removed"
+
+
+def restore_preserved(preserved: str, target: str, old_ident, *, policy: PathPolicy) -> str:
+    """move a preserved previous version back under its name (exclusive).
+    -> 'restored' | 'already_restored' | 'absent' | 'mismatch' | 'occupied'"""
+    try:
+        st = os.lstat(preserved)
+    except FileNotFoundError:
+        try:
+            if old_ident is not None and _identity(os.lstat(target)) == tuple(old_ident):
+                return "already_restored"
+        except FileNotFoundError:
+            pass
+        return "absent"
+    if old_ident is None or _identity(st) != tuple(old_ident):
+        return "mismatch"
+    policy.check_write_target(target)
+    try:
+        _rename_exclusive(preserved, target)
+    except FileExistsError:
+        return "occupied"
+    _fsync_dir(os.path.dirname(target))
+    return "restored"
 
 
 def rollback_committed(result: CopyResult, *, policy: PathPolicy) -> None:

@@ -18,7 +18,7 @@ from .models import (FileState, JobState, NON_TERMINAL_JOB_STATES, TransitionErr
                      check_job_transition)
 from ..safety import PathPolicy, SafetyError, is_simple_name
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2          # v2 (1c): identities, write-ahead intents, recovery decision, created folders
 JOURNAL_RELPATH = os.path.join("app_data", "transfers", "journal.db")
 
 _SCHEMA = """
@@ -39,6 +39,9 @@ CREATE TABLE IF NOT EXISTS jobs (
     error TEXT,
     owner_pid INTEGER,
     heartbeat REAL,
+    recovery_decision TEXT,
+    recovery_attempts INTEGER NOT NULL DEFAULT 0,
+    created_dirs TEXT NOT NULL DEFAULT '[]',
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL
 );
@@ -59,6 +62,13 @@ CREATE TABLE IF NOT EXISTS job_files (
     committed_path TEXT,
     preserved_path TEXT,
     error TEXT,
+    attempt INTEGER NOT NULL DEFAULT 0,
+    src_identity TEXT,
+    part_identity TEXT,
+    old_identity TEXT,
+    dst_identity TEXT,
+    preserved_state TEXT NOT NULL DEFAULT 'none',
+    intent TEXT,
     updated_at REAL NOT NULL,
     PRIMARY KEY (job_id, seq)
 );
@@ -78,7 +88,17 @@ CREATE INDEX IF NOT EXISTS ix_events_job ON job_events(job_id, event_id);
 """
 
 _FILE_FIELDS = {"src_mtime_ns", "src_ino", "src_sha256", "part_path", "part_sha256", "dst_sha256", "committed_path",
-                "preserved_path", "error"}
+                "preserved_path", "error", "attempt", "src_identity", "part_identity", "old_identity", "dst_identity",
+                "preserved_state", "intent"}
+_JOB_FIELDS = {"recovery_decision", "recovery_attempts", "error"}
+# columns added by schema v2 (1c) - added to a v1 journal in place (ALTER TABLE ADD COLUMN; nothing is rewritten)
+_V2_COLUMNS = {
+    "jobs": [("recovery_decision", "TEXT"), ("recovery_attempts", "INTEGER NOT NULL DEFAULT 0"),
+             ("created_dirs", "TEXT NOT NULL DEFAULT '[]'")],
+    "job_files": [("attempt", "INTEGER NOT NULL DEFAULT 0"), ("src_identity", "TEXT"), ("part_identity", "TEXT"),
+                  ("old_identity", "TEXT"), ("dst_identity", "TEXT"), ("preserved_state", "TEXT NOT NULL DEFAULT 'none'"),
+                  ("intent", "TEXT")],
+}
 
 
 class JournalError(RuntimeError):
@@ -132,8 +152,18 @@ class TransferJournal:
             row = c.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()
             if row is None:
                 c.execute("INSERT INTO schema_meta(key, value) VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
-            elif int(row["value"]) > SCHEMA_VERSION:
+                return
+            v = int(row["value"])
+            if v > SCHEMA_VERSION:
                 raise JournalError(f"journal schema {row['value']} is newer than this program ({SCHEMA_VERSION}); refusing to use it")
+            if v < 2:                                   # additive v1 -> v2 migration inside one transaction
+                for table, cols in _V2_COLUMNS.items():
+                    have = {r["name"] for r in c.execute(f"PRAGMA table_info({table})").fetchall()}
+                    for name, decl in cols:
+                        if name not in have:
+                            c.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+                c.execute("UPDATE schema_meta SET value=? WHERE key='schema_version'", (str(SCHEMA_VERSION),))
+                c.execute("INSERT OR REPLACE INTO schema_meta(key, value) VALUES ('migrated_from', ?)", (str(v),))
 
     def close(self) -> None:
         with self._lock:
@@ -228,6 +258,40 @@ class TransferJournal:
             self._event(c, job_id, "file", seq=seq, frm=cur, to=new,
                         detail={k: v for k, v in fields.items() if k in ("error", "src_sha256", "dst_sha256", "preserved_path")} or None)
             return cur
+
+    def update_file(self, job_id: str, seq: int, **fields) -> None:
+        """write-ahead fields of a file WITHOUT a state change (e.g. part identity right after creation, intents)"""
+        bad = set(fields) - _FILE_FIELDS
+        if bad or not fields:
+            raise JournalError(f"unknown / missing file fields {sorted(bad)}")
+        with self._tx() as c:
+            if c.execute("SELECT 1 FROM job_files WHERE job_id=? AND seq=?", (job_id, seq)).fetchone() is None:
+                raise JournalError(f"unknown file {job_id}#{seq}")
+            cols = [f"{k}=?" for k in fields] + ["updated_at=?"]
+            c.execute(f"UPDATE job_files SET {', '.join(cols)} WHERE job_id=? AND seq=?", (*fields.values(), time.time(), job_id, seq))
+            if {"intent", "preserved_state"} & set(fields):
+                self._event(c, job_id, "intent", seq=seq, detail={k: fields[k] for k in ("intent", "preserved_state") if k in fields})
+
+    def set_job(self, job_id: str, **fields) -> None:
+        bad = set(fields) - _JOB_FIELDS
+        if bad or not fields:
+            raise JournalError(f"unknown / missing job fields {sorted(bad)}")
+        with self._tx() as c:
+            cols = [f"{k}=?" for k in fields] + ["updated_at=?"]
+            if c.execute(f"UPDATE jobs SET {', '.join(cols)} WHERE job_id=?", (*fields.values(), time.time(), job_id)).rowcount != 1:
+                raise JournalError(f"unknown job {job_id}")
+            self._event(c, job_id, "job_fields", detail=fields)
+
+    def add_created_dir(self, job_id: str, path: str) -> None:
+        """write-ahead: record a folder BEFORE it is created, so recovery can remove it again (only if empty)"""
+        with self._tx() as c:
+            row = c.execute("SELECT created_dirs FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            if row is None:
+                raise JournalError(f"unknown job {job_id}")
+            dirs = json.loads(row["created_dirs"] or "[]")
+            if path not in dirs:
+                dirs.append(path)
+                c.execute("UPDATE jobs SET created_dirs=?, updated_at=? WHERE job_id=?", (json.dumps(dirs), time.time(), job_id))
 
     # ------------------------------------------------------------------ reads
     def get_job(self, job_id: str) -> Optional[Dict[str, Any]]:

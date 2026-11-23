@@ -124,17 +124,20 @@ class TestStateMachines(unittest.TestCase):
             with self.subTest(a=a, b=b), self.assertRaises(TransitionError):
                 check_job_transition(a, b)
 
-    def test_interrupted_only_resumes_through_the_queue_or_is_discarded(self):
-        self.assertEqual(JOB_TRANSITIONS[JobState.INTERRUPTED], {JobState.QUEUED, JobState.CANCELLED})
+    def test_interrupted_only_leaves_through_recovery(self):
+        # 1c: an interrupted job is never re-run or cancelled directly - only a recorded resume / discard decision
+        self.assertEqual(JOB_TRANSITIONS[JobState.INTERRUPTED], {JobState.RECOVERING})
 
     def test_file_states(self):
         for a, b in [(FileState.PENDING, FileState.COPYING), (FileState.COPYING, FileState.STAGED),
-                     (FileState.STAGED, FileState.VERIFIED), (FileState.VERIFIED, FileState.COMMITTED),
-                     (FileState.COMMITTED, FileState.SOURCE_REMOVED)]:
+                     (FileState.STAGED, FileState.VERIFIED), (FileState.VERIFIED, FileState.COMMITTING),
+                     (FileState.COMMITTING, FileState.COMMITTED), (FileState.COMMITTED, FileState.REMOVING_SOURCE),
+                     (FileState.REMOVING_SOURCE, FileState.SOURCE_REMOVED)]:
             check_file_transition(a, b)
         for a, b in [(FileState.PENDING, FileState.COMMITTED), (FileState.STAGED, FileState.COMMITTED),
                      (FileState.COPYING, FileState.VERIFIED), (FileState.PENDING, FileState.SOURCE_REMOVED),
-                     (FileState.VERIFIED, FileState.SOURCE_REMOVED), (FileState.COMMITTED, FileState.PENDING)]:
+                     (FileState.VERIFIED, FileState.SOURCE_REMOVED), (FileState.COMMITTED, FileState.PENDING),
+                     (FileState.VERIFIED, FileState.COMMITTED), (FileState.COMMITTED, FileState.SOURCE_REMOVED)]:
             with self.subTest(a=a, b=b), self.assertRaises(TransitionError):
                 check_file_transition(a, b)
 

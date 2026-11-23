@@ -28,6 +28,8 @@ class JobState(str, Enum):
     FAILED = "failed"
     NEEDS_ATTENTION = "needs_attention"
     INTERRUPTED = "interrupted"
+    ROLLING_BACK = "rolling_back"      # 1c: undoing this job's own commits (write-ahead: every undo step is logged first)
+    RECOVERING = "recovering"          # 1c: a user-chosen recovery (resume / discard) is in progress
 
 
 class FileState(str, Enum):
@@ -42,6 +44,9 @@ class FileState(str, Enum):
     FAILED = "failed"
     SOURCE_CHANGED = "source_changed"  # source modified while it was being copied
     ROLLED_BACK = "rolled_back"        # committed, then undone because a later commit of the same job failed (1b)
+    COMMITTING = "committing"          # 1c write-ahead: about to move the old version aside / publish
+    ROLLING_BACK = "rolling_back"      # 1c write-ahead: about to undo this file's commit / remove its .part
+    REMOVING_SOURCE = "removing_source"  # 1c write-ahead: about to remove the (verified) move source
 
 
 class Operation(str, Enum):
@@ -71,24 +76,28 @@ DEFAULT_COMMIT_MODE: Dict[Operation, CommitMode] = {
 }
 
 J = JobState
-_ACTIVE = (J.PREPARING, J.COPYING, J.FLUSHING, J.VERIFYING, J.COMMITTING, J.REMOVING_SOURCES)
+_ACTIVE = (J.PREPARING, J.COPYING, J.FLUSHING, J.VERIFYING, J.COMMITTING, J.REMOVING_SOURCES, J.ROLLING_BACK,
+           J.RECOVERING)
+_STOP = (J.FAILED, J.NEEDS_ATTENTION, J.INTERRUPTED)
 
 JOB_TRANSITIONS: Dict[JobState, FrozenSet[JobState]] = {
     J.QUEUED: frozenset({J.PREPARING, J.PAUSED, J.CANCELLED, J.INTERRUPTED}),
-    J.PREPARING: frozenset({J.COPYING, J.COMPLETED, J.FAILED, J.NEEDS_ATTENTION, J.PAUSED, J.CANCEL_REQUESTED, J.INTERRUPTED}),
-    J.COPYING: frozenset({J.FLUSHING, J.COPYING, J.COMMITTING, J.REMOVING_SOURCES, J.COMPLETED, J.FAILED, J.NEEDS_ATTENTION,
-                          J.PAUSED, J.CANCEL_REQUESTED, J.INTERRUPTED}),
-    J.FLUSHING: frozenset({J.VERIFYING, J.FAILED, J.NEEDS_ATTENTION, J.PAUSED, J.CANCEL_REQUESTED, J.INTERRUPTED}),
-    J.VERIFYING: frozenset({J.COPYING, J.COMMITTING, J.FAILED, J.NEEDS_ATTENTION, J.PAUSED, J.CANCEL_REQUESTED,
-                            J.INTERRUPTED}),      # 1b: all files are staged+verified (-> copying next file) before committing
-    J.COMMITTING: frozenset({J.COPYING, J.REMOVING_SOURCES, J.COMPLETED, J.FAILED, J.NEEDS_ATTENTION, J.CANCEL_REQUESTED,
-                             J.INTERRUPTED}),
-    J.REMOVING_SOURCES: frozenset({J.COMPLETED, J.COMPLETED_WITH_RETAINED_SOURCES, J.FAILED, J.INTERRUPTED}),
+    J.PREPARING: frozenset({J.COPYING, J.COMMITTING, J.COMPLETED, J.PAUSED, J.CANCEL_REQUESTED, *_STOP}),
+    J.COPYING: frozenset({J.FLUSHING, J.COPYING, J.COMMITTING, J.REMOVING_SOURCES, J.COMPLETED, J.PAUSED,
+                          J.CANCEL_REQUESTED, J.ROLLING_BACK, *_STOP}),
+    J.FLUSHING: frozenset({J.VERIFYING, J.PAUSED, J.CANCEL_REQUESTED, J.ROLLING_BACK, *_STOP}),
+    J.VERIFYING: frozenset({J.COPYING, J.COMMITTING, J.PAUSED, J.CANCEL_REQUESTED, J.ROLLING_BACK, *_STOP}),
+    J.COMMITTING: frozenset({J.COPYING, J.REMOVING_SOURCES, J.COMPLETED, J.CANCEL_REQUESTED, J.ROLLING_BACK, *_STOP}),
+    J.REMOVING_SOURCES: frozenset({J.COMPLETED, J.COMPLETED_WITH_RETAINED_SOURCES, *_STOP}),
+    J.ROLLING_BACK: frozenset({J.CANCELLED, *_STOP}),
+    # 1c: recovery (resume or discard, chosen by the user and persisted) ends in a terminal state, or back in
+    # interrupted (non-ambiguous failure, safe to retry) / needs_attention (a human must look)
+    J.RECOVERING: frozenset({J.COMPLETED, J.COMPLETED_WITH_RETAINED_SOURCES, J.CANCELLED, J.NEEDS_ATTENTION, J.INTERRUPTED}),
     J.PAUSED: frozenset({J.QUEUED, J.CANCEL_REQUESTED, J.CANCELLED, J.INTERRUPTED}),
     J.CANCEL_REQUESTED: frozenset({J.CANCELLED, J.FAILED, J.INTERRUPTED}),
-    J.INTERRUPTED: frozenset({J.QUEUED, J.CANCELLED}),          # resume (re-verified) or discard - always the user's choice
-    J.NEEDS_ATTENTION: frozenset({J.QUEUED, J.CANCELLED}),
-    J.FAILED: frozenset({J.QUEUED, J.CANCELLED}),               # explicit retry
+    J.INTERRUPTED: frozenset({J.RECOVERING}),           # 1c: only through recovery - never silently cancelled or re-run
+    J.NEEDS_ATTENTION: frozenset({J.RECOVERING, J.CANCELLED}),
+    J.FAILED: frozenset({J.RECOVERING, J.CANCELLED}),
     J.COMPLETED: frozenset(),
     J.COMPLETED_WITH_RETAINED_SOURCES: frozenset(),
     J.CANCELLED: frozenset(),
@@ -97,15 +106,19 @@ JOB_TRANSITIONS: Dict[JobState, FrozenSet[JobState]] = {
 F = FileState
 FILE_TRANSITIONS: Dict[FileState, FrozenSet[FileState]] = {
     F.PENDING: frozenset({F.COPYING, F.SKIPPED_IDENTICAL, F.CONFLICT, F.FAILED, F.SOURCE_CHANGED}),
-    F.COPYING: frozenset({F.STAGED, F.SKIPPED_IDENTICAL, F.CONFLICT, F.FAILED, F.SOURCE_CHANGED, F.PENDING}),
-    F.STAGED: frozenset({F.VERIFIED, F.FAILED, F.SOURCE_CHANGED, F.PENDING}),
-    F.VERIFIED: frozenset({F.COMMITTED, F.SKIPPED_IDENTICAL, F.CONFLICT, F.FAILED, F.SOURCE_CHANGED, F.PENDING,
-                           F.ROLLED_BACK}),
-    F.COMMITTED: frozenset({F.SOURCE_REMOVED, F.ROLLED_BACK}),
+    F.COPYING: frozenset({F.STAGED, F.SKIPPED_IDENTICAL, F.CONFLICT, F.FAILED, F.SOURCE_CHANGED, F.PENDING, F.ROLLING_BACK}),
+    F.STAGED: frozenset({F.VERIFIED, F.FAILED, F.SOURCE_CHANGED, F.PENDING, F.ROLLING_BACK}),
+    F.VERIFIED: frozenset({F.COMMITTING, F.SKIPPED_IDENTICAL, F.CONFLICT, F.FAILED, F.SOURCE_CHANGED, F.PENDING,
+                           F.ROLLING_BACK, F.ROLLED_BACK}),
+    F.COMMITTING: frozenset({F.COMMITTED, F.SKIPPED_IDENTICAL, F.CONFLICT, F.ROLLING_BACK, F.FAILED,
+                             F.VERIFIED}),          # VERIFIED: intent abandoned before any rename (recovery)
+    F.COMMITTED: frozenset({F.REMOVING_SOURCE, F.ROLLING_BACK}),
+    F.REMOVING_SOURCE: frozenset({F.SOURCE_REMOVED, F.COMMITTED}),       # COMMITTED: source retained (changed)
     F.SOURCE_REMOVED: frozenset(),
+    F.ROLLING_BACK: frozenset({F.ROLLED_BACK, F.CONFLICT, F.COMMITTED}),  # CONFLICT: a foreign file was left in place
     F.SKIPPED_IDENTICAL: frozenset(),
-    F.CONFLICT: frozenset({F.PENDING}),          # only after the user resolved it
-    F.FAILED: frozenset({F.PENDING}),
+    F.CONFLICT: frozenset({F.PENDING}),
+    F.FAILED: frozenset({F.PENDING, F.ROLLING_BACK, F.ROLLED_BACK}),
     F.SOURCE_CHANGED: frozenset({F.PENDING}),
     F.ROLLED_BACK: frozenset({F.PENDING}),
 }

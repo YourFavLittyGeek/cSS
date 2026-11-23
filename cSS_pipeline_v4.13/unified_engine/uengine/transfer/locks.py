@@ -92,6 +92,32 @@ class TransferLocks:
                 tl.release()
 
 
+def _probe(self, key: str) -> bool:
+    """True if nobody (no thread of this process, no other process) holds key right now. Takes and releases at once."""
+    with _REGISTRY_LOCK:
+        tl = _THREAD_LOCKS.setdefault(key, threading.Lock())
+    if not tl.acquire(blocking=False):
+        return False
+    try:
+        fd = os.open(self._file(key), os.O_RDWR | os.O_CREAT, 0o644)
+        try:
+            if fcntl is None:
+                return True
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return False
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            return True
+        finally:
+            os.close(fd)
+    finally:
+        tl.release()
+
+
+TransferLocks.probe = _probe
+
+
 def study_processing_active(project_base: str, code: str) -> bool:
     p = os.path.join(project_base, "app_data", "patients.json")
     try:
