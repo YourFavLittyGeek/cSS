@@ -21,6 +21,8 @@ import hashlib
 import sqlite3
 import pathlib
 import subprocess
+import select
+import threading
 from typing import Dict, List, Optional, Tuple, Any
 
 VAULT_DIRS = [
@@ -202,7 +204,11 @@ class PercivalDataVault:
     @classmethod
     def create_vault(cls, destination_folder: str, name: str = "PERCIVAL_VAULT") -> "PercivalDataVault":
         """Create a new organized Percival Data Vault in the destination directory."""
-        dest = os.path.abspath(os.path.join(destination_folder, name))
+        dest_folder = os.path.abspath(destination_folder)
+        if os.path.basename(dest_folder) == name:
+            dest = dest_folder
+        else:
+            dest = os.path.abspath(os.path.join(dest_folder, name))
         os.makedirs(dest, exist_ok=True)
         for d in VAULT_DIRS:
             os.makedirs(os.path.join(dest, d), exist_ok=True)
@@ -235,8 +241,8 @@ class PercivalDataVault:
         vault.save_configuration()
         return vault
 
-    def connect(self, vault_path: str) -> Tuple[bool, str]:
-        """Connect to an existing Percival Data Vault and verify integrity."""
+    def connect(self, vault_path: str, auto_create_if_drive: bool = True) -> Tuple[bool, str]:
+        """Connect to an existing Percival Data Vault or automatically create in selected volume."""
         p = os.path.abspath(vault_path)
         if not os.path.exists(p):
             # Attempt UUID-based auto-reconnect if known
@@ -251,10 +257,44 @@ class PercivalDataVault:
                 self._is_connected = False
                 return False, f"Directory does not exist: {p}"
 
+        # 1. If p itself has manifest/vault_manifest.json
         manifest_file = os.path.join(p, "manifest", "vault_manifest.json")
+
+        # 2. If p has child PERCIVAL_VAULT folder with manifest
         if not os.path.exists(manifest_file):
-            self._is_connected = False
-            return False, f"Not a valid Percival Data Vault (missing manifest): {p}"
+            child_vault = os.path.join(p, "PERCIVAL_VAULT")
+            child_manifest = os.path.join(child_vault, "manifest", "vault_manifest.json")
+            if os.path.exists(child_manifest):
+                p = child_vault
+                manifest_file = child_manifest
+
+        # 3. If manifest still missing, check if volume is eligible for automatic Vault creation
+        if not os.path.exists(manifest_file):
+            if auto_create_if_drive:
+                # Verify permissions and writable status
+                if not os.access(p, os.W_OK):
+                    self._is_connected = False
+                    return False, f"Volume is read-only or permission is denied: {p}"
+                # Verify capacity (minimum 2 GB free)
+                try:
+                    usage = shutil.disk_usage(p)
+                    free_gb = usage.free / (1024**3)
+                    if free_gb < 2.0:
+                        self._is_connected = False
+                        return False, f"Insufficient volume capacity ({free_gb:.1f} GB free, minimum 2.0 GB required): {p}"
+                except Exception:
+                    pass
+
+                try:
+                    created_vault = self.create_vault(p, name="PERCIVAL_VAULT")
+                    p = created_vault.root_path
+                    manifest_file = os.path.join(p, "manifest", "vault_manifest.json")
+                except Exception as e:
+                    self._is_connected = False
+                    return False, f"Failed to auto-create PERCIVAL_VAULT on {p}: {e}"
+            else:
+                self._is_connected = False
+                return False, f"Not a valid Percival Data Vault (missing manifest): {p}"
 
         try:
             with open(manifest_file, "r") as f:
@@ -264,7 +304,7 @@ class PercivalDataVault:
             return False, f"Failed to parse vault manifest: {e}"
 
         # Verify key directory structure
-        for d in ("manifest", "database", "PENSIEVE", "models", "SHADOW_ML"):
+        for d in ("manifest", "database", "PENSIEVE", "models", "SHADOW_ML", "MRI", "Processed_MRI"):
             dp = os.path.join(p, d)
             if not os.path.isdir(dp):
                 os.makedirs(dp, exist_ok=True)
@@ -539,6 +579,10 @@ class PercivalDataVault:
             pass
         return {"ok": True, "vault_id": self._manifest.get("vault_id"), "file_counts": counts}
 
+    @staticmethod
+    def detect_external_volumes() -> List[Dict[str, Any]]:
+        return detect_external_volumes()
+
 # Global Singleton Helper
 _DEFAULT_VAULT: Optional[PercivalDataVault] = None
 
@@ -655,3 +699,138 @@ class TransferQueueManager:
         if status:
             return [it for it in items if it.get("status") == status]
         return items
+
+
+def detect_external_volumes() -> List[Dict[str, Any]]:
+    """Inspect /Volumes and return rich status for all connected storage volumes."""
+    volumes = []
+    volumes_dir = "/Volumes"
+    if not os.path.isdir(volumes_dir):
+        return volumes
+
+    for entry in sorted(os.listdir(volumes_dir)):
+        vp = os.path.join(volumes_dir, entry)
+        if os.path.islink(vp) or not os.path.isdir(vp):
+            continue
+        if vp == "/Volumes/Macintosh HD" or entry == "Macintosh HD":
+            continue
+
+        is_external = False
+        vol_uuid = ""
+        read_only = False
+        fs_type = ""
+        try:
+            out = subprocess.check_output(["diskutil", "info", vp], text=True, stderr=subprocess.DEVNULL)
+            for line in out.splitlines():
+                if "Device Location:" in line and "External" in line:
+                    is_external = True
+                if "Volume UUID:" in line:
+                    vol_uuid = line.split(":", 1)[1].strip()
+                if "Disk / Partition UUID:" in line and not vol_uuid:
+                    vol_uuid = line.split(":", 1)[1].strip()
+                if "Volume Read-Only:" in line and "Yes" in line:
+                    read_only = True
+                if "Type (Bundle):" in line:
+                    fs_type = line.split(":", 1)[1].strip()
+        except Exception:
+            pass
+
+        if not vol_uuid:
+            vol_uuid = PercivalDataVault.get_volume_uuid(vp)
+
+        writable = os.access(vp, os.W_OK) and not read_only
+        try:
+            usage = shutil.disk_usage(vp)
+            total_gb = round(usage.total / (1024**3), 1)
+            free_gb = round(usage.free / (1024**3), 1)
+        except Exception:
+            total_gb = 0.0
+            free_gb = 0.0
+
+        direct_vault = os.path.exists(os.path.join(vp, "manifest", "vault_manifest.json"))
+        child_vault_path = os.path.join(vp, "PERCIVAL_VAULT")
+        child_vault = os.path.exists(os.path.join(child_vault_path, "manifest", "vault_manifest.json"))
+        has_vault = direct_vault or child_vault
+        vault_path = vp if direct_vault else (child_vault_path if child_vault else "")
+
+        if not writable:
+            status = "read_only"
+        elif free_gb < 2.0:
+            status = "insufficient_space"
+        elif has_vault:
+            status = "vault_healthy"
+        else:
+            status = "vault_not_initialized"
+
+        volumes.append({
+            "name": entry,
+            "mount_point": vp,
+            "is_external": is_external,
+            "volume_uuid": vol_uuid,
+            "filesystem": fs_type,
+            "writable": writable,
+            "read_only": not writable,
+            "total_gb": total_gb,
+            "free_gb": free_gb,
+            "has_vault": has_vault,
+            "vault_path": vault_path,
+            "status": status,
+        })
+    return volumes
+
+
+class VolumeWatcher(threading.Thread):
+    """Background watcher for macOS volume events with immediate kqueue and fallback polling."""
+    def __init__(self, on_change_callback):
+        super().__init__(daemon=True, name="PercivalVolumeWatcher")
+        self.callback = on_change_callback
+        self._running = True
+
+    def run(self):
+        kq = None
+        fd = -1
+        try:
+            if hasattr(select, "kqueue") and os.path.isdir("/Volumes"):
+                kq = select.kqueue()
+                fd = os.open("/Volumes", os.O_RDONLY)
+                ke = select.kevent(fd, filter=select.KQ_FILTER_VNODE,
+                                   flags=select.KQ_EV_ADD | select.KQ_EV_CLEAR,
+                                   fflags=select.KQ_NOTE_WRITE | select.KQ_NOTE_ATTRIB)
+                kq.control([ke], 0, 0)
+        except Exception:
+            kq = None
+
+        while self._running:
+            try:
+                if kq:
+                    events = kq.control([], 1, 2.0)
+                    if events:
+                        self.callback("mount_change")
+                    else:
+                        self.callback("poll_check")
+                else:
+                    time.sleep(2.5)
+                    self.callback("poll_check")
+            except Exception:
+                time.sleep(2.5)
+
+        if fd >= 0:
+            try: os.close(fd)
+            except Exception: pass
+        if kq:
+            try: kq.close()
+            except Exception: pass
+
+    def stop(self):
+        self._running = False
+
+
+_VOLUME_WATCHER: Optional[VolumeWatcher] = None
+
+def get_volume_watcher(callback=None) -> Optional[VolumeWatcher]:
+    global _VOLUME_WATCHER
+    if _VOLUME_WATCHER is None and callback:
+        _VOLUME_WATCHER = VolumeWatcher(callback)
+        _VOLUME_WATCHER.start()
+    return _VOLUME_WATCHER
+

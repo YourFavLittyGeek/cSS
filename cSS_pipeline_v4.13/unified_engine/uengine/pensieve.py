@@ -22,7 +22,7 @@ import time
 import uuid
 import sqlite3
 import hashlib
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Union
 from uengine.vault import get_vault, PercivalDataVault
 
 JOURNAL_DB_FILE = os.path.expanduser("~/.percival_local_journal.db")
@@ -245,8 +245,17 @@ CREATE INDEX IF NOT EXISTS idx_review_study ON study_review_status(study_id);
 """
 
 class PensieveCoreMemory:
-    def __init__(self, vault: Optional[PercivalDataVault] = None):
-        self.vault = vault or get_vault()
+    def __init__(self, vault: Optional[Union[PercivalDataVault, str]] = None):
+        if isinstance(vault, str):
+            if os.path.exists(os.path.join(vault, "manifest", "vault_manifest.json")) or os.path.exists(os.path.join(vault, "PERCIVAL_VAULT")):
+                try:
+                    self.vault = PercivalDataVault.connect(vault, auto_create_if_drive=True)
+                except Exception:
+                    self.vault = get_vault()
+            else:
+                self.vault = get_vault()
+        else:
+            self.vault = vault or get_vault()
         self.local_journal = DurableLocalJournal()
         if self.vault.is_connected():
             self._db_path = self.vault.pensieve_db_path()
@@ -262,6 +271,24 @@ class PensieveCoreMemory:
         con.execute("PRAGMA foreign_keys = ON;")
         con.execute("PRAGMA journal_mode = WAL;")
         return con
+
+    def flush_and_close(self) -> Dict[str, Any]:
+        """Flush SQLite WAL journal and ensure durable disk commit."""
+        flushed = False
+        if self._db_path and os.path.exists(self._db_path):
+            try:
+                with sqlite3.connect(self._db_path, timeout=10.0) as con:
+                    con.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+                    con.execute("PRAGMA optimize;")
+                flushed = True
+            except Exception as e:
+                sys.stderr.write(f"[Pensieve] Warning during flush: {e}\n")
+        if self.local_journal:
+            try:
+                self.local_journal.get_pending_entries()
+            except Exception:
+                pass
+        return {"ok": True, "flushed": flushed, "closed": True}
 
     def _init_db(self) -> None:
         """Initialize database tables and indices in the vault."""

@@ -418,6 +418,7 @@ async function renderSectionVault(el) {
   const stats = vdata.stats || {};
   const status = vdata.status || {};
   const integrity = vdata.integrity || {};
+  const detected = vdata.detected_volumes || [];
 
   el.innerHTML = `
     <div class="card" style="padding:18px">
@@ -440,9 +441,40 @@ async function renderSectionVault(el) {
         <button class="b sm pri" id="sv-open-finder" ${!status.connected ? "disabled" : ""}>Reveal in macOS Finder</button>
         <button class="b sm" id="sv-verify" ${!status.connected ? "disabled" : ""}>Verify Vault Integrity</button>
         <button class="b sm" id="sv-reindex" ${!status.connected ? "disabled" : ""}>Rebuild File Index</button>
-        <button class="b sm" id="sv-change">Connect Different Drive…</button>
+        <button class="b sm" id="sv-change">Choose Drive or Folder…</button>
         <button class="b sm" id="sv-create">Create New Vault…</button>
       </div>
+    </div>
+
+    <div class="card" style="padding:18px;margin-top:14px">
+      <div class="row" style="justify-content:space-between;margin-bottom:8px">
+        <b>Detected External Storage Volumes</b>
+        <button class="b sm" id="sv-refresh-drives">Scan Volumes Now</button>
+      </div>
+      <p class="note" style="margin:0 0 12px">Physical external drives detected on this Mac. Select a drive to connect or initialize PERCIVAL_VAULT automatically.</p>
+      ${detected.length ? `
+        <table style="width:100%;font-size:13px">
+          <thead>
+            <tr><th>Volume</th><th>Mount Point</th><th>UUID</th><th>Free Space</th><th>Status</th><th>Action</th></tr>
+          </thead>
+          <tbody>
+            ${detected.map(d => `
+              <tr>
+                <td><b>${esc(d.name)}</b></td>
+                <td class="mono" style="font-size:11px">${esc(d.mount_point)}</td>
+                <td class="mono" style="font-size:11px">${esc((d.volume_uuid || '').slice(0, 16))}…</td>
+                <td><b>${d.free_gb} GB</b> / ${d.total_gb} GB</td>
+                <td><span class="pill ${d.has_vault ? 'ok' : (d.writable ? 'warn' : 'bad')}">${d.has_vault ? 'Vault Ready' : (d.writable ? 'Not Initialized' : 'Read-Only')}</span></td>
+                <td>
+                  <button class="b sm ${d.has_vault ? 'pri' : ''}" data-vdrive="${esc(d.mount_point)}">
+                    ${d.has_vault ? 'Connect Vault' : 'Auto-Create Vault'}
+                  </button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      ` : `<p class="note">No external drives currently detected in /Volumes. Connect an external HDD and click Scan Volumes Now.</p>`}
     </div>
   `;
 
@@ -457,11 +489,12 @@ async function renderSectionVault(el) {
     const res = await api("/api/vault/reindex", {});
     toast(res.ok ? "Vault index updated" : "Reindex failed", !res.ok);
   };
+  $("#sv-refresh-drives").onclick = () => renderSectionVault(el);
   $("#sv-change").onclick = async () => {
     const p = await pick("folder", "Select external drive or PERCIVAL_VAULT folder");
     if (p) {
       const r = await api("/api/vault/connect", { path: p });
-      toast(r.ok ? "Connected to Data Vault" : esc(r.message), !r.ok);
+      toast(r.ok ? (r.message || "Connected to Data Vault") : esc(r.message || r.error), !r.ok);
       renderSectionVault(el);
     }
   };
@@ -473,6 +506,16 @@ async function renderSectionVault(el) {
       renderSectionVault(el);
     }
   };
+  el.querySelectorAll("[data-vdrive]").forEach(btn => {
+    btn.onclick = async () => {
+      btn.disabled = true;
+      btn.textContent = "Connecting…";
+      const p = btn.dataset.vdrive;
+      const r = await api("/api/vault/connect", { path: p });
+      toast(r.ok ? (r.message || "Connected to Data Vault") : esc(r.message || r.error), !r.ok);
+      renderSectionVault(el);
+    };
+  });
 }
 
 // ----------------------------------------------------------------------------

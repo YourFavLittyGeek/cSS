@@ -1328,10 +1328,15 @@ def storage_post(op, d):
 
 def vault_get(op, q):
     try:
-        from uengine.vault import get_vault
+        from uengine.vault import get_vault, detect_external_volumes
         v = get_vault(SET.get("vault_mount"))
         if op == "status":
-            return dict(ok=True, status=v.get_connection_status(), stats=v.get_storage_stats(), integrity=v.verify_integrity() if v.is_connected() else {"ok": False})
+            detected = detect_external_volumes()
+            return dict(ok=True, status=v.get_connection_status(), stats=v.get_storage_stats(),
+                        integrity=v.verify_integrity() if v.is_connected() else {"ok": False},
+                        detected_volumes=detected)
+        if op == "detect_volumes":
+            return dict(ok=True, volumes=detect_external_volumes())
         if op == "manifest":
             return dict(ok=True, manifest=v._manifest)
         return dict(ok=False, error=f"unknown vault op {op}")
@@ -1343,12 +1348,12 @@ def vault_post(op, d):
         v = get_vault(SET.get("vault_mount"))
         if op == "connect":
             p = str(d.get("path", "")).strip()
-            ok, msg = v.connect(p)
+            ok, msg = v.connect(p, auto_create_if_drive=True)
             if ok:
                 with LOCK:
                     SET["vault_mount"] = v.root_path
                     jsave("settings.json", SET)
-            return dict(ok=ok, message=msg, stats=v.get_storage_stats())
+            return dict(ok=ok, message=msg, stats=v.get_storage_stats(), root_path=v.root_path)
         if op == "create":
             dest = str(d.get("destination", "")).strip()
             name = str(d.get("name", "PERCIVAL_VAULT")).strip()
@@ -1366,6 +1371,63 @@ def vault_post(op, d):
             return v.rebuild_index()
         return dict(ok=False, error=f"unknown vault post op {op}")
     except Exception as e: return dict(ok=False, error=str(e))
+
+def app_lifecycle_get(op, q):
+    try:
+        if op == "shutdown_check":
+            running_pts = [p["code"] for p in PAT if p.get("status") in ("running", "starting", "paused")]
+            from uengine.transfer_manager import TransferManager
+            tm = TransferManager(B, vault_root=SET.get("vault_mount"))
+            active_transfers = [it for it in tm.get_queue() if it.get("status") in ("transferring", "pending")]
+            from uengine.pensieve import DurableLocalJournal
+            jnl = DurableLocalJournal()
+            pending_jnl = len(jnl.get_pending_entries())
+
+            can_quit_immediately = (len(running_pts) == 0 and len(active_transfers) == 0)
+            return dict(
+                ok=True,
+                can_quit_immediately=can_quit_immediately,
+                running_studies=running_pts,
+                active_transfers_count=len(active_transfers),
+                pending_journal_count=pending_jnl
+            )
+        return dict(ok=False, error=f"unknown app op {op}")
+    except Exception as e: return dict(ok=False, error=str(e))
+
+def app_lifecycle_post(op, d):
+    try:
+        if op == "shutdown":
+            pause_jobs = bool(d.get("pause_jobs", True))
+            threading.Thread(target=_perform_safe_shutdown, args=(pause_jobs,), daemon=False).start()
+            return dict(ok=True, message="Safe shutdown initiated.")
+        return dict(ok=False, error=f"unknown app post op {op}")
+    except Exception as e: return dict(ok=False, error=str(e))
+
+def _perform_safe_shutdown(pause_jobs: bool = True):
+    try:
+        if pause_jobs:
+            with LOCK:
+                for p in PAT:
+                    if p.get("status") in ("running", "starting"):
+                        p["status"] = "paused"
+                        p["error"] = "Paused for application shutdown"
+                save_pat()
+        try:
+            from uengine.pensieve import get_pensieve
+            p_mem = get_pensieve()
+            p_mem.flush_and_close()
+        except Exception:
+            pass
+        with LOCK:
+            jsave("settings.json", SET)
+        if WIN.get("window"):
+            try:
+                WIN["window"].destroy()
+            except Exception:
+                pass
+        time.sleep(0.4)
+    finally:
+        os._exit(0)
 
 def transfer_get(op, q):
     try:
@@ -2098,7 +2160,7 @@ def rollback():
 
 # ------------------------------------------------------------------ child apps (reviewer / blind viewer)
 CHILD = {}
-WIN = dict(webview=False, port=8800)
+WIN = dict(webview=False, port=8800, window=None)
 def free_port(start):
     for p in range(start, start + 50):
         with socket.socket() as s:
@@ -2211,6 +2273,7 @@ class H(BaseHTTPRequestHandler):
             if u.path.startswith("/api/percival/"): return self.send(pg_get(u.path[14:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/storage/"): return self.send(storage_get(u.path[13:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/vault/"): return self.send(vault_get(u.path[11:], {k: v[0] for k, v in parse_qs(u.query).items()}))
+            if u.path.startswith("/api/app/"): return self.send(app_lifecycle_get(u.path[9:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/transfer/"): return self.send(transfer_get(u.path[14:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/clean/"): return self.send(clean_get(u.path[11:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/legacy/"): return self.send(legacy_get(u.path[12:], {k: v[0] for k, v in parse_qs(u.query).items()}))
@@ -2374,6 +2437,7 @@ class H(BaseHTTPRequestHandler):
             if u.path.startswith("/api/percival/"): return self.send(pg_post(u.path[14:], d))
             if u.path.startswith("/api/storage/"): return self.send(storage_post(u.path[13:], d))
             if u.path.startswith("/api/vault/"): return self.send(vault_post(u.path[11:], d))
+            if u.path.startswith("/api/app/"): return self.send(app_lifecycle_post(u.path[9:], d))
             if u.path.startswith("/api/transfer/"): return self.send(transfer_post(u.path[14:], d))
             if u.path.startswith("/api/clean/"): return self.send(clean_post(u.path[11:], d))
             if u.path.startswith("/api/legacy/"): return self.send(legacy_post(u.path[12:], d))
@@ -2462,7 +2526,13 @@ if __name__ == "__main__":
     if how == "webview":
         import webview; WIN["webview"] = True
         threading.Thread(target=srv.serve_forever, daemon=True).start()
-        webview.create_window("Percival", url, width=1400, height=900); webview.start(dock_icon_follow_theme)
+        win = webview.create_window("Percival", url, width=1400, height=900)
+        WIN["window"] = win
+        def on_closing():
+            _perform_safe_shutdown(pause_jobs=True)
+            return True
+        win.events.closing += on_closing
+        webview.start(dock_icon_follow_theme)
     else:
         try: srv.serve_forever()
         except KeyboardInterrupt: pass

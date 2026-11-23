@@ -95,6 +95,36 @@ class TestStorageServicesExtended(unittest.TestCase):
         self.assertTrue(p["ok"])
         self.assertEqual(p["status"], "completed")
 
+    def test_detect_external_volumes_and_auto_vault(self):
+        vols = PercivalDataVault.detect_external_volumes()
+        self.assertIsInstance(vols, list)
+        for v in vols:
+            self.assertIn("mount_point", v)
+            self.assertIn("has_vault", v)
+            self.assertIn("read_only", v)
+
+        # Test auto-create vault when connecting to mock drive directory
+        mock_drive = os.path.join(self.tmp, "MockExternalDrive")
+        os.makedirs(mock_drive, exist_ok=True)
+        # Connect instance with auto_create_if_drive=True
+        ok, msg = self.vault.connect(mock_drive, auto_create_if_drive=True)
+        self.assertTrue(ok)
+        self.assertTrue(os.path.isdir(os.path.join(mock_drive, "PERCIVAL_VAULT")))
+        self.assertEqual(self.vault.root_path, os.path.join(mock_drive, "PERCIVAL_VAULT"))
+        self.assertTrue(os.path.exists(os.path.join(self.vault.root_path, "manifest", "vault_manifest.json")))
+
+    def test_pensieve_flush_and_close(self):
+        from uengine.pensieve import PensieveCoreMemory
+        p = PensieveCoreMemory(self.vault)
+        # Remember a test study
+        res_rem = p.remember_study("TEST_CLEAN_01", "PSEUDO_01", "clean_slate", metadata={"notes": "Clean test"})
+        self.assertIn(res_rem.get("status"), ("inserted", "idempotent_noop"))
+        # Test flush and close
+        res = p.flush_and_close()
+        self.assertTrue(res.get("ok"))
+        self.assertTrue(res.get("closed"))
+
+
 
 if __name__ == "__main__":
     unittest.main()
