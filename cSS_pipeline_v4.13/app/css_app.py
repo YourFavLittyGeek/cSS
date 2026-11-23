@@ -10,7 +10,61 @@ from urllib.parse import urlparse, parse_qs
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import series_detect as SD
 
-B = os.environ.get("CSS_BASE", os.path.expanduser("~/css_project"))
+def _resolve_project_base():
+    if "CSS_BASE" in os.environ and os.environ["CSS_BASE"]:
+        return os.path.abspath(os.path.expanduser(os.environ["CSS_BASE"]))
+    cfg_p = os.path.expanduser("~/Library/Application Support/Percival Dev/project_path")
+    if os.path.isfile(cfg_p):
+        try:
+            with open(cfg_p, "r") as f:
+                cand = f.read().strip()
+                if cand and os.path.isdir(os.path.expanduser(cand)):
+                    return os.path.abspath(os.path.expanduser(cand))
+        except Exception:
+            pass
+    percival_proj = os.path.expanduser("~/Percival_project")
+    if os.path.isdir(percival_proj):
+        return os.path.abspath(percival_proj)
+    return os.path.abspath(os.path.expanduser("~/css_project"))
+
+B = _resolve_project_base()
+
+def _ensure_pipeline_installed(base_dir):
+    """Self-healing: ensure pipeline scripts and unified components are present in workspace."""
+    rc = os.path.join(base_dir, "scripts", "run_css.sh")
+    if not os.path.exists(rc):
+        candidates = [
+            os.path.join(HERE, "..", "scripts"),
+            os.path.join(HERE, "..", "pipeline", "scripts"),
+            os.path.expanduser("~/Percival_project/scripts"),
+            os.path.expanduser("~/css_project/scripts"),
+        ]
+        for cand in candidates:
+            cand = os.path.abspath(cand)
+            if os.path.isdir(cand) and os.path.exists(os.path.join(cand, "run_css.sh")):
+                target_scripts = os.path.join(base_dir, "scripts")
+                os.makedirs(target_scripts, exist_ok=True)
+                for item in os.listdir(cand):
+                    if item.startswith(".") or item == "__pycache__": continue
+                    sf = os.path.join(cand, item)
+                    df = os.path.join(target_scripts, item)
+                    if os.path.isfile(sf):
+                        shutil.copy2(sf, df)
+                        if df.endswith(".sh") or df.endswith(".py"):
+                            try: os.chmod(df, 0o755)
+                            except Exception: pass
+                break
+
+    # Also ensure unified_engine and unified_score directories exist
+    for comp in ("unified_engine", "unified_score"):
+        comp_dst = os.path.join(base_dir, comp)
+        if not os.path.isdir(comp_dst):
+            for cand in [os.path.join(HERE, "..", comp), os.path.join(HERE, "..", "pipeline", comp), os.path.expanduser(f"~/Percival_project/{comp}")]:
+                if os.path.isdir(cand):
+                    shutil.copytree(cand, comp_dst, ignore=shutil.ignore_patterns("__pycache__", ".*"))
+                    break
+
+_ensure_pipeline_installed(B)
 sys.path.insert(0, os.path.join(HERE, "guard")); import css_writeguard as WG      # v5.14.2-rc2: central production write guard
 EXPERIMENTAL = os.environ.get("CSS_EXPERIMENTAL") == "1"
 if EXPERIMENTAL:
