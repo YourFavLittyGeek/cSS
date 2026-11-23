@@ -486,7 +486,9 @@ class TestFaults(Base):
         con.close()
         self.svc = TransferService(self.E.base, self.E.vault)
         con = sqlite3.connect(p)
-        self.assertEqual(con.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0], "2")
+        from uengine.transfer.journal import SCHEMA_VERSION
+        self.assertEqual(con.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0], str(SCHEMA_VERSION))
+        self.assertIn("control", {r[1] for r in con.execute("PRAGMA table_info(jobs)")})          # v3 (1d)
         self.assertEqual(con.execute("SELECT value FROM schema_meta WHERE key='migrated_from'").fetchone()[0], "1")
         cols = {r[1] for r in con.execute("PRAGMA table_info(job_files)")}
         self.assertTrue({"src_identity", "part_identity", "dst_identity", "old_identity", "preserved_state", "intent", "attempt"} <= cols)

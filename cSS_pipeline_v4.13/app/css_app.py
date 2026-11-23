@@ -1584,6 +1584,10 @@ def app_lifecycle_post(op, d):
 
 def _perform_safe_shutdown(pause_jobs: bool = True):
     try:
+        try:
+            transfer_pool_shutdown(timeout=15.0)              # Phase 1d: running transfers pause at a safe boundary
+        except Exception:
+            pass
         if pause_jobs:
             with LOCK:
                 for p in PAT:
@@ -1608,7 +1612,35 @@ def _perform_safe_shutdown(pause_jobs: bool = True):
     finally:
         os._exit(0)
 
+_TRANSFER_POOL = {"pool": None}
+_TRANSFER_POOL_LOCK = threading.Lock()
+
+def transfer_pool():
+    """Phase 1d: the background transfer worker pool (journal-backed; created on first use, started once)"""
+    with _TRANSFER_POOL_LOCK:
+        if _TRANSFER_POOL["pool"] is None:
+            from uengine.transfer.workers import TransferWorkerPool
+            _TRANSFER_POOL["pool"] = TransferWorkerPool(B, SET.get("vault_mount")).start()
+        return _TRANSFER_POOL["pool"]
+
+def transfer_pool_shutdown(timeout=15.0):
+    with _TRANSFER_POOL_LOCK:
+        pool = _TRANSFER_POOL["pool"]
+    if pool is None:
+        return None
+    try:
+        return pool.shutdown(timeout=timeout)
+    finally:
+        pool.close()
+        _TRANSFER_POOL["pool"] = None
+
 def transfer_get(op, q):
+    if op in ("jobs", "job", "assess", "workers"):           # Phase 1d endpoints (uengine/transfer/api.py)
+        try:
+            from uengine.transfer import api as TAPI
+            return TAPI.handle_get(op, q, transfer_pool())
+        except Exception as e:
+            return dict(ok=False, error=dict(code="internal", message=f"{type(e).__name__}: {e}"))
     try:
         from uengine.transfer_manager import TransferManager
         from uengine.unified_transfer_engine import get_transfer_engine
@@ -1640,6 +1672,13 @@ def transfer_get(op, q):
     except Exception as e: return dict(ok=False, error=str(e))
 
 def transfer_post(op, d):
+    if op.startswith("jobs/"):                               # Phase 1d endpoints (uengine/transfer/api.py)
+        try:
+            from uengine.transfer import api as TAPI
+            r = TAPI.handle_post(op, d, transfer_pool())
+            return r if r is not None else dict(ok=False, error=dict(code="not_found", message=f"unknown transfer op {op}"))
+        except Exception as e:
+            return dict(ok=False, error=dict(code="internal", message=f"{type(e).__name__}: {e}"))
     try:
         from uengine.transfer_manager import TransferManager
         from uengine.unified_transfer_engine import get_transfer_engine
@@ -2902,6 +2941,8 @@ if __name__ == "__main__":
             if "--no-window" not in a: open_window(f"http://127.0.0.1:{port}/")
             sys.exit(0)
     reread_failures()
+    try: transfer_pool()                                     # Phase 1d: background transfers + interrupted-job detection
+    except Exception as _e: print(f"transfer workers not started: {_e}", flush=True)
     threading.Thread(target=ai_backfill, daemon=True).start()
     threading.Thread(target=worker, daemon=True).start()
     pg_init()

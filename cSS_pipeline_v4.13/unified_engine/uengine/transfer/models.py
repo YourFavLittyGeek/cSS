@@ -87,13 +87,16 @@ JOB_TRANSITIONS: Dict[JobState, FrozenSet[JobState]] = {
                           J.CANCEL_REQUESTED, J.ROLLING_BACK, *_STOP}),
     J.FLUSHING: frozenset({J.VERIFYING, J.PAUSED, J.CANCEL_REQUESTED, J.ROLLING_BACK, *_STOP}),
     J.VERIFYING: frozenset({J.COPYING, J.COMMITTING, J.PAUSED, J.CANCEL_REQUESTED, J.ROLLING_BACK, *_STOP}),
-    J.COMMITTING: frozenset({J.COPYING, J.REMOVING_SOURCES, J.COMPLETED, J.CANCEL_REQUESTED, J.ROLLING_BACK, *_STOP}),
-    J.REMOVING_SOURCES: frozenset({J.COMPLETED, J.COMPLETED_WITH_RETAINED_SOURCES, *_STOP}),
+    J.COMMITTING: frozenset({J.COPYING, J.REMOVING_SOURCES, J.COMPLETED, J.PAUSED, J.CANCEL_REQUESTED, J.ROLLING_BACK,
+                             *_STOP}),
+    J.REMOVING_SOURCES: frozenset({J.COMPLETED, J.COMPLETED_WITH_RETAINED_SOURCES, J.PAUSED, *_STOP}),
     J.ROLLING_BACK: frozenset({J.CANCELLED, *_STOP}),
     # 1c: recovery (resume or discard, chosen by the user and persisted) ends in a terminal state, or back in
     # interrupted (non-ambiguous failure, safe to retry) / needs_attention (a human must look)
-    J.RECOVERING: frozenset({J.COMPLETED, J.COMPLETED_WITH_RETAINED_SOURCES, J.CANCELLED, J.NEEDS_ATTENTION, J.INTERRUPTED}),
-    J.PAUSED: frozenset({J.QUEUED, J.CANCEL_REQUESTED, J.CANCELLED, J.INTERRUPTED}),
+    J.RECOVERING: frozenset({J.COMPLETED, J.COMPLETED_WITH_RETAINED_SOURCES, J.CANCELLED, J.NEEDS_ATTENTION, J.INTERRUPTED,
+                             J.PAUSED}),
+    # 1d: a paused job is durable and owner-free; it continues ONLY through 1c recovery (resume / discard decision)
+    J.PAUSED: frozenset({J.RECOVERING, J.INTERRUPTED}),
     J.CANCEL_REQUESTED: frozenset({J.CANCELLED, J.FAILED, J.INTERRUPTED}),
     J.INTERRUPTED: frozenset({J.RECOVERING}),           # 1c: only through recovery - never silently cancelled or re-run
     J.NEEDS_ATTENTION: frozenset({J.RECOVERING, J.CANCELLED}),

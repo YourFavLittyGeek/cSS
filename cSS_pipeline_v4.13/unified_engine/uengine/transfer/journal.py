@@ -18,7 +18,7 @@ from .models import (FileState, JobState, NON_TERMINAL_JOB_STATES, TransitionErr
                      check_job_transition)
 from ..safety import PathPolicy, SafetyError, is_simple_name
 
-SCHEMA_VERSION = 2          # v2 (1c): identities, write-ahead intents, recovery decision, created folders
+SCHEMA_VERSION = 3          # v2 (1c): identities, intents, recovery decision, created folders; v3 (1d): control request
 JOURNAL_RELPATH = os.path.join("app_data", "transfers", "journal.db")
 
 _SCHEMA = """
@@ -42,6 +42,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     recovery_decision TEXT,
     recovery_attempts INTEGER NOT NULL DEFAULT 0,
     created_dirs TEXT NOT NULL DEFAULT '[]',
+    control TEXT,
+    request_id TEXT,
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL
 );
@@ -90,11 +92,11 @@ CREATE INDEX IF NOT EXISTS ix_events_job ON job_events(job_id, event_id);
 _FILE_FIELDS = {"src_mtime_ns", "src_ino", "src_sha256", "part_path", "part_sha256", "dst_sha256", "committed_path",
                 "preserved_path", "error", "attempt", "src_identity", "part_identity", "old_identity", "dst_identity",
                 "preserved_state", "intent"}
-_JOB_FIELDS = {"recovery_decision", "recovery_attempts", "error"}
+_JOB_FIELDS = {"recovery_decision", "recovery_attempts", "error", "control"}
 # columns added by schema v2 (1c) - added to a v1 journal in place (ALTER TABLE ADD COLUMN; nothing is rewritten)
 _V2_COLUMNS = {
     "jobs": [("recovery_decision", "TEXT"), ("recovery_attempts", "INTEGER NOT NULL DEFAULT 0"),
-             ("created_dirs", "TEXT NOT NULL DEFAULT '[]'")],
+             ("created_dirs", "TEXT NOT NULL DEFAULT '[]'"), ("control", "TEXT"), ("request_id", "TEXT")],
     "job_files": [("attempt", "INTEGER NOT NULL DEFAULT 0"), ("src_identity", "TEXT"), ("part_identity", "TEXT"),
                   ("old_identity", "TEXT"), ("dst_identity", "TEXT"), ("preserved_state", "TEXT NOT NULL DEFAULT 'none'"),
                   ("intent", "TEXT")],
@@ -103,6 +105,14 @@ _V2_COLUMNS = {
 
 class JournalError(RuntimeError):
     pass
+
+
+class DuplicateRequest(JournalError):
+    """1d: a job with this request id already exists (idempotent creation)"""
+
+    def __init__(self, request_id, job_id):
+        super().__init__(f"request {request_id} already created job {job_id}")
+        self.request_id, self.job_id = request_id, job_id
 
 
 class StaleStateError(TransitionError):
@@ -152,11 +162,12 @@ class TransferJournal:
             row = c.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()
             if row is None:
                 c.execute("INSERT INTO schema_meta(key, value) VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
+                c.execute("CREATE UNIQUE INDEX IF NOT EXISTS ix_jobs_request ON jobs(request_id) WHERE request_id IS NOT NULL")
                 return
             v = int(row["value"])
             if v > SCHEMA_VERSION:
                 raise JournalError(f"journal schema {row['value']} is newer than this program ({SCHEMA_VERSION}); refusing to use it")
-            if v < 2:                                   # additive v1 -> v2 migration inside one transaction
+            if v < SCHEMA_VERSION:                      # additive migration (v1/v2 -> v3) inside one transaction
                 for table, cols in _V2_COLUMNS.items():
                     have = {r["name"] for r in c.execute(f"PRAGMA table_info({table})").fetchall()}
                     for name, decl in cols:
@@ -164,6 +175,8 @@ class TransferJournal:
                             c.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
                 c.execute("UPDATE schema_meta SET value=? WHERE key='schema_version'", (str(SCHEMA_VERSION),))
                 c.execute("INSERT OR REPLACE INTO schema_meta(key, value) VALUES ('migrated_from', ?)", (str(v),))
+            # created only after the column exists (also for journals migrated from v1 / v2)
+            c.execute("CREATE UNIQUE INDEX IF NOT EXISTS ix_jobs_request ON jobs(request_id) WHERE request_id IS NOT NULL")
 
     def close(self) -> None:
         with self._lock:
@@ -176,19 +189,27 @@ class TransferJournal:
 
     # ------------------------------------------------------------------ jobs
     def create_job(self, job_id: str, operation: str, commit_mode: str, files: Sequence[Dict[str, Any]],
-                   study_id: Optional[str] = None, spec: Optional[Dict[str, Any]] = None) -> None:
-        """a new job in state QUEUED with its complete file list (atomic: all or nothing)"""
+                   study_id: Optional[str] = None, spec: Optional[Dict[str, Any]] = None,
+                   request_id: Optional[str] = None) -> None:
+        """a new job in state QUEUED with its complete file list (atomic: all or nothing). request_id (optional,
+        unique): a second creation with the same id raises DuplicateRequest naming the existing job."""
         if not is_simple_name(job_id) or len(job_id) > 128:
             raise JournalError(f"invalid job id {job_id!r}")
+        if request_id is not None and (not is_simple_name(request_id) or len(request_id) > 64):
+            raise JournalError(f"invalid request id {request_id!r}")
         now = time.time()
         with self._tx() as c:
             if c.execute("SELECT 1 FROM jobs WHERE job_id=?", (job_id,)).fetchone():
                 raise JournalError(f"job {job_id} already exists")
+            if request_id is not None:
+                row = c.execute("SELECT job_id FROM jobs WHERE request_id=?", (request_id,)).fetchone()
+                if row:
+                    raise DuplicateRequest(request_id, row["job_id"])
             total = sum(int(f["size"]) for f in files)
             c.execute("INSERT INTO jobs(job_id, operation, study_id, commit_mode, state, spec_json, total_files, total_bytes, "
-                      "created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                      "request_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                       (job_id, operation, study_id, commit_mode, JobState.QUEUED.value, json.dumps(spec or {}, default=str),
-                       len(files), total, now, now))
+                       len(files), total, request_id, now, now))
             for i, f in enumerate(files):
                 c.execute("INSERT INTO job_files(job_id, seq, rel_path, src, dst, size, state, updated_at) VALUES (?,?,?,?,?,?,?,?)",
                           (job_id, i, f["rel_path"], f["src"], f["dst"], int(f["size"]), FileState.PENDING.value, now))
@@ -281,6 +302,17 @@ class TransferJournal:
             if c.execute(f"UPDATE jobs SET {', '.join(cols)} WHERE job_id=?", (*fields.values(), time.time(), job_id)).rowcount != 1:
                 raise JournalError(f"unknown job {job_id}")
             self._event(c, job_id, "job_fields", detail=fields)
+
+    def request_control(self, job_id: str, value: Optional[str]) -> None:
+        """1d: a cooperative request ('pause') read by the job's owner at its next safe checkpoint (any process)"""
+        if value not in (None, "pause"):
+            raise JournalError(f"unknown control request {value!r}")
+        self.set_job(job_id, control=value)
+
+    def get_control(self, job_id: str) -> Optional[str]:
+        with self._lock:
+            r = self._conn.execute("SELECT control FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            return r["control"] if r else None
 
     def add_created_dir(self, job_id: str, path: str) -> None:
         """write-ahead: record a folder BEFORE it is created, so recovery can remove it again (only if empty)"""

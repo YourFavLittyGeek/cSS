@@ -324,6 +324,7 @@ def stage_file(src: str, dst: str, *, policy: PathPolicy, job_tag: str, mode: Co
                 b = fin.read(chunk_size)
                 if not b:
                     break
+                crash("copy.chunk")
                 h.update(b)
                 fout.write(b)
                 written += len(b)

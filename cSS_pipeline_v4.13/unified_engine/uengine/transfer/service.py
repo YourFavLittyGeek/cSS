@@ -50,6 +50,17 @@ class TransferRefused(RuntimeError):
     """the job (or recovery request) was refused before anything was recorded or written"""
 
 
+class PauseRequested(BaseException):
+    """1d: a cooperative pause was requested and this is a safe boundary (BaseException: never caught as a failure)"""
+
+    def __init__(self, where: str):
+        super().__init__(where)
+        self.where = where
+
+
+_PAUSE_EXC = (PauseRequested, CP.CopyPaused)
+
+
 def _job_id(op: Operation, study: Optional[str]) -> str:
     return f"{op.value}-{study or 'x'}-{time.strftime('%Y%m%d%H%M%S')}-{secrets.token_hex(3)}"[:56]
 
@@ -101,7 +112,7 @@ class TransferService:
 
     # ================================================================================================= submit
     def submit(self, operation, items: Sequence[Tuple[str, str]], study_id: Optional[str] = None,
-               mode: Optional[CommitMode] = None, keep_previous: bool = False) -> str:
+               mode: Optional[CommitMode] = None, keep_previous: bool = False, request_id: Optional[str] = None) -> str:
         op = Operation(operation)
         mode = CommitMode(mode or DEFAULT_COMMIT_MODE[op])
         if study_id is not None:
@@ -149,7 +160,7 @@ class TransferService:
             except CP.ExclusiveCommitUnsupported as e:
                 raise TransferRefused(str(e))
         job_id = _job_id(op, study_id)
-        self.journal.create_job(job_id, op.value, mode.value, files, study_id=study_id,
+        self.journal.create_job(job_id, op.value, mode.value, files, study_id=study_id, request_id=request_id,
                                 spec=dict(roots=roots, empty_dirs=empty_dirs, skipped=skipped, keep_previous=bool(keep_previous)))
         return job_id
 
@@ -190,6 +201,44 @@ class TransferService:
         except LockTimeout as e:
             raise TransferRefused(f"job {job_id} is already running: {e}")
 
+    # ---------------------------------------------------------------- 1d cooperative pause
+    def _checkpoint(self, job_id: str, where: str) -> None:
+        """a SAFE boundary: everything before it is journaled; raise PauseRequested if a pause was requested"""
+        crash(f"checkpoint.{where}")
+        if self.journal.get_control(job_id) == "pause":
+            raise PauseRequested(where)
+
+    def _chunk_control(self, job_id: str):
+        """copier control: checked between chunks (the .part identity is already journaled)"""
+        last = [0.0, None]
+
+        def control():
+            now = time.monotonic()
+            if now - last[0] >= 0.05:
+                last[0], last[1] = now, self.journal.get_control(job_id)
+            return "pause" if last[1] == "pause" else None
+        return control
+
+    def _pause(self, job_id: str, rep, where: str):
+        """the job stops at a safe boundary: nothing is rolled back, every file stays in a classifiable journaled state;
+        the job continues only through 1c recovery (resume / discard)"""
+        self.journal.set_job(job_id, control=None)
+        self.journal.transition_job(job_id, J.PAUSED, detail={"paused_at": where})
+        rep.update(state=J.PAUSED.value, ok=False, paused_at=where)
+        return rep
+
+    def _volume_gone(self, job_id, rep, exc):
+        """a source / destination volume disappeared: no rollback is attempted (it could not succeed and would only
+        leave half-undone files) - the job is INTERRUPTED for 1c recovery after the volume is back"""
+        job = self.journal.get_job(job_id)
+        gone = self._unavailable(job, self.journal.get_files(job_id))
+        if not gone:
+            return None
+        rep["errors"].append(f"{type(exc).__name__}: {exc}; " + "; ".join(gone))
+        self.journal.transition_job(job_id, J.INTERRUPTED, error="volume unavailable: " + "; ".join(gone))
+        rep.update(state=J.INTERRUPTED.value, ok=False)
+        return rep
+
     def _end(self, job_id, state, rep, error=None):
         if error:
             rep["errors"].append(error)
@@ -224,7 +273,7 @@ class TransferService:
         a = int(rec["attempt"] or 0)
         return job_id if a == 0 else f"{job_id}-r{a}"
 
-    def _stage_one(self, job_id, f, mode, chunk_size, progress=None):
+    def _stage_one(self, job_id, f, mode, chunk_size, progress=None, control=None):
         """write-ahead staging: COPYING(part path) -> part identity journaled on creation -> STAGED -> VERIFIED"""
         jn, seq = self.journal, f["seq"]
         tag = self._tag(job_id, f)
@@ -233,7 +282,8 @@ class TransferService:
                            part_sha256=None, intent=json.dumps({"step": "stage"}))
         crash("stage.before_copy")
         r = CP.stage_file(f["src"], f["dst"], policy=self.policy, job_tag=tag, mode=mode, chunk_size=chunk_size,
-                          progress=progress, on_created=lambda p, i: jn.update_file(job_id, seq, part_identity=_jd(i)))
+                          progress=progress, control=control,
+                          on_created=lambda p, i: jn.update_file(job_id, seq, part_identity=_jd(i)))
         if isinstance(r, CP.CopyResult):
             if r.status == "skipped_identical":
                 jn.transition_file(job_id, seq, F.SKIPPED_IDENTICAL, src_sha256=r.src_sha256, dst_sha256=r.dst_sha256, intent=None)
@@ -311,18 +361,23 @@ class TransferService:
             if todo:
                 jn.transition_job(job_id, J.COPYING)
             for f in todo:
+                self._checkpoint(job_id, "before_stage")
                 jn.update_progress(job_id, current_file=f["rel_path"])
                 if hooks.get("before_stage"):
                     hooks["before_stage"](f)
-                state = {"phase": "copying"}
+                state = {"phase": "copying", "t": 0.0}
 
-                def progress(phase, n, _st=state):
+                def progress(phase, n, _st=state, _base=done_bytes):
                     if phase != _st["phase"]:
                         nxt = {"flushing": J.FLUSHING, "verifying": J.VERIFYING}.get(phase)
                         if nxt:
                             jn.transition_job(job_id, nxt)
                         _st["phase"] = phase
-                r = self._stage_one(job_id, self._rec(job_id, f["seq"]), mode, chunk_size, progress)
+                    elif phase == "copying" and time.monotonic() - _st["t"] >= 0.5:     # truthful, throttled progress
+                        _st["t"] = time.monotonic()
+                        jn.update_progress(job_id, phase_bytes=_base + n)
+                r = self._stage_one(job_id, self._rec(job_id, f["seq"]), mode, chunk_size, progress,
+                                    control=self._chunk_control(job_id))
                 if isinstance(r, CP.CopyResult):
                     if r.status == "skipped_identical":
                         rep["skipped_identical"].append(r.dst)
@@ -334,38 +389,65 @@ class TransferService:
                 jn.update_progress(job_id, phase_bytes=done_bytes)
                 if state["phase"] == "verifying":
                     jn.transition_job(job_id, J.COPYING)
+        except _PAUSE_EXC as e:
+            return self._pause(job_id, rep, getattr(e, "where", "during_copy"))
         except BaseException as e:
+            gone = self._volume_gone(job_id, rep, e)
+            if gone:
+                return gone
             unsafe = self._abort_run(job_id, e, rep)
             state = J.NEEDS_ATTENTION if (rep["conflicts"] or unsafe) else J.FAILED
             return self._end(job_id, state, rep, f"{type(e).__name__}: {e} - no destination was changed")
         # ---------------------------------------------------------------- B: commit everything (or nothing)
+        try:
+            self._checkpoint(job_id, "before_commit_phase")
+        except PauseRequested as e:
+            return self._pause(job_id, rep, e.where)
         jn.transition_job(job_id, J.COMMITTING)
         committed: List[Tuple[dict, CP.CopyResult]] = []
         try:
             for d in sorted(set(spec.get("empty_dirs", [])) | {os.path.dirname(s.dst) for _, s in staged}):
                 self._makedirs(job_id, d)
             for i, (f, s) in enumerate(staged):
+                if i:
+                    self._checkpoint(job_id, "between_commits")
                 if hooks.get("before_commit"):
                     hooks["before_commit"](i, f)
                 r = self._commit_one(job_id, f, s, mode, rep)
                 if r.status == "committed":
                     committed.append((f, r))
                     jn.update_progress(job_id, done_files=len(committed), done_bytes=sum(x.size for _, x in committed))
+        except PauseRequested as e:
+            return self._pause(job_id, rep, e.where)
         except BaseException as e:
+            gone = self._volume_gone(job_id, rep, e)
+            if gone:
+                return gone
             unsafe = self._abort_run(job_id, e, rep)
             if unsafe or rep["conflicts"]:
                 return self._end(job_id, J.NEEDS_ATTENTION, rep, f"{type(e).__name__}: {e}; rollback "
                                                                 f"{'INCOMPLETE - see the job report' if unsafe else 'complete'}")
             return self._end(job_id, J.FAILED, rep, f"{type(e).__name__}: {e} - all commits of this job were rolled back")
         rep["committed"] = [r.dst for _, r in committed]
-        # ---------------------------------------------------------------- C / D
+        # ---------------------------------------------------------------- C / D (all commits done and recorded)
         final = J.COMPLETED
-        if op == Operation.MOVE:
-            jn.transition_job(job_id, J.REMOVING_SOURCES)
-            if hooks.get("before_remove_sources"):
-                hooks["before_remove_sources"]()
-            final = self._remove_sources(job_id, spec, rep)
-        self._finalize(job_id, spec, rep)
+        try:
+            if op == Operation.MOVE:
+                self._checkpoint(job_id, "before_remove_sources")
+                jn.transition_job(job_id, J.REMOVING_SOURCES)
+                if hooks.get("before_remove_sources"):
+                    hooks["before_remove_sources"]()
+                final = self._remove_sources(job_id, spec, rep)
+            self._checkpoint(job_id, "before_finalize")
+            self._finalize(job_id, spec, rep)
+        except PauseRequested as e:
+            return self._pause(job_id, rep, e.where)
+        except BaseException as e:
+            # every commit is recorded; only clean-up remains - resumable through 1c, never rolled back here
+            rep["errors"].append(f"{type(e).__name__}: {e}")
+            jn.transition_job(job_id, J.INTERRUPTED, error=f"after commit: {type(e).__name__}: {e}")
+            rep.update(state=J.INTERRUPTED.value, ok=False)
+            return rep
         return self._end(job_id, final, rep)
 
     def _abort_run(self, job_id, exc, rep) -> bool:
@@ -676,9 +758,9 @@ class TransferService:
     def _resume_locked(self, job_id, chunk_size):
         jn = self.journal
         job = jn.get_job(job_id)
-        if job["state"] not in (J.INTERRUPTED.value, J.NEEDS_ATTENTION.value):
-            raise TransferRefused(f"job {job_id} is {job['state']}; only interrupted jobs (or needs-attention jobs after a "
-                                  f"human resolved the cause) can be resumed")
+        if job["state"] not in (J.INTERRUPTED.value, J.PAUSED.value, J.NEEDS_ATTENTION.value):
+            raise TransferRefused(f"job {job_id} is {job['state']}; only interrupted or paused jobs (or needs-attention jobs "
+                                  f"after a human resolved the cause) can be resumed")
         a = self.assess(job_id)
         if not a["resumable"]:
             raise TransferRefused(f"job {job_id} cannot be resumed safely: " +
@@ -715,11 +797,13 @@ class TransferService:
             for rec in jn.get_files(job_id):
                 if cls[rec["seq"]]["cls"] != "needs_copy":
                     continue
+                self._checkpoint(job_id, "resume_before_stage")
                 self._remove_own_part(job_id, rec, rep)
                 if rec["state"] != F.PENDING.value:
                     jn.transition_file(job_id, rec["seq"], F.PENDING, intent=None)
                 jn.update_file(job_id, rec["seq"], attempt=int(rec["attempt"] or 0) + 1)
-                r = self._stage_one(job_id, self._rec(job_id, rec["seq"]), mode, chunk_size)
+                r = self._stage_one(job_id, self._rec(job_id, rec["seq"]), mode, chunk_size,
+                                    control=self._chunk_control(job_id))
                 crash("recover.after_stage")
                 if isinstance(r, CP.CopyResult):
                     if r.status != "skipped_identical":
@@ -729,6 +813,8 @@ class TransferService:
             # 4. commit every verified file; publish moved-aside cases
             for rec in jn.get_files(job_id):
                 c = cls[rec["seq"]]
+                if rec["state"] in (F.VERIFIED.value, F.COMMITTING.value):
+                    self._checkpoint(job_id, "resume_before_commit")
                 if rec["state"] == F.VERIFIED.value:
                     self._commit_one(job_id, rec, self._staged_from(job_id, rec), mode, rep)
                 elif rec["state"] == F.COMMITTING.value and c["cls"] == "preserved_aside":
@@ -742,8 +828,14 @@ class TransferService:
                                        dst_sha256=rec["src_sha256"], preserved_state="moved", intent=None)
             final = J.COMPLETED
             if op == Operation.MOVE:
+                self._checkpoint(job_id, "resume_before_remove_sources")
                 final = self._remove_sources(job_id, spec, rep)
+            self._checkpoint(job_id, "resume_before_finalize")
             self._finalize(job_id, spec, rep)
+        except _PAUSE_EXC as e:
+            # paused at a safe boundary during the resume: the 'resume' decision stays recorded; a partial .part of
+            # the file being copied is kept (its identity is journaled) and is re-staged by the next resume
+            return self._pause(job_id, rep, getattr(e, "where", "resume_during_copy"))
         except BaseException as e:
             # a non-ambiguous failure while resuming: everything done so far is recorded; the job is safe to retry
             for seq in fresh:
@@ -763,8 +855,9 @@ class TransferService:
     def _discard_locked(self, job_id):
         jn = self.journal
         job = jn.get_job(job_id)
-        if job["state"] not in (J.INTERRUPTED.value, J.NEEDS_ATTENTION.value, J.FAILED.value):
-            raise TransferRefused(f"job {job_id} is {job['state']}; only interrupted / failed / needs-attention jobs can be discarded")
+        if job["state"] not in (J.INTERRUPTED.value, J.PAUSED.value, J.NEEDS_ATTENTION.value, J.FAILED.value):
+            raise TransferRefused(f"job {job_id} is {job['state']}; only interrupted / paused / failed / needs-attention jobs "
+                                  f"can be discarded")
         a = self.assess(job_id)
         if a["unavailable"]:
             raise TransferRefused(f"job {job_id} cannot be discarded now: " + "; ".join(a["unavailable"]))
