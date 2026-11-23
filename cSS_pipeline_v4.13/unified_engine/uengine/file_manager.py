@@ -14,6 +14,8 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from .unified_transfer_engine import get_transfer_engine
+from .safety import (PathPolicy, SafetyError, canon, inside, is_simple_name, study_file_matches, validate_study_code,
+                     volumes_root)
 
 STATUS_LOCAL_ONLY = "LOCAL_ONLY"
 STATUS_STAGED = "STAGED"
@@ -37,6 +39,7 @@ class FileManager:
         self.app_data_dir = os.path.join(self.base_dir, "app_data")
         self.staging_dir = os.path.join(self.app_data_dir, "staging")
         self.review_dir = os.path.join(self.base_dir, "review")
+        self.policy = PathPolicy(self.base_dir, self.vault_root)
         os.makedirs(self.staging_dir, exist_ok=True)
         os.makedirs(self.review_dir, exist_ok=True)
 
@@ -237,12 +240,21 @@ class FileManager:
             "vault_files": vault_files,
         }
 
+    def _copy_verified(self, src: str, dst: str) -> None:
+        """Phase 0: staged .part copy, verified, then atomic replace (an existing dst survives a failed copy)"""
+        engine = get_transfer_engine(os.path.join(self.base_dir, "app_data", "transfers"))
+        engine.copy_file_streaming(src, dst, verify_sha=True)
+
     def stage_study(self, study_code: str) -> Dict[str, Any]:
         """Stage files from external Data Vault to local Mac SSD staging."""
+        try:
+            study_code = validate_study_code(study_code)
+        except SafetyError as e:
+            return {"ok": False, "study_code": study_code, "error": f"Refused: {e}", "files_staged": 0}
         if not self.is_vault_connected() or not self.vault_root:
             raise RuntimeError("Data Vault is disconnected. Cannot stage.")
 
-        dest_dir = os.path.join(self.staging_dir, study_code)
+        dest_dir = self.policy.check_write_target(os.path.join(self.staging_dir, study_code))
         os.makedirs(dest_dir, exist_ok=True)
 
         staged = []
@@ -251,9 +263,9 @@ class FileManager:
             if os.path.isdir(src_dir):
                 for f in os.listdir(src_dir):
                     sp = os.path.join(src_dir, f)
-                    if os.path.isfile(sp):
+                    if os.path.isfile(sp) and not f.endswith(".part"):
                         dp = os.path.join(dest_dir, f)
-                        shutil.copy2(sp, dp)
+                        self._copy_verified(sp, dp)
                         staged.append(dp)
 
         return {
@@ -264,18 +276,23 @@ class FileManager:
 
     def archive_study(self, study_code: str) -> Dict[str, Any]:
         """Archive local study outputs to external Data Vault."""
+        try:
+            study_code = validate_study_code(study_code)
+        except SafetyError as e:
+            return {"ok": False, "study_code": study_code, "error": f"Refused: {e}", "files_archived": 0}
         if not self.is_vault_connected() or not self.vault_root:
             raise RuntimeError("Data Vault is disconnected. Cannot archive.")
 
-        dest_dir = os.path.join(self.vault_root, "studies", study_code)
+        dest_dir = self.policy.check_write_target(os.path.join(self.vault_root, "studies", study_code))
         os.makedirs(dest_dir, exist_ok=True)
 
         archived = []
-        # Copy from review
-        for f in glob.glob(os.path.join(self.review_dir, f"{study_code}*")):
-            if os.path.isfile(f):
-                dp = os.path.join(dest_dir, os.path.basename(f))
-                shutil.copy2(f, dp)
+        # Copy this study's review files (code boundary: M1 does not match M10_*)
+        for f in sorted(os.listdir(self.review_dir)) if os.path.isdir(self.review_dir) else []:
+            sp = os.path.join(self.review_dir, f)
+            if os.path.isfile(sp) and study_file_matches(f, study_code):
+                dp = os.path.join(dest_dir, f)
+                self._copy_verified(sp, dp)
                 archived.append(dp)
 
         return {
@@ -318,44 +335,60 @@ class FileManager:
 
     def clean_staging(self, study_code: str) -> Dict[str, Any]:
         """Clean local staging directory for a specific study."""
+        try:
+            study_code = validate_study_code(study_code)
+        except SafetyError as e:
+            return {"ok": False, "study_code": study_code, "error": f"Refused: {e}", "reclaimed_bytes": 0, "reclaimed_mb": 0.0}
         stg_dir = os.path.join(self.staging_dir, study_code)
         reclaimed = 0
-        if os.path.isdir(stg_dir):
-            for root, _, files in os.walk(stg_dir):
-                for f in files:
-                    reclaimed += os.path.getsize(os.path.join(root, f))
-            shutil.rmtree(stg_dir, ignore_errors=True)
+        if os.path.lexists(stg_dir):
+            try:
+                self.policy.check_delete(stg_dir)
+            except SafetyError as e:
+                return {"ok": False, "study_code": study_code, "error": f"Refused: {e}", "reclaimed_bytes": 0, "reclaimed_mb": 0.0}
+            if os.path.islink(stg_dir):
+                os.remove(stg_dir)
+            elif os.path.isdir(stg_dir):
+                for root, _, files in os.walk(stg_dir):
+                    for f in files:
+                        fp = os.path.join(root, f)
+                        if not os.path.islink(fp):
+                            reclaimed += os.path.getsize(fp)
+                shutil.rmtree(stg_dir, ignore_errors=True)           # rmtree removes links, never their targets
 
         return {
+            "ok": True,
             "study_code": study_code,
             "reclaimed_bytes": reclaimed,
             "reclaimed_mb": round(reclaimed / (1024**2), 2),
         }
 
     def delete_study(self, study_code: str, target: str = "local") -> Dict[str, Any]:
-        """Safely delete study from local workspace, staging, or vault (requires explicit target)."""
-        deleted_count = 0
-        if target in ("local", "all"):
-            for f in glob.glob(os.path.join(self.review_dir, f"{study_code}*")):
-                if os.path.isfile(f):
-                    os.remove(f)
-                    deleted_count += 1
-            stg = os.path.join(self.staging_dir, study_code)
-            if os.path.isdir(stg):
-                shutil.rmtree(stg, ignore_errors=True)
-                deleted_count += 1
+        """Remove a study's local STAGING copy.
 
-        if target in ("vault", "all") and self.is_vault_connected() and self.vault_root:
-            for sub in ("studies", "archive", "processed_mri"):
-                vp = os.path.join(self.vault_root, sub, study_code)
-                if os.path.isdir(vp):
-                    shutil.rmtree(vp, ignore_errors=True)
-                    deleted_count += 1
+        Phase 0: review/ is never touched (reader calls, missed lesions, finals, review logs and the call ledger are
+        expert ground truth; derived files there are regenerated by the pipeline), and deleting a study from the
+        permanent Vault archive is disabled."""
+        try:
+            study_code = validate_study_code(study_code)
+        except SafetyError as e:
+            return {"ok": False, "study_code": study_code, "target": target, "error": f"Refused: {e}", "items_removed": 0}
+        if target not in ("local", "vault", "all"):
+            return {"ok": False, "study_code": study_code, "target": target, "error": f"Refused: unknown target {target!r}", "items_removed": 0}
+        if target in ("vault", "all"):
+            return {"ok": False, "study_code": study_code, "target": target, "items_removed": 0,
+                    "error": "Refused: deleting a study from the permanent Vault archive is disabled"}
 
+        existed = os.path.lexists(os.path.join(self.staging_dir, study_code))
+        res = self.clean_staging(study_code)
+        if not res.get("ok"):
+            return {"ok": False, "study_code": study_code, "target": target, "error": res.get("error"), "items_removed": 0}
         return {
+            "ok": True,
             "study_code": study_code,
             "target": target,
-            "items_removed": deleted_count,
+            "items_removed": 1 if existed else 0,
+            "review_records_preserved": True,
         }
 
     # =========================================================================
@@ -364,7 +397,7 @@ class FileManager:
 
     def get_categories(self) -> Dict[str, Dict[str, Any]]:
         """Return all managed storage categories with resolved absolute paths and health."""
-        vault_p = self.vault_root or ("/Volumes/Percival/PERCIVAL_VAULT" if os.path.exists("/Volumes/Percival") else "")
+        vault_p = self.vault_root or (os.path.join(volumes_root(), "Percival", "PERCIVAL_VAULT") if os.path.exists(os.path.join(volumes_root(), "Percival")) else "")
         categories = {
             "working": {
                 "name": "Working Directory",
@@ -580,113 +613,99 @@ class FileManager:
             "items": entries
         }
 
-    def copy_item(self, src: str, dst_dir: str, conflict_mode: str = "keep_both") -> Dict[str, Any]:
-        """Copy a file or directory with conflict handling (skip, keep_both, replace)."""
-        src = os.path.abspath(src)
-        dst_dir = os.path.abspath(dst_dir)
-        if not os.path.exists(src):
-            return {"ok": False, "error": f"Source does not exist: {src}"}
+    # Phase 0: every generic file operation goes through the safety policy (uengine/safety.py). Sources must be inside
+    # the project or the Vault; nothing protected (original MRI, reader calls, call ledger, Pensieve, model store,
+    # app state) can be deleted, moved, renamed, overwritten or written into; "replace" never destroys the existing
+    # target before the new copy is verified.
+    def _transfer_item(self, src: str, dst_dir: str, conflict_mode: str, operation: str) -> Dict[str, Any]:
+        verb = "Copy" if operation == "copy" else "Move"
+        if conflict_mode not in ("skip", "keep_both", "replace"):
+            return {"ok": False, "error": f"Refused: unknown conflict mode {conflict_mode!r}"}
+        try:
+            src = self.policy.check_modify(src) if operation == "move" else self.policy.check_source(src)
+            dst_dir = self.policy.check_destination_dir(dst_dir)
+        except SafetyError as e:
+            return {"ok": False, "error": f"Refused: {e}"}
         if not os.path.isdir(dst_dir):
             return {"ok": False, "error": f"Destination directory does not exist: {dst_dir}"}
+        if os.path.isdir(src) and inside(dst_dir, src):
+            return {"ok": False, "error": "Refused: destination is inside the source"}
 
         basename = os.path.basename(src)
         target_path = os.path.join(dst_dir, basename)
-
+        replace_dir = False
         if os.path.exists(target_path):
             if conflict_mode == "skip":
                 return {"ok": True, "skipped": True, "target_path": target_path}
-            elif conflict_mode == "keep_both":
+            if conflict_mode == "keep_both":
                 name, ext = os.path.splitext(basename)
                 if basename.endswith(".nii.gz"):
-                    name = basename[:-7]
-                    ext = ".nii.gz"
+                    name, ext = basename[:-7], ".nii.gz"
                 ts = time.strftime("%Y%m%d_%H%M%S")
-                target_path = os.path.join(dst_dir, f"{name}_copy_{ts}{ext}")
-            elif conflict_mode == "replace":
-                if os.path.isdir(target_path):
-                    shutil.rmtree(target_path, ignore_errors=True)
-                else:
-                    os.remove(target_path)
+                target_path = os.path.join(dst_dir, f"{name}_{'copy' if operation == 'copy' else 'moved'}_{ts}{ext}")
+            else:  # replace: the existing target must itself be replaceable
+                try:
+                    self.policy.check_modify(target_path)
+                except SafetyError as e:
+                    return {"ok": False, "error": f"Refused: {e}"}
+                if os.path.isdir(target_path) != os.path.isdir(src):
+                    return {"ok": False, "error": "Refused: cannot replace a file with a folder or a folder with a file"}
+                replace_dir = os.path.isdir(target_path)
+        try:
+            self.policy.check_write_target(target_path)
+        except SafetyError as e:
+            return {"ok": False, "error": f"Refused: {e}"}
 
         engine = get_transfer_engine(os.path.join(self.base_dir, "app_data", "transfers"))
+        stamp = f"{time.strftime('%Y%m%d_%H%M%S')}_{os.getpid()}"
+        write_to = target_path + f".incoming-{stamp}" if replace_dir else target_path
         try:
-            ok, msg, p_info = engine.transfer_path(
-                src=src,
-                dst=target_path,
-                operation="copy",
-                verify_sha=True,
-                preserve_source=True
-            )
-            if not ok:
-                return {"ok": False, "error": f"Copy failed: {msg}"}
-            return {
-                "ok": True,
-                "source": src,
-                "target_path": target_path,
-                "bytes": p_info.get("completed_bytes", 0),
-                "sha256": p_info.get("verification_status")
-            }
+            # a file target is replaced atomically by the engine only after its staged copy is verified
+            ok, msg, p_info = engine.transfer_path(src=src, dst=write_to, operation=operation, verify_sha=True,
+                                                   preserve_source=(operation == "copy"))
         except Exception as e:
-            return {"ok": False, "error": f"Copy failed: {str(e)}"}
+            ok, msg, p_info = False, str(e), {}
+        if not ok:
+            if replace_dir and os.path.isdir(write_to):
+                shutil.rmtree(write_to, ignore_errors=True)        # only the incomplete incoming copy
+            return {"ok": False, "error": f"{verb} failed: {msg}"}
+        if replace_dir:
+            old = target_path + f".replaced-{stamp}"
+            try:
+                os.rename(target_path, old)
+                try:
+                    os.rename(write_to, target_path)
+                except Exception:
+                    os.rename(old, target_path)                   # roll back: the original target comes back
+                    raise
+                shutil.rmtree(old, ignore_errors=True)            # the new copy is verified and in place
+            except Exception as e:
+                return {"ok": False, "error": f"{verb} failed while swapping in the verified copy: {e}; the original target is unchanged, the verified copy is at {write_to}"}
+        out = {"ok": True, "source": src, "target_path": target_path, "bytes": p_info.get("completed_bytes", 0)}
+        if operation == "copy":
+            out["sha256"] = p_info.get("verification_status")
+        return out
+
+    def copy_item(self, src: str, dst_dir: str, conflict_mode: str = "keep_both") -> Dict[str, Any]:
+        """Copy a file or directory with conflict handling (skip, keep_both, replace)."""
+        return self._transfer_item(src, dst_dir, conflict_mode, "copy")
 
     def move_item(self, src: str, dst_dir: str, conflict_mode: str = "keep_both") -> Dict[str, Any]:
         """Move a file or directory with verified destination and conflict handling."""
-        src = os.path.abspath(src)
-        dst_dir = os.path.abspath(dst_dir)
-        if not os.path.exists(src):
-            return {"ok": False, "error": f"Source does not exist: {src}"}
-        if not os.path.isdir(dst_dir):
-            return {"ok": False, "error": f"Destination directory does not exist: {dst_dir}"}
-
-        basename = os.path.basename(src)
-        target_path = os.path.join(dst_dir, basename)
-
-        if os.path.exists(target_path):
-            if conflict_mode == "skip":
-                return {"ok": True, "skipped": True, "target_path": target_path}
-            elif conflict_mode == "keep_both":
-                name, ext = os.path.splitext(basename)
-                if basename.endswith(".nii.gz"):
-                    name = basename[:-7]
-                    ext = ".nii.gz"
-                ts = time.strftime("%Y%m%d_%H%M%S")
-                target_path = os.path.join(dst_dir, f"{name}_moved_{ts}{ext}")
-            elif conflict_mode == "replace":
-                if os.path.isdir(target_path):
-                    shutil.rmtree(target_path, ignore_errors=True)
-                else:
-                    os.remove(target_path)
-
-        engine = get_transfer_engine(os.path.join(self.base_dir, "app_data", "transfers"))
-        try:
-            ok, msg, p_info = engine.transfer_path(
-                src=src,
-                dst=target_path,
-                operation="move",
-                verify_sha=True,
-                preserve_source=False
-            )
-            if not ok:
-                return {"ok": False, "error": f"Move failed: {msg}"}
-            return {"ok": True, "source": src, "target_path": target_path, "bytes": p_info.get("completed_bytes", 0)}
-        except Exception as e:
-            return {"ok": False, "error": f"Move failed: {str(e)}"}
+        return self._transfer_item(src, dst_dir, conflict_mode, "move")
 
     def rename_item(self, path: str, new_name: str) -> Dict[str, Any]:
         """Rename an item within its directory."""
-        path = os.path.abspath(path)
-        if not os.path.exists(path):
-            return {"ok": False, "error": f"Item does not exist: {path}"}
-
-        clean_name = os.path.basename(new_name.strip())
-        if not clean_name or "/" in clean_name or "\\" in clean_name:
+        clean_name = new_name.strip() if isinstance(new_name, str) else ""
+        if not is_simple_name(clean_name) or "\\" in clean_name:
             return {"ok": False, "error": "Invalid name"}
-
-        parent = os.path.dirname(path)
-        target = os.path.join(parent, clean_name)
-        if os.path.exists(target):
+        try:
+            path = self.policy.check_modify(path)
+            target = self.policy.check_write_target(os.path.join(os.path.dirname(path), clean_name))
+        except SafetyError as e:
+            return {"ok": False, "error": f"Refused: {e}"}
+        if os.path.lexists(target):
             return {"ok": False, "error": f"An item named '{clean_name}' already exists"}
-
         try:
             os.rename(path, target)
             return {"ok": True, "old_path": path, "new_path": target, "new_name": clean_name}
@@ -695,18 +714,18 @@ class FileManager:
 
     def create_directory(self, parent_dir: str, dir_name: str) -> Dict[str, Any]:
         """Create a new subdirectory safely."""
-        parent_dir = os.path.abspath(parent_dir)
+        clean_name = dir_name.strip() if isinstance(dir_name, str) else ""
+        if not is_simple_name(clean_name) or "\\" in clean_name:
+            return {"ok": False, "error": "Invalid folder name"}
+        try:
+            parent_dir = self.policy.check_destination_dir(parent_dir)
+            target = self.policy.check_write_target(os.path.join(parent_dir, clean_name))
+        except SafetyError as e:
+            return {"ok": False, "error": f"Refused: {e}"}
         if not os.path.isdir(parent_dir):
             return {"ok": False, "error": f"Parent directory does not exist: {parent_dir}"}
-
-        clean_name = os.path.basename(dir_name.strip())
-        if not clean_name or "/" in clean_name or "\\" in clean_name:
-            return {"ok": False, "error": "Invalid folder name"}
-
-        target = os.path.join(parent_dir, clean_name)
-        if os.path.exists(target):
+        if os.path.lexists(target):
             return {"ok": False, "error": f"Folder '{clean_name}' already exists"}
-
         try:
             os.makedirs(target, exist_ok=False)
             return {"ok": True, "path": target, "name": clean_name}
@@ -714,29 +733,22 @@ class FileManager:
             return {"ok": False, "error": f"Folder creation failed: {str(e)}"}
 
     def delete_item(self, path: str, confirm: bool = False) -> Dict[str, Any]:
-        """Delete an item with strict safety guards."""
+        """Delete an item with strict safety guards (see uengine/safety.py)."""
         if not confirm:
             return {"ok": False, "error": "Deletion requires explicit confirmation"}
-
-        path = os.path.abspath(path)
-        if not os.path.exists(path):
-            return {"ok": False, "error": f"Path does not exist: {path}"}
-
-        # Absolute protection rules
-        protected = ["/", "/Users", "/Applications", "/Volumes", os.path.expanduser("~"), self.base_dir]
-        if path in protected or os.path.dirname(path) in ("/", "/Users"):
-            return {"ok": False, "error": "Refused: Protected critical directory cannot be deleted"}
-
-        # Protected files
-        if os.path.basename(path) in ("pensieve_core.db", "identity_vault.enc", "identity_vault.json"):
-            return {"ok": False, "error": "Refused: Live Pensieve database or Identity Vault cannot be deleted"}
-
         try:
-            if os.path.isdir(path):
-                shutil.rmtree(path)
+            target = self.policy.check_delete(path)
+        except SafetyError as e:
+            return {"ok": False, "error": f"Refused: {e}"}
+        link = os.path.join(canon(os.path.dirname(os.path.abspath(path))), os.path.basename(os.path.abspath(path)))
+        try:
+            if os.path.islink(link):
+                os.remove(link)                                   # a link is removed, never what it points to
+            elif os.path.isdir(target):
+                shutil.rmtree(target)
             else:
-                os.remove(path)
-            return {"ok": True, "deleted_path": path}
+                os.remove(target)
+            return {"ok": True, "deleted_path": link}
         except Exception as e:
             return {"ok": False, "error": f"Delete failed: {str(e)}"}
 
@@ -745,7 +757,12 @@ class FileManager:
         if not self.is_vault_connected() or not self.vault_root:
             return {"ok": False, "error": "External Data Vault is disconnected or not configured"}
 
-        target_dir = os.path.join(self.vault_root, vault_category)
+        if not is_simple_name(vault_category):
+            return {"ok": False, "error": f"Refused: invalid vault category {vault_category!r}"}
+        try:
+            target_dir = self.policy.check_write_target(os.path.join(self.vault_root, vault_category))
+        except SafetyError as e:
+            return {"ok": False, "error": f"Refused: {e}"}
         os.makedirs(target_dir, exist_ok=True)
 
         res = self.copy_item(src, target_dir, conflict_mode="keep_both")
@@ -769,6 +786,13 @@ class FileManager:
         """Restore item from External Data Vault to local SSD with verification."""
         if not os.path.exists(vault_path):
             return {"ok": False, "error": f"Vault path does not exist: {vault_path}"}
+        try:
+            self.policy.check_source(vault_path)
+            local_dst_dir = self.policy.check_destination_dir(local_dst_dir)
+            if not os.path.isdir(local_dst_dir):
+                self.policy.check_write_target(local_dst_dir)
+        except SafetyError as e:
+            return {"ok": False, "error": f"Refused: {e}"}
         os.makedirs(local_dst_dir, exist_ok=True)
 
         res = self.copy_item(vault_path, local_dst_dir, conflict_mode="keep_both")

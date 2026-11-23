@@ -950,7 +950,7 @@ async function renderSectionCleaning(el) {
   if ($("#cl-purge-all")) {
     $("#cl-purge-all").onclick = async () => {
       if (!confirm("Permanently purge ALL items in quarantine?")) return;
-      const r = await api("/api/clean/quarantine_purge", {});
+      const r = await api("/api/clean/quarantine_purge", { purge_all: true });   // Phase 0: purge-all must be explicit
       toast(r.ok ? `Purged ${r.purged_count} items` : esc(r.error), !r.ok);
       renderSectionCleaning(el);
     };

@@ -13,6 +13,8 @@ import shutil
 import hashlib
 from typing import Dict, Any, List, Optional
 
+from .safety import PathPolicy, SafetyError, canon, inside, is_simple_name, validate_study_code
+
 
 CLEAN_CATEGORIES = [
     {"id": "temp_processing", "name": "Temporary Processing Files", "default_days": 7, "path": "app_data/scratch"},
@@ -42,6 +44,7 @@ class CleaningManager:
         self.quarantine_dir = os.path.join(self.app_data_dir, "quarantine")
         self.history_file = os.path.join(self.app_data_dir, "cleanup_history.jsonl")
         self.policy_file = os.path.join(self.app_data_dir, "cleaning_policies.json")
+        self.policy = PathPolicy(self.base_dir, self.vault_root)
         os.makedirs(self.quarantine_dir, exist_ok=True)
         self._ensure_policy()
 
@@ -265,10 +268,16 @@ class CleaningManager:
         files = prev.get("files", [])
         moved_count = 0
         reclaimed_bytes = 0
+        refused: List[Dict[str, str]] = []
 
         for item in files:
             src = item["path"]
             if not os.path.exists(src):
+                continue
+            try:
+                self.policy.check_delete(src)             # Phase 0: protected / structural items are never cleaned
+            except SafetyError as e:
+                refused.append({"path": src, "reason": str(e)})
                 continue
             sz = item.get("size_bytes", 0)
 
@@ -316,7 +325,9 @@ class CleaningManager:
             "ok": True,
             "items_cleaned": moved_count,
             "reclaimed_mb": round(reclaimed_bytes / (1024**2), 2),
-            "quarantined": use_quarantine
+            "quarantined": use_quarantine,
+            "refused_count": len(refused),
+            "refused": refused[:50],
         }
 
     def list_quarantine(self) -> List[Dict[str, Any]]:
@@ -353,7 +364,9 @@ class CleaningManager:
 
     def restore_quarantine(self, quarantine_id: str) -> Dict[str, Any]:
         """Restore quarantined file back to its original path."""
-        q_path = os.path.join(self.quarantine_dir, quarantine_id)
+        q_path = self._quarantine_item(quarantine_id)
+        if q_path is None:
+            return {"ok": False, "error": f"Refused: invalid quarantine id {quarantine_id!r}"}
         meta_p = q_path + ".meta"
         if not os.path.exists(q_path):
             return {"ok": False, "error": f"Quarantine item not found: {quarantine_id}"}
@@ -369,6 +382,12 @@ class CleaningManager:
 
         if not original_path:
             return {"ok": False, "error": "Cannot restore: original path metadata missing"}
+        try:
+            original_path = self.policy.check_write_target(original_path)
+        except SafetyError as e:
+            return {"ok": False, "error": f"Refused: {e}"}
+        if os.path.lexists(original_path):
+            return {"ok": False, "error": f"Refused: {original_path} already exists - restoring would overwrite it"}
 
         os.makedirs(os.path.dirname(original_path), exist_ok=True)
         try:
@@ -384,12 +403,25 @@ class CleaningManager:
         except Exception as e:
             return {"ok": False, "error": f"Failed to restore: {str(e)}"}
 
-    def purge_quarantine(self, quarantine_id: Optional[str] = None) -> Dict[str, Any]:
-        """Permanently purge specific item or entire quarantine."""
+    def _quarantine_item(self, quarantine_id) -> Optional[str]:
+        """the path of one quarantine entry, or None if the id is not a plain entry name inside the quarantine"""
+        if not is_simple_name(quarantine_id) or quarantine_id.endswith(".meta"):
+            return None
+        fp = os.path.join(self.quarantine_dir, quarantine_id)
+        if not inside(canon(os.path.dirname(fp)), canon(self.quarantine_dir)):
+            return None
+        return fp
+
+    def purge_quarantine(self, quarantine_id: Optional[str] = None, purge_all: bool = False) -> Dict[str, Any]:
+        """Permanently purge one item, or - only with purge_all=True - the entire quarantine."""
         purged = 0
         reclaimed = 0
+        if not quarantine_id and not purge_all:
+            return {"ok": False, "error": "Refused: give a quarantine id, or purge_all=True to purge everything", "purged_count": 0}
         if quarantine_id:
-            fp = os.path.join(self.quarantine_dir, quarantine_id)
+            fp = self._quarantine_item(quarantine_id)
+            if fp is None:
+                return {"ok": False, "error": f"Refused: invalid quarantine id {quarantine_id!r}", "purged_count": 0}
             meta_p = fp + ".meta"
             if os.path.exists(fp):
                 sz = os.path.getsize(fp) if os.path.isfile(fp) else 0
@@ -425,17 +457,33 @@ class CleaningManager:
     def delete_by_study(self, study_code: str, target: str = "staging") -> Dict[str, Any]:
         """Safely delete study outputs from staging or local review, protecting Pensieve."""
         # Absolute protection: Pensieve and Annotations are never deleted
+        try:
+            study_code = validate_study_code(study_code)
+        except SafetyError as e:
+            return {"ok": False, "study_code": study_code, "error": f"Refused: {e}", "items_removed": 0}
+        if target not in ("staging", "local_processed", "all"):
+            return {"ok": False, "study_code": study_code, "error": f"Refused: unknown target {target!r}", "items_removed": 0}
         removed = 0
         if target in ("staging", "all"):
             stg = os.path.join(self.base_dir, "app_data", "staging", study_code)
-            if os.path.isdir(stg):
+            if os.path.lexists(stg):
+                try:
+                    self.policy.check_delete(stg)
+                except SafetyError as e:
+                    return {"ok": False, "study_code": study_code, "error": f"Refused: {e}", "items_removed": 0}
+            if os.path.isdir(stg) and not os.path.islink(stg):
                 shutil.rmtree(stg, ignore_errors=True)
                 removed += 1
 
         if target in ("local_processed", "all"):
             # subjects/study_code
             subj = os.path.join(self.base_dir, "subjects", study_code)
-            if os.path.isdir(subj):
+            if os.path.lexists(subj):
+                try:
+                    self.policy.check_delete(subj)
+                except SafetyError as e:
+                    return {"ok": False, "study_code": study_code, "error": f"Refused: {e}", "items_removed": removed}
+            if os.path.isdir(subj) and not os.path.islink(subj):
                 # Move to quarantine first
                 ts = int(time.time())
                 dst = os.path.join(self.quarantine_dir, f"{ts}_study_{study_code}_subjects")

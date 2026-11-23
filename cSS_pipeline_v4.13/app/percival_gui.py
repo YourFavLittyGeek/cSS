@@ -852,6 +852,50 @@ def _run_id(sid):
     a = _jl(os.path.join(B(), "runs", sid, "active.json"), {}); return a.get("run_id") or "initial"
 
 
+EXPERIMENTAL_LABEL = "EXPERIMENTAL - ALBUS/LUMOS/NOX/CORE research layer, not validated; never part of the Percival Score"
+
+
+def experimental_core_enabled():
+    """Phase 0: the ALBUS / LUMOS / NOX / CORE layer runs only when explicitly switched on (default off)"""
+    try: return bool(((CTX.get("SET") or {}).get("features") or {}).get("experimental_core", False))
+    except Exception: return False
+
+
+def _experimental_core(sid, S, rows):
+    """evaluate the experimental layer for each scored candidate; results go to s['experimental_core'] only"""
+    try:
+        from uengine.percival_core import PercivalCoreIntelligence
+        from uengine.albus import AlbusDiscoveryEngine
+        from uengine.lumos import LumosImageIntelligence
+        from uengine.nox import NoxCharacteristicsEngine
+        from uengine.pensieve import get_pensieve
+        from uengine.vault import get_vault
+        _p = get_pensieve(); _v = get_vault()
+        _core = PercivalCoreIntelligence(pensieve=_p, vault=_v); _albus = AlbusDiscoveryEngine(pensieve=_p)
+        _lumos = LumosImageIntelligence(pensieve=_p, vault=_v); _nox = NoxCharacteristicsEngine(pensieve=_p)
+        for s in S:
+            cid = int(s.get("cand_id", 0)); h = str(s.get("hemi", "U"))
+            row_match = next((r for r in rows if int(r.get("cand_id", 0)) == cid), {})
+            vox = (float(row_match.get("ci", 0)), float(row_match.get("cj", 0)), float(row_match.get("ck", 0)))
+            mm = (float(row_match.get("cx", 0)), float(row_match.get("cy", 0)), float(row_match.get("cz", 0)))
+            raw_f = {"pial_distance": float(row_match.get("pdist", 1.0)), "darkness_z": float(row_match.get("darkness_z", -1.5)),
+                     "tube_ratio": float(row_match.get("tube_ratio", 1.5)), "cortex_frac": float(row_match.get("cortex_frac", 0.5)),
+                     "tram_frac": float(row_match.get("tram_frac", 0.0))}
+            try:
+                cand_a = _albus.discover_candidate(sid, cid, h, vox, mm, int(row_match.get("vol_vox", 10)), float(row_match.get("vol_mm3", 5.0)), (0,0,0,0,0,0), raw_f)
+                cand_n = _nox.measure_candidate(sid, cid, raw_f)
+                cand_l = _lumos.analyze_patch(sid, cid, row_match.get("patch"))
+                asmt = _core.evaluate_candidate(cand_a, cand_l, cand_n)
+                s["experimental_core"] = dict(label=EXPERIMENTAL_LABEL, score=asmt.percival_score, band=asmt.band,
+                                              status=asmt.status if asmt.percival_score is not None else "unavailable",
+                                              uncertainty=asmt.uncertainty)
+            except Exception as e:
+                s["experimental_core"] = dict(label=EXPERIMENTAL_LABEL, score=None, band=None, status="unavailable", error=type(e).__name__)
+    except Exception as e:
+        log(f"[experimental core] {sid}: not evaluated ({type(e).__name__}: {e})")
+
+
+
 def score_study(sid, M=None):
     from uengine.percival import meta as MT
     M = M or active()
@@ -861,63 +905,31 @@ def score_study(sid, M=None):
     S = MT.score_rows(M, rows); hemi = {r["cand_id"]: r.get("hemi", "") for r in rows}
     for s in S: s["hemi"] = hemi.get(s["cand_id"], "")
 
-    # v5.25 Unified Percival Core Evaluation & PENSIEVE Persistence
-    try:
-        from uengine.percival_core import PercivalCoreIntelligence
-        from uengine.albus import AlbusDiscoveryEngine
-        from uengine.lumos import LumosImageIntelligence
-        from uengine.nox import NoxCharacteristicsEngine
-        from uengine.pensieve import get_pensieve
-        from uengine.vault import get_vault
+    # Phase 0 (scientific integrity): the ALBUS / LUMOS / NOX / CORE layer is an unvalidated EXPERIMENTAL research layer.
+    # It runs only when Settings features.experimental_core is on (default off), and its output is stored ONLY under
+    # s["experimental_core"] - it never writes percival_score / band / status, so a missing CORE result can never
+    # replace the trained Percival Score.
+    if experimental_core_enabled():
+        _experimental_core(sid, S, rows)
 
-        _p = get_pensieve()
-        _v = get_vault()
-        _core = PercivalCoreIntelligence(pensieve=_p, vault=_v)
-        _albus = AlbusDiscoveryEngine(pensieve=_p)
-        _lumos = LumosImageIntelligence(pensieve=_p, vault=_v)
-        _nox = NoxCharacteristicsEngine(pensieve=_p)
-
-        for s in S:
-            cid = int(s.get("cand_id", 0))
-            h = str(s.get("hemi", "U"))
-            row_match = next((r for r in rows if int(r.get("cand_id", 0)) == cid), {})
-            vox = (float(row_match.get("ci", 0)), float(row_match.get("cj", 0)), float(row_match.get("ck", 0)))
-            mm = (float(row_match.get("cx", 0)), float(row_match.get("cy", 0)), float(row_match.get("cz", 0)))
-            raw_f = {
-                "pial_distance": float(row_match.get("pdist", 1.0)),
-                "darkness_z": float(row_match.get("darkness_z", -1.5)),
-                "tube_ratio": float(row_match.get("tube_ratio", 1.5)),
-                "cortex_frac": float(row_match.get("cortex_frac", 0.5)),
-                "tram_frac": float(row_match.get("tram_frac", 0.0))
-            }
-            cand_a = _albus.discover_candidate(sid, cid, h, vox, mm, int(row_match.get("vol_vox", 10)), float(row_match.get("vol_mm3", 5.0)), (0,0,0,0,0,0), raw_f)
-            cand_n = _nox.measure_candidate(sid, cid, raw_f)
-            cand_l = _lumos.analyze_patch(sid, cid, row_match.get("patch"))
-            asmt = _core.evaluate_candidate(cand_a, cand_l, cand_n)
-            if asmt.percival_score is not None:
-                s["percival_score"] = asmt.percival_score
-                s["band"] = asmt.band
-                s["status"] = asmt.status
-                s["uncertainty"] = asmt.uncertainty
-            else:
-                s["percival_score"] = None
-                s["band"] = asmt.band
-                s["status"] = asmt.status if asmt.status in ("reliable", "uncertain", "insufficient", "review") else "insufficient"
-                s["uncertainty"] = asmt.uncertainty
-            s["core_percival_score"] = asmt.percival_score
-            s["core_band"] = asmt.band
-            s["core_status"] = asmt.status
-            s["core_uncertainty"] = asmt.uncertainty
-    except Exception as e:
-        log(f"[PercivalCore] Warning: Candidate evaluation note for {sid}: {e}")
-    ids = [s["cand_id"] for s in S if s["percival_score"] is not None and s["percival_score"] >= 50]
-    study = dict(n_called=len(ids), called_ids=ids, L_score=None, R_score=None, total=None, error="")
-    try:                                                   # the study score with the reader's own scoring method, on the candidates Percival calls
-        r = subprocess.run([sys.executable, os.path.join(CTX["SC"], "score_css.py"), sid, "--accept-ids", ",".join(map(str, ids)) or "none", "--tag", "percival"],
-                           capture_output=True, text=True, timeout=600, env=dict(os.environ, CSS_BASE=B(), PYTHONWARNINGS="ignore"))
-        J = _jl(os.path.join(B(), "review", f"{sid}_score_percival.json"), {})
-        study.update(L_score=J.get("L_score"), R_score=J.get("R_score"), total=J.get("multifocality_0_4"), error="" if r.returncode == 0 else (r.stderr or r.stdout)[-160:])
-    except Exception as e: study["error"] = type(e).__name__
+    # Study score with the reader's own scoring method, on the candidates Percival calls. A study in which NO candidate
+    # has a valid trained score is UNASSESSABLE: score_css.py is not run (with no accepted ids it records a 0-4 score
+    # of 0, i.e. a negative study) and the total stays None with the reason.
+    valid = [s for s in S if s.get("percival_score") is not None]
+    ids = [s["cand_id"] for s in valid if s["percival_score"] >= 50]
+    study = dict(n_called=len(ids), called_ids=ids, L_score=None, R_score=None, total=None, error="",
+                 n_scored=len(valid), n_candidates=len(S))
+    if not valid:
+        study.update(status="unassessable", reason="no candidate has a valid Percival Score (insufficient or unavailable evidence) - "
+                                                   "this is not a negative result")
+    else:
+        study["status"] = "scored"
+        try:
+            r = subprocess.run([sys.executable, os.path.join(CTX["SC"], "score_css.py"), sid, "--accept-ids", ",".join(map(str, ids)) or "none", "--tag", "percival"],
+                               capture_output=True, text=True, timeout=600, env=dict(os.environ, CSS_BASE=B(), PYTHONWARNINGS="ignore"))
+            J = _jl(os.path.join(B(), "review", f"{sid}_score_percival.json"), {})
+            study.update(L_score=J.get("L_score"), R_score=J.get("R_score"), total=J.get("multifocality_0_4"), error="" if r.returncode == 0 else (r.stderr or r.stdout)[-160:])
+        except Exception as e: study["error"] = type(e).__name__
     in_tr = sid in set((M.get("data") or {}).get("trained_on") or [])
     rec = dict(study=sid, model=M["version"], run=_run_id(sid), created=time.strftime("%Y-%m-%d %H:%M:%S"), ready=M["ready"], thresholds=M["thresholds"],
                in_training=in_tr, in_training_note="this study's expert labels were used to train this model: its scores are in-sample (optimistic)" if in_tr else "",
@@ -951,7 +963,11 @@ def history_of(sid):
 
 
 def score_study_unified(sid):
-    """v5.25: Evaluate candidate rows using the reconstructed PercivalCoreIntelligence pipeline."""
+    """v5.25: Evaluate candidate rows using the reconstructed PercivalCoreIntelligence pipeline.
+    Phase 0: EXPERIMENTAL and off by default (Settings features.experimental_core); read-only, never a Percival Score."""
+    if not experimental_core_enabled():
+        return dict(ok=False, experimental=True, error="The ALBUS/LUMOS/NOX/CORE layer is experimental and switched off "
+                                                       "(Settings › features.experimental_core). It is not part of the Percival Score.")
     from uengine.albus import AlbusDiscoveryEngine
     from uengine.lumos import LumosImageIntelligence
     from uengine.nox import NoxCharacteristicsEngine
@@ -1004,7 +1020,7 @@ def score_study_unified(sid):
         assessment = core.evaluate_candidate(cand_albus, cand_lumos, cand_nox)
         assessments.append(assessment.__dict__)
 
-    return dict(ok=True, study=sid, count=len(assessments), assessments=assessments)
+    return dict(ok=True, study=sid, count=len(assessments), assessments=assessments, experimental=True, label=EXPERIMENTAL_LABEL)
 
 
 # ------------------------------------------------------------------ v5.24 shadow mode (controlled experimental environment)

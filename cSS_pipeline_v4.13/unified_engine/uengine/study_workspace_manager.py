@@ -18,6 +18,7 @@ from enum import Enum
 from typing import Dict, List, Optional, Any, Tuple, Set
 
 from .unified_transfer_engine import get_transfer_engine, UnifiedTransferEngine
+from .safety import PathPolicy, SafetyError, validate_study_code, volumes_root
 
 
 class StudyLifecycleState(str, Enum):
@@ -283,7 +284,7 @@ class StudyWorkspaceManager:
     def discover_source_studies(self, search_paths: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         """Discover original MRI studies from source locations without modifying or copying them."""
         paths_to_scan = search_paths or [
-            "/Volumes/Percival/Dicom",
+            os.path.join(volumes_root(), "Percival", "Dicom"),
             os.path.join(self.vault_root, "original_mri") if self.vault_root else "",
             os.path.join(self.vault_root, "MRI", "Originals") if self.vault_root else "",
             os.path.join(self.base_dir, "raw", "import_source_preserved"),
@@ -580,7 +581,14 @@ class StudyWorkspaceManager:
 
     def clean_eligible_workspace(self, study_id: str, retain_recent: int = 1,
                                   force: bool = False) -> Tuple[bool, str]:
-        """Remove local SSD working copy ONLY IF study is fully archived and verified."""
+        """Remove local SSD working copy ONLY IF study is fully archived and verified.
+
+        Phase 0: `force` is accepted for internal callers only; the HTTP API never passes it. The workspace path
+        recorded in the ledger must still pass the safety policy (inside the project, not protected / structural)."""
+        try:
+            study_id = validate_study_code(study_id)
+        except SafetyError as e:
+            return False, f"Refused: {e}"
         rec = self._ledger.get(study_id)
         if not rec:
             return False, "Study not found"
@@ -596,6 +604,10 @@ class StudyWorkspaceManager:
 
         ws_dir = rec.get("active_workspace_location")
         if ws_dir and os.path.isdir(ws_dir):
+            try:
+                ws_dir = PathPolicy(self.base_dir, self.vault_root).check_delete(ws_dir)
+            except SafetyError as e:
+                return False, f"Refused: {e}"
             shutil.rmtree(ws_dir, ignore_errors=True)
             rec["active_workspace_location"] = ""
             rec["last_successful_operation"] = "local_workspace_cleaned_after_archive"

@@ -1,6 +1,7 @@
 """test_storage_and_file_manager.py - Comprehensive Unit & Integration Tests for
 PERCIVAL File Manager, Category Explorer, and Working Directory Migration.
 """
+import os as _o, sys as _s; _s.path.insert(0, _o.path.dirname(_o.path.abspath(__file__))); import _isolation; _isolation.activate()  # Phase 0: test isolation (must stay first)
 
 import hashlib
 import json
@@ -78,7 +79,9 @@ class TestFileManagerAndStorage(unittest.TestCase):
 
     def test_04_copy_item_with_conflict_modes(self):
         """Test copy with keep_both, skip, and replace conflict modes."""
-        dst_dir = os.path.join(self.workspace_dir, "review")
+        # Phase 0: review/ holds reader calls and the call ledger and is protected - copy into the work area instead
+        dst_dir = os.path.join(self.workspace_dir, "work", "copies")
+        os.makedirs(dst_dir, exist_ok=True)
         
         # 1. First copy
         c1 = self.fm.copy_item(self.sample_mri, dst_dir)
@@ -99,10 +102,19 @@ class TestFileManagerAndStorage(unittest.TestCase):
 
     def test_05_move_and_delete_with_safety_guard(self):
         """Test move and safe deletion with protected file guards."""
-        dst_dir = os.path.join(self.workspace_dir, "review")
-        mv_res = self.fm.move_item(self.sample_mri, dst_dir)
+        # Phase 0: data/ ("MRI Originals") and review/ are protected - an original can never be moved away
+        refused = self.fm.move_item(self.sample_mri, os.path.join(self.workspace_dir, "work"))
+        self.assertFalse(refused["ok"])
+        self.assertTrue(os.path.exists(self.sample_mri))
+        work_file = os.path.join(self.workspace_dir, "work", "M01", "derived.nii.gz")
+        os.makedirs(os.path.dirname(work_file), exist_ok=True)
+        with open(work_file, "wb") as f:
+            f.write(b"DERIVED")
+        dst_dir = os.path.join(self.workspace_dir, "work", "moved")
+        os.makedirs(dst_dir, exist_ok=True)
+        mv_res = self.fm.move_item(work_file, dst_dir)
         self.assertTrue(mv_res["ok"])
-        self.assertFalse(os.path.exists(self.sample_mri))
+        self.assertFalse(os.path.exists(work_file))
         self.assertTrue(os.path.exists(mv_res["target_path"]))
 
         # Refusal without explicit confirmation

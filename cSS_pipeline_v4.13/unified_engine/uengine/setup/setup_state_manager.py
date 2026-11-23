@@ -10,6 +10,7 @@ import shutil
 import datetime
 from typing import Dict, Any, Optional, List, Tuple
 from .models import SetupStateEnum, SetupMode
+from ..safety import volumes_root
 
 CURRENT_APP_VERSION = "v5.26-Master-Setup-Rebuild"
 
@@ -100,7 +101,7 @@ class SetupStateManager:
                 pass
 
         # Check if external vault already has studies (associated with standard project)
-        vault_root = self.vault_root or ("/Volumes/Percival/PERCIVAL_VAULT" if self.workspace_root == os.path.abspath(os.path.expanduser("~/Percival_project")) else None)
+        vault_root = self.vault_root or (os.path.join(volumes_root(), "Percival", "PERCIVAL_VAULT") if self.workspace_root == os.path.abspath(os.path.expanduser("~/Percival_project")) else None)
         if vault_root and (os.path.isdir(os.path.join(vault_root, "studies")) or os.path.isdir(os.path.join(vault_root, "PENSIEVE"))):
             return True
 

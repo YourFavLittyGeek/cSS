@@ -11,6 +11,7 @@ import shutil
 import subprocess
 from typing import Dict, Any, List, Optional, Tuple
 from .models import VolumeInfo
+from ..safety import volumes_root
 
 
 DEFAULT_WORKSPACE = os.path.expanduser("~/Percival_project")
@@ -71,7 +72,7 @@ class StoragePathsService:
     def discover_external_volumes(self) -> List[VolumeInfo]:
         """Discover all mounted external volumes under /Volumes and check for PERCIVAL_VAULT."""
         volumes = []
-        vol_root = "/Volumes"
+        vol_root = volumes_root()
         if not os.path.isdir(vol_root):
             return volumes
 
@@ -157,7 +158,7 @@ class StoragePathsService:
                 return v_path
 
         # 3. Direct check on /Volumes/Percival
-        direct = "/Volumes/Percival/PERCIVAL_VAULT"
+        direct = os.path.join(volumes_root(), "Percival", "PERCIVAL_VAULT")
         if os.path.isdir(direct):
             return direct
 

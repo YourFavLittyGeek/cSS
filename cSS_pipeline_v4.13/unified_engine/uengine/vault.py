@@ -21,6 +21,7 @@ import hashlib
 import sqlite3
 import pathlib
 import subprocess
+from .safety import volumes_root
 import select
 import threading
 from typing import Dict, List, Optional, Tuple, Any
@@ -144,7 +145,7 @@ class PercivalDataVault:
         """Scan /Volumes for a drive matching volume UUID when mount point has changed."""
         if not uuid_to_find:
             return None
-        volumes_dir = "/Volumes"
+        volumes_dir = volumes_root()
         if not os.path.isdir(volumes_dir):
             return None
 
@@ -682,18 +683,24 @@ class TransferQueueManager:
             return []
         items = self._load()
         resumed = []
+        from .safety import PathPolicy, SafetyError
+        from .unified_transfer_engine import UnifiedTransferEngine
+        policy = PathPolicy(self.base_dir, vault.root_path)
+        engine = UnifiedTransferEngine(os.path.join(self.base_dir, "app_data", "transfers"))
         for it in items:
-            if it["status"] in ("pending", "PAUSED_DISCONNECTED"):
+            if not isinstance(it, dict) or "source" not in it or "destination" not in it:
+                continue                                   # entries of the other queue schema (TransferManager) are not ours
+            if it.get("status") in ("pending", "PAUSED_DISCONNECTED"):
                 src = it["source"]
                 dst = it["destination"]
                 if os.path.exists(src):
                     try:
+                        # Phase 0: both ends must pass the safety policy, and the copy is verified before it replaces dst
+                        policy.check_source(src)
+                        policy.check_write_target(dst)
                         it["status"] = "transferring"
-                        it["attempts"] += 1
-                        os.makedirs(os.path.dirname(dst), exist_ok=True)
-                        tmp_dst = dst + ".tmp"
-                        shutil.copy2(src, tmp_dst)
-                        os.replace(tmp_dst, dst)
+                        it["attempts"] = int(it.get("attempts", 0)) + 1
+                        engine.copy_file_streaming(src, dst, verify_sha=True)
                         it["status"] = "completed"
                         it["error"] = None
                         it["completed_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -717,7 +724,7 @@ class TransferQueueManager:
 def detect_external_volumes() -> List[Dict[str, Any]]:
     """Inspect /Volumes and return rich status for all connected storage volumes."""
     volumes = []
-    volumes_dir = "/Volumes"
+    volumes_dir = volumes_root()
     if not os.path.isdir(volumes_dir):
         return volumes
 

@@ -7,6 +7,7 @@ Directly verifies:
 4. ALBUS locked-test partition isolation (data leakage prevention) and exponential smoothing stability.
 5. PERCIVAL CORE IRLS unpenalized intercept, feature extraction identity between training and inference.
 """
+import os as _o, sys as _s; _s.path.insert(0, _o.path.dirname(_o.path.abspath(__file__))); import _isolation; _isolation.activate()  # Phase 0: test isolation (must stay first)
 import os
 import sys
 import json

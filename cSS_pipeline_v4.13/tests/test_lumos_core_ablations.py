@@ -10,6 +10,7 @@ Evaluates 5 distinct model configurations on a patient-separated neuroimaging co
 Patient-level cross-fitting ensures zero leakage between training folds and evaluation folds.
 Computes ROC-AUC, Sensitivity, Specificity, Brier score, and 95% bootstrap confidence intervals.
 """
+import os as _o, sys as _s; _s.path.insert(0, _o.path.dirname(_o.path.abspath(__file__))); import _isolation; _isolation.activate()  # Phase 0: test isolation (must stay first)
 
 import os
 import sys

@@ -13,6 +13,15 @@ from .models import SyncItem, SyncPreview
 from .storage_paths import StoragePathsService
 from .storage_state import StorageStateService
 from ..unified_transfer_engine import get_transfer_engine, compute_sha256
+from ..safety import SafetyError, canon, inside, parse_study_codes, validate_study_code
+
+
+def _valid_code(c: str) -> bool:
+    try:
+        validate_study_code(c)
+        return True
+    except SafetyError:
+        return False
 
 
 class SyncManager:
@@ -41,7 +50,8 @@ class SyncManager:
             )
 
         ws_root = os.path.join(self.paths.workspace_root, "work")
-        studies_to_check = study_ids or ([d for d in os.listdir(ws_root) if os.path.isdir(os.path.join(ws_root, d))] if os.path.isdir(ws_root) else [])
+        study_ids = parse_study_codes(study_ids)          # Phase 0: a comma string from the query is no longer iterated per character
+        studies_to_check = study_ids or ([d for d in os.listdir(ws_root) if os.path.isdir(os.path.join(ws_root, d)) and _valid_code(d)] if os.path.isdir(ws_root) else [])
 
         to_copy: List[SyncItem] = []
         conflicts: List[SyncItem] = []
@@ -99,43 +109,88 @@ class SyncManager:
         )
 
     def execute_sync(self, preview_dict: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute approved sync plan using UnifiedTransferEngine."""
-        items = preview_dict.get("items_to_copy", [])
+        """Execute an approved sync plan using UnifiedTransferEngine.
+
+        Phase 0: the posted preview is only a SELECTION. The server recomputes the plan for the selected studies and
+        copies only items of its own plan (work/<study>/<rel> -> <vault>/studies/<study>/<rel>, new files only). Any
+        posted item that is not in the server's plan - including any client-supplied source or destination path -
+        refuses the whole request before anything is copied. Failures are reported (ok=False), never hidden."""
+        items = (preview_dict or {}).get("items_to_copy", []) if isinstance(preview_dict, dict) else []
         if not items:
             return {"ok": True, "message": "Nothing to synchronize.", "transferred_count": 0}
+        try:
+            requested = []
+            for it in items:
+                sid = validate_study_code(it.get("study_id"))
+                rel = it.get("relative_path")
+                if not isinstance(rel, str) or not rel or os.path.isabs(rel) or ".." in rel.split(os.sep):
+                    raise SafetyError(f"invalid relative path {rel!r}")
+                requested.append((sid, rel, it.get("source_path"), it.get("destination_path")))
+        except (SafetyError, AttributeError, TypeError) as e:
+            return {"ok": False, "error": f"Refused: {e}", "transferred_count": 0}
 
+        fresh = self.generate_sync_preview(study_ids=sorted({r[0] for r in requested}), mode="manual")
+        if not fresh.can_proceed:
+            return {"ok": False, "error": f"Refused: {fresh.message}", "transferred_count": 0}
+        plan = {(i.study_id, i.relative_path): i for i in fresh.items_to_copy}
+        rejected = []
+        for sid, rel, sp, dp in requested:
+            srv = plan.get((sid, rel))
+            if srv is None:
+                rejected.append({"study_id": sid, "relative_path": rel, "reason": "not in the server's current sync plan"})
+            elif (sp is not None and canon(sp) != canon(srv.source_path)) or (dp is not None and canon(dp) != canon(srv.destination_path)):
+                rejected.append({"study_id": sid, "relative_path": rel, "reason": "client-supplied path differs from the server's plan"})
+        if rejected:
+            return {"ok": False, "error": f"Refused: {len(rejected)} item(s) are not part of the server's sync plan; nothing was copied",
+                    "rejected": rejected[:50], "transferred_count": 0}
+
+        ws_root = canon(os.path.join(self.paths.workspace_root, "work"))
+        vault_studies = canon(os.path.join(self.paths.get_vault_path(), "studies"))
         engine = get_transfer_engine(os.path.join(self.paths.workspace_root, "app_data", "transfers"))
-        transferred = 0
-        total_bytes = 0
+        transferred, total_bytes, failed = 0, 0, []
         job_id = f"sync_{int(time.time())}"
 
-        self.state.record_audit_event("sync_started", "initiated", op_id=job_id, details={"items_count": len(items)})
+        self.state.record_audit_event("sync_started", "initiated", op_id=job_id, details={"items_count": len(requested)})
 
-        for it in items:
-            sp = it["source_path"]
-            dp = it["destination_path"]
-            sid = it["study_id"]
-
-            ok, msg, info = engine.transfer_path(
-                src=sp,
-                dst=dp,
-                operation="archive_sync",
-                study_id=sid,
-                verify_sha=True,
-                preserve_source=True,
-                prefer_clone=False
-            )
+        for sid, rel, _, _ in requested:
+            it = plan[(sid, rel)]
+            sp, dp = canon(it.source_path), canon(it.destination_path)
+            if not inside(sp, os.path.join(ws_root, sid)) or not inside(dp, os.path.join(vault_studies, sid)):
+                failed.append({"study_id": sid, "relative_path": rel, "error": "path outside work/<study> or <vault>/studies/<study>"})
+                continue
+            if os.path.lexists(dp):
+                failed.append({"study_id": sid, "relative_path": rel, "error": "destination appeared since the preview; not overwritten"})
+                continue
+            try:
+                ok, msg, info = engine.transfer_path(
+                    src=sp,
+                    dst=dp,
+                    operation="archive_sync",
+                    study_id=sid,
+                    verify_sha=True,
+                    preserve_source=True,
+                    prefer_clone=False
+                )
+            except Exception as e:
+                ok, msg, info = False, str(e), {}
             if ok:
                 transferred += 1
                 total_bytes += info.get("completed_bytes", 0)
+            else:
+                failed.append({"study_id": sid, "relative_path": rel, "error": msg})
 
-        self.state.record_audit_event("sync_completed", "success", op_id=job_id, details={"transferred": transferred, "bytes": total_bytes})
+        self.state.record_audit_event("sync_completed", "success" if not failed else "failure", op_id=job_id,
+                                      details={"transferred": transferred, "bytes": total_bytes, "failed": len(failed)})
         return {
-            "ok": True,
+            "ok": not failed,
             "job_id": job_id,
             "transferred_count": transferred,
             "transferred_bytes": total_bytes,
-            "message": f"Successfully synchronized {transferred} files to external Vault."
+            "failed_count": len(failed),
+            "failed": failed[:50],
+            "message": (f"Successfully synchronized {transferred} files to external Vault." if not failed
+                        else f"{transferred} file(s) synchronized, {len(failed)} failed."),
+            **({} if not failed else {"error": f"{len(failed)} file(s) failed to synchronize"}),
         }
 
     def get_sync_policy(self) -> Dict[str, Any]:

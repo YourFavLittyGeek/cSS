@@ -297,16 +297,15 @@ class UnifiedTransferEngine:
 
             computed_sha = h_src.hexdigest()
 
-            # Atomic replace from .part to final destination
-            os.replace(part_dst, dst)
+            # Phase 0: verify the staged .part copy BEFORE it replaces anything. On a mismatch only the .part file is
+            # removed (except-branch below); an existing file at dst is left exactly as it was.
+            if verify_sha:
+                part_sha = compute_sha256(part_dst, chunk_size)
+                if part_sha != computed_sha:
+                    raise IOError(f"Integrity check failed: source {computed_sha} != staged copy {part_sha}; destination left unchanged")
 
-            # Optional destination read-back verification for high-security archival
-            if verify_sha and os.path.exists(dst):
-                dst_sha = compute_sha256(dst, chunk_size)
-                if dst_sha != computed_sha:
-                    if os.path.exists(dst):
-                        os.remove(dst)
-                    raise IOError(f"Integrity check failed: source {computed_sha} != destination {dst_sha}")
+            # Atomic replace from the verified .part to the final destination
+            os.replace(part_dst, dst)
 
             return True, computed_sha, bytes_copied, durability_level
 
@@ -370,6 +369,7 @@ class UnifiedTransferEngine:
         )
         self._active_jobs[job_id] = progress
         self._cancel_flags[job_id] = False
+        verified_this_run: List[str] = []   # source files copied AND verified in this run (the only ones a move may remove)
         self._pause_flags[job_id] = False
 
         # Load existing manifest for interrupted recovery if available
@@ -444,15 +444,25 @@ class UnifiedTransferEngine:
                 copied_sha = ""
                 dur_level = "standard"
                 if can_clone and s_size > 0:
+                    part_clone = t_target + ".part"
                     try:
-                        # Attempt fast APFS clone with .part
-                        part_clone = t_target + ".part"
+                        # Attempt fast APFS clone with .part; Phase 0: the clone is verified before it replaces anything
                         subprocess.run(["/bin/cp", "-c", s_abs, part_clone], check=True, capture_output=True)
+                        copied_sha = ""
+                        if verify_sha:
+                            src_sha = compute_sha256(s_abs)
+                            copied_sha = compute_sha256(part_clone)
+                            if copied_sha != src_sha:
+                                raise IOError(f"clone integrity mismatch for {rel_p}")
                         os.replace(part_clone, t_target)
-                        copied_sha = compute_sha256(t_target) if verify_sha else ""
                         dur_level = "apfs_clone"
                         progress.completed_bytes += s_size
                     except Exception:
+                        if os.path.exists(part_clone):
+                            try:
+                                os.remove(part_clone)
+                            except Exception:
+                                pass
                         # Fallback to streaming if clone fails
                         def on_chunk(bytes_so_far, inst_rate):
                             progress.current_mb_s = inst_rate
@@ -483,6 +493,8 @@ class UnifiedTransferEngine:
                     remaining_bytes = progress.total_bytes - progress.completed_bytes
                     progress.eta_seconds = (remaining_bytes / (progress.avg_mb_s * 1024 * 1024)) if progress.avg_mb_s > 0 else 0.0
 
+                if verify_sha:
+                    verified_this_run.append(s_abs)
                 transferred_manifest[rel_p] = {
                     "source": s_abs,
                     "target": t_target,
@@ -506,11 +518,22 @@ class UnifiedTransferEngine:
                 on_progress(progress.to_dict())
 
             # Handle safe move (delete source ONLY after destination is completely verified)
+            # Phase 0: only files copied AND verified in this run are removed - never the whole tree. Files the copy
+            # skipped (hidden files, size-only "already transferred" resumes, unverified copies) stay at the source,
+            # and folders are removed only once empty.
             if not preserve_source and operation == "move" and progress.status == TransferState.COMPLETED.value:
-                if os.path.isfile(src):
-                    os.remove(src)
-                elif os.path.isdir(src):
-                    shutil.rmtree(src, ignore_errors=True)
+                for fp in verified_this_run:
+                    try:
+                        os.remove(fp)
+                    except FileNotFoundError:
+                        pass
+                if os.path.isdir(src):
+                    for root, dirs, files in os.walk(src, topdown=False):
+                        try:
+                            if not os.listdir(root):
+                                os.rmdir(root)
+                        except OSError:
+                            pass
 
             return True, f"Successfully transferred {progress.completed_files} files ({progress.completed_bytes} bytes)", progress.to_dict()
 

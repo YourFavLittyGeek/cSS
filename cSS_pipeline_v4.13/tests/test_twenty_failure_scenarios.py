@@ -22,6 +22,7 @@ Systematic verification of the 20 failure and recovery scenarios required by Sec
 19. Duplicate study ingestion / idempotent update
 20. Application restart during recovery
 """
+import os as _o, sys as _s; _s.path.insert(0, _o.path.dirname(_o.path.abspath(__file__))); import _isolation; _isolation.activate()  # Phase 0: test isolation (must stay first)
 
 import os
 import sys

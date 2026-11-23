@@ -1,4 +1,5 @@
 """test_shadow_and_governance.py - Verification of SHADOW ML Lab and PERCIVAL GOVERNANCE"""
+import os as _o, sys as _s; _s.path.insert(0, _o.path.dirname(_o.path.abspath(__file__))); import _isolation; _isolation.activate()  # Phase 0: test isolation (must stay first)
 import os
 import sys
 import shutil

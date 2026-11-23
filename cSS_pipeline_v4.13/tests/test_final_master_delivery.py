@@ -12,6 +12,7 @@ Tests:
 9. Identity & Password-Free Architecture (default unlocked, optional app lock toggle)
 10. FileManager (dual-storage topology, status classification)
 """
+import os as _o, sys as _s; _s.path.insert(0, _o.path.dirname(_o.path.abspath(__file__))); import _isolation; _isolation.activate()  # Phase 0: test isolation (must stay first)
 
 import json
 import os

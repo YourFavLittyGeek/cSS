@@ -280,10 +280,13 @@ $("#side-vault-emergency")&&($("#side-vault-emergency").onclick=async()=>{
   try{
     const r=await api("/api/storage/eject",{emergency:true,force:false});
     if(r.ok){toast(r.message||"Drive unmounted.");await refresh();}
-    else if(r.needs_force_confirmation){
-      if(confirm(`macOS refused standard unmount.\n\nWARNING: Forcing unmount may corrupt unfinished transfers or data on the external disk.\n\nExecute FORCE unmount anyway?`)){
+    else if(r.needs_force_confirmation&&r.force_token){
+      /* Phase 0: the server authorises a force unmount only with its single-use token AND the volume name typed here */
+      const vn=r.volume_name||"";
+      const typed=prompt(`macOS refused standard unmount.\n\nWARNING: Forcing unmount may corrupt unfinished transfers or data on the external disk.\n\nTo FORCE the unmount anyway, type the volume name exactly:\n${vn}`,"");
+      if(typed!==null&&typed!==""){
         toast("Executing forced unmount…");
-        const r2=await api("/api/storage/eject",{emergency:true,force:true});
+        const r2=await api("/api/storage/eject",{emergency:true,force:true,force_token:r.force_token,confirm_volume_name:typed});
         if(r2.ok)toast(r2.message);
         else toast(r2.error,1);
         await refresh();

@@ -29,6 +29,27 @@ def _resolve_project_base():
 
 B = _resolve_project_base()
 
+# Phase 0 (test isolation): start-up side effects (installing pipeline scripts into the project, crash recovery of runs and
+# imports, registering studies found on disk) run only when this file is started as the application. Importing the
+# module (unit tests, tools) has no side effects on the project. Start-up order of the application is unchanged.
+_APP_STARTUP = __name__ == "__main__" or os.environ.get("PERCIVAL_APP_STARTUP") == "1"
+
+def _refuse_live_binding_under_test(base):
+    """an importing test must never bind to the real research project: refuse a base in the real home or under /Volumes"""
+    if __name__ == "__main__": return
+    if os.environ.get("PERCIVAL_TEST_ISOLATION") != "1" and "unittest" not in sys.modules: return
+    try:
+        import pwd; real_home = os.path.realpath(pwd.getpwuid(os.getuid()).pw_dir)
+    except Exception: real_home = os.path.realpath(os.path.expanduser("~"))
+    cb = os.path.realpath(base).lower()
+    for bad in (real_home, "/volumes"):
+        b = bad.lower().rstrip("/")
+        if cb == b or cb.startswith(b + "/"):
+            raise RuntimeError(f"css_app imported under a test with project base {base!r} inside {bad!r}: tests must set a temporary "
+                               f"HOME and CSS_BASE (tests/_isolation.py) - refusing to bind to the live research project")
+
+_refuse_live_binding_under_test(B)
+
 def _ensure_pipeline_installed(base_dir):
     """Self-healing: ensure pipeline scripts and unified components are present in workspace."""
     rc = os.path.join(base_dir, "scripts", "run_css.sh")
@@ -64,7 +85,7 @@ def _ensure_pipeline_installed(base_dir):
                     shutil.copytree(cand, comp_dst, ignore=shutil.ignore_patterns("__pycache__", ".*"))
                     break
 
-_ensure_pipeline_installed(B)
+if _APP_STARTUP: _ensure_pipeline_installed(B)
 sys.path.insert(0, os.path.join(HERE, "guard")); import css_writeguard as WG      # v5.14.2-rc2: central production write guard
 EXPERIMENTAL = os.environ.get("CSS_EXPERIMENTAL") == "1"
 if EXPERIMENTAL:
@@ -92,6 +113,7 @@ SET = dict(dict(awake=True, theme="dark", backup_dir="", freesurfer_home=os.envi
 import notify_centre as NC, study_split as SS      # v5.14.2-rc4: notification centre + user study selection / training gate
 SET.setdefault("notif", dict(NC.DEFAULTS)); [SET["notif"].setdefault(k, v) for k, v in NC.DEFAULTS.items()]
 SET.setdefault("autotrain", dict(on=False, threshold=3))
+SET["features"].setdefault("experimental_core", False)   # Phase 0: ALBUS/LUMOS/NOX/CORE research layer off by default
 SET["features"].setdefault("train_include_archived", True); SET["features"].setdefault("show_prototypes", False)   # v5.24: older ML prototypes hidden from the menu by default      # v5.20: archived studies stay in model training unless switched off
 PAT = jload("patients.json", [])
 for p in PAT:                                            # resume after a restart: interrupted runs go back to the queue
@@ -109,10 +131,12 @@ import percival_gui as PG                             # v5.22 Percival Score (lo
 try: import openpyxl, openpyxl.workbook, openpyxl.styles, openpyxl.comments   # v5.24: imported once at start-up - a first import from two
 except Exception: pass                                                       # server threads at once raised "partially initialized module"
 def pname(code): return IDG.ident(code, SET).get("patient_name", "")       # only in Standard mode with the vault unlocked
-try: PM_RECOVERED = PM.recover_all(B)                 # runs left "running" by a closed app become "interrupted" (previous outputs restored)
-except Exception as _e: PM_RECOVERED = {"error": str(_e)}
-try: PM_IMPORTS_ROLLED_BACK = PM.recover_imports(B)  # imports cut off by a crash / quit are rolled back (nothing half-imported stays)
-except Exception as _e: PM_IMPORTS_ROLLED_BACK = [f"error: {_e}"]
+PM_RECOVERED, PM_IMPORTS_ROLLED_BACK = {}, []
+if _APP_STARTUP:
+    try: PM_RECOVERED = PM.recover_all(B)                 # runs left "running" by a closed app become "interrupted" (previous outputs restored)
+    except Exception as _e: PM_RECOVERED = {"error": str(_e)}
+    try: PM_IMPORTS_ROLLED_BACK = PM.recover_imports(B)  # imports cut off by a crash / quit are rolled back (nothing half-imported stays)
+    except Exception as _e: PM_IMPORTS_ROLLED_BACK = [f"error: {_e}"]
 
 def reconcile_studies_on_disk():
     """Auto-discover and register any studies physically present in workspace or data folders."""
@@ -143,7 +167,7 @@ def reconcile_studies_on_disk():
     except Exception as _err:
         sys.stderr.write(f"[Startup] Reconcile error: {_err}\n")
 
-reconcile_studies_on_disk()
+if _APP_STARTUP: reconcile_studies_on_disk()
 PM_JOBS = {}                                          # code -> {"run_id", "stage", "started"} while a Processing Manager run works
 def _pm_code(c): return c if re.fullmatch(r"[A-Za-z0-9_\-]{1,32}", c or "") else None
 def proc_get(op, q):
@@ -1275,6 +1299,10 @@ def pg_post(op, d):
         return dict(ok=False, error=f"unknown {op}")
     except Exception as e: return dict(ok=False, error=f"{type(e).__name__}: {e}"[:400])
 # ------------------------------------------------------------------ v5.25 Storage, Health, Wizard, Recovery & Migration APIs
+def _safe_path_segment(v):
+    """Phase 0: a value that is joined into a file path must be one plain path segment (no traversal)"""
+    return isinstance(v, str) and v not in ("", ".", "..") and "/" not in v and "\\" not in v and "\x00" not in v and ".." not in v
+
 def files_get(op, q):
     try:
         from uengine.file_manager import FileManager
@@ -1313,7 +1341,9 @@ def files_post(op, d):
         if op == "restore":
             return fm.restore_entry(d.get("vault_path", ""), d.get("dst_dir", ""))
         if op == "verify":
-            p = d.get("path", "")
+            from uengine.safety import SafetyError
+            try: p = fm.policy.check_source(d.get("path", ""))          # Phase 0: only project / Vault files can be hashed
+            except SafetyError as e: return dict(ok=False, error=f"Refused: {e}")
             if os.path.isfile(p):
                 from uengine.file_manager import compute_hash
                 h = compute_hash(p)
@@ -1396,7 +1426,9 @@ def storage_post(op, d):
         if op == "eject":
             from uengine.storage import StoragePathsService, EjectManager
             em = EjectManager(StoragePathsService(B, vault_root))
-            return em.eject_vault(emergency=bool(d.get("emergency", False)), force=bool(d.get("force", False)))
+            # Phase 0: force is honoured only with the server-issued token AND the volume name the user typed
+            return em.eject_vault(emergency=bool(d.get("emergency", False)), force=d.get("force") is True,
+                                  force_token=str(d.get("force_token", "") or ""), confirm_volume_name=str(d.get("confirm_volume_name", "") or ""))
         if op == "sync_execute":
             from uengine.storage import StoragePathsService, SyncManager
             sm = SyncManager(StoragePathsService(B, vault_root))
@@ -1406,7 +1438,7 @@ def storage_post(op, d):
             sm = SyncManager(StoragePathsService(B, vault_root))
             return sm.save_sync_policy(d.get("policy", {}))
         if op == "clean": return fm.clean_staging(d.get("code", ""))
-        if op == "prune": return sa.execute_prune(d.get("action", ""), int(d.get("days", 7)))
+        if op == "prune": return sa.execute_prune(d.get("action", ""), max(1, int(d.get("days", 7))))   # Phase 0: never "everything" (days 0)
         if op == "delete": return fm.delete_study(d.get("code", ""), target=d.get("target", "local"))
         if op == "free_space_execute":
             from uengine.transfer_manager import TransferManager
@@ -1463,7 +1495,7 @@ def workspace_post(op, d):
             ok, msg = swm.archive_study(d.get("study_id", ""))
             return dict(ok=ok, message=msg)
         if op == "clean":
-            ok, msg = swm.clean_eligible_workspace(d.get("study_id", ""), force=bool(d.get("force", False)))
+            ok, msg = swm.clean_eligible_workspace(d.get("study_id", ""))     # Phase 0: no client-controlled force
             return dict(ok=ok, message=msg)
         if op == "enqueue":
             return swm.enqueue_study(d.get("study_id", ""), priority=int(d.get("priority", 0)))
@@ -1645,13 +1677,13 @@ def clean_post(op, d):
         from uengine.cleaning_manager import CleaningManager
         cm = CleaningManager(B, vault_root=SET.get("vault_mount"))
         if op == "execute":
-            return cm.execute_clean(category_ids=d.get("categories"), use_quarantine=bool(d.get("use_quarantine", True)))
+            return cm.execute_clean(category_ids=d.get("categories"), use_quarantine=True)   # Phase 0: always via quarantine
         if op == "policies":
             return cm.update_policies(d.get("policies", {}))
         if op == "quarantine_restore":
             return cm.restore_quarantine(str(d.get("quarantine_id", "")))
         if op == "quarantine_purge":
-            return cm.purge_quarantine(d.get("quarantine_id"))
+            return cm.purge_quarantine(d.get("quarantine_id") or None, purge_all=d.get("purge_all") is True)
         if op == "delete_study":
             return cm.delete_by_study(str(d.get("study_code", "")), target=str(d.get("target", "staging")))
         return dict(ok=False, error=f"unknown clean post op {op}")
@@ -2566,13 +2598,15 @@ class H(BaseHTTPRequestHandler):
         self.end_headers(); self.wfile.write(b)
     def do_GET(self):
         u = urlparse(self.path); q = {k: v[0] for k, v in parse_qs(u.query).items()}
+        if q.get("code") and not _safe_path_segment(q["code"]):   # Phase 0: ?code= is joined into file paths (logs, QC images)
+            return self.send(dict(error="invalid study code"), 400)
         try:
             if u.path == "/": return self.send(open(f"{HERE}/css_app.html", "rb").read(), ctype="text/html; charset=utf-8")
             if u.path == "/api/state": return self.send(state())
             if u.path == "/api/vset":
                 f = f"{B}/review/viewer_settings.json"; return self.send(json.load(open(f)) if os.path.exists(f) else {})
             if u.path in ("/icon_dark.png", "/icon_light.png"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="image/png")
-            if u.path.endswith(".js") and os.path.isfile(f"{HERE}{u.path}"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="text/javascript; charset=utf-8")
+            if re.fullmatch(r"/[A-Za-z0-9_]+\.js", u.path) and os.path.isfile(f"{HERE}{u.path}"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/unified_view.js": return self.send(open(f"{HERE}/unified_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path == "/shadow_view.js": return self.send(open(f"{HERE}/shadow_view.js", "rb").read(), ctype="text/javascript; charset=utf-8")
             if u.path in ("/identity_view.js", "/import_wizard_view.js", "/lineage_view.js", "/training_view.js", "/setup_view.js", "/export_view.js", "/study_admin_view.js", "/percival_view.js"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="text/javascript; charset=utf-8")
