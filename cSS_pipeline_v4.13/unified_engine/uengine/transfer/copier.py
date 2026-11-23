@@ -1,25 +1,32 @@
-"""uengine/transfer/copier.py - Phase 1a: verified single-file copy (the only primitive that writes transfer data).
+"""uengine/transfer/copier.py - verified single-file copy (the only primitive that writes transfer data).
 
-verified_copy(src, dst, policy=..., job_tag=..., mode=...) performs, in order (plan section 3):
-  1. policy checks (Phase 0 PathPolicy): source readable inside the project / Vault, regular file, not a symlink;
-     destination a permitted write target; staged / preserved names permitted too
-  2. source identity recorded: size, mtime_ns, inode
-  3. destination already present -> hash both; identical content is SKIPPED (never rewritten); otherwise the commit mode
-     decides (NEVER_OVERWRITE -> CONFLICT without writing anything)
-  4. stream into a job-owned  <dst>.part-<job_tag>  (4 MB chunks, SHA-256 while copying); pause / cancel checked
-     between chunks
-  5. flush (F_FULLFSYNC, fallback fsync) - a failed flush fails the copy
-  6. read the staged file back with F_NOCACHE (bypassing the macOS buffer cache) and hash it
-  7. compare source hash == read-back hash, and the source identity is unchanged (else SOURCE_CHANGED)
-  8. commit by mode; flush the destination directory; confirm the destination size
-Any failure before the commit removes ONLY the job's .part file; the destination is never touched before step 8.
-A pause keeps the .part (resume re-verifies it - milestone 1c). Directory trees, queues, locks and the journal are the
-service's job (milestone 1b); this module handles exactly one file.
+Two phases, so a multi-file job can verify EVERY file before it touches ANY destination (milestone 1b):
+
+  stage_file(src, dst, ...)      -> StagedFile    policy checks, source identity, job-owned  <dst>.part-<job>, SHA-256
+                                                   while copying, flush (checked), uncached read-back, compare,
+                                                   source-unchanged check. No destination is touched.
+  commit_staged(staged, mode)    -> CopyResult    publish the verified .part under the destination name
+  rollback_committed(result)                      undo one commit of this job (only if the file is still ours)
+  discard_staged(staged)                          remove a .part this job created
+  verified_copy(...)                              stage + commit for a single file (milestone 1a API)
+
+Exclusive commit (Phase 1b, measured 2026-11-23 on disk images - docs/engineering/FILESYSTEM_GUARANTEES.md):
+every publish uses renamex_np(RENAME_EXCL) - atomic "rename only if the target name is free"; if the filesystem does not
+support it, link()+unlink() (also atomic and exclusive). If NEITHER is supported (exFAT) the commit is REFUSED with
+ExclusiveCommitUnsupported - there is no check-then-rename fallback, because that cannot exclude a destination created
+between the check and the rename. A plain overwriting rename is never used to publish.
+
+Replacement (REPLACE_AFTER_VERIFY / PRESERVE_PREVIOUS) moves the old file aside to <dst>.replaced-<job> (exclusive) and
+then publishes the new file (exclusive); the old version stays until the caller (the service) has verified the whole job
+- or is moved back by rollback. Files inside the Vault are never replaced (archives are write-once).
 """
+import ctypes
+import ctypes.util
 import errno
 import hashlib
 import os
 import re
+import sys
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional
@@ -30,11 +37,13 @@ except ImportError:  # pragma: no cover - non-POSIX
     fcntl = None
 
 from .models import CommitMode
-from ..safety import PathPolicy, SafetyError
+from ..safety import PathPolicy, SafetyError, inside
 from ..unified_transfer_engine import flush_durability
 
 CHUNK = 4 * 1024 * 1024
 JOB_TAG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+# filesystems measured to lack BOTH renamex_np(RENAME_EXCL) and link(): refused before any data is copied
+NO_EXCLUSIVE_COMMIT_FS = frozenset({"exfat"})
 
 
 class CopyError(RuntimeError):
@@ -43,6 +52,10 @@ class CopyError(RuntimeError):
 
 class CopyRefused(CopyError):
     """refused by the safety policy before anything was written"""
+
+
+class ExclusiveCommitUnsupported(CopyRefused):
+    """the destination filesystem cannot atomically create a file only if its name is free"""
 
 
 class IntegrityError(CopyError):
@@ -73,6 +86,26 @@ class CopyPaused(CopyError):
         self.part_path, self.bytes_written = part_path, bytes_written
 
 
+class RollbackError(CopyError):
+    """a committed file could not be undone safely (it is no longer the file this job wrote)"""
+
+
+@dataclass
+class StagedFile:
+    src: str
+    dst: str
+    part: str
+    job_tag: str
+    size: int
+    src_sha256: str
+    part_sha256: str
+    src_identity: tuple
+    part_identity: tuple
+    durability: str
+    nocache_readback: bool
+    existing_sha256: Optional[str] = None     # hash of a destination that existed when staging started
+
+
 @dataclass
 class CopyResult:
     status: str                         # committed | skipped_identical | conflict
@@ -85,10 +118,11 @@ class CopyResult:
     durability: str = ""
     dir_synced: bool = False
     nocache_readback: bool = False
+    dst_identity: Optional[tuple] = None
     timings: dict = field(default_factory=dict)
 
 
-# ---------------------------------------------------------------------------------------------- hashing (patchable)
+# ---------------------------------------------------------------------------------------------- platform primitives
 def _hash_file(path: str, nocache: bool = False, chunk: int = CHUNK):
     """(sha256 hex, nocache_applied). nocache=True asks macOS not to serve the read from the buffer cache."""
     h = hashlib.sha256()
@@ -110,7 +144,6 @@ def _hash_file(path: str, nocache: bool = False, chunk: int = CHUNK):
 
 
 def _fsync_dir(path: str) -> bool:
-    """flush a directory entry change (rename) to disk; some filesystems (exFAT) refuse - reported, not fatal"""
     try:
         fd = os.open(path, os.O_RDONLY)
     except OSError:
@@ -124,6 +157,72 @@ def _fsync_dir(path: str) -> bool:
         os.close(fd)
 
 
+class _StatFS(ctypes.Structure):          # macOS struct statfs (64-bit inode layout)
+    _fields_ = [("f_bsize", ctypes.c_uint32), ("f_iosize", ctypes.c_int32), ("f_blocks", ctypes.c_uint64),
+                ("f_bfree", ctypes.c_uint64), ("f_bavail", ctypes.c_uint64), ("f_files", ctypes.c_uint64),
+                ("f_ffree", ctypes.c_uint64), ("f_fsid", ctypes.c_int32 * 2), ("f_owner", ctypes.c_uint32),
+                ("f_type", ctypes.c_uint32), ("f_flags", ctypes.c_uint32), ("f_fssubtype", ctypes.c_uint32),
+                ("f_fstypename", ctypes.c_char * 16), ("f_mntonname", ctypes.c_char * 1024),
+                ("f_mntfromname", ctypes.c_char * 1024), ("f_flags_ext", ctypes.c_uint32), ("f_reserved", ctypes.c_uint32 * 7)]
+
+
+_LIBC = None
+if sys.platform == "darwin":
+    try:
+        _LIBC = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+        _LIBC.renamex_np.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+        _LIBC.renamex_np.restype = ctypes.c_int
+    except (OSError, AttributeError):
+        _LIBC = None
+RENAME_EXCL = 0x00000004
+
+
+def fs_type(path: str) -> str:
+    """filesystem type name of the volume holding path ('apfs', 'exfat', 'msdos', 'hfs', ...; '' if unknown)"""
+    if _LIBC is None:
+        return ""
+    p = path
+    while p and not os.path.exists(p):
+        p = os.path.dirname(p)
+    st = _StatFS()
+    fn = getattr(_LIBC, "statfs64", None) or _LIBC.statfs
+    try:
+        if fn(os.fsencode(p or "/"), ctypes.byref(st)) != 0:
+            return ""
+    except Exception:
+        return ""
+    return st.f_fstypename.decode(errors="replace")
+
+
+def _rename_exclusive(src: str, dst: str) -> str:
+    """atomically give src the name dst ONLY if dst does not exist. Raises FileExistsError if it exists, and
+    ExclusiveCommitUnsupported if the filesystem offers no atomic exclusive primitive. Returns the method used."""
+    if _LIBC is not None:
+        if _LIBC.renamex_np(os.fsencode(src), os.fsencode(dst), RENAME_EXCL) == 0:
+            return "renamex_np(RENAME_EXCL)"
+        e = ctypes.get_errno()
+        if e == errno.EEXIST:
+            raise FileExistsError(errno.EEXIST, "destination exists", dst)
+        if e not in (errno.ENOTSUP, errno.EOPNOTSUPP, errno.EINVAL, errno.ENOSYS):
+            raise OSError(e, os.strerror(e), dst)
+    if os.path.isdir(src):
+        raise ExclusiveCommitUnsupported(f"the filesystem of {dst} ({fs_type(dst) or 'unknown'}) cannot rename a folder "
+                                         f"exclusively; refused rather than risk replacing an existing folder")
+    try:
+        os.link(src, dst)                   # atomic and exclusive: fails with EEXIST if dst exists
+    except FileExistsError:
+        raise
+    except OSError as e:
+        if e.errno in (errno.EPERM, errno.ENOTSUP, errno.EOPNOTSUPP, errno.EXDEV, errno.EMLINK, errno.ENOSYS):
+            raise ExclusiveCommitUnsupported(
+                f"the filesystem of {dst} ({fs_type(dst) or 'unknown'}) supports neither an exclusive rename nor hard "
+                f"links, so Percival cannot guarantee that an existing file is never overwritten; the operation was "
+                f"refused (use an APFS- or HFS+-formatted destination)") from e
+        raise
+    os.remove(src)
+    return "link+unlink"
+
+
 def _identity(st):
     return (st.st_size, st.st_mtime_ns, st.st_ino)
 
@@ -135,47 +234,31 @@ def _remove_quietly(p: str) -> None:
         pass
 
 
-def _free_name(dst: str, job_tag: str) -> str:
+def _free_name(dst: str, job_tag: str, attempt: int) -> str:
     d, base = os.path.split(dst)
     stem, ext = (base[:-7], ".nii.gz") if base.endswith(".nii.gz") else os.path.splitext(base)
-    for i in range(1, 1000):
-        cand = os.path.join(d, f"{stem}_restored_{job_tag}{'' if i == 1 else f'_{i}'}{ext}")
-        if not os.path.lexists(cand):
-            return cand
-    raise CopyError(f"no free name for {dst}")
+    return os.path.join(d, f"{stem}_restored_{job_tag}{'' if attempt == 1 else f'_{attempt}'}{ext}")
 
 
-def _link_no_overwrite(part: str, target: str) -> None:
-    """atomically create target from part, failing if target exists (hard link); fallback for filesystems without hard
-    links (exFAT): re-check then rename - the remaining race window is documented in the plan"""
-    try:
-        os.link(part, target)
-        os.remove(part)
-        return
-    except FileExistsError:
-        raise
-    except OSError as e:
-        if e.errno not in (errno.EPERM, errno.ENOTSUP, errno.EOPNOTSUPP, errno.EXDEV, errno.EMLINK):
-            raise
-    if os.path.lexists(target):
-        raise FileExistsError(errno.EEXIST, "destination appeared", target)
-    os.rename(part, target)
+def preflight_destination(dst: str) -> None:
+    """refuse before copying when the destination filesystem is known to lack an exclusive commit"""
+    t = fs_type(os.path.dirname(dst) or dst)
+    if t in NO_EXCLUSIVE_COMMIT_FS:
+        raise ExclusiveCommitUnsupported(
+            f"the destination {dst} is on a {t} volume, which supports neither an exclusive rename nor hard links; "
+            f"Percival refuses to write there because it cannot guarantee that an existing file is never overwritten "
+            f"(reading from {t} volumes is unaffected; use an APFS- or HFS+-formatted destination)")
 
 
-# ---------------------------------------------------------------------------------------------- the copy
-def verified_copy(src: str, dst: str, *, policy: PathPolicy, job_tag: str, mode: CommitMode,
-                  chunk_size: int = CHUNK,
-                  control: Optional[Callable[[], Optional[str]]] = None,
-                  progress: Optional[Callable[[str, int], None]] = None,
-                  _before_commit: Optional[Callable[[], None]] = None) -> CopyResult:
-    """copy one file with full verification. control() is polled between chunks and may return "pause" or "cancel".
-    progress(phase, bytes) reports bytes written ("copying") / read back ("verifying")."""
+# ---------------------------------------------------------------------------------------------- phase 1: stage
+def stage_file(src: str, dst: str, *, policy: PathPolicy, job_tag: str, mode: CommitMode, chunk_size: int = CHUNK,
+               control: Optional[Callable[[], Optional[str]]] = None,
+               progress: Optional[Callable[[str, int], None]] = None):
+    """copy src into a verified, flushed, job-owned .part next to dst. Returns a StagedFile, or a CopyResult when no
+    copy is needed (identical destination -> skipped_identical; NEVER_OVERWRITE + different -> conflict)."""
     mode = CommitMode(mode)
     if not isinstance(job_tag, str) or not JOB_TAG_RE.match(job_tag):
         raise CopyRefused(f"invalid job tag {job_tag!r}")
-    t0 = time.time()
-
-    # 1. policy -----------------------------------------------------------------------------------------------
     if not src or os.path.islink(src):
         raise CopyRefused(f"source is a symbolic link or missing: {src!r} (links are never followed)")
     try:
@@ -186,6 +269,10 @@ def verified_copy(src: str, dst: str, *, policy: PathPolicy, job_tag: str, mode:
         raise CopyRefused(str(e)) from e
     if not os.path.isfile(src_c):
         raise CopyRefused(f"source is not a regular file: {src_c}")
+    if mode in (CommitMode.REPLACE_AFTER_VERIFY, CommitMode.PRESERVE_PREVIOUS) and policy.vault and inside(dst_c, policy.vault) \
+            and os.path.lexists(dst_c):
+        raise CopyRefused(f"{dst_c} is an archived file in the Vault; archives are never replaced")
+    preflight_destination(dst_c)
     if os.path.lexists(part):
         raise StalePartFile(f"{part} already exists (left by an earlier attempt of job {job_tag}); recovery must decide")
     if os.path.isdir(dst_c) or (os.path.lexists(dst_c) and not os.path.isfile(dst_c)):
@@ -195,22 +282,19 @@ def verified_copy(src: str, dst: str, *, policy: PathPolicy, job_tag: str, mode:
         policy.check_write_target(parent)
         os.makedirs(parent, exist_ok=True)
 
-    # 2. source identity --------------------------------------------------------------------------------------
     st0 = os.stat(src_c)
     size = st0.st_size
-
-    # 3. destination already present --------------------------------------------------------------------------
+    existing_sha = None
     if os.path.lexists(dst_c):
         src_sha, _ = _hash_file(src_c)
-        dst_sha, _ = _hash_file(dst_c)
+        existing_sha, _ = _hash_file(dst_c)
         if _identity(os.stat(src_c)) != _identity(st0):
             raise SourceChanged(f"source changed while comparing with the existing destination: {src_c}")
-        if src_sha == dst_sha:
-            return CopyResult("skipped_identical", src_c, dst_c, size, src_sha, dst_sha, timings={"total_s": time.time() - t0})
+        if src_sha == existing_sha:
+            return CopyResult("skipped_identical", src_c, dst_c, size, src_sha, existing_sha)
         if mode == CommitMode.NEVER_OVERWRITE:
-            return CopyResult("conflict", src_c, dst_c, size, src_sha, dst_sha, timings={"total_s": time.time() - t0})
+            return CopyResult("conflict", src_c, dst_c, size, src_sha, existing_sha)
 
-    # 4. stream into the job-owned .part ----------------------------------------------------------------------
     h = hashlib.sha256()
     written = 0
     keep_part = False
@@ -241,71 +325,165 @@ def verified_copy(src: str, dst: str, *, policy: PathPolicy, job_tag: str, mode:
                 if progress:
                     progress("copying", written)
             fout.flush()
-            # 5. flush -------------------------------------------------------------------------------------------
+            if progress:
+                progress("flushing", written)
             ok_flush, durability = flush_durability(fout.fileno())
             if not ok_flush:
                 raise FlushFailed(f"could not flush {part} to the device: {durability}")
         src_sha = h.hexdigest()
         if written != size:
             raise SourceChanged(f"source size changed during the copy ({size} -> {written} bytes)")
-
-        # 6. uncached read-back -------------------------------------------------------------------------------
         part_sha, nocache = _hash_file(part, nocache=True, chunk=chunk_size)
         if progress:
             progress("verifying", written)
-
-        # 7. compare ------------------------------------------------------------------------------------------
         if part_sha != src_sha:
             raise IntegrityError(f"staged copy reads back differently: source {src_sha} != staged {part_sha}; destination unchanged")
         if _identity(os.stat(src_c)) != _identity(st0):
             raise SourceChanged(f"source was modified during the copy: {src_c}")
-
-        if _before_commit:
-            _before_commit()                         # test hook: e.g. a destination appearing at the last moment
-
-        # 8. commit -------------------------------------------------------------------------------------------
-        preserved = None
-        target = dst_c
-        if mode == CommitMode.NEVER_OVERWRITE:
-            try:
-                _link_no_overwrite(part, target)
-            except FileExistsError:
-                other, _ = _hash_file(target)
-                _remove_quietly(part)
-                status = "skipped_identical" if other == src_sha else "conflict"
-                return CopyResult(status, src_c, target, size, src_sha, other, durability=durability,
-                                  nocache_readback=nocache, timings={"total_s": time.time() - t0})
-        elif mode == CommitMode.NEW_NAME:
-            if os.path.lexists(target):
-                target = policy.check_write_target(_free_name(target, job_tag))
-            try:
-                _link_no_overwrite(part, target)
-            except FileExistsError:
-                target = policy.check_write_target(_free_name(target, job_tag + "b"))
-                _link_no_overwrite(part, target)
-        elif mode == CommitMode.PRESERVE_PREVIOUS:
-            if os.path.lexists(target):
-                preserved = policy.check_write_target(f"{target}.replaced-{job_tag}")
-                if os.path.lexists(preserved):
-                    raise CopyError(f"{preserved} already exists; refusing to overwrite a preserved version")
-                os.rename(target, preserved)
-                try:
-                    os.replace(part, target)
-                except Exception:
-                    os.rename(preserved, target)          # roll back: the previous version returns
-                    raise
-            else:
-                _link_no_overwrite(part, target)
-        else:  # REPLACE_AFTER_VERIFY
-            os.replace(part, target)
-
-        dir_synced = _fsync_dir(os.path.dirname(target))
-        if os.path.getsize(target) != size:
-            raise CopyError(f"committed file {target} has the wrong size")    # (cannot happen after rename; defensive)
-        return CopyResult("committed", src_c, target, size, src_sha, part_sha, preserved_path=preserved,
-                          durability=durability, dir_synced=dir_synced, nocache_readback=nocache,
-                          timings={"total_s": time.time() - t0})
+        return StagedFile(src_c, dst_c, part, job_tag, size, src_sha, part_sha, _identity(st0), _identity(os.stat(part)),
+                          durability, nocache, existing_sha)
     except BaseException:
         if created and not keep_part:
             _remove_quietly(part)
         raise
+
+
+def discard_staged(staged: StagedFile) -> bool:
+    """remove a .part this job created - only if it is still the file staging wrote"""
+    try:
+        st = os.lstat(staged.part)
+    except FileNotFoundError:
+        return False
+    if _identity(st) != staged.part_identity:
+        raise RollbackError(f"{staged.part} is no longer the file this job staged; left untouched")
+    os.remove(staged.part)
+    return True
+
+
+# ---------------------------------------------------------------------------------------------- phase 2: commit
+def commit_staged(staged: StagedFile, mode: CommitMode, *, policy: PathPolicy,
+                  _before_commit: Optional[Callable[[], None]] = None) -> CopyResult:
+    """publish a verified .part under its destination name (exclusive). On any failure the .part is removed and the
+    destination is exactly as it was (a moved-aside previous version is moved back)."""
+    mode = CommitMode(mode)
+    t0 = time.time()
+    try:
+        if _identity(os.lstat(staged.part)) != staged.part_identity:
+            raise IntegrityError(f"{staged.part} changed after verification; not committed")
+        if _identity(os.stat(staged.src)) != staged.src_identity:
+            raise SourceChanged(f"source {staged.src} changed after it was verified; not committed")
+        if _before_commit:
+            _before_commit()                      # test hook: e.g. a destination appearing at the last moment
+        target = policy.check_write_target(staged.dst)
+        preserved = None
+        method = ""
+        if mode == CommitMode.NEVER_OVERWRITE:
+            try:
+                method = _rename_exclusive(staged.part, target)
+            except FileExistsError:
+                other, _ = _hash_file(target)
+                _remove_quietly(staged.part)
+                return CopyResult("skipped_identical" if other == staged.src_sha256 else "conflict", staged.src, target,
+                                  staged.size, staged.src_sha256, other, durability=staged.durability,
+                                  nocache_readback=staged.nocache_readback)
+        elif mode == CommitMode.NEW_NAME:
+            attempt = 0
+            while True:
+                try:
+                    method = _rename_exclusive(staged.part, target)
+                    break
+                except FileExistsError:
+                    other, _ = _hash_file(target)
+                    if other == staged.src_sha256:
+                        _remove_quietly(staged.part)
+                        return CopyResult("skipped_identical", staged.src, target, staged.size, staged.src_sha256, other)
+                    attempt += 1
+                    if attempt > 50:
+                        raise CopyError(f"no free name for {staged.dst}")
+                    target = policy.check_write_target(_free_name(staged.dst, staged.job_tag, attempt))
+        else:  # PRESERVE_PREVIOUS / REPLACE_AFTER_VERIFY: old version aside (exclusive), then publish (exclusive)
+            if policy.vault and inside(target, policy.vault) and os.path.lexists(target):
+                raise CopyRefused(f"{target} is an archived file in the Vault; archives are never replaced")
+            if os.path.lexists(target):
+                preserved = policy.check_write_target(f"{target}.replaced-{staged.job_tag}")
+                try:
+                    _rename_exclusive(target, preserved)
+                except FileExistsError:
+                    raise CopyError(f"{preserved} already exists; refusing to overwrite a preserved version")
+            try:
+                method = _rename_exclusive(staged.part, target)
+            except BaseException:
+                if preserved:
+                    try:
+                        _rename_exclusive(preserved, target)          # the previous version returns
+                        preserved = None
+                    except FileExistsError:
+                        raise CopyError(f"{target} was created by someone else during the commit; the previous version is "
+                                        f"kept at {preserved} - nothing was overwritten")
+                raise
+        dir_synced = _fsync_dir(os.path.dirname(target))
+        st = os.lstat(target)
+        if st.st_size != staged.size:
+            raise CopyError(f"committed file {target} has the wrong size")
+        return CopyResult("committed", staged.src, target, staged.size, staged.src_sha256, staged.part_sha256,
+                          preserved_path=preserved, durability=staged.durability, dir_synced=dir_synced,
+                          nocache_readback=staged.nocache_readback, dst_identity=_identity(st),
+                          timings={"commit_s": time.time() - t0, "method": method})
+    except BaseException:
+        if _same(staged.part, staged.part_identity):     # only the .part this job staged
+            _remove_quietly(staged.part)
+        raise
+
+
+def _same(path, ident) -> bool:
+    try:
+        return _identity(os.lstat(path)) == ident
+    except FileNotFoundError:
+        return False
+
+
+def rollback_committed(result: CopyResult, *, policy: PathPolicy) -> None:
+    """undo one commit of this job: remove the committed file ONLY if it is still exactly the file this job wrote, then
+    move a preserved previous version back (exclusive). Raises RollbackError if that cannot be done safely."""
+    if result.status != "committed":
+        return
+    if not _same(result.dst, result.dst_identity):
+        raise RollbackError(f"{result.dst} is no longer the file this job committed; not removed")
+    policy.check_write_target(result.dst)
+    os.remove(result.dst)
+    if result.preserved_path:
+        try:
+            _rename_exclusive(result.preserved_path, result.dst)
+        except FileExistsError:
+            raise RollbackError(f"{result.dst} was re-created by someone else; previous version kept at {result.preserved_path}")
+    _fsync_dir(os.path.dirname(result.dst))
+
+
+def finalize_preserved(result: CopyResult, *, policy: PathPolicy) -> bool:
+    """after the WHOLE job is verified and committed: remove this job's preserved previous version"""
+    p = result.preserved_path
+    if not p or ".replaced-" not in os.path.basename(p) or not os.path.lexists(p):
+        return False
+    policy.check_write_target(p)
+    os.remove(p)
+    return True
+
+
+# ---------------------------------------------------------------------------------------------- one-file convenience
+def verified_copy(src: str, dst: str, *, policy: PathPolicy, job_tag: str, mode: CommitMode,
+                  chunk_size: int = CHUNK,
+                  control: Optional[Callable[[], Optional[str]]] = None,
+                  progress: Optional[Callable[[str, int], None]] = None,
+                  _before_commit: Optional[Callable[[], None]] = None) -> CopyResult:
+    """stage + commit one file. REPLACE_AFTER_VERIFY removes the moved-aside old version once the new one is committed
+    (single-file job = whole job verified); PRESERVE_PREVIOUS keeps it."""
+    mode = CommitMode(mode)
+    staged = stage_file(src, dst, policy=policy, job_tag=job_tag, mode=mode, chunk_size=chunk_size,
+                        control=control, progress=progress)
+    if isinstance(staged, CopyResult):
+        return staged
+    res = commit_staged(staged, mode, policy=policy, _before_commit=_before_commit)
+    if mode == CommitMode.REPLACE_AFTER_VERIFY and res.status == "committed" and res.preserved_path:
+        finalize_preserved(res, policy=policy)
+        res.preserved_path = None
+    return res

@@ -41,6 +41,7 @@ class FileState(str, Enum):
     CONFLICT = "conflict"              # destination exists with different content and the policy forbids overwriting
     FAILED = "failed"
     SOURCE_CHANGED = "source_changed"  # source modified while it was being copied
+    ROLLED_BACK = "rolled_back"        # committed, then undone because a later commit of the same job failed (1b)
 
 
 class Operation(str, Enum):
@@ -78,7 +79,8 @@ JOB_TRANSITIONS: Dict[JobState, FrozenSet[JobState]] = {
     J.COPYING: frozenset({J.FLUSHING, J.COPYING, J.COMMITTING, J.REMOVING_SOURCES, J.COMPLETED, J.FAILED, J.NEEDS_ATTENTION,
                           J.PAUSED, J.CANCEL_REQUESTED, J.INTERRUPTED}),
     J.FLUSHING: frozenset({J.VERIFYING, J.FAILED, J.NEEDS_ATTENTION, J.PAUSED, J.CANCEL_REQUESTED, J.INTERRUPTED}),
-    J.VERIFYING: frozenset({J.COMMITTING, J.FAILED, J.NEEDS_ATTENTION, J.PAUSED, J.CANCEL_REQUESTED, J.INTERRUPTED}),
+    J.VERIFYING: frozenset({J.COPYING, J.COMMITTING, J.FAILED, J.NEEDS_ATTENTION, J.PAUSED, J.CANCEL_REQUESTED,
+                            J.INTERRUPTED}),      # 1b: all files are staged+verified (-> copying next file) before committing
     J.COMMITTING: frozenset({J.COPYING, J.REMOVING_SOURCES, J.COMPLETED, J.FAILED, J.NEEDS_ATTENTION, J.CANCEL_REQUESTED,
                              J.INTERRUPTED}),
     J.REMOVING_SOURCES: frozenset({J.COMPLETED, J.COMPLETED_WITH_RETAINED_SOURCES, J.FAILED, J.INTERRUPTED}),
@@ -95,15 +97,17 @@ JOB_TRANSITIONS: Dict[JobState, FrozenSet[JobState]] = {
 F = FileState
 FILE_TRANSITIONS: Dict[FileState, FrozenSet[FileState]] = {
     F.PENDING: frozenset({F.COPYING, F.SKIPPED_IDENTICAL, F.CONFLICT, F.FAILED, F.SOURCE_CHANGED}),
-    F.COPYING: frozenset({F.STAGED, F.FAILED, F.SOURCE_CHANGED, F.PENDING}),
+    F.COPYING: frozenset({F.STAGED, F.SKIPPED_IDENTICAL, F.CONFLICT, F.FAILED, F.SOURCE_CHANGED, F.PENDING}),
     F.STAGED: frozenset({F.VERIFIED, F.FAILED, F.SOURCE_CHANGED, F.PENDING}),
-    F.VERIFIED: frozenset({F.COMMITTED, F.SKIPPED_IDENTICAL, F.CONFLICT, F.FAILED, F.SOURCE_CHANGED, F.PENDING}),
-    F.COMMITTED: frozenset({F.SOURCE_REMOVED}),
+    F.VERIFIED: frozenset({F.COMMITTED, F.SKIPPED_IDENTICAL, F.CONFLICT, F.FAILED, F.SOURCE_CHANGED, F.PENDING,
+                           F.ROLLED_BACK}),
+    F.COMMITTED: frozenset({F.SOURCE_REMOVED, F.ROLLED_BACK}),
     F.SOURCE_REMOVED: frozenset(),
     F.SKIPPED_IDENTICAL: frozenset(),
     F.CONFLICT: frozenset({F.PENDING}),          # only after the user resolved it
     F.FAILED: frozenset({F.PENDING}),
     F.SOURCE_CHANGED: frozenset({F.PENDING}),
+    F.ROLLED_BACK: frozenset({F.PENDING}),
 }
 
 TERMINAL_JOB_STATES = frozenset(s for s, nxt in JOB_TRANSITIONS.items() if not nxt)

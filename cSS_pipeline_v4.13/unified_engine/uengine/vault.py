@@ -684,9 +684,8 @@ class TransferQueueManager:
         items = self._load()
         resumed = []
         from .safety import PathPolicy, SafetyError
-        from .unified_transfer_engine import UnifiedTransferEngine
+        from .transfer.service import TransferService
         policy = PathPolicy(self.base_dir, vault.root_path)
-        engine = UnifiedTransferEngine(os.path.join(self.base_dir, "app_data", "transfers"))
         for it in items:
             if not isinstance(it, dict) or "source" not in it or "destination" not in it:
                 continue                                   # entries of the other queue schema (TransferManager) are not ours
@@ -700,7 +699,15 @@ class TransferQueueManager:
                         policy.check_write_target(dst)
                         it["status"] = "transferring"
                         it["attempts"] = int(it.get("attempts", 0)) + 1
-                        engine.copy_file_streaming(src, dst, verify_sha=True)
+                        # Phase 1b: verified, write-once job - an existing different destination is a conflict, never
+                        # overwritten (the item is left "failed" with the reason, nothing is replaced)
+                        svc = TransferService(self.base_dir, vault.root_path)
+                        try:
+                            job = svc.transfer("copy", [(src, dst)], mode="never_overwrite")
+                        finally:
+                            svc.close()
+                        if not job["ok"]:
+                            raise RuntimeError(f"job {job['job_id']} ended {job['state']}: {'; '.join(job['errors'])}")
                         it["status"] = "completed"
                         it["error"] = None
                         it["completed_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())

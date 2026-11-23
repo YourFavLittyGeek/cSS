@@ -240,10 +240,15 @@ class FileManager:
             "vault_files": vault_files,
         }
 
-    def _copy_verified(self, src: str, dst: str) -> None:
-        """Phase 0: staged .part copy, verified, then atomic replace (an existing dst survives a failed copy)"""
-        engine = get_transfer_engine(os.path.join(self.base_dir, "app_data", "transfers"))
-        engine.copy_file_streaming(src, dst, verify_sha=True)
+    def _study_job(self, operation: str, pairs, study_code: str) -> Dict[str, Any]:
+        """Phase 1b: one verified, all-or-nothing transfer job for a study's files (stage: previous local versions kept
+        until the job is verified; archive: never overwrites anything in the Vault)"""
+        from .transfer.service import TransferService
+        svc = TransferService(self.base_dir, self.vault_root)
+        try:
+            return svc.transfer(operation, pairs, study_id=study_code)
+        finally:
+            svc.close()
 
     def stage_study(self, study_code: str) -> Dict[str, Any]:
         """Stage files from external Data Vault to local Mac SSD staging."""
@@ -257,21 +262,24 @@ class FileManager:
         dest_dir = self.policy.check_write_target(os.path.join(self.staging_dir, study_code))
         os.makedirs(dest_dir, exist_ok=True)
 
-        staged = []
+        pairs = []
         for sub in ("studies", "archive", "original_mri"):
             src_dir = os.path.join(self.vault_root, sub, study_code)
             if os.path.isdir(src_dir):
-                for f in os.listdir(src_dir):
+                for f in sorted(os.listdir(src_dir)):
                     sp = os.path.join(src_dir, f)
-                    if os.path.isfile(sp) and not f.endswith(".part"):
-                        dp = os.path.join(dest_dir, f)
-                        self._copy_verified(sp, dp)
-                        staged.append(dp)
-
+                    if os.path.isfile(sp) and not os.path.islink(sp):
+                        pairs.append((sp, os.path.join(dest_dir, f)))
+        if not pairs:
+            return {"ok": True, "study_code": study_code, "staged_dir": dest_dir, "files_staged": 0}
+        rep = self._study_job("stage", pairs, study_code)
         return {
+            "ok": rep["ok"],
             "study_code": study_code,
             "staged_dir": dest_dir,
-            "files_staged": len(staged),
+            "files_staged": len(rep["committed"]) + len(rep["skipped_identical"]) if rep["ok"] else 0,
+            "job_id": rep["job_id"], "state": rep["state"],
+            **({} if rep["ok"] else {"error": "; ".join(rep["errors"]) or rep["state"], "conflicts": rep["conflicts"]}),
         }
 
     def archive_study(self, study_code: str) -> Dict[str, Any]:
@@ -286,19 +294,22 @@ class FileManager:
         dest_dir = self.policy.check_write_target(os.path.join(self.vault_root, "studies", study_code))
         os.makedirs(dest_dir, exist_ok=True)
 
-        archived = []
-        # Copy this study's review files (code boundary: M1 does not match M10_*)
+        pairs = []
+        # This study's review files (code boundary: M1 does not match M10_*); the Vault copy is write-once
         for f in sorted(os.listdir(self.review_dir)) if os.path.isdir(self.review_dir) else []:
             sp = os.path.join(self.review_dir, f)
-            if os.path.isfile(sp) and study_file_matches(f, study_code):
-                dp = os.path.join(dest_dir, f)
-                self._copy_verified(sp, dp)
-                archived.append(dp)
-
+            if os.path.isfile(sp) and not os.path.islink(sp) and study_file_matches(f, study_code):
+                pairs.append((sp, os.path.join(dest_dir, f)))
+        if not pairs:
+            return {"ok": True, "study_code": study_code, "vault_dir": dest_dir, "files_archived": 0}
+        rep = self._study_job("archive", pairs, study_code)
         return {
+            "ok": rep["ok"],
             "study_code": study_code,
             "vault_dir": dest_dir,
-            "files_archived": len(archived),
+            "files_archived": len(rep["committed"]) + len(rep["skipped_identical"]) if rep["ok"] else 0,
+            "job_id": rep["job_id"], "state": rep["state"],
+            **({} if rep["ok"] else {"error": "; ".join(rep["errors"]) or rep["state"], "conflicts": rep["conflicts"]}),
         }
 
     def verify_study_checksums(self, study_code: str) -> Dict[str, Any]:
@@ -656,34 +667,49 @@ class FileManager:
         except SafetyError as e:
             return {"ok": False, "error": f"Refused: {e}"}
 
-        engine = get_transfer_engine(os.path.join(self.base_dir, "app_data", "transfers"))
-        stamp = f"{time.strftime('%Y%m%d_%H%M%S')}_{os.getpid()}"
+        # Phase 1b: every copy / move is a journal-backed job of the verified transfer service - all files are staged and
+        # verified before any destination changes, commits are exclusive, a failed job rolls back its own commits.
+        from .transfer.service import TransferService, TransferRefused
+        from .transfer.models import CommitMode
+        from .transfer import copier as CP
+        stamp = f"{time.strftime('%Y%m%d%H%M%S')}{os.getpid()}"
         write_to = target_path + f".incoming-{stamp}" if replace_dir else target_path
+        replace_file = conflict_mode == "replace" and os.path.isfile(target_path) and not replace_dir
+        mode = CommitMode.REPLACE_AFTER_VERIFY if replace_file else CommitMode.NEVER_OVERWRITE
         try:
-            # a file target is replaced atomically by the engine only after its staged copy is verified
-            ok, msg, p_info = engine.transfer_path(src=src, dst=write_to, operation=operation, verify_sha=True,
-                                                   preserve_source=(operation == "copy"))
+            svc = TransferService(self.base_dir, self.vault_root)
         except Exception as e:
-            ok, msg, p_info = False, str(e), {}
-        if not ok:
-            if replace_dir and os.path.isdir(write_to):
-                shutil.rmtree(write_to, ignore_errors=True)        # only the incomplete incoming copy
-            return {"ok": False, "error": f"{verb} failed: {msg}"}
+            return {"ok": False, "error": f"{verb} failed: transfer service unavailable: {e}"}
+        try:
+            rep = svc.transfer(operation, [(src, write_to)], mode=mode)
+        except TransferRefused as e:
+            return {"ok": False, "error": f"Refused: {e}"}
+        except Exception as e:
+            return {"ok": False, "error": f"{verb} failed: {type(e).__name__}: {e}"}
+        finally:
+            svc.close()
+        if not rep["ok"]:
+            return {"ok": False, "error": f"{verb} failed ({rep['state']}): {'; '.join(rep['errors']) or 'see job report'}",
+                    "job_id": rep["job_id"], "state": rep["state"], "conflicts": rep["conflicts"]}
         if replace_dir:
             old = target_path + f".replaced-{stamp}"
             try:
-                os.rename(target_path, old)
+                CP._rename_exclusive(target_path, old)             # exclusive renames only: nothing is ever overwritten
                 try:
-                    os.rename(write_to, target_path)
-                except Exception:
-                    os.rename(old, target_path)                   # roll back: the original target comes back
+                    CP._rename_exclusive(write_to, target_path)
+                except BaseException:
+                    CP._rename_exclusive(old, target_path)         # roll back: the original target comes back
                     raise
-                shutil.rmtree(old, ignore_errors=True)            # the new copy is verified and in place
+                self.policy.check_modify(old)
+                shutil.rmtree(old)                                 # the new copy is verified and in place
             except Exception as e:
-                return {"ok": False, "error": f"{verb} failed while swapping in the verified copy: {e}; the original target is unchanged, the verified copy is at {write_to}"}
-        out = {"ok": True, "source": src, "target_path": target_path, "bytes": p_info.get("completed_bytes", 0)}
+                return {"ok": False, "error": f"{verb} failed while swapping in the verified copy: {e}; the original target is "
+                                              f"unchanged, the verified copy is at {write_to}", "job_id": rep["job_id"]}
+        out = {"ok": True, "source": src, "target_path": target_path, "job_id": rep["job_id"],
+               "bytes": sum(os.path.getsize(p) for p in rep["committed"] if os.path.isfile(p)),
+               "skipped": rep["skipped"], "retained_sources": rep["retained_sources"]}
         if operation == "copy":
-            out["sha256"] = p_info.get("verification_status")
+            out["sha256"] = "verified"
         return out
 
     def copy_item(self, src: str, dst_dir: str, conflict_mode: str = "keep_both") -> Dict[str, Any]:

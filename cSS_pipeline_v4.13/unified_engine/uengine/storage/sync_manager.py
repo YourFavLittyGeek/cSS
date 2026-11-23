@@ -146,38 +146,37 @@ class SyncManager:
 
         ws_root = canon(os.path.join(self.paths.workspace_root, "work"))
         vault_studies = canon(os.path.join(self.paths.get_vault_path(), "studies"))
-        engine = get_transfer_engine(os.path.join(self.paths.workspace_root, "app_data", "transfers"))
         transferred, total_bytes, failed = 0, 0, []
         job_id = f"sync_{int(time.time())}"
-
         self.state.record_audit_event("sync_started", "initiated", op_id=job_id, details={"items_count": len(requested)})
 
+        pairs = []
         for sid, rel, _, _ in requested:
             it = plan[(sid, rel)]
             sp, dp = canon(it.source_path), canon(it.destination_path)
             if not inside(sp, os.path.join(ws_root, sid)) or not inside(dp, os.path.join(vault_studies, sid)):
                 failed.append({"study_id": sid, "relative_path": rel, "error": "path outside work/<study> or <vault>/studies/<study>"})
-                continue
-            if os.path.lexists(dp):
-                failed.append({"study_id": sid, "relative_path": rel, "error": "destination appeared since the preview; not overwritten"})
-                continue
-            try:
-                ok, msg, info = engine.transfer_path(
-                    src=sp,
-                    dst=dp,
-                    operation="archive_sync",
-                    study_id=sid,
-                    verify_sha=True,
-                    preserve_source=True,
-                    prefer_clone=False
-                )
-            except Exception as e:
-                ok, msg, info = False, str(e), {}
-            if ok:
-                transferred += 1
-                total_bytes += info.get("completed_bytes", 0)
             else:
-                failed.append({"study_id": sid, "relative_path": rel, "error": msg})
+                pairs.append((sp, dp))
+        if pairs and not failed:
+            # Phase 1b: one verified, all-or-nothing, write-once job (a destination that appeared since the preview is a
+            # conflict: nothing is overwritten and nothing of this sync is committed)
+            from ..transfer.service import TransferService, TransferRefused
+            try:
+                svc = TransferService(self.paths.workspace_root, self.paths.get_vault_path())
+                try:
+                    job = svc.transfer("sync", pairs, study_id=requested[0][0] if len({r[0] for r in requested}) == 1 else None)
+                finally:
+                    svc.close()
+                job_id = job["job_id"]
+                if job["ok"]:
+                    transferred = len(job["committed"]) + len(job["skipped_identical"])
+                    total_bytes = sum(os.path.getsize(p) for p in job["committed"] if os.path.isfile(p))
+                else:
+                    failed.append({"error": f"sync job {job['job_id']} ended {job['state']}: {'; '.join(job['errors'])}",
+                                   "conflicts": job["conflicts"]})
+            except TransferRefused as e:
+                failed.append({"error": f"Refused: {e}"})
 
         self.state.record_audit_event("sync_completed", "success" if not failed else "failure", op_id=job_id,
                                       details={"transferred": transferred, "bytes": total_bytes, "failed": len(failed)})

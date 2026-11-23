@@ -431,8 +431,9 @@ class TestCommitModes(CopierBase):
     def test_preserve_previous_rolls_back_if_the_swap_fails(self):
         src = self.E.work("M01/q.nii", b"NEW")
         dst = self.E.work("M04/q.nii", b"OLD")
-        real = os.replace
-        with mock.patch.object(CP.os, "replace", side_effect=lambda a, b: (_ for _ in ()).throw(OSError(5, "EIO")) if b == dst else real(a, b)):
+        real = CP._rename_exclusive                         # 1b: publishing uses the exclusive rename
+        with mock.patch.object(CP, "_rename_exclusive", side_effect=lambda a, b: (_ for _ in ()).throw(OSError(5, "EIO"))
+                               if a.endswith(".part-jobQ") else real(a, b)):
             with self.assertRaises(OSError):
                 self.cp(src, dst, mode=CommitMode.PRESERVE_PREVIOUS, tag="jobQ")
         self.assertEqual(open(dst, "rb").read(), b"OLD")

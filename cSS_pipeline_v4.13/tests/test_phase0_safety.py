@@ -445,7 +445,11 @@ class TestReplaceSafety(Base):
         target = _w(os.path.join(dst_dir, "out.nii"), b"OLD-VALID")
         tree_src = _w(os.path.join(self.P.base, "work", "T1", "seg", "a.nii"), b"A-NEW")
         tree_tgt = _w(os.path.join(self.P.base, "work", "M02", "seg", "a.nii"), b"A-OLD")
-        with self._bad_part_hash():
+        from uengine.transfer import copier as CP                  # Phase 1b: File Manager copies use the verified copier
+        real = CP._hash_file
+        bad = mock.patch.object(CP, "_hash_file", side_effect=lambda p, nocache=False, chunk=CP.CHUNK:
+                                ("0" * 64, nocache) if nocache else real(p, nocache, chunk))
+        with bad:
             self.assertFalse(self.fm.copy_item(src, dst_dir, conflict_mode="replace")["ok"])
             self.assertFalse(self.fm.copy_item(os.path.dirname(tree_src), dst_dir, conflict_mode="replace")["ok"])
         self.assertEqual(open(target, "rb").read(), b"OLD-VALID")
@@ -459,14 +463,24 @@ class TestReplaceSafety(Base):
         self.P.intact(self)
 
     def test_s10_move_never_deletes_uncopied_source_files(self):
+        # Phase 1b: hidden files ARE copied (they can be data) and then removed from the source like any verified file;
+        # items that are never copied (symlinks, Finder metadata) must stay at the source.
         src_dir = os.path.join(self.P.base, "work", "MV")
         a = _w(os.path.join(src_dir, "a.nii"), b"A")
         hidden = _w(os.path.join(src_dir, "sub", ".hidden_notes"), b"H")
+        dsstore = _w(os.path.join(src_dir, "sub", ".DS_Store"), b"finder")
+        link = os.path.join(src_dir, "link_to_raw")
+        os.symlink(os.path.join(self.P.base, "raw", "M01"), link)
         r = self.fm.move_item(src_dir, os.path.join(self.P.base, "work", "M01"))
         self.assertTrue(r["ok"], r)
         self.assertFalse(os.path.exists(a))
-        self.assertTrue(os.path.isfile(hidden))                                    # not copied -> not deleted
+        self.assertFalse(os.path.exists(hidden))                                   # copied + verified -> removed
+        self.assertEqual(open(os.path.join(r["target_path"], "sub", ".hidden_notes"), "rb").read(), b"H")
+        self.assertTrue(os.path.isfile(dsstore))                                   # not copied -> not deleted
+        self.assertTrue(os.path.islink(link))                                      # not copied -> not deleted
+        self.assertFalse(os.path.lexists(os.path.join(r["target_path"], "link_to_raw")))
         self.assertEqual(open(os.path.join(r["target_path"], "a.nii"), "rb").read(), b"A")
+        self.P.intact(self)
 
 
 # S11 - S14 ----------------------------------------------------------------------------------------------------------------

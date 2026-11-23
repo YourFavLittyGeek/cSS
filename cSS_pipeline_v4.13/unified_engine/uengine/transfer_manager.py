@@ -149,47 +149,27 @@ class TransferManager:
         target_vault_dir = os.path.join(self.vault_root, "Processed_MRI", code)
         os.makedirs(target_vault_dir, exist_ok=True)
 
-        engine = get_transfer_engine(os.path.join(self.base_dir, "app_data", "transfers"))
-
-        def update_job_progress(p_dict):
-            job["transferred_bytes"] = p_dict.get("completed_bytes", 0)
-            job["progress_pct"] = p_dict.get("percent", 0.0)
-            job["current_mb_s"] = p_dict.get("current_mb_s", 0.0)
-            job["avg_mb_s"] = p_dict.get("avg_mb_s", 0.0)
-            job["eta_seconds"] = p_dict.get("eta_seconds", 0.0)
-            self._save_queue(q)
-
         try:
-            # Transfer candidate file via UnifiedTransferEngine
+            # Phase 1b: one verified, study-locked, all-or-nothing, write-once archive job (an archived file with different
+            # content is a conflict: nothing is written and the queue item fails with the reason)
+            from .transfer.service import TransferService
+            pairs = []
             rev_file = os.path.join(self.base_dir, "review", f"{code}_candidates.csv")
             if os.path.isfile(rev_file):
-                dst_file = os.path.join(self.vault_root, "Candidates", "ALBUS", f"{code}_candidates.csv")
-                ok, msg, _ = engine.transfer_path(
-                    src=rev_file,
-                    dst=dst_file,
-                    operation="archive",
-                    study_id=code,
-                    verify_sha=True,
-                    preserve_source=True
-                )
-                if not ok:
-                    raise IOError(f"Candidate file transfer failed: {msg}")
-
-            # Transfer subjects folder via UnifiedTransferEngine
+                pairs.append((rev_file, os.path.join(self.vault_root, "Candidates", "ALBUS", f"{code}_candidates.csv")))
             subj_dir = os.path.join(self.base_dir, "subjects", code)
             if os.path.isdir(subj_dir):
-                ok, msg, p_info = engine.transfer_path(
-                    src=subj_dir,
-                    dst=target_vault_dir,
-                    operation="archive",
-                    study_id=code,
-                    verify_sha=True,
-                    preserve_source=True,
-                    prefer_clone=False,
-                    on_progress=update_job_progress
-                )
-                if not ok:
-                    raise IOError(f"Subjects transfer failed: {msg}")
+                pairs.append((subj_dir, target_vault_dir))
+            if pairs:
+                svc = TransferService(self.base_dir, self.vault_root)
+                try:
+                    rep = svc.transfer("archive", pairs, study_id=code)
+                finally:
+                    svc.close()
+                if not rep["ok"]:
+                    raise IOError(f"archive job {rep['job_id']} ended {rep['state']}: {'; '.join(rep['errors'])}")
+                job["transfer_job_id"] = rep["job_id"]
+                job["transferred_bytes"] = sum(os.path.getsize(p) for p in rep["committed"] if os.path.isfile(p))
 
             job["status"] = "completed"
             job["progress_pct"] = 100.0

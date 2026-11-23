@@ -58,7 +58,8 @@ class TestStudyWorkspaceManager(unittest.TestCase):
 
     def test_staging_processing_review_archival_and_clean_lifecycle(self):
         # 1. Setup mock source files
-        src_dir = os.path.join(self.tmp, "src_mri")
+        # Phase 1b: staging sources must be inside the project or the Vault (here: the Vault's original MRI folder)
+        src_dir = os.path.join(self.swm.vault_root, "original_mri", "SUBJ_FULL")
         os.makedirs(src_dir, exist_ok=True)
         swi_file = os.path.join(src_dir, "swi.nii")
         with open(swi_file, "w") as f:

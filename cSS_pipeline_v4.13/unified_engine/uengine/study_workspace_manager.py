@@ -411,30 +411,26 @@ class StudyWorkspaceManager:
         if not paths and rec.get("original_mri_location"):
             paths = [rec["original_mri_location"]]
 
-        engine = get_transfer_engine(os.path.join(self.base_dir, "app_data", "transfers"))
         staged_manifest = {}
         total_bytes = 0
         file_count = 0
 
         try:
+            pairs = []
             for p in paths:
                 if not os.path.exists(p):
                     raise FileNotFoundError(f"Source path not found: {p}")
-
-                ok, msg, p_info = engine.transfer_path(
-                    src=p,
-                    dst=ws_dir,
-                    operation="stage",
-                    study_id=study_id,
-                    verify_sha=verify,
-                    preserve_source=True,
-                    prefer_clone=True
-                )
-                if not ok:
-                    raise IOError(f"UnifiedTransferEngine staging failed: {msg}")
-
-                total_bytes += p_info.get("completed_bytes", 0)
-                file_count += p_info.get("completed_files", 0)
+                pairs.append((p, os.path.join(ws_dir, os.path.basename(p))) if os.path.isfile(p) else (p, ws_dir))
+            # Phase 1b: one verified, study-locked, all-or-nothing job (previous local versions kept until verified)
+            from .transfer.service import TransferService
+            svc = TransferService(self.base_dir, self.vault_root)
+            try:
+                job = svc.transfer("stage", pairs, study_id=study_id)
+            finally:
+                svc.close()
+            if not job["ok"]:
+                raise IOError(f"staging job {job['job_id']} ended {job['state']}: {'; '.join(job['errors'])}")
+            file_count += len(job["committed"]) + len(job["skipped_identical"])
 
             # Re-index staged directory files for checksum ledger
             for root, _, files in os.walk(ws_dir):
@@ -535,19 +531,18 @@ class StudyWorkspaceManager:
         os.makedirs(dest_dir, exist_ok=True)
         rec["hdd_archive_location"] = dest_dir
 
-        engine = get_transfer_engine(os.path.join(self.base_dir, "app_data", "transfers"))
         try:
-            ok, msg, p_info = engine.transfer_path(
-                src=ws_dir,
-                dst=dest_dir,
-                operation="archive",
-                study_id=study_id,
-                verify_sha=verify,
-                preserve_source=True,
-                prefer_clone=False  # Cross-device SSD-to-HDD uses bounded streaming
-            )
-            if not ok:
-                raise IOError(f"Archive transfer failed: {msg}")
+            # Phase 1b: verified, study-locked, all-or-nothing; the Vault copy is write-once (a differing archived file
+            # is a conflict -> nothing written, the study is not marked archived)
+            from .transfer.service import TransferService
+            svc = TransferService(self.base_dir, v_root)
+            try:
+                job = svc.transfer("archive", [(ws_dir, dest_dir)], study_id=study_id)
+            finally:
+                svc.close()
+            if not job["ok"]:
+                raise IOError(f"archive job {job['job_id']} ended {job['state']}: {'; '.join(job['errors'])}")
+            rec["archive_job_id"] = job["job_id"]
 
             rec["archive_status"] = "archived_and_verified"
             self.transition_state(study_id, StudyLifecycleState.ARCHIVED.value, reason="archive_verified")
