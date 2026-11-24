@@ -17,6 +17,7 @@ import datetime, glob, hashlib, json, os, re, shutil, subprocess, sys
 import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from css_common import FP, match_calls, norm_call
+import review_io as RIO       # Phase 3A.1: crash-safe writes, cross-process study locks, append-only reviewer event journals
 
 LEDGER_VERSION = "call-ledger/1.0"
 POLICY_SCHEMA = "call-policy/1.0"
@@ -143,18 +144,23 @@ def decide_carry(base, sid, row_uid, reviewer_of_call, time_of_call, decision, b
     if not str(by or "").strip(): raise ValueError("a reviewer name is required")
     e = next((x for x in pending_confirmations(base, sid) if x["row_uid"] == row_uid and x["reviewer"] == reviewer_of_call and x["time"] == time_of_call), None)
     if e is None: raise ValueError("no pending confirmation for that call")
-    k = f"{row_uid}|{reviewer_of_call}|{time_of_call}"; D = decisions(base, sid)
-    if decision == "confirm":
-        cand = candidates(base, sid).set_index("cand_id"); nc = int(e["suggested_new_cand_id"])
-        p = os.path.join(base, "review", f"{sid}_calls_{slug(by)}.csv")
-        d = _read(p) if os.path.exists(p) else pd.DataFrame(columns=["cand_id", "call", "comment", "reviewer", "time"] + FP)
-        d = d[d.cand_id != nc] if len(d) else d
-        row = dict(cand_id=nc, call=e["call"], comment=f"[confirmed carry-over of {reviewer_of_call}'s '{e['call']}' ({time_of_call}) from an earlier run: {e['lineage_why']}]",
-                   reviewer=by.strip(), time=_now(), **{f: cand.loc[nc, f] for f in FP})
-        pd.concat([d, pd.DataFrame([row])], ignore_index=True).to_csv(p, index=False)
-    D[k] = dict(decision=decision, by=by, time=_now()); dp = os.path.join(base, "review", f"{sid}_lineage_decisions.json")
-    with open(dp + ".tmp", "w") as f: json.dump(D, f, indent=1)
-    os.replace(dp + ".tmp", dp)
+    k = f"{row_uid}|{reviewer_of_call}|{time_of_call}"
+    with RIO.study_lock(base, sid):                                        # Phase 3A.1: journal first, files atomic, one writer per study
+        D = decisions(base, sid)
+        if decision == "confirm":
+            cand = candidates(base, sid).set_index("cand_id"); nc = int(e["suggested_new_cand_id"])
+            p = os.path.join(base, "review", f"{sid}_calls_{slug(by)}.csv")
+            RIO.ensure_table(base, sid, by, "calls", p)
+            d = _read(p) if os.path.exists(p) else pd.DataFrame(columns=["cand_id", "call", "comment", "reviewer", "time"] + FP)
+            d = d[d.cand_id != nc] if len(d) else d
+            row = dict(cand_id=nc, call=e["call"], comment=f"[confirmed carry-over of {reviewer_of_call}'s '{e['call']}' ({time_of_call}) from an earlier run: {e['lineage_why']}]",
+                       reviewer=by.strip(), time=_now(), **{f: cand.loc[nc, f] for f in FP})
+            RIO.write_table(base, sid, by, "calls", p, pd.concat([d, pd.DataFrame([row])], ignore_index=True), ["cand_id"] + FP, "carry_confirm",
+                            cand_id=nc, call=e["call"], carried_from=dict(reviewer=reviewer_of_call, time=time_of_call, row_uid=row_uid))
+        else:
+            RIO.journal_append(base, sid, by, "carry_reject", row_uid=row_uid, reviewer_of_call=reviewer_of_call, time_of_call=time_of_call)
+        D[k] = dict(decision=decision, by=by, time=_now()); dp = os.path.join(base, "review", f"{sid}_lineage_decisions.json")
+        RIO.atomic_write_json(dp, D)
     return dict(ok=True, decision=decision)
 
 
@@ -183,6 +189,11 @@ def _valid_rule(rule):
 
 def set_policy(base, scope, target, rule, by=""):
     """scope 'all' | 'cohort' | 'study'; rule None removes a cohort / study override. Appends to the history; returns the policy."""
+    with RIO.project_lock(base, "call_policy"):                            # Phase 3A.1: read-modify-write under a cross-process lock
+        return _set_policy(base, scope, target, rule, by)
+
+
+def _set_policy(base, scope, target, rule, by=""):
     P = load_policy(base); rule = None if rule is None else _valid_rule(rule)
     if scope == "all": P["default"] = rule or dict(mode="newest")
     elif scope in ("cohort", "study"):
@@ -192,10 +203,7 @@ def set_policy(base, scope, target, rule, by=""):
         else: P[key][target] = rule
     else: raise ValueError("scope must be all, cohort or study")
     P["history"].append(dict(time=_now(), scope=scope, target=target or "", rule=rule, by=by or ""))
-    os.makedirs(os.path.dirname(policy_path(base)), exist_ok=True)
-    tmp = policy_path(base) + ".tmp"
-    with open(tmp, "w") as f: json.dump(P, f, indent=1)
-    os.replace(tmp, policy_path(base)); return P
+    RIO.atomic_write_json(policy_path(base), P); return P
 
 
 def cohort_of(base, sid):
@@ -280,7 +288,13 @@ def _sha(p):
 
 def materialize(base, sid, cohort="", by="", scripts=HERE, rescore=True):
     """write the effective calls into review/ID_calls.csv (legacy format) and (rescore=True) re-score with mark_css.py; the earlier
-    ID_calls.csv / ID_score.json are copied to review/call_history/ID/ first"""
+    ID_calls.csv / ID_score.json are copied to review/call_history/ID/ first. The shared file is DERIVED from the reviewer files (their
+    event journals are the provenance record); it is never an authoritative source."""
+    with RIO.study_lock(base, sid):                                        # Phase 3A.1: one writer per study across processes
+        return _materialize(base, sid, cohort, by, scripts, rescore)
+
+
+def _materialize(base, sid, cohort="", by="", scripts=HERE, rescore=True):
     cand = candidates(base, sid); E = effective(base, sid, cohort, cand=cand)
     eff = {r["cand_id"]: r["effective_call"] for r in E["rows"] if r["effective_call"]}
     c = cand.set_index("cand_id") if len(cand) else None
@@ -304,8 +318,7 @@ def materialize(base, sid, cohort="", by="", scripts=HERE, rescore=True):
         for src in (p, sp):
             if os.path.exists(src): shutil.copy2(src, os.path.join(hd, f"{ts}_{os.path.basename(src)}"))
         rec["backup"] = os.path.relpath(hd, base) + f"/{ts}_*"
-        with open(p + ".tmp", "w") as f: f.write(new_txt)
-        os.replace(p + ".tmp", p)
+        RIO.atomic_write_text(p, new_txt)
     cur_sha = hashlib.sha256(new_txt.encode()).hexdigest(); rec["scored_calls_sha256"] = prev.get("scored_calls_sha256", "")
     if rescore and (rec["scored_calls_sha256"] != cur_sha or not os.path.exists(sp)):
         acc = sorted(k for k, v in eff.items() if v == "cSS"); ich = sorted(k for k, v in eff.items() if v == "Near ICH")
@@ -315,8 +328,7 @@ def materialize(base, sid, cohort="", by="", scripts=HERE, rescore=True):
         rec.update(score_ok=r.returncode == 0, score_note=(r.stdout + r.stderr).strip()[-600:])
         if r.returncode == 0: rec["scored_calls_sha256"] = cur_sha
     rec["calls_sha256"] = _sha(p); rec["score_current"] = rec["scored_calls_sha256"] == cur_sha
-    with open(ep + ".tmp", "w") as f: json.dump(rec, f, indent=1)
-    os.replace(ep + ".tmp", ep)
+    RIO.atomic_write_json(ep, rec)
     return rec
 
 
@@ -338,25 +350,31 @@ def consolidate(base, sids, confirm, by=""):
     if confirm != CONFIRM: raise PermissionError(f"refused: type exactly '{CONFIRM}' to confirm")
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f"); done = []
     for sid in sids:
-        cand = candidates(base, sid); hist, _, _ = ledger(base, sid, cand)
-        newest = {cid: (v[-1]["reviewer"], v[-1]["time"]) for cid, v in hist.items()}
-        arch = os.path.join(base, "review", "call_history", sid, f"consolidate_{ts}"); os.makedirs(arch, exist_ok=True)
-        for f in glob.glob(os.path.join(base, "review", f"{sid}_calls*.csv")) + glob.glob(os.path.join(base, "review", f"{sid}_final_*.json")) \
-                + glob.glob(os.path.join(base, "review", f"{sid}_score*.json")) + glob.glob(os.path.join(base, "review", f"{sid}_review_log.csv")):
-            shutil.copy2(f, arch)
-        removed = 0
-        for s in sources(base, sid):
-            if s["origin"] != "reviewer file": continue
-            d = s["rows"]; keep = []
-            for _, r in d.iterrows():
-                m, _ = match_calls(cand, pd.DataFrame([r])) if len(cand) and all(c in d.columns for c in FP) else ({}, 0)
-                cid = next(iter(m)) if m else None
-                t = str(r.get("time")) if isinstance(r.get("time"), str) and str(r.get("time")).strip() else _mtime_str(os.path.join(base, s["file"]))
-                ok = cid is None or not isinstance(r.get("call"), str) or newest.get(cid) == (s["reviewer"], t)
-                keep.append(ok); removed += 0 if ok else 1
-            d[keep].to_csv(os.path.join(base, s["file"]), index=False)
-        set_policy(base, "study", sid, dict(mode="newest"), by=by or "consolidate")
-        done.append(dict(study=sid, removed=removed, archive=os.path.relpath(arch, base)))
+        with RIO.study_lock(base, sid):                                      # Phase 3A.1: the removed calls stay in each reviewer's journal
+            pre = os.path.join(base, "review", f"{sid}_calls_")
+            for s in sources(base, sid):
+                if s["origin"] == "reviewer file": RIO.ensure_table(base, sid, os.path.join(base, s["file"])[len(pre):-4], "calls", os.path.join(base, s["file"]))
+            cand = candidates(base, sid); hist, _, _ = ledger(base, sid, cand)
+            newest = {cid: (v[-1]["reviewer"], v[-1]["time"]) for cid, v in hist.items()}
+            arch = os.path.join(base, "review", "call_history", sid, f"consolidate_{ts}"); os.makedirs(arch, exist_ok=True)
+            for f in glob.glob(os.path.join(base, "review", f"{sid}_calls*.csv")) + glob.glob(os.path.join(base, "review", f"{sid}_final_*.json")) \
+                    + glob.glob(os.path.join(base, "review", f"{sid}_score*.json")) + glob.glob(os.path.join(base, "review", f"{sid}_review_log.csv")):
+                shutil.copy2(f, arch)
+            removed = 0
+            for s in sources(base, sid):
+                if s["origin"] != "reviewer file": continue
+                d = s["rows"]; keep = []
+                for _, r in d.iterrows():
+                    m, _ = match_calls(cand, pd.DataFrame([r])) if len(cand) and all(c in d.columns for c in FP) else ({}, 0)
+                    cid = next(iter(m)) if m else None
+                    t = str(r.get("time")) if isinstance(r.get("time"), str) and str(r.get("time")).strip() else _mtime_str(os.path.join(base, s["file"]))
+                    ok = cid is None or not isinstance(r.get("call"), str) or newest.get(cid) == (s["reviewer"], t)
+                    keep.append(ok); removed += 0 if ok else 1
+                RIO.write_table(base, sid, os.path.join(base, s["file"])[len(pre):-4], "calls", os.path.join(base, s["file"]), d[keep],
+                                ["cand_id"] + FP if all(c in d.columns for c in FP) else ["cand_id"], "consolidate", by=by, archive=os.path.relpath(arch, base),
+                                n_removed=int(sum(1 for x in keep if not x)))
+            set_policy(base, "study", sid, dict(mode="newest"), by=by or "consolidate")
+            done.append(dict(study=sid, removed=removed, archive=os.path.relpath(arch, base)))
     return done
 
 
@@ -364,5 +382,13 @@ def restore(base, sid, archive_rel):
     arch = os.path.join(base, archive_rel)
     if not os.path.isdir(arch) or os.path.dirname(os.path.relpath(arch, os.path.join(base, "review", "call_history"))) != sid:
         raise ValueError("not a consolidation archive of this study")
-    for f in os.listdir(arch): shutil.copy2(os.path.join(arch, f), os.path.join(base, "review", f))
+    with RIO.study_lock(base, sid):                                        # Phase 3A.1: restored reviewer files become the journal head
+        for f in os.listdir(arch):
+            src, dst = os.path.join(arch, f), os.path.join(base, "review", f)
+            m = re.match(rf"^{re.escape(sid)}_(calls|excluded_audit)_(.+)\.csv$", f)
+            if m:
+                with open(src, encoding="utf-8") as fh: txt = fh.read()
+                RIO.write_table_text(base, sid, m.group(2), "calls" if m.group(1) == "calls" else "audit", dst, txt, "restore",
+                                     archive=os.path.relpath(arch, base))
+            else: RIO.atomic_copy(src, dst)
     return sorted(os.listdir(arch))

@@ -14,6 +14,7 @@ import sys, os, shutil, numpy as np, pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from css_common import base as _base, save_calls, FP
 from review_web import slug, now, reviewers
+import review_io as RIO       # Phase 3A.1: locked, journaled, atomic writes of the reviewer's calls file
 
 B = _base(); CH = f"{B}/review/changes"
 
@@ -54,19 +55,26 @@ def run(sid, rev, dry):
         if cl or cm: rows[nid] = (cl, cm); keep += 1                               # keep what is already there
     msg = f"{sid}: {inh} calls inherited, {mixed} candidates with conflicting old calls (hint only), {keep} existing calls kept, {len(new) - len(rows)} candidates without any old call"
     if dry: return msg + " [dry run]", None
+    with RIO.study_lock(B, sid):
+        return _write(sid, rev, new, rows, msg, inh, mixed, keep)
+
+
+def _write(sid, rev, new, rows, msg, inh, mixed, keep):
+    rp = f"{B}/review/{sid}_calls_{slug(rev)}.csv"
+    RIO.ensure_table(B, sid, rev, "calls", rp)
     os.makedirs(CH, exist_ok=True)
     for f in (f"{B}/review/{sid}_calls_{slug(rev)}.csv", f"{B}/review/{sid}_calls.csv"):
         if os.path.exists(f): shutil.copy2(f, f"{CH}/{sid}_precalls_{os.path.basename(f)}")
     c = new.set_index("cand_id"); t = now()
     out = [dict(cand_id=k, call=v[0], comment=v[1], reviewer=rev, time=t if v[0] else "", **{f: c.loc[k, f] for f in FP}) for k, v in sorted(rows.items())]
-    pd.DataFrame(out, columns=["cand_id", "call", "comment", "reviewer", "time"] + FP).to_csv(f"{B}/review/{sid}_calls_{slug(rev)}.csv", index=False)
+    RIO.write_table(B, sid, rev, "calls", rp, pd.DataFrame(out, columns=["cand_id", "call", "comment", "reviewer", "time"] + FP), ["cand_id"] + FP,
+                    "inherit", n_inherited=inh, n_conflict_hints=mixed, backup=f"review/changes/{sid}_precalls_{os.path.basename(rp)}")
     save_calls(B, sid, new, {k: v[0] for k, v in rows.items() if v[0]})
-    lp = f"{B}/review/{sid}_review_log.csv"; newlog = not os.path.exists(lp); q = lambda s: '"' + str(s).replace('"', "'") + '"'
-    with open(lp, "a") as f:
-        if newlog: f.write("time,reviewer,action,cand_id,call,comment,meter_shown,vox_i,vox_j,vox_k,volume_mm3\n")
-        for k, v in sorted(rows.items()):
-            if v[1].startswith("[inherited") or v[1].startswith("[old calls"):
-                f.write(",".join([t, q(rev), "inherit", str(k), q(v[0]), q(v[1]), ""] + [str(c.loc[k, x]) for x in FP]) + "\n")
+    lp = f"{B}/review/{sid}_review_log.csv"; q = lambda s: '"' + str(s).replace('"', "'") + '"'
+    if not os.path.exists(lp): RIO.append_line(lp, "time,reviewer,action,cand_id,call,comment,meter_shown,vox_i,vox_j,vox_k,volume_mm3")
+    for k, v in sorted(rows.items()):
+        if v[1].startswith("[inherited") or v[1].startswith("[old calls"):
+            RIO.append_line(lp, ",".join([t, q(rev), "inherit", str(k), q(v[0]), q(v[1]), ""] + [str(c.loc[k, x]) for x in FP]))
     return msg, dict(study=sid, inherited=inh, conflicts=mixed, kept=keep)
 
 

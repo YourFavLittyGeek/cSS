@@ -35,6 +35,7 @@ for p in (ROOT, os.path.join(ROOT, "unified_engine")):
     if p not in sys.path: sys.path.insert(0, p)
 from css_common import base as _base, save_calls, FP, norm_call, LABELS
 import call_ledger as CL      # v5.15: every reviewer kept; shared ID_calls.csv / ID_score.json = EFFECTIVE calls (policy, default newest)
+import review_io as RIO       # Phase 3A.1: crash-safe writes, cross-process study locks, append-only reviewer event journals, recovery
 
 B = _base()
 CALLS = ["cSS", "Vessel", "Normal", "Artifact", "Unsure", "Near ICH", "Microbleed"]   # v5.7: Microbleed (fine code MB) = not cSS
@@ -66,7 +67,11 @@ def primary(sid, set_to=None, if_missing=False):
     p = f"{B}/review/{sid}_primary.json"
     cur = json.load(open(p)).get("reviewer", "") if os.path.exists(p) else ""
     if set_to and (not if_missing or not cur):
-        json.dump(dict(reviewer=set_to.strip(), set=now()), open(p, "w"), indent=1); cur = set_to.strip()
+        with RIO.study_lock(B, sid):
+            cur = json.load(open(p)).get("reviewer", "") if os.path.exists(p) else ""
+            if not if_missing or not cur:
+                RIO.journal_append(B, sid, set_to, "primary_set", previous=cur, primary=set_to.strip(), automatic=bool(if_missing))
+                RIO.atomic_write_json(p, dict(reviewer=set_to.strip(), set=now())); cur = set_to.strip()
     return cur
 
 
@@ -335,6 +340,7 @@ class Study:
 
     def load_audit(self, reviewer):
         p = self.apath(reviewer)
+        with RIO.study_lock(B, self.sid): RIO.ensure_table(B, self.sid, reviewer, "audit", p, need=("excl_id",))
         if not os.path.exists(p): return {}
         a = pd.read_csv(p); out = {}
         for _, r in a.iterrows():
@@ -342,11 +348,16 @@ class Study:
                                                      time=r.get("time", "") if isinstance(r.get("time"), str) else "")
         return out
 
-    def save_audit(self, reviewer, calls):
+    def save_audit(self, reviewer, calls, cand_id=None):
         xd, _ = self._excluded(); why = dict(zip(xd.excl_id, xd.reason)) if len(xd) else {}
         rows = [dict(excl_id=k - AUDIT_OFFSET, call=v.get("call", ""), comment=v.get("comment", ""), reviewer=reviewer, time=v.get("time", ""),
                      rule=str(why.get(k - AUDIT_OFFSET, "")).split(":")[0]) for k, v in sorted(calls.items()) if k >= AUDIT_OFFSET and (v.get("call") or v.get("comment"))]
-        pd.DataFrame(rows, columns=["excl_id", "call", "comment", "reviewer", "time", "rule"]).to_csv(self.apath(reviewer), index=False)
+        df = pd.DataFrame(rows, columns=["excl_id", "call", "comment", "reviewer", "time", "rule"])
+        with RIO.study_lock(B, self.sid):                                    # Phase 3A.1: journal first, then the file (atomic)
+            RIO.ensure_table(B, self.sid, reviewer, "audit", self.apath(reviewer), need=("excl_id",))
+            v = calls.get(cand_id, {}) if cand_id is not None else {}
+            RIO.write_table(B, self.sid, reviewer, "audit", self.apath(reviewer), df, ["excl_id"], "audit_call",
+                            excl_id=None if cand_id is None else int(cand_id) - AUDIT_OFFSET, call=v.get("call", ""), comment=v.get("comment", ""))
 
     def _grid(self, path, order=1):
         im = nib.load(path)
@@ -395,7 +406,10 @@ class Study:
         """-> ({cand_id: {call, comment, time}}, note). Matched by fingerprint, so a detector re-run cannot move a call.
         v5.7: a reviewer name with no file of its own starts EMPTY (earlier calls only through import_calls)."""
         p, note = self.rpath(reviewer), ""
-        if not os.path.exists(p): return {}, ""
+        with RIO.study_lock(B, self.sid):                                    # Phase 3A.1: repair from the journal before reading
+            r = RIO.ensure_table(B, self.sid, reviewer, "calls", p)
+        if r["detail"]: note = r["detail"] + "."
+        if not os.path.exists(p): return {}, note
         return self._read_calls(p, note)
 
     def import_sources(self, reviewer):
@@ -421,11 +435,11 @@ class Study:
             if not v.get("call") or (k in mine and mine[k].get("call") and not overwrite): continue
             mine[k] = dict(call=v["call"], comment=f"[imported from {tag}] " + re.sub(r"^\[(inherited|old calls|imported)[^\]]*\]\s*", "", v.get("comment", "") or ""),
                            time=now()); n += 1
-        self.save(reviewer, mine)
-        lp = f"{B}/review/{self.sid}_review_log.csv"; new = not os.path.exists(lp)
-        with open(lp, "a") as f:
-            if new: f.write("time,reviewer,action,cand_id,call,comment,meter_shown,vox_i,vox_j,vox_k,volume_mm3\n")
-            f.write(f'{now()},"{reviewer}",import,,,"{n} calls from {tag}",,,,,\n')
+        with RIO.study_lock(B, self.sid):
+            self.save(reviewer, mine, action="import", source=tag, n_imported=n, overwrite=bool(overwrite))
+            lp = f"{B}/review/{self.sid}_review_log.csv"
+            if not os.path.exists(lp): RIO.append_line(lp, "time,reviewer,action,cand_id,call,comment,meter_shown,vox_i,vox_j,vox_k,volume_mm3")
+            RIO.append_line(lp, f'{now()},"{reviewer}",import,,,"{n} calls from {tag}",,,,,')
         return mine, n
 
     def _read_calls(self, p, note):
@@ -445,7 +459,12 @@ class Study:
         if lost: note += f" {lost} earlier call(s) match no current candidate (detector re-run) and were left out."
         return out, note.strip()
 
-    def save(self, reviewer, calls, cand_id=None, action="call", ai=None):
+    def save(self, reviewer, calls, cand_id=None, action="call", ai=None, **info):
+        with RIO.study_lock(B, self.sid):                                    # Phase 3A.1: one writer per study across processes
+            return self._save(reviewer, calls, cand_id, action, ai, **info)
+
+    def _save(self, reviewer, calls, cand_id=None, action="call", ai=None, **info):
+        RIO.ensure_table(B, self.sid, reviewer, "calls", self.rpath(reviewer))
         c = self.df.set_index("cand_id")
         rows = [dict(cand_id=k, call=v["call"], comment=v.get("comment", ""), reviewer=reviewer, time=v.get("time", ""),
                      **{f: c.loc[k, f] for f in FP}, fine_code=v.get("fine", "")) for k, v in sorted(calls.items()) if v.get("call") or v.get("comment")]
@@ -458,7 +477,11 @@ class Study:
                 dd = np.sqrt(((C[:, :3] - r[FP[:3]].to_numpy(float)) ** 2).sum(1)); dv = np.abs(C[:, 3] - float(r.volume_mm3)) / max(float(r.volume_mm3), 1.0)
                 if not ((dd <= 2.0) & (dv <= 0.15)).any(): keep.append(r.to_dict())
             rows += keep
-        pd.DataFrame(rows, columns=["cand_id", "call", "comment", "reviewer", "time"] + FP + ["fine_code"]).to_csv(self.rpath(reviewer), index=False)
+        v = calls.get(cand_id, {}) if cand_id is not None else {}
+        RIO.write_table(B, self.sid, reviewer, "calls", self.rpath(reviewer),
+                        pd.DataFrame(rows, columns=["cand_id", "call", "comment", "reviewer", "time"] + FP + ["fine_code"]), ["cand_id"] + FP, action,
+                        cand_id=None if cand_id is None else int(cand_id), call=v.get("call", ""), fine=v.get("fine", ""), comment=v.get("comment", ""),
+                        client_meter="" if ai is None else str(ai), **info)
         primary(self.sid, reviewer, if_missing=True)                              # kept for display / the "use this reviewer" choice
         CL.materialize(B, self.sid, by=reviewer, rescore=False)                  # v5.15: shared ID_calls.csv = effective calls (no re-score per click)
 
@@ -484,19 +507,19 @@ class Study:
             sys.stderr.write(f"[PensieveSync] Candidate call recording notice: {e_pen}\n")
 
         if cand_id is not None:
-            v = calls.get(cand_id, {}); lp = f"{B}/review/{self.sid}_review_log.csv"; new = not os.path.exists(lp)
-            with open(lp, "a") as f:
-                if new: f.write("time,reviewer,action,cand_id,call,comment,meter_shown,vox_i,vox_j,vox_k,volume_mm3\n")
-                q = lambda s: '"' + str(s).replace('"', "'").replace("\n", " ") + '"'
-                f.write(",".join([now(), q(reviewer), action, str(cand_id), q(v.get("call", "")), q(v.get("comment", "")),
-                                  "" if ai is None else str(ai)] + [str(c.loc[cand_id, k]) for k in FP]) + "\n")
+            v = calls.get(cand_id, {}); lp = f"{B}/review/{self.sid}_review_log.csv"
+            if not os.path.exists(lp): RIO.append_line(lp, "time,reviewer,action,cand_id,call,comment,meter_shown,vox_i,vox_j,vox_k,volume_mm3")
+            q = lambda s: '"' + str(s).replace('"', "'").replace("\n", " ") + '"'
+            RIO.append_line(lp, ",".join([now(), q(reviewer), action, str(cand_id), q(v.get("call", "")), q(v.get("comment", "")),
+                                          "" if ai is None else str(ai)] + [str(c.loc[cand_id, k]) for k in FP]))
 
     # ---------- missed cSS marks ----------
     MCOLS = ["missed_id", "reviewer", "time", "vox_i", "vox_j", "vox_k", "x_mm", "y_mm", "z_mm", "can_i", "can_j", "can_k",
              "comment", "plane", "slice", "shape", "points", "detector_fate"]
 
-    def missed(self):
+    def missed(self, by=""):
         p = f"{B}/review/{self.sid}_missed.csv"
+        with RIO.study_lock(B, self.sid): RIO.ensure_missed(B, self.sid, p, by)          # Phase 3A.1
         if not os.path.exists(p): return pd.DataFrame(columns=self.MCOLS)
         m = pd.read_csv(p, dtype=str).fillna("")
         for c in self.MCOLS:
@@ -526,7 +549,11 @@ class Study:
         return "; ".join(out) if out else "not generated by the detector (outside the search zone, not dark enough, or no ridge)"
 
     def missed_edit(self, reviewer, action, d=None):
-        d = d or {}; m = self.missed()
+        with RIO.study_lock(B, self.sid):                                    # Phase 3A.1: one writer per study across processes
+            return self._missed_edit(reviewer, action, d)
+
+    def _missed_edit(self, reviewer, action, d=None):
+        d = d or {}; m = self.missed(reviewer); before = {int(x): r for x, r in zip(m.missed_id, m.to_dict("records"))}
         if action == "add":
             strokes = d.get("strokes") or [[d["ijk"]]]
             pts = np.array([q for st in strokes for q in st], float)
@@ -572,7 +599,10 @@ class Study:
                 pass
         elif action == "comment":
             m.loc[m.missed_id == int(d["id"]), "comment"] = str(d.get("comment", ""))[:300]
-        m.to_csv(f"{B}/review/{self.sid}_missed.csv", index=False)
+        after = {int(x): r for x, r in zip(m.missed_id, m.to_dict("records"))}
+        changed = [after[k] for k in after if before.get(k) != after[k]] + [dict(before[k], deleted=True) for k in before if k not in after]
+        RIO.write_missed(B, self.sid, reviewer, f"{B}/review/{self.sid}_missed.csv", m, f"missed_{action}",
+                         missed_ids=sorted({int(r["missed_id"]) for r in changed}), rows=changed)
         return m.to_dict("records")
 
 
@@ -614,7 +644,7 @@ def reviewers(add=None):
         except Exception: pass
     if add and add.strip():
         add = add.strip(); d["names"] = [add] + [n for n in d["names"] if n != add]; d["last"] = add
-        json.dump(d, open(p, "w"), indent=1)
+        with RIO.project_lock(B, "reviewers"): RIO.atomic_write_json(p, d)
     return d
 
 def acq_info(sid):
@@ -748,7 +778,8 @@ class H(BaseHTTPRequestHandler):
                 f = f"{B}/review/viewer_settings.json"; os.makedirs(os.path.dirname(f), exist_ok=True)
                 cur = json.load(open(f)) if os.path.exists(f) else {}
                 cur.update({k: v for k, v in d.items() if isinstance(k, str) and len(k) < 40 and not k.startswith("vmode_")})
-                json.dump(cur, open(f + ".tmp", "w"), indent=1); os.replace(f + ".tmp", f); return self._send(dict(ok=True))
+                with RIO.project_lock(B, "viewer_settings"): RIO.atomic_write_json(f, cur)
+                return self._send(dict(ok=True))
             s = study(d["study"]); rev = (d.get("reviewer") or "").strip()
             if not rev: return self._send(dict(error="Enter the reviewer name first (upper right)."), code=400)
             if u.path == "/api/screencap":            # macOS screencapture: the reviewer window (-R) or an area chosen with the mouse (-i)
@@ -793,7 +824,7 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/import" and d.get("mode") == "validation":
                 return self._send(dict(error="import is switched off during a validation read (it would unblind you)"), code=400)
             if u.path == "/api/import":
-                with LOCK: calls, n = s.import_calls(rev, str(d.get("source", "")), bool(d.get("overwrite")))
+                with LOCK, RIO.study_lock(B, s.sid): calls, n = s.import_calls(rev, str(d.get("source", "")), bool(d.get("overwrite")))
                 return self._send(dict(ok=True, calls=calls, imported=n, saved=now()))
             if u.path == "/api/primary":
                 name = str(d.get("name") or rev).strip()
@@ -803,7 +834,7 @@ class H(BaseHTTPRequestHandler):
                     CL.materialize(B, s.sid, by=rev or name, rescore=True)
                 return self._send(dict(ok=True, primary=pr))
             if u.path == "/api/call" and int(d.get("cand_id", 0)) >= AUDIT_OFFSET:      # v5.7 excluded-object audit call
-                with LOCK:
+                with LOCK, RIO.study_lock(B, s.sid):                     # Phase 3A.1: read-modify-write under the cross-process lock
                     au = s.load_audit(rev); cid = int(d["cand_id"]); cur = au.get(cid, dict(call="", comment=""))
                     if "call" in d:
                         if d["call"] not in CALLS + [""]: return self._send(dict(error="unknown call"), code=400)
@@ -811,10 +842,10 @@ class H(BaseHTTPRequestHandler):
                     if "comment" in d: cur["comment"] = str(d["comment"])[:500]
                     au[cid] = cur
                     if not cur.get("call") and not cur.get("comment"): au.pop(cid)
-                    s.save_audit(rev, au); calls, _ = s.load_calls(rev); calls.update(au)
+                    s.save_audit(rev, au, cid); calls, _ = s.load_calls(rev); calls.update(au)
                 return self._send(dict(ok=True, calls=calls, saved=now()))
             if u.path == "/api/call":
-                with LOCK:
+                with LOCK, RIO.study_lock(B, s.sid):                     # Phase 3A.1: read-modify-write under the cross-process lock
                     calls, _ = s.load_calls(rev); cid = int(d["cand_id"]); cur = calls.get(cid, dict(call="", comment=""))
                     if "call" in d:
                         if d["call"] not in CALLS + [""]: return self._send(dict(error="unknown call"), code=400)
@@ -833,9 +864,10 @@ class H(BaseHTTPRequestHandler):
                 with LOCK: m = s.missed_edit(rev, d["action"], d)
                 return self._send(dict(ok=True, missed=m, saved=now()))
             if u.path == "/api/finish":
-                calls, _ = s.load_calls(rev); c = {k: v["call"] for k, v in calls.items() if v.get("call")}
+                with LOCK, RIO.study_lock(B, s.sid):                     # Phase 3A.1
+                    calls, _ = s.load_calls(rev); s.save(rev, calls, action="finish")
+                c = {k: v["call"] for k, v in calls.items() if v.get("call")}
                 acc = sorted(k for k, v in c.items() if v == "cSS"); ich = sorted(k for k, v in c.items() if v == "Near ICH")
-                with LOCK: s.save(rev, calls)
                 # v5.15: this reviewer's OWN score (ID_score_rev_<name>.json), then the shared score of the EFFECTIVE calls
                 cmd = [sys.executable, f"{HERE}/score_css.py", s.sid, "--accept-ids", ",".join(map(str, acc)) or "none",
                        "--ich-ids", ",".join(map(str, ich)) or "none", "--reviewed-ids", ",".join(map(str, sorted(c))) or "none",
@@ -866,7 +898,9 @@ class H(BaseHTTPRequestHandler):
                     fin["audit_n_read"] = sum(1 for v in au.values() if v.get("call"))
                     fin["audit_css"] = [dict(excl_id=k - AUDIT_OFFSET, rule=str(why.get(k - AUDIT_OFFSET, "")).split(":")[0])
                                         for k, v in sorted(au.items()) if v.get("call") == "cSS"]
-                    json.dump(fin, open(final_path(s.sid, rev), "w"), indent=1)
+                    with RIO.study_lock(B, s.sid):                       # Phase 3A.1: the final record is journaled, then written atomically
+                        RIO.journal_append(B, s.sid, rev, "final", file=os.path.relpath(final_path(s.sid, rev), B), record=fin)
+                        RIO.atomic_write_json(final_path(s.sid, rev), fin)
 
                     # v5.25 Synchronize study review completion status into PENSIEVE memory
                     try:
@@ -918,6 +952,7 @@ if __name__ == "__main__":
     if SHOW_EXCL: print("SHOW EXCLUDED: every rule-excluded object is listed after the candidates (number 10000 + id, rule shown); its calls are never scored", flush=True)
     if OPEN_READ: print("OPEN READ: AI meter and AI score visible, no blind validation read", flush=True)
     print("shown candidates only (rule-excluded objects hidden)" if not AUDIT_ON else "AUDIT: a 20 % sample of the rule-excluded objects is mixed into validation reads", flush=True)
+    RIO.clean_orphan_tmp(f"{B}/review")                                     # Phase 3A.1: temporary files left by a crash (own prefix only)
     study(START[0])
     if "--no-browser" not in a: threading.Timer(0.5, lambda: webbrowser.open(url)).start()
     try: srv.serve_forever()
