@@ -523,7 +523,7 @@ def train_cycle(rows, version, seed=0, cnn_epochs=30, progress=None, mins=None, 
     # infinity and every score to 0 or 100 (seen in v5.22: calibration slope 7.9 on the test cohort)
     cal_b, _, _ = irls(np.nan_to_num(meta_oof)[:, None], y, CAL_LAMBDA); cal = dict(a=float(cal_b[0]), b=float(cal_b[1]), ridge=CAL_LAMBDA)
     p_dev = sigmoid(cal["a"] + cal["b"] * meta_oof); th = IN.stable_thresholds(y, p_dev, g, sens_spec, seed=seed)
-    say("Percival Intelligence: ablation, disagreement, reliability", 0.66)
+    say("PERCIVAL analyses: ablation, disagreement, reliability", 0.66)
     intel = dict(provenance=IN.PROVENANCE, overlap=IN.overlap(), ablation=IN.ablation(Z, y, g, INDEP, folds(g, 5, seed + 7), auc, seed=seed),
                  disagreement=IN.disagreement(Z, y, COMPONENTS), reliability=IN.reliability(y, p_dev), families=fam,
                  note="all analyses on the development cohort's patient-grouped out-of-fold predictions; the locked test cohort is not used")
@@ -546,7 +546,7 @@ def train_cycle(rows, version, seed=0, cnn_epochs=30, progress=None, mins=None, 
                            trained_on=sorted({r["study"] for r in dev}),
                            dataset_hash=hashlib.sha256(json.dumps(sorted((r["study"], r["cand_id"], r["y"]) for r in rows)).encode()).hexdigest()[:16]),
                  note="experimental assessment score - trained on this computer on this project's expert reviews; not clinically validated",
-                 interpretation="Percival Score = 100 x a CALIBRATED model output on the development cohort. It is a ranking / assessment score, "
+                 interpretation="PERCIVAL score = 100 x a CALIBRATED model output on the development cohort. It is a ranking / assessment score, "
                                 "not a validated probability of cSS: calibration is checked on the locked test cohort and only on this project's data.")
     model["ready"] = model["data"]["studies"] >= mins["studies"] and len(rows) >= mins["candidates"] and min(model["data"]["css"], model["data"]["not_css"]) >= mins["per_class"]
     model["minimum"] = mins

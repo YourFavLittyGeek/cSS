@@ -185,7 +185,7 @@ class TestAdversarialScientificAcceptance(unittest.TestCase):
     # =========================================================================
     def test_lumos_depth_gradient_distinguishes_subpial_from_deep_vessel(self):
         """Construct synthetic 3D patches representing superficial siderosis vs deep sulcal vessels."""
-        lumos = LumosImageIntelligence(pensieve=self.pensieve, vault=self.vault)
+        lumos = LumosImageIntelligence(weights=__import__('uengine.percival.cnn', fromlist=['SmallCNN']).SmallCNN(7).p, pensieve=self.pensieve, vault=self.vault)   # explicit weights (an untrained network reports 'untrained')
         core = PercivalCoreIntelligence(pensieve=self.pensieve, vault=self.vault)
 
         # Pattern 1: Superficial Subpial Siderosis (n=N-1 is superficial/dark, n=0 is deep/bright)

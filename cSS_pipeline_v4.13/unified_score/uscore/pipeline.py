@@ -135,8 +135,19 @@ def _label_fingerprints(base, studies):
     return out
 
 
-def train(base, cohort, out, labels_access=None):
-    """development only. Returns the model dict (frozen) and the development report dict."""
+TRAINING_DISABLED = ("uScore training is DISABLED: this experimental prototype learns from the derived shared ID_calls.csv without the "
+                     "Phase 3A/3B safeguards (expert roles, completed-review consensus, label provenance / blinding) and splits by study, "
+                     "not by patient. Primary training: Percival (Training Center). Synthetic research only: run_unified.py train --research-unverified")
+
+
+class TrainingDisabled(PermissionError):
+    pass
+
+
+def train(base, cohort, out, labels_access=None, research_unverified=False):
+    """development only. Returns the model dict (frozen) and the development report dict.
+    Phase 3D review: refused unless research_unverified=True (explicit synthetic / research run); such models are stamped unverified."""
+    if not research_unverified: raise TrainingDisabled(TRAINING_DISABLED)
     gate = _jl_gate(base)                                       # v5.14.2-rc4: the user's training gate (app_data/split/gate.json)
     if gate is not None and not gate.get("open"):
         raise CohortError(f"training gate is CLOSED (closed {gate.get('at', '')} by {gate.get('by', '?')}) - open it in the app (Unified > Study selection)")
@@ -181,6 +192,8 @@ def train(base, cohort, out, labels_access=None):
                       synthetic_test=cohort.synthetic, development_report_summary=dict(auc=a_cal, slope=slope),
                       split_version=getattr(cohort, "split_version", None), label_fingerprints=_label_fingerprints(base, dev))
     M["frozen"] = False                    # v5.14-gui: training never freezes; freeze() is a separate, confirmed step
+    M.update(research_only_unverified=True, label_provenance="derived ID_calls.csv - NOT Phase 3A ground truth (no roles / consensus / provenance checks; study-level split)")
+    M["model_hash"] = md.model_hash(M)     # the stamp is model content: covered by the hash checked at the held-out boundary
     os.makedirs(out, exist_ok=True)
     json.dump(M, open(f"{out}/model_trained.json", "w"), indent=1)
     json.dump(dict(oof=[dict(study=r["study"], cand_id=r["cand_id"], y=int(t), p_raw=float(a), p_cal=float(b)) for r, t, a, b in zip(rows, y, p_raw, p_cal) if np.isfinite(b)],

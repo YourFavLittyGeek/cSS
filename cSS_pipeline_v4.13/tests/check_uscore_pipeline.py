@@ -73,7 +73,7 @@ def tree_hash(d):
 before = {d: tree_hash(f"{B}/{d}") for d in ("review", "data", "work", "raw")}
 for s in S.studies("development") + S.studies("held-out"): pl.extract_study(B, s, S, out)
 check("5 refuses an excluded / real study id", raises(lambda: pl.extract_study(B, "M02", S, out), cm.CohortError))
-M, rep = pl.train(B, S, out)
+M, rep = pl.train(B, S, out, research_unverified=True)
 check("5 training does NOT freeze", not M["frozen"] and not os.path.exists(f"{out}/model_frozen.json"))
 check("5 freeze refused without the confirmation text", raises(lambda: pl.freeze(out, "yes"), ValueError))
 fz = pl.freeze(out, "FREEZE"); M = json.load(open(f"{out}/model_frozen.json"))
@@ -106,7 +106,7 @@ check("5 held-out access logged as granted only in held-out mode",
 # reproducibility
 out2 = os.path.join(B, "uscore2")
 for s in S.studies("development") + S.studies("held-out"): pl.extract_study(B, s, S, out2)
-M2, _ = pl.train(B, S, out2)
+M2, _ = pl.train(B, S, out2, research_unverified=True)
 check("5 reproducible: same model hash on a second run", M2["model_hash"] == M["model_hash"])
 real = cm.Cohort()
 check("5 synthetic model refused for real scoring", raises(lambda: pl.score(real, out, ["M02"]), cm.CohortError))

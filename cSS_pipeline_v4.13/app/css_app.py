@@ -435,8 +435,13 @@ def watcher():
                 pend = SS.pending_training(B, sel_studies())
                 if len(pend) >= int(A.get("threshold", 3)):
                     import unified_gui as UG
-                    WATCH["autotrain_last"] = time.time(); UG.train()
-                    notify_c("done", "training", "Auto-train started", f"{len(pend)} train studies with new or changed reads: {', '.join(pend[:8])}")
+                    WATCH["autotrain_last"] = time.time(); r_ = UG.train() or {}
+                    if r_.get("disabled"):                   # I0: uScore training is disabled - say so once, never claim a run started
+                        if not WATCH.get("autotrain_disabled_said"):
+                            WATCH["autotrain_disabled_said"] = True
+                            notify_c("action", "training", "uScore auto-train is disabled", "The separate uScore scorer can no longer train (no expert-provenance "
+                                     "safeguards). Train PERCIVAL in PERCIVAL › Training Center instead.")
+                    else: notify_c("done", "training", "Auto-train started", f"{len(pend)} train studies with new or changed reads: {', '.join(pend[:8])}")
         except Exception as e: print("watcher:", e, flush=True)
         try: PG.snapshot_reviews()                        # v5.23: immutable expert-review snapshots (labels + outputs shown at review time)
         except Exception as e: print("percival snapshots:", e, flush=True)
@@ -1215,7 +1220,7 @@ def pg_init():
             save_settings=lambda: jsave("settings.json", SET), notify=lambda t, x: notify_c("done", "training", t, x), other_projects=other_projects)
 def pg_get(op, q):
     if op == "state": return PG.state()
-    if op in ("score", "history"):                                                            # Phase 3A.2: not before the blind review
+    if op in ("score", "history", "contracts", "pensieve_history"):                           # Phase 3A.2: not before the blind review
         bs = BG.state(B, q.get("code", ""))
         if bs["pending"]: return dict(none=True, hidden=True, reason=bs["reason"]) if op == "score" else dict(ledger=[], hidden=True, reason=bs["reason"])
     if op == "score":
@@ -1236,6 +1241,13 @@ def pg_get(op, q):
     if op == "readiness": return PG.readiness()                                              # 3D
     if op == "split": return PG.split_state()
     if op == "shadow": return PG.shadow_summaries()                                          # v5.24 Percival shadow mode                        # only on request: reads other projects' patients.json
+    if op == "architecture": return PG.architecture_state()                                  # architecture: honest component states
+    if op == "contracts": return PG.candidate_contracts(q.get("code", ""))                      # PERCIVAL candidate contracts (no patient ids)
+    if op == "components_report": return PG.components_report()
+    if op == "pensieve_index": return PG.pensieve_index_state()                                 # PENSIEVE (derived per-project index)
+    if op == "pensieve_history": return PG.pensieve_history(q.get("code", ""), q.get("cand", "0"))
+    if op == "shadow_gov": return PG.shadow_gov_state()                                         # SHADOW governed discovery
+    if op == "albus": return PG.albus_state()                                                   # ALBUS detector evaluation + registry
     if op == "pensieve": return PG.pensieve_state()                                          # v5.25 PENSIEVE Core Memory
     if op == "pensieve_query": return PG.pensieve_query(q.get("component", "albus"))
     if op == "vault": return PG.vault_status()                                               # v5.25 PERCIVAL DATA VAULT status
@@ -1297,6 +1309,8 @@ def pg_post(op, d):
         if op == "vault_backup": return PG.vault_backup(str(d.get("destination", "")))
         if op == "missed_lesion":                                                             # Phase 3A.5: disabled (it wrote unvalidated rows)
             return dict(ok=False, error="disabled: missed-cSS marks are recorded in the reviewer (validated, one journaled file per reviewer)")
+        if op == "pensieve_rebuild": return PG.pensieve_index_rebuild()
+        if op.startswith("shadow_gov_"): return PG.shadow_gov_post(op[len("shadow_gov_"):], d)
         if op == "shadow_run": return PG.shadow_run_trial(str(d.get("target", "ALBUS")), str(d.get("hypothesis", "")), d.get("config", {}))
         if op == "score_unified": return PG.score_study_unified(str(d.get("study_id", "")))
         if op == "split_new_version": return PG.split_new_version(float(d.get("fraction", 0)), d.get("by", ""), d.get("reason", ""), d.get("confirm", ""))   # 3D

@@ -71,7 +71,7 @@ class TestMasterEndToEndRebuild(unittest.TestCase):
         self.assertGreater(cand_albus.math_score, 0.4)
 
         print("--- STEP 4: LUMOS 3D Image Intelligence ---")
-        lumos = LumosImageIntelligence(pensieve=pensieve, vault=vault)
+        lumos = LumosImageIntelligence(weights=__import__('uengine.percival.cnn', fromlist=['SmallCNN']).SmallCNN(7).p, pensieve=pensieve, vault=vault)   # explicit weights (an untrained network reports 'untrained')
         # Synthetic 3D patch with blooming subpial siderosis
         swi = np.random.normal(1.0, 0.15, (49, 25, 17)).astype(np.float32)
         valid = np.ones((49, 25, 17), dtype=bool)

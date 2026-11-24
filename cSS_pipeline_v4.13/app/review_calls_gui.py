@@ -32,12 +32,36 @@ def _studies(B, PAT, scope="all", target=""):
 
 
 _CACHE = {}
+HASH_MAX = 8 * 1024 * 1024
+TEXT_EXT = (".csv", ".json", ".jsonl", ".txt", ".tsv")
+
+
+def file_key(paths, rel=None):
+    """Phase 3D review: cache key from file CONTENT. A file rewritten within the same clock tick (same size, same mtime) must never be taken
+    for the unchanged file: every review / label text file (and any file up to 8 MB) is identified by its sha256; only larger binary files
+    (images - never label sources) fall back to size + nanosecond mtime + inode. -> list of [name, digest] (JSON-serialisable)"""
+    import hashlib
+    out = []
+    for f in sorted(set(paths)):
+        try:
+            s = os.stat(f)
+            if not os.path.isfile(f): continue
+            if s.st_size <= HASH_MAX or f.lower().endswith(TEXT_EXT):
+                h = hashlib.sha256()
+                with open(f, "rb") as fh:
+                    for blk in iter(lambda: fh.read(1 << 20), b""): h.update(blk)
+                d = h.hexdigest()
+            else: d = f"stat:{s.st_size}:{s.st_mtime_ns}:{s.st_ino}"
+        except OSError: continue
+        out.append([os.path.relpath(f, rel) if rel else f, d])
+    return out
 
 
 def _key(B, code, cohort):
     import glob
-    fs = glob.glob(os.path.join(B, "review", f"{code}_*")) + [os.path.join(B, "review", "call_policy.json"), os.path.join(B, "app_data", "patients.json")]
-    return (code, cohort) + tuple(sorted((f, os.path.getmtime(f), os.path.getsize(f)) for f in fs if os.path.isfile(f)))
+    fs = glob.glob(os.path.join(B, "review", f"{code}_*")) + [os.path.join(B, "review", "call_policy.json"), os.path.join(B, "app_data", "patients.json"),
+                                                               os.path.join(B, "review", "project_roles_events.jsonl")]   # I0: roles change the state
+    return (code, cohort) + tuple(tuple(x) for x in file_key(fs))
 
 
 def state(B, code, cohort=""):

@@ -160,13 +160,13 @@ def reliability():
 
 # ------------------------------------------------------------------ 3 train / validate / freeze
 def train():
-    def run():
-        _log("train", "nested leave-one-patient-out on the development patients (labels: development only)", 0.05)
-        _cli("train", ["train"], 6 * 3600)
-        try: _cli("train", ["report"], 600)
-        except Exception as e: _log("train", f"report not written: {e}")
-        return dict(trained=True)
-    return start("train", run)
+    """Phase 3D review: uScore training is disabled in the app (no provenance / consensus / patient-split safeguards)"""
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "unified_score"))
+    try:
+        from uscore.pipeline import TRAINING_DISABLED
+    except Exception: TRAINING_DISABLED = "uScore training is disabled (experimental; no provenance safeguards)"
+    return dict(ok=False, disabled=True, error=TRAINING_DISABLED)
 
 
 def validation():

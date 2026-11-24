@@ -47,8 +47,8 @@ try:
     # gate closed -> training refused (central check in the training code)
     ok(post("/api/sel/gate", dict(open=False, by="tester"))["gate"]["open"] is False, "gate closed")
     post("/api/u/extract", dict(which="all")); wait_job("extract")
-    post("/api/u/train", {}); j = wait_job("train")
-    ok(j.get("status") == "failed" and "CLOSED" in (j.get("error") or "") + " ".join(j.get("log") or []), "training refused while the gate is closed")
+    r = post("/api/u/train", {})                                    # I0: in-app uScore training is disabled (no provenance safeguards)
+    ok(r.get("ok") is False and r.get("disabled") is True, "uScore training refused in the app while the gate is closed (training disabled)")
     # apply validation
     r = post("/api/sel/apply", dict(changes={"SYN03": {"role": "exclude"}})); ok(not r["ok"] and any("reason" in e for e in r["errors"]), "exclude without a reason refused")
     r = post("/api/sel/apply", dict(changes={"SYN02": {"patient": "PT-1"}, "SYN06": {"patient": "PT-1"}}))
@@ -60,12 +60,16 @@ try:
     ok(os.path.exists(f"{B}/app_data/split/v1.json") and os.path.exists(f"{B}/app_data/split/v2.json"), "every version kept on disk")
     rr = post("/api/sel/restore", dict(version=1)); ok(rr["ok"] and rr["version"] == 3 and json.load(open(f"{B}/app_data/split/current.json"))["roles"]["SYN05"] == "hold", "restore v1 creates v3 with v1's roles")
     # training with the gate open uses the user's selection
-    post("/api/sel/gate", dict(open=True, by="tester")); post("/api/u/train", {}); j = wait_job("train")
+    post("/api/sel/gate", dict(open=True, by="tester")); r = post("/api/u/train", {})
+    ok(r.get("ok") is False and r.get("disabled") is True and not os.path.exists(f"{B}/uscore/model_trained.json"),
+       "gate open: in-app uScore training still refused, nothing written")
+    # the calls-changed flow below needs a trained model: explicit, stamped SYNTHETIC research run through the CLI (never from the app)
+    p_ = subprocess.run([sys.executable, os.path.join(ROOT, "unified_score", "run_unified.py"), "train", "--research-unverified"], capture_output=True, text=True,
+                        env=dict(os.environ, HOME=HOME, CSS_BASE=B, CSS_USCORE_DEMO="1", CSS_USCORE_MANIFEST=man), timeout=1800)
     M = json.load(open(f"{B}/uscore/model_trained.json")) if os.path.exists(f"{B}/uscore/model_trained.json") else {}
-    ok(j.get("status") == "completed" and M.get("split_version") == 3, f"gate open: training ran on selection v3 ({j.get('status')}, split {M.get('split_version')})")
-    ok("SYN05" not in M.get("train_studies", []) and set(M.get("label_fingerprints", {})) == set(M.get("train_studies", [])), "held study left out of training; fingerprints recorded for every training study")
-    n = until(lambda: [i for i in notifs()["items"] if i["title"] == "Trained model ready"], 30)
-    ok(bool(n) and "NOT active" in n[0]["text"], "notification: trained model ready (with AUC, not active)")
+    ok(p_.returncode == 0 and M.get("research_only_unverified") is True and set(M.get("label_fingerprints", {})) == set(M.get("train_studies", [])),
+       "research run (CLI, flagged): model stamped research_only_unverified; fingerprints recorded for every training study")
+    ok(not [i for i in notifs()["items"] if i["title"] == "Trained model ready"], "no 'trained model ready' notification from the app (it trained nothing)")
     # calls changed after training -> label + urgent notification; hold resolves it
     cf = f"{B}/review/SYN01_calls.csv"; open(cf, "a").write(open(cf).read().splitlines()[-1] + "\n")
     st = get("/api/sel/status"); r1 = next(r for r in st["rows"] if r["study"] == "SYN01")
@@ -90,8 +94,9 @@ try:
     # auto-train
     post("/api/sel/autotrain", dict(on=True, threshold=1)); time.sleep(1)
     cf = f"{B}/review/SYN02_calls.csv"; open(cf, "a").write(open(cf).read().splitlines()[-1] + "\n")
-    ok(bool(until(lambda: [i for i in notifs()["items"] + get("/api/notif/log")["log"] if i["title"] == "Auto-train started"], 40)), "auto-train starts when a train study's calls change (gate open, threshold 1)")
-    wait_job("train")
+    ok(bool(until(lambda: [i for i in notifs()["items"] + get("/api/notif/log")["log"] if i["title"] == "uScore auto-train is disabled"], 40))
+       and not [i for i in notifs()["items"] + get("/api/notif/log")["log"] if i["title"] == "Auto-train started"],
+       "auto-train trigger: reports that uScore training is disabled, never 'Auto-train started'")
     post("/api/sel/autotrain", dict(on=False, threshold=3))
     if SHOTS:
         js = r"""const {chromium}=require('playwright');const [U,O]=process.argv.slice(2);(async()=>{const b=await chromium.launch();const errs=[];

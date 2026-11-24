@@ -272,10 +272,10 @@ function renderStep1_Welcome(el) {
           <span style="font-size:16px">🔬</span>
           <div>
             <div style="font-weight:600;font-size:13px">PERCIVAL Algorithm Pipeline &amp; Models</div>
-            <div class="mut" style="font-size:11px">80 algorithm scripts · ALBUS candidate detection · Morph3D &amp; Unified Score</div>
+            <div class="mut" style="font-size:11px">ALBUS detection · NOX measurements · LUMOS / PERCIVAL learning - models are trained only after expert review (see PERCIVAL › System)</div>
           </div>
         </div>
-        <span class="pill ok">VERIFIED READY</span>
+        <span class="pill">CODE PRESENT · NOT TRAINED HERE</span>
       </div>
 
       <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--panel2);border-radius:6px;border:1px solid var(--bd)">

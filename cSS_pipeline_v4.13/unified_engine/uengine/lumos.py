@@ -42,6 +42,29 @@ class LumosImageIntelligence:
         else:
             self._load_active_checkpoint()
 
+    @classmethod
+    def from_percival_model(cls, model: Optional[Dict[str, Any]], pensieve=None, vault=None) -> "LumosImageIntelligence":
+        """Architecture integration: LUMOS = the Percival Decision Engine's trained image network (the SAME weights; no second CNN).
+        model: a registry model.json (dict). Without a trained image component LUMOS reports 'untrained' and returns no prediction."""
+        self = cls.__new__(cls)
+        self.pensieve, self.vault = pensieve, vault
+        self.version = "lumos-5.25.0"; self.checkpoint_hash = ""; self.checkpoint_error = ""; self.checkpoint_source = ""
+        self.net = SmallCNN(); self.checkpoint_status = "uncalibrated_baseline"
+        im = ((model or {}).get("components") or {}).get("image")
+        if im is not None and im.get("type", "cnn") == "cnn" and im.get("params"):
+            self.net = SmallCNN.from_json(im)
+            self.checkpoint_status = "registry_trained"
+            self.checkpoint_source = f"percival registry {model.get('version')}"
+            self.checkpoint_hash = hashlib.sha256(json.dumps(im.get("params"), sort_keys=True).encode()).hexdigest()[:16]
+            self.version = f"lumos@{model.get('version')}"
+        elif im is not None:
+            self.checkpoint_status = "not_cnn"; self.checkpoint_error = f"image component is {im.get('type')} (no CNN weights)"
+        return self
+
+    @property
+    def trained(self) -> bool:
+        return self.checkpoint_status in ("registry_trained", "loaded", "recovered_from_backup", "explicit_weights")
+
     def _load_active_checkpoint(self) -> None:
         """Attempt to load latest model weights from Data Vault with integrity verification & recovery."""
         if not self.vault.is_connected():
@@ -178,6 +201,11 @@ class LumosImageIntelligence:
             else:
                 depth_grad_status = "insufficient_depth"
 
+        if not self.trained:                       # architecture integration: random initial weights are not evidence
+            return LumosInference(cand_id=cand_id, study_id=study_id, prob=None, logit=None, uncertainty=1.0, patch_shape=swi.shape,
+                                  model_version=self.version, has_visual_evidence=False, depth_gradient=depth_grad,
+                                  depth_gradient_status=depth_grad_status, status="untrained",
+                                  error="no trained LUMOS weights (train PERCIVAL, or connect a verified checkpoint)")
         # Test-Time Augmentation (TTA) along symmetric u axis via logit_tta
         logits, unc_logits = self.net.logit_tta(M[np.newaxis])
         mean_logit = float(logits[0])

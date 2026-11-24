@@ -54,8 +54,18 @@ try:
     post("/api/u/extract", {"which": "all"}); j = wait("extract")
     check("feature extraction completes for every study", j["status"] == "completed" and len(glob.glob(f"{B}/uscore/features/*.json")) == 6, j.get("error", ""))
     r = get("/api/u/reliability"); check("reliability table per study", len(r["per_study"]) == 6)
-    post("/api/u/train", {}); j = wait("train")
-    check("training completes", j["status"] == "completed", j.get("error", ""))
+    # Phase 3D review: uScore training is disabled in the app (no provenance / consensus / patient-split safeguards)
+    r = post("/api/u/train", {})
+    check("Phase 3D: in-app uScore training refused (disabled), no job started", r.get("ok") is False and r.get("disabled") is True
+          and "DISABLED" in r.get("error", "") and get("/api/u/log?job=train")["status"] in ("idle", None), str(r)[:200])
+    cli = os.path.join(ROOT, "unified_score", "run_unified.py")
+    p0 = subprocess.run([sys.executable, cli, "train"], env=env, capture_output=True, text=True, timeout=600)
+    check("Phase 3D: CLI train without --research-unverified refused, nothing written", p0.returncode != 0 and "REFUSED" in p0.stderr
+          and not os.path.exists(f"{B}/uscore/model_trained.json"), p0.stderr[-200:])
+    # downstream checks need a model: explicit SYNTHETIC research run through the CLI
+    p1 = subprocess.run([sys.executable, cli, "train", "--research-unverified"], env=env, capture_output=True, text=True, timeout=1800)
+    check("training completes (explicit --research-unverified synthetic run)", p1.returncode == 0, (p1.stderr or p1.stdout)[-300:])
+    check("Phase 3D: research model stamped research_only_unverified", json.load(open(f"{B}/uscore/model_trained.json")).get("research_only_unverified") is True)
     m = get("/api/u/state")["model"]
     check("training does NOT freeze", m["trained"] and not m["frozen"])
     v = get("/api/u/validation")

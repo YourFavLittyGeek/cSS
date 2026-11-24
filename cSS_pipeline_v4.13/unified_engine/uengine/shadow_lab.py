@@ -192,7 +192,8 @@ class ShadowMLLaboratory:
         self.pensieve.record_scientific_finding(
             category="shadow_experiment",
             hypothesis=exp.hypothesis,
-            evidence_strength="replicated" if exp.metrics_experimental.get("auc", 0) > exp.metrics_baseline.get("auc", 0) else "exploratory",
+            # architecture integration: these fixed trials are demonstrations - never 'replicated' evidence (governed path: shadow_governed.py)
+            evidence_strength=("synthetic_demonstration" if str(getattr(self, "last_cohort", "")).startswith("SYNTHETIC") else "exploratory_unverified_labels"),
             details={
                 "experiment_id": exp.experiment_id,
                 "delta_auc": exp.metrics_experimental.get("auc", 0) - exp.metrics_baseline.get("auc", 0),

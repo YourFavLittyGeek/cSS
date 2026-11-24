@@ -72,7 +72,7 @@ try:
     check("local learning switched off at first", s["authorized"] is False and s["active"] is None)
     D = dom("#intel")
     if 'data-pv="switch-on"' not in D: D = dom("#intel", 30000)          # first render right after start-up can exceed the budget on a busy machine
-    check("Percival Intelligence offers the switch", 'data-pv="switch-on"' in D and "Percival Intelligence" in D)
+    check("PERCIVAL screen offers the switch", 'data-pv="switch-on"' in D and "<b>PERCIVAL</b>" in D)
     post("/api/percival/settings", dict(percival_test_fraction=0.35))    # the partition hashes random synthetic patient ids: a larger share keeps both classes in the locked test
     check("switch on", post("/api/percival/authorize", dict(on=True)).get("authorized") is True)
     post("/api/percival/train", {}); s = wait_job(); L = s["latest"]

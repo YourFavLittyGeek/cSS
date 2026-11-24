@@ -7,6 +7,12 @@ The trainable model is the **Percival Score learning engine** (`unified_engine/u
 components, a meta-model chosen by patient-grouped cross-validation, calibration, and a locked patient-level test cohort. ALBUS / LUMOS /
 NOX / CORE are an experimental heuristic layer (off by default) without a dataset-consuming training interface.
 
+## Names used in the app
+PERCIVAL is the integrated system: **ALBUS** (mathematical detection, the detector), **NOX** (quantitative measurements + uScore x1–x5),
+**LUMOS** (the image network), the **PERCIVAL Decision Engine** (the trainable meta-model; its output is the PERCIVAL score), **CORE**
+(fixed-weight comparison baseline, never the prediction), **PENSIEVE** (memory) and **SHADOW** (discovery lab). The first run trains the
+PERCIVAL Decision Engine; ALBUS / NOX / LUMOS contribute through it. Screen: PERCIVAL (left menu).
+
 ## Ground truth that counts
 * Calls of **designated experts** (roles set by the administrator with a typed confirmation) who **completed** their review.
 * Per candidate, the completed experts agree (consensus, default quorum 1); a disagreement, an expert who completed the review without a
@@ -14,6 +20,20 @@ NOX / CORE are an experimental heuristic layer (off by default) without a datase
 * Provenance class **verified_blind_post_3A** (blind first read recorded by the server) or **historical_blinding_verified** (an older read
   with a documented verification of exactly those calls). Everything else is kept, shown, and excluded with a reason.
 * Missed-cSS marks of designated experts with eligible provenance.
+
+### Exact consensus behaviour (default rule: consensus of designated experts, quorum 1)
+Participants = designated experts who COMPLETED their review of the study. Per candidate, only definite calls vote (cSS / not-cSS classes;
+Near ICH = out of scope); **Unsure is an abstention, never a vote and never an effective call**.
+| Situation | Status | Trained on? |
+|---|---|---|
+| every completed expert agrees (≥ quorum definite votes) | resolved (effective call = the most frequent subtype among the votes) | yes, if the provenance class is eligible |
+| one expert Unsure, the other(s) definite and agreeing | resolved by the definite call(s) only | yes (raise the quorum to require more votes) |
+| all experts Unsure | abstained | no |
+| definite calls of different classes | disagreement | no (an adjudication is recorded, not ground truth) |
+| fewer definite votes than the quorum | insufficient | no |
+| a completed expert made no call on the candidate | incomplete (never resolved by the others) | no |
+| experts still reviewing | pending_review | no |
+| only non-experts called it / nobody did | no_expert / missing | no |
 
 ## Before you start (checklist)
 1. Import and process the new cohort in the app (FreeSurfer anatomy, detection, QC). Check every study's patient identity

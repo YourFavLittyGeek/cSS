@@ -34,12 +34,15 @@ class DurableLocalJournal:
     Guarantees expert annotations and candidate updates survive application crashes,
     power outages, and restarts while awaiting Data Vault reconnection.
     """
-    def __init__(self, db_path: str = JOURNAL_DB_FILE):
+    def __init__(self, db_path: Optional[str] = None):
+        if db_path is None:   # architecture integration: per project when the project is known (was one file in the home folder)
+            db_path = os.path.join(os.path.abspath(os.environ["CSS_BASE"]), "app_data", "pensieve_local_journal.db") if os.environ.get("CSS_BASE") else JOURNAL_DB_FILE
         self.db_path = db_path
         self._init_journal()
 
     def _init_journal(self) -> None:
         try:
+            os.makedirs(os.path.dirname(os.path.abspath(self.db_path)), exist_ok=True)
             with sqlite3.connect(self.db_path) as con:
                 con.execute("""
                     CREATE TABLE IF NOT EXISTS local_journal (
@@ -269,6 +272,9 @@ class PensieveCoreMemory:
             self._live_db_path = os.path.abspath(live_db_path)
         elif self.vault and self.vault.root_path and any(p in self.vault.root_path for p in ("/tmp", "/var/folders", "test", "temp")):
             self._live_db_path = os.path.join(self.vault.root_path, "live_pensieve.db")
+        elif os.environ.get("CSS_BASE"):
+            # architecture integration: one legacy memory per PROJECT (was always the live project's file, shared by every project)
+            self._live_db_path = os.path.join(os.path.abspath(os.environ["CSS_BASE"]), "app_data", "pensieve.db")
         else:
             self._live_db_path = DEFAULT_LIVE_PENSIEVE_DB
 

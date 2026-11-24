@@ -19,7 +19,9 @@ class TestLumosIntelligence(unittest.TestCase):
         self.temp_dir = tempfile.mkdtemp(prefix="lumos_test_")
         self.vault = PercivalDataVault.create_vault(self.temp_dir, name="VAULT_LUMOS")
         self.pensieve = PensieveCoreMemory(self.vault)
-        self.lumos = LumosImageIntelligence(pensieve=self.pensieve, vault=self.vault)
+        # architecture integration: an UNTRAINED network never reports a probability; the mechanics are tested with explicit weights
+        self.untrained = LumosImageIntelligence(pensieve=self.pensieve, vault=self.vault)
+        self.lumos = LumosImageIntelligence(weights=__import__('uengine.percival.cnn', fromlist=['SmallCNN']).SmallCNN(7).p, pensieve=self.pensieve, vault=self.vault)
 
     def tearDown(self):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
@@ -38,6 +40,8 @@ class TestLumosIntelligence(unittest.TestCase):
         inf = self.lumos.analyze_patch("LUM01", 1, patch_data)
         
         self.assertEqual(inf.status, "ok")
+        u = self.untrained.analyze_patch("LUM01", 1, patch_data)
+        self.assertEqual((u.status, u.prob), ("untrained", None))
         self.assertGreaterEqual(inf.prob, 0.0)
         self.assertLessEqual(inf.prob, 1.0)
         self.assertGreaterEqual(inf.uncertainty, 0.0)

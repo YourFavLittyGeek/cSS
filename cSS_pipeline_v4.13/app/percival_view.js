@@ -1,9 +1,9 @@
-// percival_view.js - v5.25 Research › Percival Intelligence & Training Center
+// percival_view.js - v5.25 PERCIVAL & Training Center
 // Standard View (clinical language) & Advanced Research View (technical algorithms)
-const PV={tab:"center",study:"",q:"",viewMode:localStorage.getItem("pv_view_mode")||"standard"};
+const PV={tab:"system",study:"",q:"",viewMode:localStorage.getItem("pv_view_mode")||"standard"};
 const PC={percival:"var(--lv-1)",dev:"var(--lv-2)",math:"var(--lv-math)"};
-const CN_STD={math:"Quantitative Candidate Detection",unified:"Unified Anomaly Score",char:"Imaging Features",image:"MRI Visual Intelligence",fusion:"Integrated Model Evidence"};
-const CN_ADV={math:"Deterministic MATH (score_v4)",unified:"Unified Predictor Score (v1.1)",char:"Characteristic ML (9 measurements)",image:"Image ML (3D CNN patch)",fusion:"Multimodal Fusion ML"};
+const CN_STD={math:"ALBUS · Mathematical Detection",unified:"NOX · uScore x1–x5 predictors",char:"NOX · Quantitative measurements",image:"LUMOS · Visual Intelligence",fusion:"NOX × LUMOS fusion"};
+const CN_ADV={math:"ALBUS: score_v4 (Platt-recalibrated)",unified:"NOX: uScore x1–x5 (L2 logistic)",char:"NOX: 9 detector measurements (L2 logistic)",image:"LUMOS: SmallCNN on MRI patches",fusion:"PERCIVAL fusion: measurements + image logit"};
 const CN=new Proxy({},{get:(t,p)=>(PV.viewMode==="standard"?CN_STD[p]:CN_ADV[p])||p});
 
 const MN_STD={
@@ -30,7 +30,7 @@ function pvCurve(H){if(!H.length)return '<p class="note">The learning curve appe
   const W=760,Hh=270,L=46,R=170,T=14,Bm=40,pw=W-L-R,ph=Hh-T-Bm,n=H.length,X=i=>L+(n===1?pw/2:pw*i/(n-1));
   const vals=H.flatMap(h=>[h.test_auc,h.test_math_auc,(h.dev||{})[h.chosen],...(h.test_ci||[])]).filter(v=>v!=null),lo=Math.max(0,Math.floor((Math.min(0.5,...vals)-0.02)*10)/10),Y=v=>T+ph*(1-(v-lo)/(1-lo));
   const grid=[];for(let v=lo;v<=1.0001;v+=0.1)grid.push(`<line x1="${L}" x2="${L+pw}" y1="${Y(v)}" y2="${Y(v)}" class="lv-grid"/><text x="${L-6}" y="${Y(v)+4}" class="lv-ax" text-anchor="end">${v.toFixed(1)}</text>`);
-  const ser=[["percival",h=>h.test_auc,"Percival Score · locked test"],["dev",h=>(h.dev||{})[h.chosen],"chosen model · development CV"],["math",h=>h.test_math_auc,"MATH alone · locked test"]];
+  const ser=[["percival",h=>h.test_auc,"PERCIVAL score · locked test"],["dev",h=>(h.dev||{})[h.chosen],"chosen model · development CV"],["math",h=>h.test_math_auc,"MATH alone · locked test"]];
   const band=n>1&&H.every(h=>h.test_ci)?`<path class="lv-band" d="M${H.map((h,i)=>`${X(i)},${Y(h.test_ci[1])}`).join("L")}L${H.slice().reverse().map((h,i)=>`${X(n-1-i)},${Y(h.test_ci[0])}`).join("L")}Z"/>`:"";
   const line=([k,f,nm])=>{const pts=H.map((h,i)=>f(h)!=null?[X(i),Y(f(h)),f(h)]:null).filter(Boolean);if(!pts.length)return"";const l=pts[pts.length-1];
     return `<path d="M${pts.map(p=>p[0]+","+p[1]).join("L")}" class="lv-line ${k==="math"?"lv-dash":""}" style="stroke:${PC[k]}"/>${pts.map(p=>`<circle cx="${p[0]}" cy="${p[1]}" r="4" class="lv-dot" style="fill:${PC[k]}"/>`).join("")}<text x="${l[0]+8}" y="${l[1]+4}" class="lv-lab">${nm.split(" · ")[0]} ${g3(l[2])}</text>`};
@@ -47,8 +47,8 @@ async function intelView(v){{const hq=location.hash.match(/^#intel\?tab=(\w+)/);
   PV.tab=({training:"center",registry:"models"})[PV.tab]||PV.tab;   // v5.24 names (old deep links still work)   // v5.23 deep link #intel?tab=evidence
   const s=await api("/api/percival/state");if(V!=="intel")return;
   if(s.store&&!s.store.ok){v.innerHTML=`<div class="banner w" data-pv="store-error"><b>Percival data could not be opened</b><span>${esc(s.store.error)}</span></div><p class="note">Nothing was changed. Backups of earlier states are in the project folder under backups/percival/. Data integrity details: Settings › About, or reopen the previous Percival version.</p>`;return}const M=s.active,Lt=s.latest,H=s.history||[],job=s.job||{},d=(M||Lt||{}).data;
-  const status=!s.authorized?'<span class="pill bad">local learning switched off</span>':!M?(Lt?'<span class="pill warn">no model active yet - make one active in Model Center</span>':'<span class="pill">no model yet</span>'):M.ready?'<span class="pill ok">Percival Score in use</span>':`<span class="pill warn">learning · minimum ${s.minimum.studies} studies / ${s.minimum.candidates} candidates</span>`;
-  v.innerHTML=`<div class="banner ${s.authorized?"":"w"}" data-pv="banner"><b>Percival Intelligence</b><span class="mut">${PV.viewMode==="standard"?"AI-Assisted Cerebral Superficial Siderosis detection and neuroimaging intelligence. Learns locally on this Mac from expert radiologist reviews.":"Multimodal evidence integration: ALBUS quantitative discovery, LUMOS 3D visual intelligence, NOX morphological analysis, and PERCIVAL Core meta-learning."}</span></div>
+  const status=!s.authorized?'<span class="pill bad">local learning switched off</span>':!M?(Lt?'<span class="pill warn">no model active yet - make one active in Model Center</span>':'<span class="pill">no model yet</span>'):M.ready?'<span class="pill ok">PERCIVAL score in use</span>':`<span class="pill warn">learning · minimum ${s.minimum.studies} studies / ${s.minimum.candidates} candidates</span>`;
+  v.innerHTML=`<div class="banner ${s.authorized?"":"w"}" data-pv="banner"><b>PERCIVAL</b><span class="mut">${PV.viewMode==="standard"?"AI-Assisted Cerebral Superficial Siderosis detection and neuroimaging intelligence. Learns locally on this Mac from expert radiologist reviews.":"Multimodal evidence integration: ALBUS quantitative discovery, LUMOS 3D visual intelligence, NOX morphological analysis, and PERCIVAL Core meta-learning."}</span></div>
    <div class="row" style="flex-wrap:wrap;gap:10px;margin:10px 0;align-items:center">${status}
     <div style="display:inline-flex;gap:4px;background:var(--panel2);padding:2px;border-radius:6px">
       <button class="b sm ${PV.viewMode==='standard'?'pri':''}" id="pv-mode-std" title="Clinical research terminology">Standard View</button>
@@ -60,13 +60,13 @@ async function intelView(v){{const hq=location.hash.match(/^#intel\?tab=(\w+)/);
    <div class="tiles" data-pv="tiles">
     <div class="tile"><div class="n">${d?d.studies:0}</div><div class="t">studies learned</div></div>
     <div class="tile"><div class="n">${d?d.dev_candidates+d.test_candidates:0}</div><div class="t">candidates${d?` · ${d.css} cSS / ${d.not_css} not`:""}</div></div>
-    <div class="tile"><div class="n">${g3((((M||Lt||{}).test||{}).percival||{}).auc)}</div><div class="t">Percival AUC · locked test${d?` (${d.test_patients} patients)`:""}</div></div>
+    <div class="tile"><div class="n">${g3((((M||Lt||{}).test||{}).percival||{}).auc)}</div><div class="t">PERCIVAL AUC · locked test${d?` (${d.test_patients} patients)`:""}</div></div>
     <div class="tile"><div class="n">${g3((((M||Lt||{}).test||{}).math||{}).auc)}</div><div class="t">MATH alone · same test</div></div>
     <div class="tile"><div class="n">${M?esc(M.version):"—"}</div><div class="t">active model${M?` · ${esc(MN[M.discovery.chosen]||M.discovery.chosen)}`:""}</div></div></div>
-   <div class="subtabs" data-pv="tabs">${[["overview","Overview"],["center",`Training Center (${s.n_selected})`],["models",`Model Center (${s.versions.length})`],["pensieve","PENSIEVE Memory"],["shadow","SHADOW ML Lab"],["vault","Data Vault"],["integrity","Data integrity"],["|","Advanced:"],["components","Components & agreement"],["evidence","Evidence & reliability"],["meta","Meta-model"],["explore","Candidate explorer"]].map(([k,l])=>k==="|"?`<span class="note" style="margin:0 4px 0 14px;white-space:nowrap;align-self:center">${l}</span>`:`<button data-pvt="${k}" class="${PV.tab===k?"on":""}">${l}</button>`).join("")}</div><div id="pvb"></div>`;
+   <div class="subtabs" data-pv="tabs">${[["system","System","PERCIVAL · the integrated system: every component and its state"],["overview","Overview","learning curve and the locked-test evaluation"],["center",`Training Center (${s.n_selected})`,"eligible expert labels, readiness, training"],["models",`Model Center (${s.versions.length})`,"trained versions, acceptance, explicit approval"],["albus","ALBUS","ALBUS · Mathematical Detection: detector versions, sensitivity, false positives"],["pensieve","PENSIEVE","PENSIEVE · AI Memory and History"],["shadow","SHADOW","SHADOW · Experimental Discovery Lab"],["vault","Data Vault","storage"],["integrity","Integrity","data integrity"],["|","Advanced:"],["components","Components","Components & agreement"],["evidence","Evidence","Evidence & reliability"],["meta","Meta-model","PERCIVAL Decision Engine: meta-model and calibration"],["explore","Candidates","Candidate explorer: every component per candidate"]].map(([k,l,t])=>k==="|"?`<span class="note" style="margin:0 4px 0 14px;white-space:nowrap;align-self:center">${l}</span>`:`<button data-pvt="${k}" class="${PV.tab===k?"on":""}" title="${esc(t||l)}">${l}</button>`).join("")}</div><div id="pvb"></div>`;
   const el=$("#pvb"),X=M||Lt;
   if(PV.tab==="overview"){el.innerHTML=pvFlow(s,X)+`<div class="card"><h3 style="margin:0 0 4px">Learning curve</h3><p class="note" style="margin-top:0">One point per training cycle. The locked test cohort (${Math.round(100*s.test_fraction)} % of patients, assigned permanently) is never used for training or selection.</p>${pvCurve(H)}</div>
-    ${X?`<div class="card"><h3 style="margin:0 0 6px">Locked test cohort (${esc(X.version)})</h3><table data-pv="test">${PVMH}${pvMetricsRow("Percival Score",(X.test||{}).percival,PC.percival)}${pvMetricsRow("MATH alone",(X.test||{}).math,PC.math)}</table>
+    ${X?`<div class="card"><h3 style="margin:0 0 6px">Locked test cohort (${esc(X.version)})</h3><table data-pv="test">${PVMH}${pvMetricsRow("PERCIVAL score",(X.test||{}).percival,PC.percival)}${pvMetricsRow("MATH alone",(X.test||{}).math,PC.math)}</table>
       <p class="note">${(X.test||{}).at_red?`At the red threshold: sensitivity ${g3(X.test.at_red.sensitivity)}, specificity ${g3(X.test.at_red.specificity)} · at the green threshold: sensitivity ${g3(X.test.at_green.sensitivity)}, specificity ${g3(X.test.at_green.specificity)}.`:""}
       ${X.acceptance?` Acceptance: <b>${X.acceptance.passed?"passed":"not passed"}</b>${X.acceptance.reasons.length?" - "+X.acceptance.reasons.map(esc).join("; "):""}.`:""}</p></div>`:""}
     ${(s.log||[]).length?`<details class="card"><summary>Last training log</summary><pre class="note" style="white-space:pre-wrap">${esc(s.log.join("\n"))}</pre></details>`:""}`;pvTip(H)}
@@ -76,14 +76,14 @@ async function intelView(v){{const hq=location.hash.match(/^#intel\?tab=(\w+)/);
      <div class="card"><h3 style="margin:0 0 4px">Agreement and dependence</h3><p class="note" style="margin-top:0">Spearman correlation of the sources' log-odds (dependence) and how often their calls (≥ 50 %) agree. Agreement is not correctness; disagreement is tested for its predictive value in the meta-model comparison.</p>
       <table data-pv="agreement"><tr><th></th>${names.map(c=>`<th>${CN[c]}</th>`).join("")}</tr>${names.map(a=>`<tr><td><b>${CN[a]}</b></td>${names.map(b=>{if(a===b)return'<td class="mut">—</td>';const x=A.find(q=>(q.a===a&&q.b===b)||(q.a===b&&q.b===a));return x?`<td class="mono" style="background:color-mix(in srgb,var(--lv-1) ${Math.round(40*Math.max(0,x.spearman))}%,transparent)">ρ ${x.spearman.toFixed(2)}<div class="note">calls agree ${Math.round(100*x.call_agreement)} %</div></td>`:'<td class="mut">—</td>'}).join("")}</tr>`).join("")}</table></div>`}
   if(PV.tab==="meta"&&X){const D=X.discovery,co=X.meta&&X.meta.type==="logistic"?X.meta:null,th=X.thresholds,te=X.test||{};
-    el.innerHTML=`<div class="card"><h3 style="margin:0 0 4px">How Percival Score is combined - discovered, not assigned</h3><p class="note" style="margin-top:0">Seven ways to combine the sources were compared by patient-grouped cross-validation on the development cohort. Rule: ${esc(D.rule)}.</p>
+    el.innerHTML=`<div class="card"><h3 style="margin:0 0 4px">How PERCIVAL score is combined - discovered, not assigned</h3><p class="note" style="margin-top:0">Seven ways to combine the sources were compared by patient-grouped cross-validation on the development cohort. Rule: ${esc(D.rule)}.</p>
       <table data-pv="discovery"><tr><th>Candidate</th><th>AUC</th><th>PR-AUC</th><th>log loss</th><th>± SE</th><th>Brier</th><th>calibration slope</th><th></th></tr>
       ${Object.keys(MN).map(k=>{const m=D.results[k]||{};return `<tr class="${k===D.chosen?"pv-chosen":""}"><td>${esc(MN[k])}</td>${m.skipped?`<td colspan="6" class="note">skipped: ${esc(m.skipped)}</td>`:`<td class="mono">${g3(m.auc)}</td><td class="mono">${g3(m.pr_auc)}</td><td class="mono">${g3(m.logloss)}</td><td class="mono">${g3(m.logloss_se)}</td><td class="mono">${g3(m.brier)}</td><td class="mono">${g3(m.calib_slope)}</td>`}<td>${k===D.chosen?'<span class="pill ok">chosen</span>':k===D.best_logloss?'<span class="pill">lowest log loss</span>':""}</td></tr>`}).join("")}</table></div>
-     <div class="card"><h3 style="margin:0 0 4px">The chosen model's actual calculation</h3>${co?`<p class="note" style="margin-top:0">log-odds = ${g3(co.beta[0])} (intercept) + Σ coefficient × standardised input; then calibrated: p = σ(${g3(X.calibration.a)} + ${g3(X.calibration.b)} × log-odds); Percival Score = 100 × p.</p>
+     <div class="card"><h3 style="margin:0 0 4px">The chosen model's actual calculation</h3>${co?`<p class="note" style="margin-top:0">log-odds = ${g3(co.beta[0])} (intercept) + Σ coefficient × standardised input; then calibrated: p = σ(${g3(X.calibration.a)} + ${g3(X.calibration.b)} × log-odds); PERCIVAL score = 100 × p.</p>
        <table class="lv-w"><tr><th>Input</th><th>Coefficient</th><th style="width:40%"></th></tr>${co.columns.map((c,i)=>{const b=co.beta[i+1],mx=Math.max(0.3,...co.beta.slice(1).map(Math.abs));return `<tr><td>${esc(c.replace("_missing"," missing").replace("disagreement_","disagreement · ").replace(/^(math|unified|char|image|fusion)$/,m=>CN[m]))}</td><td class="mono">${b>=0?"+":""}${b.toFixed(3)}</td><td><div class="lv-bar"><span class="${b>=0?"pos":"neg"}" style="width:${Math.round(50*Math.abs(b)/mx)}%;${b>=0?"left:50%":"right:50%"}"></span><i></i></div></td></tr>`}).join("")}</table>
        <p class="note">Coefficients describe this model's arithmetic on this project's data; they are associations, not causes.</p>`:`<p class="note">The chosen model is ${esc(MN[D.chosen])}${X.meta&&X.meta.type==="stumps"?` (${X.meta.trees.length} stumps)`:""}.</p>`}</div>
      <div class="card"><h3 style="margin:0 0 4px">Red / yellow / green thresholds</h3><p class="note" style="margin-top:0">${esc(th.strategy)}.</p>
-      <table data-pv="thresholds"><tr><th></th><th>Percival Score</th><th>development sensitivity</th><th>development specificity</th><th>locked-test sensitivity</th><th>locked-test specificity</th></tr>
+      <table data-pv="thresholds"><tr><th></th><th>PERCIVAL score</th><th>development sensitivity</th><th>development specificity</th><th>locked-test sensitivity</th><th>locked-test specificity</th></tr>
        <tr><td><span class="pvb red"></span> red below</td><td class="mono">${pct(100*th.red_below)}</td><td class="mono">${g3(th.dev_at_red.sensitivity)}</td><td class="mono">${g3(th.dev_at_red.specificity)}</td><td class="mono">${g3((te.at_red||{}).sensitivity)}</td><td class="mono">${g3((te.at_red||{}).specificity)}</td></tr>
        <tr><td><span class="pvb green"></span> green from</td><td class="mono">${pct(100*th.green_from)}</td><td class="mono">${g3(th.dev_at_green.sensitivity)}</td><td class="mono">${g3(th.dev_at_green.specificity)}</td><td class="mono">${g3((te.at_green||{}).sensitivity)}</td><td class="mono">${g3((te.at_green||{}).specificity)}</td></tr></table></div>
      <div class="card"><h3 style="margin:0 0 4px">Robustness on the locked test cohort</h3><table data-pv="subgroups">${PVMH}${["complete_inputs","missing_inputs","low_disagreement","high_disagreement"].map(k=>pvMetricsRow(k.replace("_"," "),te["subgroup_"+k])).join("")}</table><p class="note">${te.insufficient||0} test candidates had insufficient evidence (no learned source).</p></div>`}
@@ -110,35 +110,10 @@ async function intelView(v){{const hq=location.hash.match(/^#intel\?tab=(\w+)/);
     ${(SH.runs||[]).map(r=>`<tr><td class="mono"><b>${esc(r.version)}</b></td><td class="note">${esc(r.at)} · ${r.studies} studies</td><td class="mono">${esc(r.active||"—")}</td><td class="mono">${r.band_agreement==null?"—":Math.round(100*r.band_agreement)+" %"}</td><td class="mono">${r.mean_abs_difference==null?"—":r.mean_abs_difference.toFixed(1)}</td><td class="mono">${r.prospective.n} (${r.prospective.css} cSS)</td><td class="mono">${g3((r.prospective.shadow||{}).auc)}</td><td class="mono" title="${r.prospective.n_fair??0} calls neither model learned from">${r.prospective.n_fair?`${g3((r.prospective.fair_shadow||{}).auc)} vs ${g3((r.prospective.active||{}).auc)} <span class="note">(n ${r.prospective.n_fair})</span>`:'<span class="mut">no calls unseen by both</span>'}</td></tr>`).join("")||'<tr><td colspan="8" class="empty">No shadow run yet.</td></tr>'}</table>
     <p class="note">AUC shadow: on expert calls this version never learned from. Head-to-head: only calls that <b>neither</b> model learned from (otherwise the active model would be judged on its own training data). Synthetic or small projects give unstable numbers; these are not clinical results.</p></div>`);
     if(j.state==="running")setTimeout(()=>V==="intel"&&PV.tab==="models"&&intelView(v),2500)}
-  if(PV.tab==="pensieve"){
-    const ps=await api("/api/percival/pensieve");
-    const summ=ps.summary||{};
-    el.innerHTML=`<div class="card" data-pv="pensieve"><div class="row" style="justify-content:space-between"><div><h3 style="margin:0 0 4px">PENSIEVE: Persistent Shared Core Memory</h3><p class="note" style="margin:0">The long-term scientific memory foundation of the Percival ecosystem. Preserves studies, candidate identities, expert ground truth, missed lesions, and component evolution.</p></div><span class="pill ${ps.vault_connected?'ok':'bad'}">${ps.vault_connected?'Vault Synchronized':'Vault Disconnected'}</span></div>
-    <div class="row" style="margin:12px 0 16px"><div class="tile"><div class="n">${ps.studies?ps.studies.length:0}</div><div class="t">studies remembered</div></div><div class="tile"><div class="n">${ps.corrections?ps.corrections.length:0}</div><div class="t">corrections recorded</div></div><div class="tile"><div class="n">${(summ.albus||{}).missed_lesions_count||0}</div><div class="t">missed lesions flagged</div></div><div class="tile"><div class="n">${ps.findings?ps.findings.length:0}</div><div class="t">scientific findings</div></div></div>
-    <div class="row" style="gap:12px;margin-bottom:16px"><div class="card" style="flex:1"><h4 style="margin:0 0 6px">ALBUS Discovery Memory</h4><p class="note" style="margin:0">${esc((summ.albus||{}).guidance||"No guidance yet")}</p></div><div class="card" style="flex:1"><h4 style="margin:0 0 6px">LUMOS 3D Visual Memory</h4><p class="note" style="margin:0">${esc((summ.lumos||{}).guidance||"No guidance yet")}</p></div><div class="card" style="flex:1"><h4 style="margin:0 0 6px">NOX Quantitative Memory</h4><p class="note" style="margin:0">${esc((summ.nox||{}).guidance||"No guidance yet")}</p></div></div>
-    <h4 style="margin:12px 0 6px">Recent Detection &amp; Review Corrections</h4>
-    <table><tr><th>ID</th><th>Study</th><th>Type</th><th>Component</th><th>Initial AI</th><th>Ground Truth</th><th>Pattern</th></tr>
-    ${(ps.corrections||[]).map(c=>`<tr><td class="mono">${esc(c.correction_id)}</td><td class="mono">${esc(c.study_id)}</td><td><b>${esc(c.event_type)}</b></td><td>${esc(c.responsible_component)}</td><td class="mono">${esc(c.initial_ai_call||"—")}</td><td class="mono"><b>${esc(c.expert_ground_truth)}</b></td><td class="note">${esc(c.failure_pattern||"—")}</td></tr>`).join("")||'<tr><td colspan="7" class="empty">No corrections recorded yet.</td></tr>'}</table>
-    <h4 style="margin:16px 0 6px">Accumulated Scientific Findings</h4>
-    <table><tr><th>ID</th><th>Category</th><th>Hypothesis</th><th>Evidence Strength</th><th>Source</th></tr>
-    ${(ps.findings||[]).map(f=>`<tr><td class="mono">${esc(f.finding_id)}</td><td>${esc(f.category)}</td><td>${esc(f.hypothesis)}</td><td><span class="pill ${f.evidence_strength==='validated'?'ok':'warn'}">${esc(f.evidence_strength)}</span></td><td class="note">${esc(f.created_by)}</td></tr>`).join("")||'<tr><td colspan="5" class="empty">No scientific findings stored yet.</td></tr>'}</table></div>`;
-  }
-  if(PV.tab==="shadow"){
-    const sh=await api("/api/percival/shadow_lab");
-    el.innerHTML=`<div class="card" data-pv="shadow-lab"><div class="row" style="justify-content:space-between"><div><h3 style="margin:0 0 4px">SHADOW ML: Autonomous Experimental Research Laboratory</h3><p class="note" style="margin:0">Continuously searches for pipeline improvements across ALBUS, LUMOS, NOX, and Percival Core. Experiments in an isolated sandbox without altering active clinical diagnostic behavior.</p></div><button class="b pri" id="shd-run">Run Autonomous Trial</button></div>
-    <h4 style="margin:14px 0 6px">Experimental Queue &amp; Completed Trials</h4>
-    <table><tr><th>Exp ID</th><th>Component</th><th>Hypothesis</th><th>Status</th><th>Baseline AUC</th><th>Exp AUC</th><th>Runtime</th></tr>
-    ${(sh.experiments||[]).map(e=>`<tr><td class="mono">${esc(e.id)}</td><td><b>${esc(e.target_component)}</b></td><td>${esc(e.hypothesis)}</td><td><span class="pill ${e.status==='completed'?'ok':'warn'}">${esc(e.status)}</span></td><td class="mono">${g3((e.baseline||{}).auc)}</td><td class="mono"><b>${g3((e.experimental||{}).auc)}</b></td><td class="note">${(e.runtime_s||0).toFixed(2)}s</td></tr>`).join("")||'<tr><td colspan="7" class="empty">No autonomous trials executed yet. Click "Run Autonomous Trial" to explore.</td></tr>'}</table>
-    <h4 style="margin:16px 0 6px">Governance Proposals &amp; Audit Trail</h4>
-    <table><tr><th>Proposal ID</th><th>Target</th><th>Rationale</th><th>Sensitivity Loss</th><th>FP Reduction</th><th>Verdict</th></tr>
-    ${(sh.proposals||[]).map(p=>`<tr><td class="mono">${esc(p.proposal_id)}</td><td><b>${esc(p.target_component)}</b></td><td>${esc(p.rationale)}</td><td class="mono">${(p.sensitivity_loss||0).toFixed(3)}</td><td class="mono">${(p.false_positive_reduction||0).toFixed(1)}/scan</td><td><span class="pill ${p.verdict==='approved'?'ok':'bad'}">${esc(p.verdict)}</span></td></tr>`).join("")||'<tr><td colspan="6" class="empty">No proposals submitted to Governance yet.</td></tr>'}</table></div>`;
-    $("#shd-run")&&($("#shd-run").onclick=async()=>{
-      toast("Starting autonomous trial across ALBUS & Core...");
-      const res=await api("/api/percival/shadow_run",{target:"ALBUS",hypothesis:"Adaptive subpial weighting recovering missed lesions",config:{formula:"formula_adaptive_subpial",threshold:0.45}});
-      toast(res.ok?`Trial completed: Exp AUC ${g3(res.metrics_experimental.auc)}`:esc(res.error),!res.ok);
-      intelView(v);
-    });
-  }
+  if(PV.tab==="system"){await pvSystem(el)}
+  if(PV.tab==="albus"){await pvAlbus(el)}
+  if(PV.tab==="pensieve"){await pvPensieve(el)}
+  if(PV.tab==="shadow"){await pvShadow(el,v)}
   if(PV.tab==="vault"){
     const ov=await api("/api/storage/overview");
     const stList=(await api("/api/storage/studies")).studies||[];
@@ -220,7 +195,7 @@ async function intelView(v){{const hq=location.hash.match(/^#intel\?tab=(\w+)/);
       <tr><td><b>original_mri</b></td><td>Raw DICOM and NIfTI acquisitions</td><td class="mono">${fmtGb(cats.original_mri||0)}</td></tr>
       <tr><td><b>processed_mri</b></td><td>Resampled volumes &amp; masks</td><td class="mono">${fmtGb(cats.processed_mri||0)}</td></tr>
       <tr><td><b>PENSIEVE</b></td><td>Persistent memory database &amp; snapshots</td><td class="mono">${fmtGb(cats.PENSIEVE||0)}</td></tr>
-      <tr><td><b>models</b></td><td>Weights for ALBUS, LUMOS, NOX, Percival Core</td><td class="mono">${fmtGb(cats.models||0)}</td></tr>
+      <tr><td><b>models</b></td><td>LUMOS image-network weights; CORE fixed-weight baseline</td><td class="mono">${fmtGb(cats.models||0)}</td></tr>
       <tr><td><b>backups</b></td><td>Independent recovery archives</td><td class="mono">${fmtGb(cats.backups||0)}</td></tr></table>
 
       <div class="row" style="gap:10px;margin-top:16px">
@@ -299,7 +274,7 @@ async function intelView(v){{const hq=location.hash.match(/^#intel\?tab=(\w+)/);
   v.querySelectorAll("[data-pvds]").forEach(a=>a.onclick=e=>{e.preventDefault();PV.tab="center";PV.ds=a.dataset.pvds;intelView(v)});
   if(job.state==="running")setTimeout(()=>V==="intel"&&intelView(v),2500)}
 
-// ------------------------------------------------------------------ v5.23 Evidence & reliability (Percival Intelligence analyses of the model)
+// ------------------------------------------------------------------ v5.23 Evidence & reliability (PERCIVAL analyses of the model)
 const FAM={char:["Characteristic ML",{logistic:"Logistic regression (L2)",gbt:"Gradient-boosted trees (depth 2)",forest:"Random forest"}],
   image:["Image ML",{pixel_logistic:"Pixel logistic (3×7×5 block means) - baseline",cnn:"Convolutional network (SmallCNN)"}],
   fusion:["Fusion",{late:"Late (decision-level)",feature:"Feature-level",hybrid:"Hybrid"}]};
@@ -309,7 +284,7 @@ function pvCal(R,Rt){if(!R||!R.length)return '<p class="note">Not enough candida
   const pts=(A,c)=>A.map(r=>`<line x1="${X(r.mean_score)}" x2="${X(r.mean_score)}" y1="${Y(r.ci[0]??r.observed)}" y2="${Y(r.ci[1]??r.observed)}" style="stroke:${c};stroke-width:1.5;opacity:.6"/><circle cx="${X(r.mean_score)}" cy="${Y(r.observed)}" r="${3+Math.min(5,Math.sqrt(r.n)/2)}" style="fill:${c}"><title>score ${Math.round(100*r.mean_score)} · observed ${Math.round(100*r.observed)} % cSS · n ${r.n}</title></circle>`).join("");
   return `<div class="lv-legend"><span><i style="background:${PC.dev}"></i>development (out-of-fold)</span>${Rt&&Rt.length?`<span><i style="background:${PC.percival}"></i>locked test</span>`:""}<span><i class="dash" style="background:var(--mut)"></i>perfect calibration</span></div>
    <svg viewBox="0 0 ${W} ${Hh}" class="lv-svg" style="max-width:440px" role="img" aria-label="calibration">${g}<line x1="${X(0)}" y1="${Y(0)}" x2="${X(1)}" y2="${Y(1)}" class="lv-line lv-dash" style="stroke:var(--mut)"/>${pts(R,PC.dev)}${Rt?pts(Rt,PC.percival):""}
-   <text x="${L+pw/2}" y="${Hh-3}" class="lv-ax" text-anchor="middle">Percival Score</text><text x="12" y="${T+ph/2}" class="lv-ax" text-anchor="middle" transform="rotate(-90 12 ${T+ph/2})">observed cSS rate</text></svg>`}
+   <text x="${L+pw/2}" y="${Hh-3}" class="lv-ax" text-anchor="middle">PERCIVAL score</text><text x="12" y="${T+ph/2}" class="lv-ax" text-anchor="middle" transform="rotate(-90 12 ${T+ph/2})">observed cSS rate</text></svg>`}
 function pvEvidence(X,s){const I=X.intelligence;if(!I)return '<div class="card"><p class="note">This model was trained before v5.23 and has no evidence analysis. Start a training cycle.</p></div>';
   const F=I.families||{},ab=I.ablation||{},fb=(F.fusion||{}).benefit;
   const famCard=Object.keys(FAM).filter(k=>F[k]).map(k=>{const f=F[k],[t,nm]=FAM[k];return `<h4 style="margin:12px 0 4px">${t}</h4><table data-pv="family-${k}"><tr><th>Model</th><th>AUC</th><th>log loss</th><th>± SE</th><th>calibration slope</th><th>n</th></tr>
@@ -325,7 +300,7 @@ function pvEvidence(X,s){const I=X.intelligence;if(!I)return '<div class="card">
     <table data-pv="ablation"><tr><th>Source</th><th>AUC alone</th><th>AUC of the others without it</th><th>Δ log loss when removed</th><th>95 % CI</th><th></th></tr>${abRows||'<tr><td colspan="6" class="empty">not available</td></tr>'}</table></div>
    <div class="card"><h3 style="margin:0 0 4px">Disagreement - learned from expert reviews</h3><p class="note" style="margin-top:0">For every pair of sources: how many expert-reviewed candidates fell in each pattern and how many of those were cSS (n · % cSS). In the reviewer, each candidate shows its own pattern and this historical rate.</p>
     <table data-pv="disagreement"><tr><th>Pair</th><th>both cSS</th><th>both not</th><th>first only</th><th>second only</th><th>disagree</th><th>right when they disagree</th></tr>${dis}</table></div>
-   <div class="card"><h3 style="margin:0 0 4px">Calibration - does a score of 70 mean 70 % cSS?</h3><p class="note" style="margin-top:0">Mean Percival Score vs the observed cSS rate per decile (with 95 % intervals). Only on this project's expert-reviewed candidates: it is a property of this model on these data, not a validated clinical probability.</p>
+   <div class="card"><h3 style="margin:0 0 4px">Calibration - does a score of 70 mean 70 % cSS?</h3><p class="note" style="margin-top:0">Mean PERCIVAL score vs the observed cSS rate per decile (with 95 % intervals). Only on this project's expert-reviewed candidates: it is a property of this model on these data, not a validated clinical probability.</p>
     <div data-pv="calibration">${pvCal(I.reliability,(X.test||{}).reliability)}</div></div>
    <div class="card"><h3 style="margin:0 0 4px">Expert-review snapshots</h3><p class="note" style="margin-top:0"><b>${s.n_review_snapshots||0}</b> final expert reviews are stored with the exact model outputs available when they were saved (labels never overwritten; whether the score was visible to the reviewer is recorded).</p></div>`}
 
@@ -342,9 +317,9 @@ function pvFlow(s,X){const I=s.inputs||{},n=I.studies||0,F=((X||{}).intelligence
   ${row("3 · Characteristic ML","9 detector measurements per candidate; compares logistic / boosted trees / random forest",st(!!ch("char"),ch("char")?`chosen: ${esc(ch("char"))}`:"trained in the next cycle"))}
   ${row("4 · Image ML","the MRI patch around each candidate; compares a pixel baseline with a small CNN (CNN only if it wins)",st(I.image>0,`${I.image||0} of ${n} studies with image patches${ch("image")?` · chosen: ${esc(ch("image"))}`:""}`))}
   ${row("5 · Fusion","Characteristic + Image ML together (late / feature / hybrid)",st(!!ch("fusion"),ch("fusion")?`chosen: ${esc(ch("fusion"))}`:"trained in the next cycle"))}
-  ${row("→ Percival Score","1-5 combined by a meta-model learned from your expert calls, calibrated, red / yellow / green",st(!!s.active,s.active?`model ${esc(s.active.version)} in use`:"no model in use yet"))}
+  ${row("→ PERCIVAL score","1-5 combined by a meta-model learned from your expert calls, calibrated, red / yellow / green",st(!!s.active,s.active?`model ${esc(s.active.version)} in use`:"no model in use yet"))}
   </table>
-  <p class="note">Labels: your expert calls in Review (cSS = 1; Vessel / Normal / Artifact / Microbleed = 0; Unsure and Near ICH are not used). The other screens under <i>Older prototypes</i> (Training, Predictor model, Shadow ML, Image ML) are the separate research prototypes these parts were developed from; they do <b>not</b> feed the Percival Score. <i>Shadow ML</i> = the earlier Unified-Score engine run in "shadow mode": it computes its predictions next to the pipeline for comparison and never changes a result.</p></div>`}
+  <p class="note">Labels: your expert calls in Review (cSS = 1; Vessel / Normal / Artifact / Microbleed = 0; Unsure and Near ICH are not used). The other screens under <i>Older prototypes</i> (Training, uScore scorer, Stage-1 shadow-mode prototype, Image ML) are the separate research prototypes these parts were developed from; they do <b>not</b> feed the PERCIVAL score. <i>Stage-1 shadow-mode prototype</i> = the earlier Unified-Score engine run in "shadow mode": it computes its predictions next to the pipeline for comparison and never changes a result.</p></div>`}
 
 // ------------------------------------------------------------------ v5.25 Training Center: 14 Modular Sections (Standard & Advanced View)
 const PVR={NOT_REVIEWED:"not reviewed",UNCERTAIN:"Unsure",OUT_OF_SCOPE:"Near ICH (out of scope)",CONFLICT:"reviewers disagree",STUDY_EXCLUDED:"study left out",
@@ -372,7 +347,7 @@ async function pvCenter(el,s,v){
   // Component breakdown for Dataset Builder
   const comp=last?["char","image","fusion","meta","predictor","shadow","detection","segmentation"].filter(k=>(last.components||{})[k]).map(k=>{
     const c=(last.components||{})[k]||{},d=c.development||{},t=c.test||{};
-    const nameMap={char:"Characteristic ML",image:"Image ML",fusion:"Fusion",meta:"Percival Core Meta-model",predictor:"Unified Predictor Score",shadow:"Shadow ML Lab",detection:"ALBUS Candidate Detection",segmentation:"cSS Lesion Segmentation"};
+    const nameMap={char:"Characteristic ML",image:"Image ML",fusion:"Fusion",meta:"PERCIVAL Decision Engine (meta-model)",predictor:"NOX · uScore x1–x5",shadow:"SHADOW evaluation",detection:"ALBUS Candidate Detection",segmentation:"cSS Lesion Segmentation"};
     return `<tr><td><b>${nameMap[k]||k}</b></td><td class="mono">${d.n??0}</td><td class="mono">${d.css??0} / ${d.not_css??0}</td><td class="mono">${d.patients??0}</td><td class="mono">${t.n??0}</td><td class="mono">${t.css??0} / ${t.not_css??0}</td><td class="mono">${t.patients??0}</td></tr>`;
   }).join(""):"";
 
@@ -517,10 +492,10 @@ async function pvCenter(el,s,v){
       return `
       <table style="margin-top:10px">
         <tr><th>Learning Task</th><th>Target Pipeline Component</th><th>Eligible Candidates</th><th>Eligibility Criteria</th><th>Status</th></tr>
-        <tr><td><b>Candidate Classification</b></td><td>LUMOS, NOX &amp; Percival Core</td><td class="mono"><b>${bc.char||bc.meta||O.eligible||0}</b></td><td>Complete feature vector, valid MRI patch, unambiguous expert label</td><td><span class="pill ok">Active</span></td></tr>
+        <tr><td><b>Candidate Classification</b></td><td>LUMOS, NOX &amp; PERCIVAL Decision Engine</td><td class="mono"><b>${bc.char||bc.meta||O.eligible||0}</b></td><td>Complete feature vector, valid MRI patch, unambiguous expert label</td><td><span class="pill ok">Active</span></td></tr>
         <tr><td><b>Candidate Discovery &amp; Detection</b></td><td>ALBUS (Candidate Generator)</td><td class="mono"><b>${(O.candidates||0) + missedList.length}</b></td><td>All ALBUS candidates + reviewer-drawn missed lesions</td><td><span class="pill ok">Active</span></td></tr>
         <tr><td><b>Lesion Segmentation</b></td><td>NOX Morphological Boundary Engine</td><td class="mono"><b>${(L.css_dev||0)+(L.css_test||0) + missedList.length}</b></td><td>Pixel-level pen stroke masks and candidate bounding boxes</td><td><span class="pill ok">Active</span></td></tr>
-        <tr><td><b>Study-Level Siderosis Evaluation</b></td><td>Percival Score Study Aggregator</td><td class="mono"><b>${O.reviewed_studies||0} studies</b></td><td>Finished study review, all candidates verified, missed lesions addressed</td><td><span class="pill ${O.reviewed_studies>0?'ok':'warn'}">${O.reviewed_studies>0?'Ready':'Pending Reviews'}</span></td></tr>
+        <tr><td><b>Study-Level Siderosis Evaluation</b></td><td>PERCIVAL study aggregation</td><td class="mono"><b>${O.reviewed_studies||0} studies</b></td><td>Finished study review, all candidates verified, missed lesions addressed</td><td><span class="pill ${O.reviewed_studies>0?'ok':'warn'}">${O.reviewed_studies>0?'Ready':'Pending Reviews'}</span></td></tr>
       </table>`;
     })()}
   </div>
@@ -633,7 +608,7 @@ async function pvCenter(el,s,v){
     <table>
       <tr><th>Model / Predictor</th><th>Locked-Test AUC</th>${isAdv?`<th>PR-AUC</th><th>Brier Score</th><th>Log Loss</th><th>Calib Slope</th>`:""}<th>Operating Sensitivity</th><th>Operating Specificity</th></tr>
       <tr>
-        <td><b>Percival Score (${esc(Lt.version)})</b></td>
+        <td><b>PERCIVAL score (${esc(Lt.version)})</b></td>
         <td class="mono"><b>${g3(((Lt.test||{}).percival||{}).auc)}</b></td>
         ${isAdv?`<td class="mono">${g3(((Lt.test||{}).percival||{}).pr_auc)}</td><td class="mono">${g3(((Lt.test||{}).percival||{}).brier)}</td><td class="mono">${g3(((Lt.test||{}).percival||{}).logloss)}</td><td class="mono">${g3(((Lt.test||{}).percival||{}).calib_slope)}</td>`:""}
         <td class="mono">${pct(100*((Lt.test||{}).at_red||{}).sensitivity)}%</td>
@@ -849,3 +824,81 @@ async function pvReadiness(el){let R;try{R=await api("/api/percival/readiness")}
   const rows=(R.checks||[]).map(c=>`<tr><td>${c.ok?'<span class="ok">✓</span>':'<span class="bad">✗</span>'}</td><td>${esc(c.name)}</td><td class="note">${esc(c.detail||"")}</td></tr>`).join("");
   el.insertAdjacentHTML("afterbegin",`<div class="card" data-pv="readiness"><h3 style="margin:0 0 4px">Ready for a scientifically defensible training run? ${R.ready?'<span class="ok">yes</span>':'<span class="warn">not yet</span>'}</h3>
    <table>${rows}</table><p class="note">${esc(R.policy||"")}. Synthetic test data never counts as real-data performance.</p></div>`)}
+
+// ------------------------------------------------------------------ PERCIVAL architecture screens (System, ALBUS, PENSIEVE, SHADOW)
+// Every state shown here comes from /api/percival/architecture (what exists in THIS project) - a component is never shown as active because
+// its code exists. Experimental / synthetic results are labelled as such; nothing here trains, promotes or changes a label.
+const ARS={active:["ok","active"],awaiting_data:["warn","awaiting data"],untrained:["warn","untrained"],trained_not_active:["warn","trained · not active"],
+  valid:["ok","trained weights"],off:["","off"],enabled_comparison:["warn","on · comparison only"],built:["ok","built"],not_built:["warn","not built"],available:["ok","available"]};
+const arPill=s=>{const[c,l]=ARS[s]||["",s||"—"];return `<span class="pill ${c}">${esc(l)}</span>`};
+const arWho=()=>localStorage.getItem("cssapp_reviewer")||"";
+async function pvSystem(el){const A=await api("/api/percival/architecture");if(A.error){el.innerHTML=`<div class="card"><p class="bad">${esc(A.error)}</p></div>`;return}
+  const R=await api("/api/percival/components_report");
+  el.innerHTML=`<div class="card" data-pv="system"><h3 style="margin:0 0 4px">PERCIVAL · Integrated cSS AI system</h3>
+   <p class="note" style="margin-top:0">PERCIVAL combines ALBUS mathematical detection, NOX quantitative MRI analysis and LUMOS visual intelligence in one
+   learned decision, remembers every expert decision and prediction in PENSIEVE, and tests proposed improvements in SHADOW before you approve them.
+   States below are read from this project; research software, not for clinical use.</p>
+   <div class="arflow">${A.flow.map((s,i)=>`<span class="arstep">${i+1}. ${esc(s)}</span>`).join('<span class="mut">→</span>')}</div></div>
+   <div class="argrid">${A.components.map(c=>`<div class="card arcard" data-arc="${c.key}"><div class="row" style="justify-content:space-between;align-items:center"><h4 style="margin:0">${esc(c.name)}</h4>${arPill(c.state)}</div>
+     <p class="note" style="margin:6px 0 4px"><b>Implementation:</b> ${esc(c.implementation)}</p>
+     <p class="note" style="margin:0 0 4px">${esc(c.detail||"")}</p>
+     ${c.registry?`<p class="note" style="margin:0 0 4px">Approved configuration: <span class="mono">${esc(c.registry)}</span>${c.registry==="v000"?" (built-in)":""}</p>`:""}
+     ${c.model?`<p class="note" style="margin:0 0 4px">Model <span class="mono">${esc(c.model)}</span> · acceptance ${c.accepted?'<span class="ok">passed</span>':'<span class="warn">not passed</span>'}${c.ready===false?" · below the minimum data":""}</p>`:""}
+     <p class="note" style="margin:0"><b>Validation:</b> ${esc(c.validation||"")}</p></div>`).join("")}</div>
+   <div class="card"><h3 style="margin:0 0 4px">Component evaluation</h3>${!R.available?`<p class="note">${esc(R.reason||"No trained model yet")}. Component metrics appear after the first training cycle on eligible expert labels.</p>`:
+    `<p class="note" style="margin-top:0">${esc(R.basis)} · model <span class="mono">${esc(R.model)}</span>. Locked-test numbers are separate and are evaluated once per model.</p>
+     <table><tr><th>Component</th><th>Engine input</th><th>AUC (development, out-of-fold)</th><th>Version (hash)</th></tr>
+     ${Object.entries(R.components).map(([k,c])=>`<tr><td><b>${esc(c.owner)}</b></td><td>${esc(c.label)}</td><td class="mono">${c.available?g3((c.development_oof||{}).auc):"— (not available)"}</td><td class="mono">${esc(((R.component_versions||{})[k]||{}).sha256||"—")}</td></tr>`).join("")}
+     <tr><td><b>PERCIVAL</b></td><td>decision (${esc(MN[R.percival.chosen_meta_model]||R.percival.chosen_meta_model||"—")})</td><td class="mono">nested ${g3((R.percival.nested_development||{}).auc)} · locked test ${g3((R.percival.locked_test||{}).auc)}</td><td class="mono">${esc(((R.component_versions||{}).meta||{}).sha256||"—")}</td></tr></table>`}</div>`}
+async function pvAlbus(el){const A=await api("/api/percival/albus");const E=Object.entries(A.evaluation||{}).filter(([k])=>k!=="unreadable");
+  el.innerHTML=`<div class="card" data-pv="albus"><h3 style="margin:0 0 4px">ALBUS · Mathematical Detection</h3>
+   <p class="note" style="margin-top:0">The detector (scripts/detect_css.py: candidate generation, rules E1–E30, score_v4) measured per detector version against
+   <b>eligible expert ground truth</b>. ${esc(A.note||"")}</p>
+   <table><tr><th>Detector version</th><th>Studies</th><th>cSS detected</th><th>cSS missed (expert marks)</th><th>Sensitivity [95 % CI]</th><th>False positives / study</th><th>Candidates / study</th><th>Whole-study searches</th></tr>
+   ${E.map(([v,m])=>`<tr><td class="mono">${esc(v)}</td><td>${m.studies.length}</td><td>${m.detected}</td><td>${m.missed}</td><td class="mono">${m.sensitivity==null?"— (no expert-found lesion yet)":g3(m.sensitivity)+(m.sensitivity_ci?` [${g3(m.sensitivity_ci[0])}–${g3(m.sensitivity_ci[1])}]`:"")}</td><td class="mono">${m.fp_per_study??"—"}</td><td class="mono">${m.candidates_per_study??"—"}</td><td>${m.whole_study_searched} / ${m.studies.length}</td></tr>`).join("")||'<tr><td colspan="8" class="empty">No study has a candidate list yet - awaiting MRI processing.</td></tr>'}</table>
+   <p class="note">A new detector version is accepted only if it keeps every eligible cSS the previous version found (sensitivity first, then fewer false positives).
+   Approved versions are recorded below and never applied automatically.</p>
+   <h4 style="margin:12px 0 6px">Approved detector configurations</h4>
+   <table><tr><th>Version</th><th>Event</th><th>By</th><th>Reason</th><th>When</th></tr>${((A.registry||{}).history||[]).map(h=>`<tr><td class="mono">${esc(h.version)}</td><td>${esc(h.event)}</td><td>${esc(h.by)}</td><td>${esc(h.reason||"")}</td><td class="note">${esc(h.at)}</td></tr>`).join("")||'<tr><td colspan="5" class="empty">Built-in detector (v000) - no change approved.</td></tr>'}</table></div>`}
+async function pvPensieve(el){const P=await api("/api/percival/pensieve_index");
+  el.innerHTML=`<div class="card" data-pv="pensieve"><div class="row" style="justify-content:space-between;align-items:center"><div><h3 style="margin:0 0 4px">PENSIEVE · AI Memory and History</h3>
+   <p class="note" style="margin:0">One memory per project, rebuilt from the authoritative records (reviewer journals, call ledger, missed-cSS marks, prediction ledger).
+   Expert decisions and AI predictions are kept apart; a prediction never becomes a label. The reviewer updates the memory after every save.</p></div>
+   <button class="b" id="pns-rebuild">${P.built?"Rebuild from records":"Build memory"}</button></div>
+   ${!P.built?'<p class="note">Not built yet for this project.</p>':`
+   <div class="row" style="margin:12px 0">${Object.entries(P.counts).map(([k,n])=>`<div class="tile"><div class="n">${n}</div><div class="t">${esc(k.replace("_"," "))}</div></div>`).join("")}</div>
+   <p class="note">Content digest <span class="mono">${esc(P.digest)}</span> (the same records always give the same digest) · expert / prediction separation ${P.separation_ok?'<span class="ok">verified</span>':'<span class="bad">VIOLATED</span>'}
+   ${((P.status||{}).last_update||{}).ok===false?` · <span class="bad">last update failed: ${esc(P.status.last_update.error)}</span>`:""}${(((P.status||{}).last_rebuild||{}).errors||[]).length?` · <span class="warn">${P.status.last_rebuild.errors.length} studies could not be read</span>`:""}</p>
+   <h4 style="margin:12px 0 6px">Detection corrections (from expert decisions)</h4>
+   <table><tr><th>Study</th><th>Event</th><th>Responsible</th><th>Detector version</th><th>Expert basis</th><th>Eligible</th></tr>
+   ${P.corrections.map(c=>`<tr><td class="mono">${esc(c.study_id)}</td><td>${esc(c.event_type.replace(/_/g," "))}</td><td><b>${esc(c.responsible_component)}</b></td><td class="mono">${esc(c.responsible_version)}</td><td class="note">${esc(c.expert_basis)}</td><td>${c.eligible?"yes":"no"}</td></tr>`).join("")||'<tr><td colspan="6" class="empty">No correction recorded yet.</td></tr>'}</table>`}</div>`;
+  $("#pns-rebuild").onclick=async()=>{const r=await api("/api/percival/pensieve_rebuild",{});toast(r.ok?`PENSIEVE rebuilt · digest ${esc(r.digest)}`:`PENSIEVE: ${esc((r.errors||[]).join("; ")||r.error||"failed")}`,!r.ok);pvPensieve(el)}}
+async function pvShadow(el,v){const S=await api("/api/percival/shadow_gov"),H=S.hypotheses||[];
+  const st=h=>({registered:["","registered"],discovery_done:["warn","discovery done · awaiting PERCIVAL confirmation"],confirmed:["ok","confirmed by PERCIVAL"],not_confirmed:["bad","not confirmed"],
+    confirmation_insufficient:["warn","too few confirmation patients"],approved:["ok","approved"],not_implemented:["","experiment not implemented"]})[h.status]||["",h.status];
+  el.innerHTML=`<div class="card" data-pv="shadow-lab"><h3 style="margin:0 0 4px">SHADOW · Experimental Discovery Lab</h3>
+   <p class="note" style="margin-top:0">SHADOW tests one registered hypothesis at a time on <b>discovery</b> patients of the development cohort.
+   PERCIVAL then evaluates it once on separate <b>confirmation</b> patients SHADOW never saw. Only after that, a named person can approve it, which creates a new
+   component version (the previous one stays available for rollback). SHADOW never changes a model, rule or label by itself; locked-test patients are never used.</p>
+   <p class="note">Data: ${esc(S.source)} · ${S.n_examples} eligible development candidates${S.split?` · ${S.split.discovery} discovery / ${S.split.confirmation} confirmation patients`:""} · NOX configuration <span class="mono">${esc((S.nox||{}).version||"v000")}</span></p>
+   <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><b>New hypothesis</b><select id="shg-var">${(S.measurements||[]).map(m=>`<option>${esc(m)}</option>`).join("")||"<option value=\"\">(no measurements yet)</option>"}</select>
+    <input id="shg-why" placeholder="rationale (why this measurement may separate cSS from mimics)" style="min-width:340px"><button class="b" id="shg-reg" ${S.n_examples?"":"disabled title=\"needs eligible expert labels (train PERCIVAL once)\""}>Register</button></div>
+   <table style="margin-top:10px"><tr><th>ID</th><th>Target</th><th>Variable</th><th>Status</th><th>Discovery ΔAUC [CI]</th><th>Confirmation ΔAUC [CI]</th><th></th></tr>
+   ${H.map(h=>{const d=(h.discovery||{}).result||{},c=(h.confirmation||{}).result||{},[pc,pl]=st(h);const ci=x=>x?` [${g3(x[0])}–${g3(x[1])}]`:"";
+     return `<tr><td class="mono">${esc(h.id)}</td><td><b>${esc(h.target_component)}</b></td><td class="mono">${esc((h.variables||[]).join(", "))}</td><td><span class="pill ${pc}">${esc(pl)}</span>${(h.discovery||{}).synthetic?' <span class="pill warn">SYNTHETIC</span>':""}</td>
+      <td class="mono">${d.delta_auc==null?"—":g3(d.delta_auc)+ci(d.delta_auc_ci)}</td><td class="mono">${c.delta_auc==null?"—":g3(c.delta_auc)+ci(c.delta_auc_ci)}</td>
+      <td>${h.status==="registered"?`<button class="b sm" data-shg="discovery" data-id="${esc(h.id)}">Run discovery</button>`:h.status==="discovery_done"?`<button class="b sm" data-shg="confirm" data-id="${esc(h.id)}">PERCIVAL confirmation</button>`:(h.status==="confirmed"||h.status==="not_confirmed")?`<button class="b sm" data-shg="approve" data-id="${esc(h.id)}" data-pass="${h.status==="confirmed"?1:0}">Approve…</button>`:""}</td></tr>`}).join("")||'<tr><td colspan="7" class="empty">No hypothesis registered.</td></tr>'}</table>
+   ${(S.nox||{}).version&&(S.nox||{}).version!=="v000"?`<p class="note">Active NOX configuration ${esc(S.nox.version)} (parent ${esc(S.nox.parent)}) <button class="b sm" id="shg-rb">Roll back…</button></p>`:""}
+   <p class="note">Approved NOX configurations are versioned and reversible. The PERCIVAL Decision Engine still trains on its built-in measurement set; reading the
+   approved configuration during training is the next integration step (not yet active).</p>
+   <details style="margin-top:10px"><summary class="note">Older demonstration trials (SYNTHETIC random cohort - never evidence)</summary><p class="note">${esc(S.legacy_note)}</p>
+    <button class="b sm" id="shd-run">Run a synthetic demonstration trial</button></details></div>`;
+  $("#shg-reg").onclick=async()=>{const r=await api("/api/percival/shadow_gov_register",{target:"NOX",kind:"nox_measurement",variables:[$("#shg-var").value],rationale:$("#shg-why").value,by:arWho()});toast(r.ok?`registered ${esc(r.hypothesis.id)}`:esc(r.error),!r.ok);pvShadow(el,v)};
+  el.querySelectorAll("[data-shg]").forEach(b=>b.onclick=async()=>{const op=b.dataset.shg,id=b.dataset.id;let body={id};
+    if(op==="approve"){const by=(prompt("Approve "+id+" - your name (the approver):",arWho())||"").trim();if(!by)return;const why=(prompt("Reason:")||"").trim();if(!why)return;
+      const c=prompt("Type exactly: APPROVE COMPONENT CHANGE");if(c===null)return;body=Object.assign(body,{by,reason:why,confirm:c.trim(),override:b.dataset.pass!=="1"})}
+    b.disabled=true;const r=await api("/api/percival/shadow_gov_"+op,body);toast(r.ok?`${id}: ${esc(op)} done`:esc(r.error),!r.ok);pvShadow(el,v)});
+  $("#shg-rb")&&($("#shg-rb").onclick=async()=>{const by=(prompt("Roll back NOX - your name:",arWho())||"").trim();if(!by)return;const why=(prompt("Reason:")||"").trim();if(!why)return;
+    const c=prompt("Type exactly: APPROVE COMPONENT CHANGE");if(c===null)return;const r=await api("/api/percival/shadow_gov_rollback",{component:"NOX",by,reason:why,confirm:c.trim()});toast(r.ok?"rolled back":esc(r.error),!r.ok);pvShadow(el,v)});
+  $("#shd-run").onclick=async()=>{const r=await api("/api/percival/shadow_run",{target:"ALBUS",hypothesis:"synthetic demonstration",config:{formula:"formula_adaptive_subpial",threshold:0.45}});
+    toast(r.ok?`Synthetic demonstration finished (not evidence): AUC ${g3((r.metrics_experimental||{}).auc)}`:esc(r.error),!r.ok)}}

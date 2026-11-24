@@ -2,7 +2,9 @@
 Reads production outputs read-only from $CSS_BASE; writes only to $CSS_BASE/uscore (or --out).
 
   python unified_score/run_unified.py extract [ID ...]   features + decomposition + detectors + perturbations (no labels)
-  python unified_score/run_unified.py train              development studies only (manifest: M01-M26 since 2026-11-20): nested LOPO -> model_trained.json (NOT frozen)
+  python unified_score/run_unified.py train --research-unverified
+                                                         DISABLED without the flag (Phase 3D review: no expert-role / consensus / provenance /
+                                                         patient-split safeguards); with it: synthetic research only, model stamped research_only_unverified
   python unified_score/run_unified.py freeze FREEZE      freeze the trained model -> model_frozen.json
   python unified_score/run_unified.py score              frozen model -> categories + per-candidate reports (no labels)
   python unified_score/run_unified.py report             cohort report (development and held-out kept separate)
@@ -36,7 +38,9 @@ if cmd == "extract":
         except FileNotFoundError as e:
             print(f"  {s}: NOT EXTRACTED - {e} (recorded; the study stays in the manifest)")
 elif cmd == "train":
-    M, rep = pl.train(B, C, out)
+    if "--research-unverified" not in rest: sys.exit("  REFUSED: " + pl.TRAINING_DISABLED)                 # Phase 3D review
+    print("  UNVERIFIED RESEARCH RUN - labels are not Phase 3A expert ground truth; the model is stamped research_only_unverified")
+    M, rep = pl.train(B, C, out, research_unverified=True)
     print(f"  model {M['model_hash'][:16]} trained (not frozen); development AUC {rep['outer_auc_calibrated']}, slope {rep['calibration_slope']}, "
           f"probability output {M['probability_output']}")
 elif cmd == "score":

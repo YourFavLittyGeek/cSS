@@ -310,7 +310,9 @@ def label_summary(sid):
             conflicts, historical, state, state_label)"""
     import label_schema as LS
     files = sorted(glob.glob(os.path.join(B(), "review", f"{sid}_*"))) + sorted(glob.glob(os.path.join(B(), "historical", sid, "review", "*")))
-    key = [(os.path.relpath(f, B()), round(os.path.getmtime(f), 3)) for f in files if os.path.isfile(f)]
+    files.append(os.path.join(B(), "review", "project_roles_events.jsonl"))   # I0: expert roles / adjudication permission decide eligibility
+    import review_calls_gui as RCG
+    key = RCG.file_key(files, B())                                           # Phase 3D review: content hashes, not millisecond mtimes
     try: L = _ledger_mod(); pol = L.load_policy(B())
     except Exception as e: return dict(labels={}, detail={}, css=0, mimic=0, unused=0, stale=0, conflicts=0, historical=0, state="error",
                                        state_label="labels unavailable", error=f"{type(e).__name__}: {e}"[:200])
@@ -448,7 +450,8 @@ def _gather(sid, labelled=True):
     cp = os.path.join(B(), "review", f"{sid}_candidates.csv")
     if not os.path.exists(cp): return []
     deps = [cp, os.path.join(B(), "uscore", "features", f"{sid}.json")]
-    key = [round(os.path.getmtime(p), 3) if os.path.exists(p) else 0 for p in deps] + [int(may_read(sid))]
+    import review_calls_gui as RCG
+    key = RCG.file_key(deps, B()) + [int(may_read(sid))]                    # Phase 3D review: content hashes (JSON-stable lists)
     cj, cz = P("cache", f"{sid}.json"), P("cache", f"{sid}.npz"); C = _jl(cj, {})
     if C.get("key") != key or C.get("v") != 3 or not os.path.exists(cz):
         cand = pd.read_csv(cp); pred = _predictors(sid); maps = _maps(sid) if may_read(sid) else {}
@@ -824,7 +827,7 @@ def _train(reason):
             _run_end("insufficient_data", error=msg)
             return dict(ok=False, error=msg, stage="data_needed")
 
-        if not all(may_read(c) for c in sel): raise ValueError("local learning is not switched on (Percival Intelligence › Switch on)")
+        if not all(may_read(c) for c in sel): raise ValueError("local learning is not switched on (PERCIVAL › Switch on local learning)")
         from uengine.percival import datasets as DS, eligibility as EL
         integ = integrity([x["code"] for x in SL if x["n_labelled"] or x.get("n_missed")])     # v5.24: conflicts / duplicates over EVERY labelled study
         dup = set(integ["duplicates"]) & set(sel); rows, exs = [], []
@@ -877,6 +880,8 @@ def _train(reason):
         M["data"].update(dataset=man["id"], dataset_hash_manifest=man["content_hash"], eligibility_rules=EL.RULES_VERSION,
                          split=man.get("split"), leakage_audit=dict(passed=audit["passed"], checks=audit["checks"]),
                          feature_schema=DS.FEATURE_SCHEMA, patch_spec=DS.PATCH_SPEC, code_version=_code_version())
+        from uengine.percival import architecture as AR                       # architecture: component-level version records
+        M["component_versions"] = AR.component_versions(M)
         M["data"]["identity"] = dict(idc, policy="only verified / declared patient identities are used (v5.25)")
         log("registering", 0.9)                                    # last cancellation point: nothing has been written to the registry yet
         M["integrity"] = integ; M["reason"] = reason; M["run_id"] = RUN.get("id"); M["seed"] = 0; M["cnn_epochs"] = int(os.environ.get("CSS_PERCIVAL_EPOCHS", "30")); act = active(); acc = MT.acceptance(M, act); M["acceptance"] = acc
@@ -894,7 +899,7 @@ def _train(reason):
             log(f"{v} made active (test setting)", 0.95)
         else: log(f"{v} registered as {'a candidate (passed the acceptance criteria) - make it active in Model Center' if acc['passed'] else 'experimental: ' + '; '.join(acc['reasons'])}", 0.95)
         _js(P("history.json"), H); _js(P("last_cycle.json"), dict(at=time.strftime("%Y-%m-%d %H:%M:%S"), finished=sorted(sel)))
-        CTX["notify"](f"Percival Score model {v} trained", ("made active" if H[-1]["promoted"] else "waiting for your approval" if acc["passed"] else "experimental") + f" · {M['data']['studies']} studies")
+        CTX["notify"](f"PERCIVAL Decision Engine {v} trained", ("made active" if H[-1]["promoted"] else "waiting for your approval" if acc["passed"] else "experimental") + f" · {M['data']['studies']} studies")
         _transition("finished", progress=1.0, stage="completed")
         _run_end("finished", version=v, dataset=man["id"], acceptance=acc, status=status_all().get(v, {}).get("status"))
         try: eligibility_record()
@@ -922,7 +927,7 @@ def _run_id(sid):
     a = _jl(os.path.join(B(), "runs", sid, "active.json"), {}); return a.get("run_id") or "initial"
 
 
-EXPERIMENTAL_LABEL = "EXPERIMENTAL - ALBUS/LUMOS/NOX/CORE research layer, not validated; never part of the Percival Score"
+EXPERIMENTAL_LABEL = "EXPERIMENTAL · CORE Fixed-Weight Baseline (comparison only, not validated) - never the PERCIVAL prediction"
 
 
 def experimental_core_enabled():
@@ -942,7 +947,7 @@ def _experimental_core(sid, S, rows):
         from uengine.vault import get_vault
         _p = get_pensieve(); _v = get_vault()
         _core = PercivalCoreIntelligence(pensieve=_p, vault=_v); _albus = AlbusDiscoveryEngine(pensieve=_p)
-        _lumos = LumosImageIntelligence(pensieve=_p, vault=_v); _nox = NoxCharacteristicsEngine(pensieve=_p)
+        _lumos = LumosImageIntelligence.from_percival_model(active(), pensieve=_p, vault=_v); _nox = NoxCharacteristicsEngine(pensieve=_p)   # LUMOS = the trained Percival CNN
         for s in S:
             cid = int(s.get("cand_id", 0)); h = str(s.get("hemi", "U"))
             row_match = next((r for r in rows if int(r.get("cand_id", 0)) == cid), {})
@@ -990,7 +995,7 @@ def score_study(sid, M=None):
     study = dict(n_called=len(ids), called_ids=ids, L_score=None, R_score=None, total=None, error="",
                  n_scored=len(valid), n_candidates=len(S))
     if not valid:
-        study.update(status="unassessable", reason="no candidate has a valid Percival Score (insufficient or unavailable evidence) - "
+        study.update(status="unassessable", reason="no candidate has a valid PERCIVAL score (insufficient or unavailable evidence) - "
                                                    "this is not a negative result")
     else:
         study["status"] = "scored"
@@ -1003,7 +1008,7 @@ def score_study(sid, M=None):
     in_tr = sid in set((M.get("data") or {}).get("trained_on") or [])
     rec = dict(study=sid, model=M["version"], run=_run_id(sid), created=time.strftime("%Y-%m-%d %H:%M:%S"), ready=M["ready"], thresholds=M["thresholds"],
                in_training=in_tr, in_training_note="this study's expert labels were used to train this model: its scores are in-sample (optimistic)" if in_tr else "",
-               candidates=S, study_score=study, note=M["note"], kind="AI prediction (Percival Score) - not a human review",
+               candidates=S, study_score=study, note=M["note"], kind="AI prediction (PERCIVAL score) - not a human review",
                provenance=dict(model=M["version"], engine=M.get("engine", ""), dataset=(M.get("data") or {}).get("dataset", "(trained before v5.24 - no manifest)"),
                                feature_schema=(M.get("data") or {}).get("feature_schema", ""), code=(M.get("data") or {}).get("code_version", {}),
                                processing_run=_run_id(sid)))
@@ -1036,8 +1041,8 @@ def score_study_unified(sid):
     """v5.25: Evaluate candidate rows using the reconstructed PercivalCoreIntelligence pipeline.
     Phase 0: EXPERIMENTAL and off by default (Settings features.experimental_core); read-only, never a Percival Score."""
     if not experimental_core_enabled():
-        return dict(ok=False, experimental=True, error="The ALBUS/LUMOS/NOX/CORE layer is experimental and switched off "
-                                                       "(Settings › features.experimental_core). It is not part of the Percival Score.")
+        return dict(ok=False, experimental=True, error="The CORE fixed-weight baseline is experimental and switched off "
+                                                       "(Settings › features.experimental_core). It is never the PERCIVAL score.")
     from uengine.albus import AlbusDiscoveryEngine
     from uengine.lumos import LumosImageIntelligence
     from uengine.nox import NoxCharacteristicsEngine
@@ -1049,7 +1054,7 @@ def score_study_unified(sid):
     vault = get_vault()
     core = PercivalCoreIntelligence(pensieve=pensieve, vault=vault)
     albus = AlbusDiscoveryEngine(pensieve=pensieve)
-    lumos = LumosImageIntelligence(pensieve=pensieve, vault=vault)
+    lumos = LumosImageIntelligence.from_percival_model(active(), pensieve=pensieve, vault=vault)     # LUMOS = the trained Percival CNN
     nox = NoxCharacteristicsEngine(pensieve=pensieve)
 
     rows = gather(sid, labelled=False)
@@ -1293,7 +1298,7 @@ def snapshot_study(sid):
                    read_mode=F.get("read_mode", ""), percival_visible_to_reviewer=F.get("meter_visible", ""), labels=labels,
                    percival_at_review=None if shown is None else dict(model=shown.get("model"), created=shown.get("created"), run=shown.get("run"),
                                                                       candidates=shown.get("candidates"), thresholds=shown.get("thresholds")),
-                   percival_note="no Percival Score existed for this study when the review was saved" if shown is None else "the newest prediction created before the save",
+                   percival_note="no PERCIVAL score existed for this study when the review was saved" if shown is None else "the newest prediction created before the save",
                    candidates=cand, processing=dict(run=_run_id(sid), manifest_sha256=_sha(os.path.join(B(), "review", f"{sid}_manifest.json")),
                                                     candidates_sha256=_sha(os.path.join(B(), "review", f"{sid}_candidates.csv"))),
                    active_model_at_snapshot=active_version(), snapshot_created=time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -1504,3 +1509,171 @@ def shadow_run_trial(target, hypothesis, config):
         "governance_evaluation": eval_res
     }
 
+
+
+# ------------------------------------------------------------------ PERCIVAL architecture (ALBUS / NOX / LUMOS / PERCIVAL / CORE / PENSIEVE / SHADOW)
+def _model_any():
+    """the active model, else the latest trained version (for reports); None when nothing was trained"""
+    M = active()
+    if M: return M
+    vs = versions()
+    return load(vs[-1]) if vs else None
+
+
+def architecture_state():
+    """honest operational state of every component, from what exists in this project (no module counts as active because it exists)"""
+    from uengine.percival import architecture as AR, component_registry as CR
+    from uengine import pensieve_index as PI
+    M = active(); X = _model_any(); SL = selection(); codes = [s["code"] for s in SL]
+    det = [c for c in codes if os.path.exists(os.path.join(B(), "review", f"{c}_candidates.csv"))]
+    vers = {}
+    for c in det: vers.setdefault(AR.detector_version(B(), c).get("version") or "unversioned", []).append(c)
+    feats = sum(os.path.exists(os.path.join(B(), "uscore", "features", f"{c}.json")) for c in det)
+    reg = CR.overview(P()); ps = PI.summary(B())
+    return dict(
+        names=AR.NAMES,
+        components=[
+            dict(key="ALBUS", name=AR.NAMES["ALBUS"], implementation="scripts/detect_css.py (candidate generation, rules E1–E30, score_v4)",
+                 state="active" if det else "awaiting_data", detail=f"{len(det)} studies with a candidate list; detector versions: {len(vers)}",
+                 versions={k: len(v) for k, v in vers.items()}, registry=reg["ALBUS"]["active"]["version"],
+                 validation="sensitivity / missed-lesion recall needs eligible expert reviews" ),
+            dict(key="NOX", name=AR.NAMES["NOX"], implementation="detector measurements (9) + uScore x1–x5 predictors",
+                 state="active" if det else "awaiting_data", detail=f"measurements for {len(det)} studies; x1–x5 extracted for {feats}",
+                 registry=reg["NOX"]["active"]["version"], feature_set=(reg["NOX"]["active"].get("config") or {}).get("feature_set"),
+                 validation="trained inside PERCIVAL" if X else "untrained (no PERCIVAL model yet)"),
+            dict(key="LUMOS", name=AR.NAMES["LUMOS"], implementation="PERCIVAL SmallCNN on MRI patches (the same trained weights)",
+                 state=AR.lumos_state(M)["state"] if M else "untrained", detail=AR.lumos_state(M).get("reason") or AR.lumos_state(M).get("source"),
+                 calibrated=False, validation="component logit; calibrated only within the PERCIVAL decision"),
+            dict(key="PERCIVAL", name=AR.NAMES["ENGINE"], implementation="trainable meta-model + calibration + OOD + thresholds (uengine/percival)",
+                 state=("active" if M else "trained_not_active" if X else "untrained"), model=(M or X or {}).get("version"),
+                 accepted=((M or X or {}).get("acceptance") or {}).get("passed"), ready=(M or X or {}).get("ready"),
+                 detail="no model trained yet" if not X else ("active model " + M["version"] if M else f"{X['version']} trained, not made active (Model Center)"),
+                 validation="locked-test evaluation once per model; acceptance needs approval in Model Center"),
+            dict(key="CORE", name=AR.NAMES["CORE"], implementation="uengine/percival_core.py (fixed weights)",
+                 state="enabled_comparison" if experimental_core_enabled() else "off", detail="comparison only - never the PERCIVAL prediction",
+                 validation="not validated (fixed hand-set weights)"),
+            dict(key="PENSIEVE", name=AR.NAMES["PENSIEVE"], implementation="per-project index rebuilt from journals, call ledger, missed marks, prediction ledger",
+                 state="built" if ps.get("built") else "not_built", detail=(f"{ps['counts']['studies']} studies, {ps['counts']['expert_calls']} expert calls, "
+                                                                           f"{ps['counts']['predictions']} predictions") if ps.get("built") else "press Rebuild",
+                 separation_ok=ps.get("separation_ok"), validation="reproducible: same sources -> same digest"),
+            dict(key="SHADOW", name=AR.NAMES["SHADOW"], implementation="governed discovery: discovery / confirmation patients, PERCIVAL confirmation, human approval",
+                 state="awaiting_data" if not X else "available", detail=f"{len(_shadow_listing())} hypotheses registered",
+                 validation="no discovery claimed without confirmation on separate patients")],
+        flow=["MRI ingestion", "study registration + identity", "preprocessing", "ALBUS detection", "NOX quantitative analysis", "LUMOS visual analysis",
+              "PERCIVAL integrated inference", "blinded expert review", "adjudication + eligible ground truth", "PENSIEVE history", "curated dataset",
+              "training + evaluation", "model registry", "SHADOW discovery", "PERCIVAL confirmation", "human-approved component change"],
+        registry={k: dict(active=v["active"]["version"], versions=v["versions"]) for k, v in reg.items()})
+
+
+def _shadow_listing():
+    from uengine import shadow_governed as SG
+    try: return SG.listing(P())
+    except Exception: return []
+
+
+def candidate_contracts(sid):
+    """one PERCIVAL candidate contract per scored candidate (AI predictions; no patient identifier)"""
+    from uengine.percival import architecture as AR
+    rec = _jl(P("scores", f"{sid}.json"), None)
+    if not rec: return dict(ok=False, error="study not scored by PERCIVAL yet")
+    M = load(rec["model"]) if rec.get("model") in versions() else None
+    rows = {r["cand_id"]: r for r in gather(sid, labelled=False)}
+    import pandas as pd
+    cp = os.path.join(B(), "review", f"{sid}_candidates.csv"); fp = {}
+    if os.path.exists(cp):
+        for r in pd.read_csv(cp).itertuples(): fp[int(r.cand_id)] = {k: float(getattr(r, k)) for k in ("vox_i", "vox_j", "vox_k", "volume_mm3") if hasattr(r, k)}
+    alb = AR.detector_version(B(), sid); out = []
+    for c in rec.get("candidates") or []:
+        row = dict(rows.get(c["cand_id"]) or {}, **fp.get(c["cand_id"], {})); row.pop("patient", None)
+        out.append(AR.candidate_contract(sid, c, row, M, alb))
+    return dict(ok=True, study=sid, model=rec.get("model"), contracts=out)
+
+
+def components_report():
+    from uengine.percival import architecture as AR
+    return AR.component_report(_model_any())
+
+
+def pensieve_index_state():
+    from uengine import pensieve_index as PI
+    return PI.summary(B())
+
+
+def pensieve_index_rebuild():
+    from uengine import pensieve_index as PI
+    r = PI.rebuild(B(), patient_of=lambda c: (identity(c) or {}).get("patient"))
+    log(f"PENSIEVE rebuilt: digest {r['digest']}, {r['counts']}" + (f", {len(r['errors'])} studies not readable" if r["errors"] else ""))
+    return r
+
+
+def pensieve_history(sid, cand_id):
+    from uengine import pensieve_index as PI
+    return PI.history(B(), sid, cand_id)
+
+
+def _shadow_rows():
+    """SHADOW's data: eligible expert labels of DEVELOPMENT patients from the latest dataset manifest + every recorded numeric measurement
+    of the candidate (review/ID_candidates.csv). Locked-test patients are never included."""
+    from uengine.percival import datasets as DS
+    import pandas as pd, numpy as np
+    L = DS.listing(P())
+    if not L: return [], "no dataset yet - train PERCIVAL once (the dataset records the eligible labels)"
+    man = DS.load(P(), L[-1]["id"]); rows = []; cache = {}
+    for e in man["examples"]:
+        if e.get("partition") != "development" or e.get("status") != "eligible" or e.get("y") not in (0, 1) or str(e["cand_id"]).startswith("missed"): continue
+        sid = e["study"]
+        if sid not in cache:
+            cp = os.path.join(B(), "review", f"{sid}_candidates.csv")
+            cache[sid] = pd.read_csv(cp).set_index("cand_id") if os.path.exists(cp) else None
+        t = cache[sid]
+        if t is None or int(e["cand_id"]) not in t.index: continue
+        r = t.loc[int(e["cand_id"])]
+        feats = {k: (float(r[k]) if isinstance(r[k], (int, float, np.integer, np.floating)) and np.isfinite(r[k]) else None) for k in t.columns
+                 if pd.api.types.is_numeric_dtype(t[k])}
+        if "volume_mm3" in feats and feats["volume_mm3"]: feats["log_volume_mm3"] = float(np.log(max(feats["volume_mm3"], 1e-3)))
+        rows.append(dict(study=sid, cand_id=e["cand_id"], patient=e.get("patient"), partition="development", y=int(e["y"]), features=feats))
+    return rows, f"dataset {man['id']}"
+
+
+def shadow_gov_state():
+    from uengine import shadow_governed as SG
+    from uengine.percival import component_registry as CR
+    rows, src = _shadow_rows()
+    cols = sorted({k for r in rows for k, v in r["features"].items() if v is not None})
+    S = SG.split_of(P(), [r["patient"] for r in rows]) if rows else None
+    return dict(hypotheses=SG.listing(P()), source=src, n_examples=len(rows), measurements=cols,
+                split=None if not S else dict(discovery=sum(1 for v in S["assignment"].values() if v == "discovery"),
+                                              confirmation=sum(1 for v in S["assignment"].values() if v == "confirmation")),
+                nox=CR.active(P(), "NOX"), registry=CR.overview(P()), implemented=list(SG.IMPLEMENTED), kinds=list(SG.KINDS),
+                legacy_note="The older Shadow Lab trials run on a random SYNTHETIC cohort and are demonstrations only - never evidence.")
+
+
+def shadow_gov_post(op, d):
+    from uengine import shadow_governed as SG
+    from uengine.percival import component_registry as CR
+    try:
+        if op == "register":
+            return dict(ok=True, hypothesis=SG.register(P(), d.get("target", "NOX"), d.get("kind", "nox_measurement"), d.get("variables") or [],
+                                                         d.get("rationale", ""), created_by="SHADOW (proposed by " + str(d.get("by") or "user") + ")"))
+        rows, _ = _shadow_rows()
+        base = (CR.active(P(), "NOX").get("config") or {}).get("feature_set") or CR.BASELINES["NOX"]["feature_set"]
+        if op == "discovery": return dict(ok=True, hypothesis=SG.run_discovery(P(), d["id"], rows, base))
+        if op == "confirm": return dict(ok=True, hypothesis=SG.confirm(P(), d["id"], rows, actor="PERCIVAL"))
+        if op == "approve":
+            H, V = SG.approve(P(), d["id"], d.get("by", ""), d.get("reason", ""), d.get("confirm", ""), override=bool(d.get("override")))
+            return dict(ok=True, hypothesis=H, version=V)
+        if op == "rollback":
+            return dict(ok=True, active=CR.rollback(P(), d.get("component", "NOX"), d.get("by", ""), d.get("reason", ""), d.get("confirm", "")))
+        return dict(ok=False, error=f"unknown op {op}")
+    except (SG.ShadowError, CR.RegistryError, KeyError) as e: return dict(ok=False, error=str(e))
+
+
+def albus_state():
+    from uengine import albus_detection as AD
+    from uengine.percival import component_registry as CR
+    codes = [s["code"] for s in selection() if os.path.exists(os.path.join(B(), "review", f"{s['code']}_candidates.csv"))]
+    ev = AD.evaluate(B(), codes)
+    for v in ev.values(): v.pop("per_study", None)
+    return dict(evaluation=ev, registry=CR.overview(P())["ALBUS"],
+                note="Sensitivity counts only lesions experts found (detected + expert-marked missed); an approved detector version is recorded, "
+                     "never applied automatically.")

@@ -143,6 +143,19 @@ def ai_opinion(r):
     return dict(score=round(s, 2), band=band, suspect=suspect, reason=", ".join(why), source=src, tier=tier)
 
 
+
+def _pensieve_update(sid):
+    """PENSIEVE (architecture integration): replace this study's memory from the authoritative records (journals, call ledger, missed
+    marks, prediction ledger). The old direct writes (duplicate rows per save, mismatched candidate ids, blind provenance lost, errors
+    swallowed) are gone. A failure is recorded in percival/pensieve/status.json and logged here - the review itself is already saved."""
+    try:
+        from uengine import pensieve_index as PI
+        r = PI.update_study(B, sid)
+        if not r.get("ok"): sys.stderr.write(f"[PENSIEVE] {sid}: memory NOT updated - {r.get('error')} (see percival/pensieve/status.json)\n")
+        return r
+    except Exception as e:
+        sys.stderr.write(f"[PENSIEVE] {sid}: memory NOT updated - {type(e).__name__}: {e}\n"); return dict(ok=False, error=str(e))
+
 class Study:
     def __init__(self, sid):
         self.sid = sid
@@ -189,9 +202,10 @@ class Study:
         if getattr(self, "_aud_xl", None) is None:
             xp, xn = f"{B}/review/{self.sid}_excluded.csv", f"{B}/review/{self.sid}_excluded.nii.gz"
             xd = pd.read_csv(xp) if os.path.exists(xp) else pd.DataFrame()
-            if len(xd) and "excl_id" in xd.columns and os.path.exists(xn):
-                self._aud_xl = self._grid(xn, order=0).astype(np.int32); self._aud_xd = xd
-            else: self._aud_xl = np.zeros(1, np.int32); self._aud_xd = pd.DataFrame()
+            if len(xd) and "excl_id" in xd.columns and os.path.exists(xn): xl = self._grid(xn, order=0).astype(np.int32)
+            else: xl, xd = np.zeros(1, np.int32), pd.DataFrame()
+            # set _aud_xd BEFORE _aud_xl: a concurrent request tests _aud_xl and then reads _aud_xd (race seen as AttributeError)
+            self._aud_xd = xd; self._aud_xl = xl
         return self._aud_xd, self._aud_xl
 
     def audit_ids(self, reviewer):
@@ -519,26 +533,7 @@ class Study:
                         client_meter="" if ai is None else str(ai), **info)
         CL.materialize(B, self.sid, by=reviewer, rescore=False)                  # v5.15: shared ID_calls.csv = effective calls (no re-score per click)
 
-        # v5.25 Synchronize candidate review calls into PENSIEVE memory
-        try:
-            from uengine.pensieve import get_pensieve
-            p_mem = get_pensieve()
-            for cid_k, cinfo in calls.items():
-                call_norm = norm_call(cinfo.get("call", ""))
-                if call_norm:
-                    call_type = "definite_css" if call_norm == "cSS" else "not_css" if call_norm in ("Vessel", "Normal", "Artifact", "Mimic", "Microbleed") else "uncertain"
-                    lesion_type = cinfo.get("fine") or ("superficial_siderosis" if call_norm == "cSS" else "mimic")
-                    p_mem.record_expert_annotation(
-                        study_id=self.sid,
-                        reviewer_id=reviewer,
-                        call=call_type,
-                        candidate_uid=f"{self.sid}_cand_{cid_k}",
-                        lesion_type=lesion_type,
-                        confidence="high" if call_norm != "Unsure" else "uncertain",
-                        provenance=f"reviewer_web_{cinfo.get('time', now())}"
-                    )
-        except Exception as e_pen:
-            sys.stderr.write(f"[PensieveSync] Candidate call recording notice: {e_pen}\n")
+        _pensieve_update(self.sid)                                               # PENSIEVE: derived index rebuilt from the journaled records
 
         if cand_id is not None:
             v = calls.get(cand_id, {}); lp = f"{B}/review/{self.sid}_review_log.csv"
@@ -1094,24 +1089,7 @@ class H(BaseHTTPRequestHandler):
                         RIO.journal_append(B, s.sid, rev, "final", file=os.path.relpath(final_path(s.sid, rev), B), record=fin)
                         RIO.atomic_write_json(final_path(s.sid, rev), fin)
 
-                    # v5.25 Synchronize study review completion status into PENSIEVE memory
-                    try:
-                        from uengine.pensieve import get_pensieve
-                        p_mem = get_pensieve()
-                        cand_done = "all_reviewed" if res["unread"] == 0 else "incomplete"
-                        m_done = "missed_drawn" if int(len(res["missed"])) > 0 else "none_found"
-                        overall = "expert_review_completed" if cand_done == "all_reviewed" else "candidate_review_done"
-                        p_mem.set_study_review_status(
-                            study_id=s.sid,
-                            candidate_review=cand_done,
-                            missed_assessment=m_done,
-                            adjudication="not_needed",
-                            overall_status=overall,
-                            reviewer_id=rev,
-                            completed_at=time.time()
-                        )
-                    except Exception as e_pst:
-                        sys.stderr.write(f"[PensieveSync] Study review status recording notice: {e_pst}\n")
+                    _pensieve_update(s.sid)                                       # PENSIEVE: completion is read from the journals
 
                     import css_report
                     out, n, xl = css_report.build(B); res["final"] = fin; res["report"] = f"{out}.csv{xl}"

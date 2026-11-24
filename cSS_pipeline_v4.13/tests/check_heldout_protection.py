@@ -40,19 +40,19 @@ check("refusals are logged with granted=0", all(l.endswith(",0") for l in log[1:
 # 3 training reads development labels only (spy on the private reader)
 seen = []; real = cm._read_calls
 cm._read_calls = lambda base, sid, tab: (seen.append(sid), real(base, sid, tab))[1]
-try: M1, _ = pl.train(B, C, out)
+try: M1, _ = pl.train(B, C, out, research_unverified=True)
 finally: cm._read_calls = real
 check("training: labels read for development studies only", set(seen) == set(dev), f"read {sorted(set(seen))}")
-check("training refuses a held-out-mode boundary", raises(lambda: pl.train(B, C, out, labels_access=type("X", (), {"mode": "heldout_evaluation"})()), cm.CohortError))
+check("training refuses a held-out-mode boundary", raises(lambda: pl.train(B, C, out, research_unverified=True, labels_access=type("X", (), {"mode": "heldout_evaluation"})()), cm.CohortError))
 
 # 4 held-out labels cannot influence development: flip every held-out label, retrain -> identical model
 for s in ho:
     p = f"{B}/review/{s}_calls.csv"; rows = list(csv.DictReader(open(p)))
     for r in rows: r["call"] = "Vessel" if r["call"] == "cSS" else "cSS"
     with open(p, "w", newline="") as f: w = csv.DictWriter(f, fieldnames=list(rows[0])); w.writeheader(); w.writerows(rows)
-M2, _ = pl.train(B, C, os.path.join(B, "uscore_flip")) if False else (None, None)
+M2, _ = pl.train(B, C, os.path.join(B, "uscore_flip"), research_unverified=True) if False else (None, None)
 out2 = os.path.join(B, "uscore_flip"); shutil.copytree(f"{out}/features", f"{out2}/features")
-M2, _ = pl.train(B, C, out2)
+M2, _ = pl.train(B, C, out2, research_unverified=True)
 check("flipping every held-out label leaves the trained model identical (same hash)", M1["model_hash"] == M2["model_hash"])
 
 # 5 freezing and the held-out boundary

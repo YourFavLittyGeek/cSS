@@ -31,7 +31,7 @@ const SETTINGS_SECTIONS = [
   { id: "a_setup", group: "3. Pipeline Configuration", title: "Installation & Setup Center", desc: "Targeted discovery, Python 3.11, FreeSurfer 8.2, licenses, and readiness matrix.", keywords: "setup wizard freesurfer licence installation preflight discovery validation" },
   { id: "b_pipeline", group: "3. Pipeline Configuration", title: "Pipeline & Reviewer Settings", desc: "Quality indicators, duplicate checks, and radiologist review viewer settings.", keywords: "pipeline features duplicate qc_snapshot preflight reviewer" },
   { id: "d_models", group: "3. Pipeline Configuration", title: "Neural Models & Checkpoints", desc: "Active and historical neural network weights, calibrations, and checkpoints.", keywords: "models checkpoints weights calibration albus lumos nox percival" },
-  { id: "d_advanced", group: "3. Pipeline Configuration", title: "Advanced Prototypes", desc: "Shadow ML laboratory, unified scoring prototypes, and experimental flags.", keywords: "shadow_ml research experimental prototypes unified_score" },
+  { id: "d_advanced", group: "3. Pipeline Configuration", title: "Advanced Prototypes", desc: "SHADOW · Discovery Lab demonstrations, the uScore scorer prototype, and experimental flags.", keywords: "shadow_ml research experimental prototypes unified_score" },
 
   // Group 4: Storage & Data Management
   { id: "c_overview", group: "4. Storage & Data Management", title: "Storage Overview", desc: "Authoritative capacity metrics distinguishing volume, archive, workspace, and Pensieve.", keywords: "storage overview bars capacity disk mac hdd free space usage gb tb" },
@@ -1385,7 +1385,7 @@ async function renderSectionTraining(el) {
   el.innerHTML = `
     <div class="card" style="padding:18px">
       <b>Training &amp; Dataset Management</b>
-      <p class="note">Direct route to the 14-section modular Training Centre in Percival Intelligence.</p>
+      <p class="note">Direct route to the 14-section modular Training Center in PERCIVAL.</p>
       <button class="b pri" onclick="go('intel')">Open Training Centre ▸</button>
     </div>
   `;
@@ -1395,7 +1395,7 @@ async function renderSectionModels(el) {
   el.innerHTML = `
     <div class="card" style="padding:18px">
       <b>Models &amp; Calibrated Weights</b>
-      <p class="note">Inspect neural network architectures for ALBUS, LUMOS, NOX, and PERCIVAL CORE.</p>
+      <p class="note">Inspect the PERCIVAL components: ALBUS detection, NOX measurements, the LUMOS network and the CORE fixed-weight baseline.</p>
     </div>
   `;
 }
@@ -1409,7 +1409,7 @@ async function renderSectionAdvanced(el) {
       <div class="row">
         <label style="display:flex;gap:8px;align-items:center;cursor:pointer">
           <input type="checkbox" id="adv-proto" ${F.show_prototypes ? 'checked' : ''}>
-          Show older research prototypes in navigation (Training, Unified Score, Shadow ML, Image ML)
+          Show older research prototypes in navigation (Training, uScore scorer, Stage-1 prototype, Image ML)
         </label>
       </div>
     </div>
