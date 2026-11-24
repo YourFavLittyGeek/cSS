@@ -205,9 +205,14 @@ def model_info():
     return i
 
 
+SCORER_RETIRED = ("the uScore separate scorer is RETIRED in the app (docs/engineering/DEPRECATIONS.md): no in-app training, freezing or "
+                  "cohort scoring. Its x1-x5 extractors stay as NOX inputs of the PERCIVAL Decision Engine. Research only: "
+                  "unified_score/run_unified.py train --research-unverified / freeze FREEZE / score.")
+
+
 def freeze(confirm):
-    from uscore import pipeline as pl
-    return pl.freeze(OUT, confirm)
+    """Stage 1: retired in the app (refuses, writes nothing)"""
+    return dict(ok=False, retired=True, error=SCORER_RETIRED)
 
 
 def heldout_status():
@@ -221,6 +226,10 @@ def heldout_status():
 
 # ------------------------------------------------------------------ 4 candidates / patient step (fail-safe)
 def score_all():
+    return dict(ok=False, retired=True, error=SCORER_RETIRED)
+
+
+def _score_all_cli():                                         # retired app job body, kept for reference (CLI: run_unified.py score)
     def run():
         _cli("score", ["score"], 6 * 3600); return dict(scored=True)
     return start("score", run)

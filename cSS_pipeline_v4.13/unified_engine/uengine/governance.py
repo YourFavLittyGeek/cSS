@@ -28,9 +28,10 @@ from uengine.vault import get_vault, PercivalDataVault
 class PercivalGovernance:
     def __init__(self, pensieve: Optional[PensieveCoreMemory] = None,
                  vault: Optional[PercivalDataVault] = None):
-        self.pensieve = pensieve or get_pensieve()
-        self.vault = vault or get_vault()
-        self.version = "governance-5.25.0"
+        from uengine.legacy_guard import NullPensieve, NullVault          # retired: never the global legacy memory or the external Vault
+        self.pensieve = pensieve or NullPensieve()
+        self.vault = vault or NullVault()
+        self.version = "governance-5.25.0-retired"
         self._promotion_history: List[Dict[str, Any]] = []
 
     def evaluate_proposal(self, proposal: GovernanceProposal) -> Dict[str, Any]:
@@ -85,82 +86,25 @@ class PercivalGovernance:
             }
         }
 
+    RETIRED = ("governance.py promotion is RETIRED (docs/engineering/DEPRECATIONS.md): it never writes an 'active' record, the "
+               "legacy PENSIEVE or the Data Vault. Component changes go through SHADOW (shadow_governed.py) and the component "
+               "registry (named human approval, typed confirmation, rollback).")
+
     def promote_proposal(self, proposal: GovernanceProposal,
                          approver_id: str, reason: str,
                          override: bool = False) -> Tuple[bool, str]:
-        """Promote an approved proposal into the active system configuration."""
+        """RETIRED: evaluates the proposal for the record and refuses. Nothing is promoted, nothing is written."""
         eval_result = self.evaluate_proposal(proposal)
-        if not eval_result["all_passed"] and not override:
-            proposal.verdict = "rejected"
-            return False, f"Promotion denied by Governance safety checks: {[c[0] for c in eval_result['checks'] if not c[1]]}"
-
-        new_version = f"{proposal.target_component.lower()}-v{int(time.time())}"
-        proposal.verdict = "approved"
-        proposal.promoted_version = new_version
-        proposal.approval_reason = reason
-
-        record = {
-            "proposal_id": proposal.proposal_id,
-            "promoted_version": new_version,
-            "target_component": proposal.target_component,
-            "approver_id": approver_id,
-            "reason": reason,
-            "override_applied": override,
-            "metrics": eval_result["metrics"],
-            "timestamp": time.time()
-        }
-        self._promotion_history.append(record)
-
-        # Record in PENSIEVE model evolution memory
-        try:
-            with self.pensieve._get_connection() as con:
-                con.execute("""
-                    INSERT INTO model_evolution (version_id, component, architecture_or_formula,
-                                                validation_metrics, active_status, promoted_at, created_at)
-                    VALUES (?, ?, ?, ?, 'active', ?, ?)
-                """, (new_version, proposal.target_component, proposal.hypothesis,
-                      json.dumps(eval_result["metrics"]), time.time(), time.time()))
-        except Exception:
-            pass
-
-        # Update authoritative active configuration in Data Vault
-        if self.vault.is_connected():
-            try:
-                model_dir = self.vault.path("models", proposal.target_component)
-                os.makedirs(model_dir, exist_ok=True)
-                active_cfg_file = os.path.join(model_dir, "promoted_active.json")
-                # Backup previous if exists
-                if os.path.exists(active_cfg_file):
-                    shutil.copy2(active_cfg_file, os.path.join(model_dir, f"backup_before_{new_version}.json"))
-                with open(active_cfg_file, "w") as f:
-                    json.dump(record, f, indent=2)
-            except Exception:
-                pass
-
-        return True, f"Successfully promoted {proposal.target_component} to active version {new_version}."
+        proposal.verdict = "not_applied_retired" if eval_result["all_passed"] else "rejected"
+        self._promotion_history.append({
+            "proposal_id": proposal.proposal_id, "target_component": proposal.target_component, "requested_by": approver_id,
+            "reason": reason, "override_requested": bool(override), "checks_passed": bool(eval_result["all_passed"]),
+            "metrics": eval_result["metrics"], "status": "refused_retired", "timestamp": time.time()})
+        return False, self.RETIRED
 
     def rollback(self, target_component: str) -> Tuple[bool, str]:
-        """Revert a component to its previous stable baseline."""
-        reverts = [r for r in self._promotion_history if r["target_component"] == target_component]
-        if not reverts:
-            return False, f"No promotion history to rollback for {target_component}."
-        last = reverts.pop()
-        last["status"] = "rolled_back"
-
-        # Restore previous configuration from Data Vault
-        if self.vault.is_connected():
-            try:
-                model_dir = self.vault.path("models", target_component)
-                active_cfg_file = os.path.join(model_dir, "promoted_active.json")
-                backup_file = os.path.join(model_dir, f"backup_before_{last['promoted_version']}.json")
-                if os.path.exists(backup_file):
-                    shutil.copy2(backup_file, active_cfg_file)
-                elif os.path.exists(active_cfg_file):
-                    os.remove(active_cfg_file)
-            except Exception:
-                pass
-
-        return True, f"Rolled back {target_component} from {last['promoted_version']} to previous stable baseline."
+        """RETIRED: there is never anything to roll back (promotion is retired); use component_registry.rollback()."""
+        return False, self.RETIRED
 
     def get_audit_trail(self) -> List[Dict[str, Any]]:
         return list(self._promotion_history)

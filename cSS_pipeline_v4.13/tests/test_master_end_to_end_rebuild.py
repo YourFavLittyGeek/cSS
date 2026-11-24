@@ -145,12 +145,10 @@ class TestMasterEndToEndRebuild(unittest.TestCase):
             approver_id="Chief_Neuroimaging_Scientist",
             reason="Validated gain in sensitivity without false positive inflation.", override=True     # explicit, recorded override
         )
-        self.assertTrue(promoted)
-        self.assertEqual(proposal.verdict, "approved")
-
-        # Rollback capability test
+        self.assertFalse(promoted)                                             # Stage 1: governance promotion retired (refuses)
+        self.assertNotEqual(proposal.verdict, "approved")
         rb_ok, rb_msg = governance.rollback("ALBUS")
-        self.assertTrue(rb_ok)
+        self.assertFalse(rb_ok)
 
         print("--- STEP 10: External Storage Disconnection & Recovery ---")
         # Safe ejection

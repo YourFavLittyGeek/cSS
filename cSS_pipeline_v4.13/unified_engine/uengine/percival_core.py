@@ -31,8 +31,8 @@ class PercivalCoreIntelligence:
                  calibration_params: Optional[Tuple[float, float]] = None,
                  pensieve: Optional[PensieveCoreMemory] = None,
                  vault: Optional[PercivalDataVault] = None):
-        self.pensieve = pensieve or get_pensieve()
-        self.vault = vault or get_vault()
+        self.pensieve = pensieve if pensieve is not None else __import__('uengine.legacy_guard', fromlist=['NullPensieve']).NullPensieve()   # Stage 1: never the global legacy memory by default
+        self.vault = vault if vault is not None else __import__('uengine.legacy_guard', fromlist=['NullVault']).NullVault()   # Stage 1: never the external Vault by default
         self.version = "percival-core-5.25.0"
         
         # Integration weights (learned across ALBUS, LUMOS, NOX, and absorbed Epoximise interactions)

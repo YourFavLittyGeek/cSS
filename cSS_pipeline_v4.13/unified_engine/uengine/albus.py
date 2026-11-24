@@ -76,7 +76,7 @@ class AlbusDiscoveryEngine:
         self.formula_id = formula_id
         self.base_threshold = float(threshold)
         self.threshold = float(threshold)
-        self.pensieve = pensieve or get_pensieve()
+        self.pensieve = pensieve if pensieve is not None else __import__('uengine.legacy_guard', fromlist=['NullPensieve']).NullPensieve()   # Stage 1: never the global legacy memory by default
         self.version = "albus-5.25.0"
         self.adaptive_multiplier = 1.0
         self.active_learning_history: List[Dict[str, Any]] = []

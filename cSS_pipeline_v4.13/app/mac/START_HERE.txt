@@ -1,7 +1,11 @@
-cSS Pipeline app - first start (no Terminal)
-1. Drag "cSS Pipeline.app" into Applications.
-2. The first time only: right-click it -> Open -> Open (macOS asks because the app is not from the App Store).
-3. Home screen: Setup check. If FreeSurfer shows ✗, go to Settings -> FreeSurfer folder -> Choose... (/Applications/freesurfer/8.2.0).
-4. Home -> "Install / update from zip..." -> choose cSS_pipeline_v5.11.0-phase1_app1.zip (installs the matching pipeline; a backup is kept).
-5. Add patients -> Choose folder... -> check the table -> Review summary -> Start processing.
-Needs: Miniforge with the "css" environment and FreeSurfer 8 (both already on this Mac).
+OBSOLETE (Stage 1 consolidation, 2026-11-24) - see docs/engineering/DEPRECATIONS.md
+
+The frozen "cSS Pipeline.app" bundle that used to live in this folder was removed from the source tree. It contained a
+frozen, pre-Phase-3 copy of the application code WITHOUT the expert-role / consensus / blind-read / training safeguards.
+Its launcher copied that frozen code into ~/css_project/app (rsync --update) every time it started, so opening it could
+silently run old code against a project.
+
+Install the current application with install.sh (backup first) or build a development app with
+tools/build_percival_dev_app.sh. The old bundle can be recovered from git history if ever needed:
+  git checkout 81d9bd4 -- "cSS_pipeline_v4.13/app/mac/cSS Pipeline.app"
+An already-installed /Applications/cSS Pipeline.app is NOT touched by this change.

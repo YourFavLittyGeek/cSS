@@ -1,5 +1,0 @@
-app:      Percival.app  (v5.14.2-rc5 Percival (experimental/unified-gui: UX redesign - Studies, study panel, Activity process manager, tabbed Settings; write guard, production models))
-source:   7e0f5d755a699a977210d3825be79f8720e16831  branch experimental/unified-gui +uncommitted changes
-built:    2026-11-20 15:45 UTC on Linux x86_64
-zip sha256: 88c96cc54759c758d7ddd3ba9d0ed5152e6218b37d09de60515f7380a0fdd3b4
-files:    124

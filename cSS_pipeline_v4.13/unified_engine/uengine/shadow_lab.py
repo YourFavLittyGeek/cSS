@@ -68,9 +68,10 @@ def _compute_classification_metrics(scores: np.ndarray, labels: np.ndarray,
 class ShadowMLLaboratory:
     def __init__(self, pensieve: Optional[PensieveCoreMemory] = None,
                  vault: Optional[PercivalDataVault] = None):
-        self.pensieve = pensieve or get_pensieve()
-        self.vault = vault or get_vault()
-        self.version = "shadow-5.25.0"
+        from uengine.legacy_guard import NullPensieve, NullVault          # retired: synthetic demonstrations never use project memory / the Vault
+        self.pensieve = pensieve or NullPensieve()
+        self.vault = vault or NullVault()
+        self.version = "shadow-5.25.0-demonstration"
         self._experiment_queue: List[ShadowExperiment] = []
         self._completed_experiments: List[ShadowExperiment] = []
         self._proposals: List[GovernanceProposal] = []
@@ -97,25 +98,8 @@ class ShadowMLLaboratory:
 
     def _get_benchmark_cohort(self, seed: int = 42) -> Tuple[List[Dict[str, float]], np.ndarray, int]:
         """Retrieve development partition candidate data or generate deterministic cohort."""
-        dev_rows = self.pensieve.get_training_dataset("development")
-        if len(dev_rows) >= 20 and len(set(r.get("call") for r in dev_rows)) >= 2:
-            features = []
-            labels = []
-            for r in dev_rows:
-                meas = json.loads(r.get("nox_measurements") or "{}")
-                features.append({
-                    "pial_distance": meas.get("pial_distance_mm", 1.0),
-                    "darkness_z": meas.get("darkness_z", -1.5),
-                    "tube_ratio": meas.get("elongation", 1.5),
-                    "cortex_frac": meas.get("cortex_fraction", 0.5),
-                    "skeleton_length": meas.get("skeleton_length_mm", 4.0),
-                    "edge_contrast": meas.get("edge_contrast", 0.4)
-                })
-                labels.append(1 if r.get("call") in ("definite_css", "cSS", "1") else 0)
-            n_patients = len(set(r.get("patient_pseudo_id") for r in dev_rows))
-            self.last_cohort = "pensieve (unverified labels: any non-cSS call counted as 0)"
-            return features, np.array(labels, dtype=int), max(1, n_patients)
-
+        # Stage 1 (retired): the fixed trials never read labels any more. The old path read the legacy PENSIEVE 'development' rows and
+        # counted every non-cSS call (including Unsure) as 0 - unverified labels. Governed discovery on expert labels: shadow_governed.py.
         # Reproducible synthetic neuroimaging benchmark cohort
         self.last_cohort = "SYNTHETIC (random benchmark cohort - not real data)"          # Phase 3D: always labelled as synthetic
         rng = np.random.default_rng(seed)

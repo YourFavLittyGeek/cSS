@@ -83,7 +83,7 @@ class TestAdversarialScientificAcceptance(unittest.TestCase):
         self.assertIn("identical to baseline", str(eval_report["checks"]))
 
     def test_governance_persistent_promotion_and_rollback(self):
-        """Approved promotion must create persistent files in Data Vault, and rollback must restore baseline."""
+        """Stage 1: the retired governance promotion refuses (also with an override) and never writes an active record to the Vault."""
         exp = self.shadow.formulate_hypothesis(
             target_component="ALBUS",
             hypothesis_text="Curvilinear enhancement with adaptive thresholding.",
@@ -96,19 +96,14 @@ class TestAdversarialScientificAcceptance(unittest.TestCase):
         refused, _ = self.governance.promote_proposal(proposal, "Chief_Scientist", "no override")
         self.assertFalse(refused)
 
-        # Promote (explicit, recorded override - exercises persistence and rollback)
+        # Stage 1: promotion is RETIRED - even an explicit override is refused and nothing 'active' is written to the Vault
         promoted, msg = self.governance.promote_proposal(proposal, "Chief_Scientist", "Validated gain in cSS recovery", override=True)
-        self.assertTrue(promoted)
+        self.assertFalse(promoted)
+        self.assertIn("RETIRED", msg)
         active_cfg = self.vault.path("models", "ALBUS", "promoted_active.json")
-        self.assertTrue(os.path.exists(active_cfg))
-        with open(active_cfg) as f:
-            saved = json.load(f)
-        self.assertEqual(saved["target_component"], "ALBUS")
-
-        # Rollback
+        self.assertFalse(os.path.exists(active_cfg))
         rb_ok, rb_msg = self.governance.rollback("ALBUS")
-        self.assertTrue(rb_ok)
-        self.assertIn("Rolled back", rb_msg)
+        self.assertFalse(rb_ok)
 
     # =========================================================================
     # MISSION 3: PERCIVAL CORE IRLS, REGULARIZATION & MISSING-DATA

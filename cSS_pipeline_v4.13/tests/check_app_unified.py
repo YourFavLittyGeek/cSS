@@ -70,9 +70,16 @@ try:
     check("training does NOT freeze", m["trained"] and not m["frozen"])
     v = get("/api/u/validation")
     check("validation labelled CROSS-VALIDATION, gate shown, no held-out read", v["estimate_type"].startswith("CROSS-VALIDATION") and len(v["gate"]) == 3 and v["gate"][2]["ok"])
-    check("freeze refused without the typed word FREEZE", post("/api/u/freeze", {"confirm": "yes"}).get("ok") is False)
-    check("freeze with FREEZE", post("/api/u/freeze", {"confirm": "FREEZE"}).get("ok") is True)
-    post("/api/u/score", {}); j = wait("score"); check("score all extracted studies", j["status"] == "completed", j.get("error", ""))
+    fz = post("/api/u/freeze", {"confirm": "FREEZE"}); sa = post("/api/u/score", {})
+    check("Stage 1: in-app freeze and score-all retired (refused, nothing frozen)", fz.get("ok") is False and fz.get("retired") and sa.get("ok") is False
+          and sa.get("retired") and not os.path.exists(f"{B}/uscore/model_frozen.json"), str(fz)[:160])
+    # research reference path (CLI only): freeze refused without the typed word, then freeze + score for the downstream checks
+    pf = subprocess.run([sys.executable, cli, "freeze", "yes"], env=env, capture_output=True, text=True, timeout=600)
+    check("freeze refused without the typed word FREEZE (CLI)", not os.path.exists(f"{B}/uscore/model_frozen.json"), (pf.stderr or pf.stdout)[-160:])
+    pf = subprocess.run([sys.executable, cli, "freeze", "FREEZE"], env=env, capture_output=True, text=True, timeout=600)
+    check("freeze with FREEZE (CLI)", pf.returncode == 0 and os.path.exists(f"{B}/uscore/model_frozen.json"), (pf.stderr or pf.stdout)[-160:])
+    ps = subprocess.run([sys.executable, cli, "score"], env=env, capture_output=True, text=True, timeout=1800)
+    check("score all extracted studies (CLI)", ps.returncode == 0, (ps.stderr or ps.stdout)[-300:])
     c = get("/api/u/candidates?study=SYN01")["candidates"]
     check("candidate list for a study (4 candidates, valid categories)", len(c) == 4 and all(x["category"] in ("css_compatible", "uncertain", "alternative_high_confidence") for x in c))
     post("/api/u/enable", {"on": True}); post("/api/u/score_patient", {"code": "SYN02"})

@@ -27,8 +27,11 @@ class LumosImageIntelligence:
     def __init__(self, weights: Optional[Dict[str, np.ndarray]] = None,
                  pensieve: Optional[PensieveCoreMemory] = None,
                  vault: Optional[PercivalDataVault] = None):
-        self.pensieve = pensieve or get_pensieve()
-        self.vault = vault or get_vault()
+        # Stage 1 (retired Vault-only loader): without an explicitly passed Vault nothing is read from or written to the external Vault and
+        # nothing goes to the legacy PENSIEVE; production LUMOS = from_percival_model() (the registry CNN weights).
+        from uengine.legacy_guard import NullPensieve, NullVault
+        self.pensieve = pensieve or NullPensieve()
+        self.vault = vault or NullVault()
         self.version = "lumos-5.25.0"
         self.net = SmallCNN()
         self.checkpoint_status = "uncalibrated_baseline"

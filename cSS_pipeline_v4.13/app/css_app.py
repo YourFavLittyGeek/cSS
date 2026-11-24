@@ -1046,7 +1046,7 @@ def unified_post(op, d):
         if op == "audit": return UG.start("audit", UG.audit)
         if op == "extract": return UG.extract(d.get("which", "all"))
         if op == "train": return UG.train()
-        if op == "freeze": return dict(ok=True, **UG.freeze(d.get("confirm", "")))
+        if op == "freeze": return UG.freeze(d.get("confirm", ""))                                    # Stage 1: retired (refuses)
         if op == "score": return UG.score_all()
         if op == "score_patient":
             p = next((x for x in PAT if x["code"] == d["code"]), None)

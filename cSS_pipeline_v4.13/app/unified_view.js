@@ -24,7 +24,7 @@ async function uniView(v,keep){
   clearTimeout(U.timer);const y=window.scrollY,openD=[...document.querySelectorAll("#u-step details")].map(d=>d.open);
   const st=await api("/api/u/state");U.st=st;U.sig=uSig(st);
   const banner=st.synthetic?`<div class="card" style="border-color:var(--bad);background:color-mix(in srgb,var(--bad) 12%,transparent)"><b class="bad">SYNTHETIC DEMO</b> — SYN studies only. Nothing on this page is a result.</div>`:"";
-  v.innerHTML=`${banner}<div class="row" style="justify-content:space-between"><div><b style="font-size:17px">Unified cSS scoring</b> <span class="pill warn">EXPERIMENTAL · research only · not a diagnosis</span>
+  v.innerHTML=`${banner}<div class="row" style="justify-content:space-between"><div><b style="font-size:17px">uScore scorer (retired prototype)</b> <span class="pill warn">RETIRED · research only · not a diagnosis</span><div class="note">In-app training, freezing and cohort scoring are retired. The five x1–x5 measurements remain as NOX inputs of the PERCIVAL Decision Engine. See docs/engineering/DEPRECATIONS.md.</div>
     <span class="pill ok" id="u-supp">suppression: ${st.suppression?"ON":"OFF"}</span> <span class="pill" title="${esc(st.heldout.why)}">held-out: locked</span> <button class="b sm" onclick="typeof openCalls==='function'&&openCalls()" title="which reviewer's calls are used as training labels">Reviewer calls used for training</button></div>
     <div class="row"><span class="mut">Run after each patient</span>${seg("u-en",[["0","Off"],["1","On"]],st.enabled?"1":"0")}
     ${seg("u-tab",[["flow","Workflow"],["tests","Test protocol"]],U.tab)}</div></div><div id="u-body"></div>`;

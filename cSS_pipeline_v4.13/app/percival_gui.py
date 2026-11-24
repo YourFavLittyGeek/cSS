@@ -936,34 +936,57 @@ def experimental_core_enabled():
     except Exception: return False
 
 
+# Stage 1 (retirement): the legacy ALBUS / NOX engines are thin adapters over the REAL detector measurements of the candidate (the NOX
+# CHAR columns gathered for the PERCIVAL engine). Before, missing measurements were replaced by invented defaults (darkness -1.5, tube 1.5,
+# cortex 0.5 ...) so CORE produced a number for a candidate with no evidence. Now a candidate without the measurements is 'unavailable'.
+# The comparison never writes the legacy PENSIEVE and never touches the external Data Vault (legacy_guard null objects).
+CORE_INPUTS = dict(pial_distance="pial_dist_mm", darkness_z="darkness_z", tube_ratio="tube_ratio", cortex_frac="cortex_frac", tram_frac="tram_frac")
+
+
+def _core_inputs(r):
+    ch = r.get("char") or {}; out = {}; missing = []
+    for k, c in CORE_INPUTS.items():
+        v = ch.get(c)
+        try: v = float(v)
+        except (TypeError, ValueError): v = float("nan")
+        if np.isfinite(v): out[k] = v
+        else: missing.append(c)
+    return (None if missing else out), missing
+
+
+def _core_engines():
+    from uengine.percival_core import PercivalCoreIntelligence
+    from uengine.albus import AlbusDiscoveryEngine
+    from uengine.lumos import LumosImageIntelligence
+    from uengine.nox import NoxCharacteristicsEngine
+    from uengine.legacy_guard import NullPensieve, NullVault
+    _p, _v = NullPensieve(), NullVault()
+    return (PercivalCoreIntelligence(pensieve=_p, vault=_v), AlbusDiscoveryEngine(pensieve=_p),
+            LumosImageIntelligence.from_percival_model(active(), pensieve=_p, vault=_v), NoxCharacteristicsEngine(pensieve=_p))
+
+
+def _core_assess(sid, r, engines):
+    """one candidate through the CORE comparison baseline -> dict (score None + reason when its real inputs are missing)"""
+    _core, _albus, _lumos, _nox = engines
+    raw, missing = _core_inputs(r)
+    if raw is None:
+        return dict(label=EXPERIMENTAL_LABEL, score=None, band=None, status="unavailable", reason="missing NOX measurements: " + ", ".join(missing))
+    cid = int(r.get("cand_id", 0)); h = str(r.get("hemi", "U") or "U")
+    cand_a = _albus.discover_candidate(sid, cid, h, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 0, 0.0, (0, 0, 0, 0, 0, 0), raw)
+    cand_n = _nox.measure_candidate(sid, cid, raw)
+    cand_l = _lumos.analyze_patch(sid, cid, r.get("patch") if isinstance(r.get("patch"), dict) else None)
+    asmt = _core.evaluate_candidate(cand_a, cand_l, cand_n)
+    return dict(label=EXPERIMENTAL_LABEL, score=asmt.percival_score, band=asmt.band,
+                status=asmt.status if asmt.percival_score is not None else "unavailable", uncertainty=asmt.uncertainty, inputs=raw,
+                lumos="trained" if getattr(_lumos, "trained", False) else "untrained")
+
+
 def _experimental_core(sid, S, rows):
     """evaluate the experimental layer for each scored candidate; results go to s['experimental_core'] only"""
     try:
-        from uengine.percival_core import PercivalCoreIntelligence
-        from uengine.albus import AlbusDiscoveryEngine
-        from uengine.lumos import LumosImageIntelligence
-        from uengine.nox import NoxCharacteristicsEngine
-        from uengine.pensieve import get_pensieve
-        from uengine.vault import get_vault
-        _p = get_pensieve(); _v = get_vault()
-        _core = PercivalCoreIntelligence(pensieve=_p, vault=_v); _albus = AlbusDiscoveryEngine(pensieve=_p)
-        _lumos = LumosImageIntelligence.from_percival_model(active(), pensieve=_p, vault=_v); _nox = NoxCharacteristicsEngine(pensieve=_p)   # LUMOS = the trained Percival CNN
+        engines = _core_engines(); by = {int(r.get("cand_id", 0)): r for r in rows}
         for s in S:
-            cid = int(s.get("cand_id", 0)); h = str(s.get("hemi", "U"))
-            row_match = next((r for r in rows if int(r.get("cand_id", 0)) == cid), {})
-            vox = (float(row_match.get("ci", 0)), float(row_match.get("cj", 0)), float(row_match.get("ck", 0)))
-            mm = (float(row_match.get("cx", 0)), float(row_match.get("cy", 0)), float(row_match.get("cz", 0)))
-            raw_f = {"pial_distance": float(row_match.get("pdist", 1.0)), "darkness_z": float(row_match.get("darkness_z", -1.5)),
-                     "tube_ratio": float(row_match.get("tube_ratio", 1.5)), "cortex_frac": float(row_match.get("cortex_frac", 0.5)),
-                     "tram_frac": float(row_match.get("tram_frac", 0.0))}
-            try:
-                cand_a = _albus.discover_candidate(sid, cid, h, vox, mm, int(row_match.get("vol_vox", 10)), float(row_match.get("vol_mm3", 5.0)), (0,0,0,0,0,0), raw_f)
-                cand_n = _nox.measure_candidate(sid, cid, raw_f)
-                cand_l = _lumos.analyze_patch(sid, cid, row_match.get("patch"))
-                asmt = _core.evaluate_candidate(cand_a, cand_l, cand_n)
-                s["experimental_core"] = dict(label=EXPERIMENTAL_LABEL, score=asmt.percival_score, band=asmt.band,
-                                              status=asmt.status if asmt.percival_score is not None else "unavailable",
-                                              uncertainty=asmt.uncertainty)
+            try: s["experimental_core"] = _core_assess(sid, by.get(int(s.get("cand_id", 0)), {}), engines)
             except Exception as e:
                 s["experimental_core"] = dict(label=EXPERIMENTAL_LABEL, score=None, band=None, status="unavailable", error=type(e).__name__)
     except Exception as e:
@@ -1043,58 +1066,14 @@ def score_study_unified(sid):
     if not experimental_core_enabled():
         return dict(ok=False, experimental=True, error="The CORE fixed-weight baseline is experimental and switched off "
                                                        "(Settings › features.experimental_core). It is never the PERCIVAL score.")
-    from uengine.albus import AlbusDiscoveryEngine
-    from uengine.lumos import LumosImageIntelligence
-    from uengine.nox import NoxCharacteristicsEngine
-    from uengine.percival_core import PercivalCoreIntelligence
-    from uengine.pensieve import get_pensieve
-    from uengine.vault import get_vault
-
-    pensieve = get_pensieve()
-    vault = get_vault()
-    core = PercivalCoreIntelligence(pensieve=pensieve, vault=vault)
-    albus = AlbusDiscoveryEngine(pensieve=pensieve)
-    lumos = LumosImageIntelligence.from_percival_model(active(), pensieve=pensieve, vault=vault)     # LUMOS = the trained Percival CNN
-    nox = NoxCharacteristicsEngine(pensieve=pensieve)
-
     rows = gather(sid, labelled=False)
     if not rows:
         return dict(ok=False, error=f"No candidates found for study {sid}")
-
-    assessments = []
+    engines = _core_engines(); assessments = []
     for r in rows:
-        cid = int(r.get("cand_id", 0))
-        hemi = str(r.get("hemi", "U"))
-        raw_feats = {
-            "pial_distance": float(r.get("pdist", r.get("pial_distance", 1.0))),
-            "darkness_z": float(r.get("darkness_z", -1.5)),
-            "tube_ratio": float(r.get("tube_ratio", 1.5)),
-            "cortex_frac": float(r.get("cortex_frac", 0.5)),
-            "tram_frac": float(r.get("tram_frac", 0.0)),
-            "skeleton_length": float(r.get("skeleton_length", 4.0))
-        }
-        vox = (float(r.get("ci", 0)), float(r.get("cj", 0)), float(r.get("ck", 0)))
-        mm = (float(r.get("cx", 0)), float(r.get("cy", 0)), float(r.get("cz", 0)))
-
-        cand_albus = albus.discover_candidate(
-            study_id=sid, cand_id=cid, hemi=hemi,
-            centroid_vox=vox, centroid_mm=mm,
-            volume_vox=int(r.get("vol_vox", 10)),
-            volume_mm3=float(r.get("vol_mm3", 5.0)),
-            bbox=(0, 0, 0, 0, 0, 0),
-            raw_features=raw_feats
-        )
-        cand_nox = nox.measure_candidate(sid, cid, raw_feats)
-
-        # Check patch availability
-        patch_data = None
-        if "patch" in r and isinstance(r["patch"], dict):
-            patch_data = r["patch"]
-        cand_lumos = lumos.analyze_patch(sid, cid, patch_data)
-
-        assessment = core.evaluate_candidate(cand_albus, cand_lumos, cand_nox)
-        assessments.append(assessment.__dict__)
-
+        try: a = _core_assess(sid, r, engines)
+        except Exception as e: a = dict(label=EXPERIMENTAL_LABEL, score=None, status="unavailable", error=type(e).__name__)
+        assessments.append(dict(a, cand_id=int(r.get("cand_id", 0))))
     return dict(ok=True, study=sid, count=len(assessments), assessments=assessments, experimental=True, label=EXPERIMENTAL_LABEL)
 
 
@@ -1383,38 +1362,17 @@ def state():
 # -------------------------------------------------------------
 # PERCIVAL DATA VAULT, PENSIEVE & SHADOW ML BACKEND SERVICES
 # -------------------------------------------------------------
+PENSIEVE_RETIRED = ("the legacy PENSIEVE sqlite memory is retired (docs/engineering/DEPRECATIONS.md); PENSIEVE is the per-project index "
+                    "rebuilt from the authoritative records: /api/percival/pensieve_index")
+
+
 def pensieve_state():
-    from uengine.pensieve import get_pensieve
-    from uengine.vault import get_vault
-    p = get_pensieve()
-    v = get_vault()
-    return {
-        "ok": True,
-        "vault_connected": v.is_connected(),
-        "vault_path": v.root_path,
-        "studies": p.get_all_studies()[:50],
-        "corrections": p.get_all_corrections()[:50],
-        "findings": p.get_all_findings()[:50],
-        "summary": {
-            "albus": p.ask_albus_memory(limit=10),
-            "lumos": p.ask_lumos_memory(limit=10),
-            "nox": p.ask_nox_memory(),
-            "core": p.ask_core_memory(),
-            "shadow": p.ask_shadow_memory()
-        }
-    }
+    """retired legacy tile: answers with the per-project PENSIEVE index summary instead of the global legacy database"""
+    return dict(ok=True, retired=True, message=PENSIEVE_RETIRED, index=pensieve_index_state())
 
 
 def pensieve_query(component):
-    from uengine.pensieve import get_pensieve
-    p = get_pensieve()
-    comp = str(component).lower()
-    if comp == "albus": return p.ask_albus_memory()
-    if comp == "lumos": return p.ask_lumos_memory()
-    if comp == "nox": return p.ask_nox_memory()
-    if comp == "core": return p.ask_core_memory()
-    if comp == "shadow": return p.ask_shadow_memory()
-    return {"error": f"unknown component {component}"}
+    return dict(ok=False, retired=True, error=PENSIEVE_RETIRED, component=str(component))
 
 
 def vault_status():
@@ -1455,12 +1413,21 @@ def vault_backup(destination):
     return {"ok": ok, "message": msg}
 
 
-def shadow_lab_state():
+SHADOW_DEMO_LABEL = ("SYNTHETIC DEMONSTRATION (retired Shadow Lab fixed trials): synthetic benchmark only, never evidence, never "
+                     "promoted, never written to project memory. Governed discovery: SHADOW tab.")
+
+
+def _legacy_lab():
     from uengine.shadow_lab import ShadowMLLaboratory
     from uengine.governance import PercivalGovernance
-    lab = ShadowMLLaboratory()
-    gov = PercivalGovernance()
-    return {
+    from uengine.legacy_guard import NullPensieve, NullVault
+    _p, _v = NullPensieve(), NullVault()
+    return ShadowMLLaboratory(pensieve=_p, vault=_v), PercivalGovernance(pensieve=_p, vault=_v)
+
+
+def shadow_lab_state():
+    lab, gov = _legacy_lab()
+    return {"label": SHADOW_DEMO_LABEL, "retired": True,
         "experiments": [
             {
                 "id": e.experiment_id,
@@ -1493,10 +1460,7 @@ def shadow_lab_state():
 
 
 def shadow_run_trial(target, hypothesis, config):
-    from uengine.shadow_lab import ShadowMLLaboratory
-    from uengine.governance import PercivalGovernance
-    lab = ShadowMLLaboratory()
-    gov = PercivalGovernance()
+    lab, gov = _legacy_lab()
     exp = lab.formulate_hypothesis(target, hypothesis, config or {})
     ok, prop = lab.run_experiment(exp)
     eval_res = gov.evaluate_proposal(prop) if prop else {}
@@ -1506,7 +1470,8 @@ def shadow_run_trial(target, hypothesis, config):
         "metrics_baseline": exp.metrics_baseline,
         "metrics_experimental": exp.metrics_experimental,
         "proposal": prop.__dict__ if prop else None,
-        "governance_evaluation": eval_res
+        "governance_evaluation": eval_res,
+        "label": SHADOW_DEMO_LABEL, "synthetic": True, "promoted": False
     }
 
 

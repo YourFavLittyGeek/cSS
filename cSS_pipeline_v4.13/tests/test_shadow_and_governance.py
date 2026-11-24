@@ -52,13 +52,16 @@ class TestShadowAndGovernance(unittest.TestCase):
             approver_id="Chief_Scientist",
             reason="Verified improvement in sensitivity (+0.02) and false positive reduction (-0.8/scan).", override=True   # explicit override
         )
-        self.assertTrue(promoted)
-        self.assertEqual(proposal.verdict, "approved")
-        self.assertTrue(proposal.promoted_version.startswith("albus-v"))
+        # Stage 1: governance.py promotion is retired - refused even with an override, nothing promoted or written
+        self.assertFalse(promoted)
+        self.assertIn("RETIRED", msg)
+        self.assertNotEqual(proposal.verdict, "approved")
+        self.assertFalse(getattr(proposal, "promoted_version", None))
+        self.assertEqual(self.governance.get_audit_trail()[-1]["status"], "refused_retired")
 
-        # 5. Rollback verification
+        # 5. Rollback: retired too (nothing was promoted)
         rb_ok, rb_msg = self.governance.rollback("ALBUS")
-        self.assertTrue(rb_ok)
+        self.assertFalse(rb_ok)
 
     def test_governance_rejection_on_sensitivity_loss(self):
         # Test that governance rejects an experiment that drops sensitivity

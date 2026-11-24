@@ -42,7 +42,7 @@ VALID_RANGES = {
 
 class NoxCharacteristicsEngine:
     def __init__(self, pensieve: Optional[PensieveCoreMemory] = None):
-        self.pensieve = pensieve or get_pensieve()
+        self.pensieve = pensieve if pensieve is not None else __import__('uengine.legacy_guard', fromlist=['NullPensieve']).NullPensieve()   # Stage 1: never the global legacy memory by default
         self.version = "nox-5.25.0"
         self._custom_extractors: Dict[str, Any] = {}
 
