@@ -42,14 +42,25 @@ from ..ml_component import PenalizedLogistic, MathRecalibration, sigmoid, irls
 from .cnn import SmallCNN
 from . import learners as LR, intelligence as IN
 from .learners import PixelLogistic
+from . import component_api as CI          # Stage 2: the engine reads ALBUS / NOX / LUMOS evidence through one component interface
 
 PREDICTORS = ["x1_vessel_continuity_mm", "x2_core_contrast_nu", "x3_pial_distance_mm", "x4_sulcal_alignment", "x5_extracranial_mm"]
 CHAR = ["darkness_z", "edge_contrast", "pial_dist_mm", "cortex_frac", "tram_frac", "tube_ratio", "elongation_3d", "log_volume_mm3", "local_cont_max_mm"]
 COMPONENTS = ["math", "unified", "char", "image", "fusion"]
 INDEP = ["math", "unified", "char", "image"]
 LAMBDAS = np.logspace(-2, 3, 9)
-SIMPLICITY = ["math_only", "equal_mean", "fusion_only", "stack_logit", "stack_fusion", "stack_reg", "boosted"]
+SIMPLICITY = ["math_only", "equal_mean", "fusion_only", "stack_logit", "stack_fusion", "stack_reg", "stack_unc", "boosted"]
+# Stage 3: learned uncertainty + disagreement. stack_unc = regularised stacking (penalty by nested CV) on the component log-odds with NEUTRAL
+# filling of a missing component (log-odds 0 = no evidence, never a negative) + one missing indicator per component + the components'
+# reliability signals (ALBUS rule fate, NOX missing fraction, LUMOS test-time-augmentation spread) + the |gap| of every component pair.
+REL = ["rel_albus_tier2", "rel_nox_missing", "rel_lumos_spread"]
+PAIRS = [(a, b) for i, a in enumerate(["math", "unified", "char", "image"]) for b in ["math", "unified", "char", "image"][i + 1:]]
 MIN_STUDIES, MIN_CANDIDATES, MIN_PER_CLASS = 30, 100, 10
+SUBGROUPS = ("field_strength", "sequence", "anatomy", "qc")         # Stage 3 calibration subgroups (rows['subgroups'], from review/ID_qc.json)
+ABSTENTION_POLICY = ("PERCIVAL says 'review required' (no score) when >= 2 independent abstention triggers fire: measurements out of distribution, "
+                     "MRI patch out of distribution, strong component disagreement (log-odds SD > 2.5), meta-model ensemble spread > 15 points; "
+                     "or when study image quality is insufficient. One trigger -> 'uncertain' with the score shown. No learned evidence -> "
+                     "'insufficient'. The coverage / accuracy trade-off of the disagreement-based risk is reported on the development cohort.")
 TEST_FRACTION = 0.2
 CAL_LAMBDA = 1.0
 
@@ -171,11 +182,16 @@ def _fusion_X(kind, Xc, il, cl):
     return np.c_[cl, il] if kind == "late" else np.c_[Xc, il] if kind == "feature" else np.c_[Xc, il, cl]
 
 
-def _fusion_cols(kind): return ["char_logit", "image_logit"] if kind == "late" else CHAR + ["image_logit"] if kind == "feature" else CHAR + ["image_logit", "char_logit"]
+def _fusion_cols(kind, cols=None):
+    cols = list(cols or CHAR)
+    return ["char_logit", "image_logit"] if kind == "late" else cols + ["image_logit"] if kind == "feature" else cols + ["image_logit", "char_logit"]
 
 
 def _fit_image(kind, M, y, g, seed, epochs):
     if kind == "pixel_logistic": return PixelLogistic(seed).fit(M, y, g)
+    if kind == "cnn_ensemble":                                             # Stage 3: augmented, class-balanced seed ensemble (LUMOS registry)
+        from .cnn import SeedEnsemble
+        return SeedEnsemble(seed).fit(M, y, g, epochs=epochs)
     return SmallCNN(seed).fit(M, y, g, epochs=epochs)
 
 
@@ -183,15 +199,17 @@ class Components:
     """fit on rows -> predict log-odds of each component (NaN when the component has no input for a row).
     v5.23: the model family of Characteristic ML (logistic / gbt / forest), Image ML (pixel_logistic / cnn) and Fusion (late / feature /
     hybrid) is chosen by component_oof() on patient-grouped CV and passed in; the defaults reproduce v5.22."""
-    def __init__(self, char_kind="logistic", image_kind="cnn", fusion_kind="feature"):
+    def __init__(self, char_kind="logistic", image_kind="cnn", fusion_kind="feature", char_cols=None):
         self.char_kind, self.image_kind, self.fusion_kind = char_kind, image_kind, fusion_kind; self.ood = None; self.image_ood = None
+        self.char_cols = list(char_cols or CHAR)              # Stage 2: the NOX feature list is part of the model (default: the built-in 9)
 
     def fit(self, rows, seed=0, image_logit_oof=None, char_logit_oof=None, cnn_epochs=30):
         y = np.array([r["y"] for r in rows], float); g = [r["patient"] for r in rows]; w = patient_weights(rows)
-        self.math = MathRecalibration().fit(np.array([r["math"] for r in rows], float), y, w)
-        self.unified = _pl_fit(X_of(rows, PREDICTORS, "pred"), y, g, w, PREDICTORS)
-        Xc = X_of(rows, CHAR, "char"); self.char = LR.fit_tabular(self.char_kind, Xc, y, g, w, CHAR, seed)
-        M, have = maps_of(rows); self.image = None
+        NF = CI.NOX.features(rows, char_cols=self.char_cols)
+        self.math = MathRecalibration().fit(CI.ALBUS.features(rows)["math"], y, w)
+        self.unified = _pl_fit(NF["unified"], y, g, w, PREDICTORS)
+        Xc = NF["char"]; self.char = LR.fit_tabular(self.char_kind, Xc, y, g, w, self.char_cols, seed)
+        LF = CI.LUMOS.features(rows); M, have = LF["image"], LF["have"]; self.image = None
         if cnn_epochs and have.sum() >= 20 and len(np.unique(y[have])) == 2:
             try: self.image = _fit_image(self.image_kind, M[have], y[have], np.asarray(g)[have], seed, cnn_epochs)
             except ValueError: self.image = None
@@ -199,8 +217,8 @@ class Components:
         cl = char_logit_oof if char_logit_oof is not None else self._char(Xc)
         self.fusion = None
         if np.isfinite(il).sum() >= 10:
-            self.fusion = _pl_fit(_fusion_X(self.fusion_kind, Xc, il, cl), y, g, w, _fusion_cols(self.fusion_kind))
-        self.ood = IN.OOD().fit(np.c_[Xc, X_of(rows, PREDICTORS, "pred")])
+            self.fusion = _pl_fit(_fusion_X(self.fusion_kind, Xc, il, cl), y, g, w, _fusion_cols(self.fusion_kind, self.char_cols))
+        self.ood = IN.OOD().fit(np.c_[Xc, NF["unified"]])
         self.image_ood = IN.OOD().fit(patch_stats(M[have])) if have.sum() >= 20 else None      # v5.24: patches unlike the training patches
         return self
 
@@ -219,18 +237,20 @@ class Components:
         return out, sp
 
     def predict(self, rows, extras=False):
-        s = np.array([r["math"] for r in rows], float); Z = dict(math=self.math.logit(s))
-        X = X_of(rows, PREDICTORS, "pred"); out = np.full(len(rows), np.nan)
+        NF = CI.NOX.features(rows, char_cols=self.char_cols)
+        Z = dict(math=self.math.logit(CI.ALBUS.features(rows)["math"]))
+        X = NF["unified"]; out = np.full(len(rows), np.nan)
         if self.unified is not None:
             have = np.isfinite(X).any(1)
             if have.any(): out[have] = self.unified.logit(X[have])
-        Z["unified"] = out; Xc = X_of(rows, CHAR, "char"); Z["char"] = self._char(Xc)
+        Z["unified"] = out; Xc = NF["char"]; Z["char"] = self._char(Xc)
         Z["image"], spread = self._img(rows)
         out = np.full(len(rows), np.nan)
         if self.fusion is not None and self.image is not None:
             have = np.isfinite(Z["image"])                                  # fusion is defined only where the image model has an output
             if have.any(): out[have] = self.fusion.logit(_fusion_X(self.fusion_kind, Xc[have], Z["image"][have], Z["char"][have]))
         Z["fusion"] = out
+        for kk, vv in CI.reliability_table(rows, dict(image_spread=spread), char_cols=self.char_cols).items(): Z["rel_" + kk] = vv
         if not extras: return Z
         ood = self.ood.distance(np.c_[Xc, X]) if self.ood is not None else np.full(len(rows), np.nan)
         iood = np.full(len(rows), np.nan)
@@ -241,7 +261,7 @@ class Components:
                        image_ood_limit=self.image_ood.limit if self.image_ood is not None else None)
 
     def to_json(self):
-        return dict(kinds=dict(char=self.char_kind, image=self.image_kind, fusion=self.fusion_kind),
+        return dict(kinds=dict(char=self.char_kind, image=self.image_kind, fusion=self.fusion_kind), char_cols=list(self.char_cols),
                     math=dict(a=self.math.a, b=self.math.b, eps=self.math.eps), unified=LR.tab_json(self.unified), char=LR.tab_json(self.char),
                     image=None if self.image is None else self.image.to_json(), fusion=LR.tab_json(self.fusion),
                     ood=None if self.ood is None else self.ood.to_json(), image_ood=None if self.image_ood is None else self.image_ood.to_json())
@@ -249,7 +269,8 @@ class Components:
     @classmethod
     def from_json(cls, d):
         k = d.get("kinds") or dict(char="logistic", image="cnn", fusion="feature")          # v5.22 models: the old fixed families
-        c = cls(k["char"], k["image"], k["fusion"]); c.math = MathRecalibration(**d["math"]); c.unified = LR.tab_from(d["unified"])
+        c = cls(k["char"], k["image"], k["fusion"], char_cols=d.get("char_cols"))       # models before Stage 2: the built-in CHAR list
+        c.math = MathRecalibration(**d["math"]); c.unified = LR.tab_from(d["unified"])
         c.char = LR.tab_from(d["char"]); c.image = LR.image_model_from(d.get("image"))
         f = d.get("fusion"); c.fusion = c.char if f == "char" else LR.tab_from(f)
         if f == "char": c.fusion = None                                       # v5.22 stored 'char' when no image model existed
@@ -276,26 +297,26 @@ def _common(oofs):
     return m
 
 
-def component_oof(rows, k=5, seed=0, cnn_epochs=30, progress=None, char_kinds=None, image_kinds=None, fusion_kinds=None):
+def component_oof(rows, k=5, seed=0, cnn_epochs=30, progress=None, char_kinds=None, image_kinds=None, fusion_kinds=None, char_cols=None):
     """patient-grouped out-of-fold log-odds of every component for the given (development) rows, and the model-family comparisons
     (Characteristic ML, Image ML, Fusion) on the SAME folds. -> Z, report"""
-    say = progress or (lambda *a: None)
+    say = progress or (lambda *a: None); CC = list(char_cols or CHAR)
     char_kinds = char_kinds or LR.CHAR_KINDS; image_kinds = image_kinds or LR.IMAGE_KINDS; fusion_kinds = fusion_kinds or FUSION_KINDS
     y = np.array([r["y"] for r in rows], float); g = np.array([r["patient"] for r in rows]); w = patient_weights(rows); F = folds(g, k, seed)
-    Xc = X_of(rows, CHAR, "char"); M, have = maps_of(rows); rep = {}
+    Xc = X_of(rows, CC, "char"); M, have = maps_of(rows); rep = {}
     # 1. Image ML families (their OOF logit is an input of Fusion)
-    img = {kd: np.full(len(rows), np.nan) for kd in image_kinds}; spread = np.full(len(rows), np.nan)
+    img = {kd: np.full(len(rows), np.nan) for kd in image_kinds}; spr = {kd: np.full(len(rows), np.nan) for kd in image_kinds}
     for i, (tr, te) in enumerate(F):
         htr, hte = tr[have[tr]], te[have[te]]
         if len(htr) >= 20 and len(np.unique(y[htr])) == 2 and len(hte):
             for kd in image_kinds:
                 try:
                     net = _fit_image(kd, M[htr], y[htr], g[htr], seed + i, cnn_epochs); lg, sp = net.logit_tta(M[hte]); img[kd][hte] = lg
-                    if kd == "cnn": spread[hte] = sp
+                    spr[kd][hte] = sp
                 except ValueError: pass
         say(f"image models fold {i + 1}/{len(F)}", 0.1 + 0.25 * (i + 1) / len(F))
     m = _common(img); ik, ires = _select({kd: np.where(m, v, np.nan) for kd, v in img.items()}, y, g, LR.IMAGE_KINDS)
-    ik = ik or image_kinds[-1]; img_oof = img[ik]
+    ik = ik or image_kinds[-1]; img_oof = img[ik]; spread = spr[ik]
     rep["image"] = dict(chosen=ik, results=ires, n_with_image=int(have.sum()), tta_spread_median=float(np.nanmedian(spread)) if np.isfinite(spread).any() else None,
                         rule="simplest image model within one bootstrap SE of the lowest CV log loss (pixel_logistic < cnn)", compared_on=int(m.sum()))
     # 2. Characteristic ML families
@@ -303,15 +324,15 @@ def component_oof(rows, k=5, seed=0, cnn_epochs=30, progress=None, char_kinds=No
     for i, (tr, te) in enumerate(F):
         if len(np.unique(y[tr])) < 2: continue
         for kd in char_kinds:
-            mdl = LR.fit_tabular(kd, Xc[tr], y[tr], g[tr], w[tr], CHAR, seed + i)
+            mdl = LR.fit_tabular(kd, Xc[tr], y[tr], g[tr], w[tr], CC, seed + i)
             if mdl is not None:
                 hv = np.isfinite(Xc[te]).any(1)
                 if hv.any(): ch[kd][te[hv]] = mdl.logit(Xc[te[hv]])
         say(f"characteristic models fold {i + 1}/{len(F)}", 0.35 + 0.15 * (i + 1) / len(F))
     ck, cres = _select(ch, y, g, LR.CHAR_KINDS); ck = ck or "logistic"
-    final_char = LR.fit_tabular(ck, Xc, y, g, w, CHAR, seed)
+    final_char = LR.fit_tabular(ck, Xc, y, g, w, CC, seed)
     rep["char"] = dict(chosen=ck, results=cres, importance=LR.importance(final_char), rule="simplest model within one bootstrap SE of the lowest CV log loss (logistic < gbt < forest)",
-                       feature_auc={c: auc(y, (Xc[:, j] if np.isfinite(Xc[:, j]).sum() >= 5 else np.full(len(y), np.nan))) for j, c in enumerate(CHAR)})
+                       feature_auc={c: auc(y, (Xc[:, j] if np.isfinite(Xc[:, j]).sum() >= 5 else np.full(len(y), np.nan))) for j, c in enumerate(CC)})
     # 3. every component out-of-fold + Fusion families. Fusion is a second-level model: it is trained on the Characteristic and Image
     #    log-odds of the TRAINING rows, which must themselves be out-of-sample AND must never come from a model that saw the held-out
     #    fold. v5.25 fix (indirect validation leakage): before, the training rows' image log-odds were img_oof[tr] - produced by image
@@ -324,13 +345,13 @@ def component_oof(rows, k=5, seed=0, cnn_epochs=30, progress=None, char_kinds=No
         assert not set(g[tr]) & set(g[te]), "patient in both the training and the held-out fold"
         R = [rows[j] for j in tr]; T = [rows[j] for j in te]
         if len(np.unique(y[tr])) < 2: continue
-        c = Components(ck, ik, fusion_kinds[0]).fit(R, seed, image_logit_oof=np.full(len(tr), np.nan), char_logit_oof=np.zeros(len(tr)), cnn_epochs=0)
+        c = Components(ck, ik, fusion_kinds[0], char_cols=CC).fit(R, seed, image_logit_oof=np.full(len(tr), np.nan), char_logit_oof=np.zeros(len(tr)), cnn_epochs=0)
         P = c.predict(T)
         for k_ in ("math", "unified", "char"): Z[k_][te] = P[k_]
         inner = np.full(len(tr), np.nan); inner_img = np.full(len(tr), np.nan); htr_all = have[tr]
         for itr, ite in folds(g[tr], 3, seed + 31 + i):
             if len(np.unique(y[tr][itr])) < 2: continue
-            mi = LR.fit_tabular(ck, Xc[tr][itr], y[tr][itr], g[tr][itr], w[tr][itr], CHAR, seed)
+            mi = LR.fit_tabular(ck, Xc[tr][itr], y[tr][itr], g[tr][itr], w[tr][itr], CC, seed)
             if mi is not None: inner[ite] = mi.logit(Xc[tr][ite])
             a, b = itr[htr_all[itr]], ite[htr_all[ite]]                  # inner image model: inner-training patients of tr only
             if len(a) >= 20 and len(np.unique(y[tr][a])) == 2 and len(b):
@@ -341,7 +362,7 @@ def component_oof(rows, k=5, seed=0, cnn_epochs=30, progress=None, char_kinds=No
         if np.isfinite(inner_img).sum() >= 10 and hte.any():
             fin = np.isfinite(inner_img)
             for kd in fusion_kinds:
-                f = _pl_fit(_fusion_X(kd, Xc[tr][fin], inner_img[fin], inner[fin]), y[tr][fin], g[tr][fin], w[tr][fin], _fusion_cols(kd))
+                f = _pl_fit(_fusion_X(kd, Xc[tr][fin], inner_img[fin], inner[fin]), y[tr][fin], g[tr][fin], w[tr][fin], _fusion_cols(kd, CC))
                 if f is not None: fu[kd][te[hte]] = f.logit(_fusion_X(kd, Xc[te][hte], img_oof[te][hte], P["char"][hte]))
         fold_prov.append(dict(fold=i, n_train=int(len(tr)), n_heldout=int(len(te)), train_patients=int(len(set(g[tr]))), heldout_patients=sorted(set(map(str, g[te]))),
                               fusion_trained_on=int(np.isfinite(inner_img).sum()), fusion_inputs="inner patient-grouped CV within the training fold"))
@@ -363,6 +384,8 @@ def component_oof(rows, k=5, seed=0, cnn_epochs=30, progress=None, char_kinds=No
                        verdict="fusion improves on the better single model" if hi < 0 else ("fusion is worse than the better single model" if lo > 0 else "no demonstrated improvement"))
     rep["fusion"] = dict(chosen=fk, results=fres, single=sres, benefit=benefit, compared_on=int(mf.sum()), doc=FUSION_DOC,
                          rule="simplest fusion within one bootstrap SE of the lowest CV log loss (late < feature < hybrid)")
+    for kk, vv in CI.reliability_table(rows, dict(image_spread=np.where(np.isfinite(img_oof), spread, np.nan)), char_cols=CC).items():
+        Z["rel_" + kk] = vv                                              # Stage 3: reliability signals, out-of-fold where they are model outputs
     return Z, rep
 
 
@@ -370,6 +393,11 @@ def component_oof(rows, k=5, seed=0, cnn_epochs=30, progress=None, char_kinds=No
 def meta_inputs(Z, kind):
     L = np.c_[[Z[c] for c in INDEP]].T if kind != "stack_fusion" else np.c_[[Z[c] for c in ("math", "unified", "fusion")]].T
     miss = ~np.isfinite(L); Lf = np.where(miss, np.nan, L)
+    if kind == "stack_unc":
+        n = len(L); Ln = np.where(miss, 0.0, L)                          # neutral: a missing component is no evidence, never a negative
+        rel = [np.nan_to_num(np.asarray(Z.get(k, np.zeros(n)), float), nan=0.0) for k in REL]
+        gaps = [np.where(~np.isfinite(Z[a]) | ~np.isfinite(Z[b]), 0.0, np.abs(np.nan_to_num(Z[a]) - np.nan_to_num(Z[b]))) for a, b in PAIRS]
+        return np.c_[Ln, miss[:, 1:].astype(float), np.c_[rel].T, np.c_[gaps].T]
     if kind in ("stack_reg", "boosted"):
         with np.errstate(all="ignore"):
             spread = np.nanstd(Lf, axis=1); gap = np.nanmax(Lf, axis=1) - np.nanmin(Lf, axis=1)
@@ -379,6 +407,7 @@ def meta_inputs(Z, kind):
 
 
 def meta_columns(kind):
+    if kind == "stack_unc": return list(INDEP) + [f"{c}_missing" for c in INDEP[1:]] + list(REL) + [f"gap_{a}_{b}" for a, b in PAIRS]
     base = INDEP if kind != "stack_fusion" else ["math", "unified", "fusion"]
     cols = list(base) + ([f"{c}_missing" for c in base[1:]] if kind in ("stack_logit", "stack_fusion", "stack_reg", "boosted") else [])
     return cols + (["disagreement_spread", "disagreement_gap"] if kind in ("stack_reg", "boosted") else [])
@@ -421,7 +450,7 @@ class Meta:
         elif k == "boosted": self.model = Stumps().fit(X, y, w)
         else:
             pl = PenalizedLogistic(meta_columns(k))
-            self.model = pl.fit_nested(X, y, g, w=w, lambdas=LAMBDAS) if k in ("stack_reg", "stack_fusion") else pl.fit(X, y, 1e-2, w=w)
+            self.model = pl.fit_nested(X, y, g, w=w, lambdas=LAMBDAS) if k in ("stack_reg", "stack_fusion", "stack_unc") else pl.fit(X, y, 1e-2, w=w)
         return self
     def logit(self, Z):
         k = self.kind; X = meta_inputs(Z, k)
@@ -453,6 +482,7 @@ def discover(Z, y, g, w=None, k=5, seed=0):
     pos_pts = len({p for p, t in zip(g, y) if t == 1})
     neg_pts = len({p for p, t in zip(g, y) if t == 0})
     kinds = [s for s in SIMPLICITY if s != "boosted" or (min(n_pos, n_neg) >= 50 and min(pos_pts, neg_pts) >= 8)]
+    if not all(k_ in Z for k_ in REL): kinds = [s for s in kinds if s != "stack_unc"]          # tables without reliability signals
     for kind in kinds:
         oof = np.full(len(y), np.nan)
         for tr, te in folds(g, k, seed + 7):
@@ -506,7 +536,7 @@ def check_partitions(rows):
     if split: raise ValueError(f"patient(s) in both the development and the locked test cohort: {split[:5]} - refused")
 
 
-def train_cycle(rows, version, seed=0, cnn_epochs=30, progress=None, mins=None, nested=True):
+def train_cycle(rows, version, seed=0, cnn_epochs=30, progress=None, mins=None, nested=True, features=None, frozen=None):
     """one complete, reproducible training cycle -> model dict (components + meta + calibration + thresholds + full report)"""
     mins = mins or dict(studies=MIN_STUDIES, candidates=MIN_CANDIDATES, per_class=MIN_PER_CLASS)
     check_partitions(rows)
@@ -515,7 +545,11 @@ def train_cycle(rows, version, seed=0, cnn_epochs=30, progress=None, mins=None, 
     y = np.array([r["y"] for r in dev], float); g = np.array([r["patient"] for r in dev]); w = patient_weights(dev)
     if min(y.sum(), (1 - y).sum()) < 3: raise ValueError(f"both classes are needed (cSS {int(y.sum())}, not cSS {int((1 - y).sum())})")
     say = progress or (lambda *a: None); say("component out-of-fold predictions", 0.08)
-    Z, fam = component_oof(dev, seed=seed, cnn_epochs=cnn_epochs, progress=say)
+    CC = list((features or {}).get("char") or CHAR)                # Stage 2: the approved NOX feature set (component registry), else built-in
+    FZ = {k: v for k, v in (frozen or {}).items() if v}            # Stage 2: frozen component families (component registry) - no re-selection
+    kinds = dict(char_kinds=[FZ["char"]] if "char" in FZ else None, image_kinds=[FZ["image"]] if "image" in FZ else None,
+                 fusion_kinds=[FZ["fusion"]] if "fusion" in FZ else None)
+    Z, fam = component_oof(dev, seed=seed, cnn_epochs=cnn_epochs, progress=say, char_cols=CC, **kinds)
     comp_metrics = {c: metrics(y, sigmoid(Z[c]), g) for c in COMPONENTS}
     say("meta-model discovery", 0.62); D, oofs = discover(Z, y, g, w, seed=seed)
     chosen = D["chosen"]; meta_oof = oofs[chosen]
@@ -528,7 +562,7 @@ def train_cycle(rows, version, seed=0, cnn_epochs=30, progress=None, mins=None, 
                  disagreement=IN.disagreement(Z, y, COMPONENTS), reliability=IN.reliability(y, p_dev), families=fam,
                  note="all analyses on the development cohort's patient-grouped out-of-fold predictions; the locked test cohort is not used")
     say("final fit on the development cohort", 0.7)
-    C = Components(fam["char"]["chosen"], fam["image"]["chosen"], fam["fusion"]["chosen"]).fit(dev, seed, image_logit_oof=Z["image"], char_logit_oof=Z["char"], cnn_epochs=cnn_epochs)
+    C = Components(fam["char"]["chosen"], fam["image"]["chosen"], fam["fusion"]["chosen"], char_cols=CC).fit(dev, seed, image_logit_oof=Z["image"], char_logit_oof=Z["char"], cnn_epochs=cnn_epochs)
     M = Meta(chosen).fit(Z, y, g, w)
     ens = []
     rng = np.random.default_rng(seed + 99); u = np.unique(g)
@@ -548,6 +582,25 @@ def train_cycle(rows, version, seed=0, cnn_epochs=30, progress=None, mins=None, 
                  note="experimental assessment score - trained on this computer on this project's expert reviews; not clinically validated",
                  interpretation="PERCIVAL score = 100 x a CALIBRATED model output on the development cohort. It is a ranking / assessment score, "
                                 "not a validated probability of cSS: calibration is checked on the locked test cohort and only on this project's data.")
+    model["features"] = dict(char=CC, unified=list(PREDICTORS), nox_version=(features or {}).get("nox_version", "v000"),
+                             source="component registry NOX active version" if features else "built-in NOX baseline (v000)")
+    model["component_config"] = dict(
+        ALBUS=dict(input="score_v4 (Platt recalibration, monotone)", registry_version=(features or {}).get("albus_version", "v000")),
+        NOX=dict(char_kind=fam["char"]["chosen"], feature_set=CC, predictors=list(PREDICTORS), frozen="char" in FZ,
+                 registry_version=(features or {}).get("nox_version", "v000")),
+        LUMOS=dict(image_kind=fam["image"]["chosen"], epochs=cnn_epochs, frozen="image" in FZ, registry_version=(features or {}).get("lumos_version", "v000")),
+        PERCIVAL=dict(fusion_kind=fam["fusion"]["chosen"], meta=chosen, frozen_fusion="fusion" in FZ))
+    model["component_interface"] = CI.describe(model)
+    # Stage 3 small-data honesty (development cohort only; the locked test cohort is not used here)
+    from . import analysis as AN
+    model["missing_data"] = AN.by_availability(Z, y, p_dev, g)
+    try: model["learning_curve"] = AN.learning_curve(Z, y, g, chosen, seed=seed)
+    except Exception as e: model["learning_curve"] = dict(error=f"{type(e).__name__}: {e}")
+    sg = {k: [((r.get("subgroups") or {}).get(k)) for r in dev] for k in SUBGROUPS}
+    model["subgroup_calibration"] = AN.subgroup_calibration(y, p_dev, sg)
+    with np.errstate(all="ignore"):
+        Lr = np.c_[[Z[c] for c in INDEP]].T; risk = np.nan_to_num(np.nanstd(Lr, axis=1)) + (~np.isfinite(Lr)).sum(1) * 0.5
+    model["abstention"] = dict(policy=ABSTENTION_POLICY, development=AN.abstention_curve(y, p_dev, risk))
     model["ready"] = model["data"]["studies"] >= mins["studies"] and len(rows) >= mins["candidates"] and min(model["data"]["css"], model["data"]["not_css"]) >= mins["per_class"]
     model["minimum"] = mins
     # v5.25: the development threshold figures above are IN-SAMPLE for the calibration and the threshold choice (both fitted on the same
@@ -558,9 +611,12 @@ def train_cycle(rows, version, seed=0, cnn_epochs=30, progress=None, mins=None, 
     if nested:
         say("nested cross-fitting of the whole procedure (development cohort)", 0.72)
         from . import nested as NS
-        model["nested"], _ = NS.nested_crossfit(dev, seed=seed, cnn_epochs=cnn_epochs, progress=lambda m, p: say(m, 0.72 + 0.12 * p))
+        model["nested"], _ = NS.nested_crossfit(dev, seed=seed, cnn_epochs=cnn_epochs, progress=lambda m, p: say(m, 0.72 + 0.12 * p), char_cols=CC, kinds=kinds)
     say("evaluation on the locked test cohort", 0.85)
     model["test"] = evaluate_test(model, test)
+    model["model_hash"] = AN.model_hash(model)
+    model["model_hash_basis"] = ("sha256 of the trained parts (components, meta-model, ensemble, calibration, thresholds, discovery, feature list, "
+                                 "component configuration); retraining on the same dataset with the same seed must reproduce it")
     return model
 
 
@@ -574,6 +630,12 @@ def score_rows(model, rows):
     ens = [sigmoid(cal["a"] + cal["b"] * Meta.from_json(e).logit(Z)) for e in model.get("meta_ensemble", [])]
     sd = np.std(np.array(ens), axis=0) * 100 if ens else np.zeros(len(rows))
     contrib, base = M.contributions(Z); th = model["thresholds"]; out = []
+    meas = None                                                          # Stage 3 explainability: the NOX measurements behind the score
+    if C.char is not None and hasattr(C.char, "contributions"):
+        try:
+            Xc = CI.NOX.features(rows, char_cols=C.char_cols)["char"]
+            meas = np.where(np.isfinite(Xc), np.asarray(C.char.contributions(Xc), float), np.nan)   # a missing measurement explains nothing
+        except Exception: meas = None
     dis_table = (model.get("intelligence") or {}).get("disagreement"); lim = X["ood_limit"]
     for i, r in enumerate(rows):
         avail = [c for c in INDEP if np.isfinite(Z[c][i])]; learned = [c for c in avail if c != "math"]
@@ -589,11 +651,13 @@ def score_rows(model, rows):
         missing = [c for c in INDEP if c not in avail]
         if missing and learned: reasons.append("missing: " + ", ".join(missing))
         if qc == "low_confidence_review": reasons.append("study image quality: low confidence")
+        trig = [sd[i] > 15, spread > 2.5, lim is not None and ood is not None and ood > lim, img_ood]      # Stage 3 abstention policy
         if not learned: status = "insufficient"; reasons.insert(0, "no learned source of evidence for this candidate")
         elif qc == "insufficient_quality": status = "review"; reasons.insert(0, "study image quality insufficient - expert review required")
+        elif sum(map(bool, trig)) >= 2: status = "review"; reasons.insert(0, "review required: two or more abstention triggers (abstention policy)")
         elif sd[i] > 15 or spread > 2.5 or (lim is not None and ood is not None and ood > lim) or qc == "low_confidence_review" or (np.isfinite(isp) and isp > 1.0) or img_ood: status = "uncertain"
         else: status = "reliable"
-        sc = None if status == "insufficient" else float(np.clip(100 * p[i], 0, 100))
+        sc = None if status == "insufficient" or (status == "review" and qc != "insufficient_quality") else float(np.clip(100 * p[i], 0, 100))
         band = None if sc is None else ("red" if sc / 100 < th["red_below"] else "green" if sc / 100 >= th["green_from"] else "yellow")
         pat = IN.pattern_of(dis_table, "char", "image", Z["char"][i], Z["image"][i]) if dis_table else None
         out.append(dict(cand_id=r["cand_id"], percival_score=None if sc is None else round(sc, 1), band=band, status=status, reasons=reasons,
@@ -602,8 +666,18 @@ def score_rows(model, rows):
                         image_tta_spread=None if not np.isfinite(isp) else round(float(isp), 2), qc=qc or None, pattern=pat,
                         image_ood_distance=None if iood is None else round(iood, 2), image_ood_limit=None if ilim is None else round(float(ilim), 2),
                         components={c: (None if not np.isfinite(Z[c][i]) else round(float(sigmoid(Z[c][i])) * 100, 1)) for c in COMPONENTS},
-                        contributions=None if contrib is None else {k: round(float(v[i]), 3) for k, v in contrib.items()}, baseline=base))
+                        contributions=None if contrib is None else {k: round(float(v[i]), 3) for k, v in contrib.items()}, baseline=base,
+                        pairwise={f"{a}|{b}": (None if not (np.isfinite(Z[a][i]) and np.isfinite(Z[b][i])) else
+                                               dict(gap=round(float(abs(Z[a][i] - Z[b][i])), 2), agree=bool((Z[a][i] >= 0) == (Z[b][i] >= 0)))) for a, b in PAIRS},
+                        measurements=_top_measurements(meas, i, C.char_cols)))
     return out
+
+
+def _top_measurements(meas, i, cols, k=3):
+    """the k NOX measurements with the largest log-odds contribution for row i (linear measurement model only), else None"""
+    if meas is None or meas.ndim != 2 or i >= len(meas): return None
+    v = meas[i]; o = [j for j in np.argsort(-np.abs(np.nan_to_num(v))) if np.isfinite(v[j]) and v[j] != 0][:k]
+    return [dict(measurement=cols[j], contribution=round(float(v[j]), 3), direction="towards cSS" if v[j] > 0 else "against cSS") for j in o]
 
 
 def evaluate_test(model, test):
@@ -624,6 +698,8 @@ def evaluate_test(model, test):
         comp = np.array([not s["missing"] for s in S]); hi = np.array([s["disagreement"] > 1.5 for s in S])
         for name, mask in (("complete_inputs", comp & m), ("missing_inputs", ~comp & m), ("high_disagreement", hi & m), ("low_disagreement", ~hi & m)):
             out[f"subgroup_{name}"] = metrics(y[mask], p[mask], None) if mask.sum() >= 5 else dict(n=int(mask.sum()))
+        from . import analysis as AN
+        out["by_availability"] = AN.by_availability(Z, y, p, g)
     return out
 
 

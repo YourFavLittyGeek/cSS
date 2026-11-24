@@ -266,4 +266,7 @@ class PixelLogistic:
 def image_model_from(d):
     from .cnn import SmallCNN
     if d is None: return None
+    if d.get("type") == "cnn_ensemble":
+        from .cnn import SeedEnsemble
+        return SeedEnsemble.from_json(d)
     return PixelLogistic.from_json(d) if d.get("type") == "pixel_logistic" else SmallCNN.from_json(d)

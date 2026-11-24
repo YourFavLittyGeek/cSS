@@ -25,34 +25,55 @@ def norm_call(c):
     return "Vessel" if isinstance(c, str) and c.strip() == "Vein" else c
 
 
-def match_one_to_one(cand, rows, tol_vox=2.0, tol_vol=0.15, margin_vox=0.5):
+TOL_MM, MARGIN_MM = 1.5, 0.4        # Stage 4: resolution-independent matching tolerances (millimetres), used when the voxel size is known
+
+
+def voxel_size_mm(base, sid):
+    """voxel size (mm) of the study's SWI grid (data/ID_swi.nii[.gz] header), or None when it cannot be read"""
+    import glob as _g
+    for p in sorted(_g.glob(os.path.join(base, "data", f"{sid}_swi.nii*"))):
+        try:
+            import nibabel as _nb
+            z = _nb.load(p).header.get_zooms()[:3]
+            if len(z) == 3 and all(float(v) > 0 for v in z): return [float(v) for v in z]
+        except Exception: pass
+    return None
+
+
+def match_one_to_one(cand, rows, tol_vox=2.0, tol_vol=0.15, margin_vox=0.5, voxel_mm=None, tol_mm=None, margin_mm=None):
     """Phase 3B: the ONE matcher that re-attaches recorded annotations (calls, adjudications, verified records) to the CURRENT candidates.
     A record matches a candidate only if its centroid is within tol_vox voxels, its volume within tol_vol, and - when both carry one - the
     hemisphere is the same. It stays UNRESOLVED (never silently moved) when:
       no_candidate  nothing within tolerance (the lesion is gone, shrank / grew beyond tolerance, split or merged)
       ambiguous     a second candidate is almost as close (within margin_vox of the best) - proximity is not proof of identity
       contested     two or more records choose the same candidate (a merge, or duplicates): none of them is attached
-    -> [dict(row, cand_id or None, status, distance_vox, candidates_in_tolerance)] in row order. Rows are DataFrame rows or dicts."""
+    -> [dict(row, cand_id or None, status, distance_vox, candidates_in_tolerance)] in row order. Rows are DataFrame rows or dicts.
+    Stage 4: with voxel_mm (the SWI voxel size) distances are measured in MILLIMETRES (tol_mm, margin_mm; defaults TOL_MM / MARGIN_MM),
+    so the same physical displacement gives the same decision at 0.5 mm and 1.2 mm resolution; distance_mm is reported as well."""
     import pandas as _pd
     R = rows.to_dict("records") if isinstance(rows, _pd.DataFrame) else list(rows)
     out = []
     if not len(cand): return [dict(row=i, cand_id=None, status="no_candidate", distance_vox=None, candidates_in_tolerance=0) for i in range(len(R))]
     C = cand[["cand_id"] + FP].to_numpy(float)
     ch = cand["hemi"].astype(str).to_numpy() if "hemi" in cand.columns else None
+    sc = np.ones(3) if voxel_mm is None else np.asarray(voxel_mm, float)[:3]
+    tol = tol_vox if voxel_mm is None else (TOL_MM if tol_mm is None else float(tol_mm))
+    marg = margin_vox if voxel_mm is None else (MARGIN_MM if margin_mm is None else float(margin_mm))
     for i, r in enumerate(R):
         try: p = np.array([float(r[f]) for f in FP])
         except (KeyError, TypeError, ValueError):
             out.append(dict(row=i, cand_id=None, status="no_fingerprint", distance_vox=None, candidates_in_tolerance=0)); continue
-        d = np.sqrt(((C[:, 1:4] - p[:3]) ** 2).sum(1)); dv = np.abs(C[:, 4] - p[3]) / max(p[3], 1.0)
-        ok = (d <= tol_vox) & (dv <= tol_vol)
+        d = np.sqrt((((C[:, 1:4] - p[:3]) * sc) ** 2).sum(1)); dv = np.abs(C[:, 4] - p[3]) / max(p[3], 1.0)
+        ok = (d <= tol) & (dv <= tol_vol)
         h = r.get("hemi")
         if ch is not None and isinstance(h, str) and h.strip(): ok &= (ch == h)
         idx = np.where(ok)[0]
         if not len(idx): out.append(dict(row=i, cand_id=None, status="no_candidate", distance_vox=None, candidates_in_tolerance=0)); continue
         o = idx[np.argsort(d[idx])]
-        if len(o) > 1 and d[o[1]] - d[o[0]] < margin_vox:
+        if len(o) > 1 and d[o[1]] - d[o[0]] < marg:
             out.append(dict(row=i, cand_id=None, status="ambiguous", distance_vox=round(float(d[o[0]]), 3), candidates_in_tolerance=int(len(o)))); continue
-        out.append(dict(row=i, cand_id=int(C[o[0], 0]), status="matched", distance_vox=round(float(d[o[0]]), 3), candidates_in_tolerance=int(len(o))))
+        out.append(dict(row=i, cand_id=int(C[o[0], 0]), status="matched", distance_vox=round(float(d[o[0]]), 3) if voxel_mm is None else None,
+                        distance_mm=round(float(d[o[0]]), 3) if voxel_mm is not None else None, candidates_in_tolerance=int(len(o))))
     by = {}
     for x in out:
         if x["status"] == "matched": by.setdefault(x["cand_id"], []).append(x)

@@ -103,7 +103,7 @@ def _stability(sup):
     return w
 
 
-def nested_crossfit(dev, k_outer=K_OUTER, k_inner=K_INNER, seed=0, cnn_epochs=30, progress=None, ablations=True):
+def nested_crossfit(dev, k_outer=K_OUTER, k_inner=K_INNER, seed=0, cnn_epochs=30, progress=None, ablations=True, char_cols=None, kinds=None):
     """-> report dict (JSON-serialisable) and arrays dict (held-out predictions, for tests)"""
     say = progress or (lambda *a: None)
     y = np.array([r["y"] for r in dev], float); g = np.array([str(r["patient"]) for r in dev]); w = MT.patient_weights(dev)
@@ -121,9 +121,9 @@ def nested_crossfit(dev, k_outer=K_OUTER, k_inner=K_INNER, seed=0, cnn_epochs=30
             continue
         sub = lambda m, p: say(f"nested fold {i + 1}/{len(F)}: {m}", (i + p) / len(F))
         # step 2: the whole development procedure on the outer-training patients only
-        Zin, fam = MT.component_oof(R, k=k_inner, seed=seed + 1000 * (i + 1), cnn_epochs=cnn_epochs, progress=lambda m, p: sub(m, 0.7 * p))
+        Zin, fam = MT.component_oof(R, k=k_inner, seed=seed + 1000 * (i + 1), cnn_epochs=cnn_epochs, progress=lambda m, p: sub(m, 0.7 * p), char_cols=char_cols, **(kinds or {}))
         ytr, gtr, wtr = y[tr], g[tr], w[tr]
-        C = MT.Components(fam["char"]["chosen"], fam["image"]["chosen"], fam["fusion"]["chosen"]).fit(
+        C = MT.Components(fam["char"]["chosen"], fam["image"]["chosen"], fam["fusion"]["chosen"], char_cols=char_cols).fit(
             R, seed, image_logit_oof=Zin["image"], char_logit_oof=Zin["char"], cnn_epochs=cnn_epochs)
         D, oofs_in = MT.discover(Zin, ytr, gtr, wtr, k=k_inner, seed=seed + 1000 * (i + 1))
         chosen = D["chosen"]; Mm = MT.Meta(chosen).fit(Zin, ytr, gtr, wtr)

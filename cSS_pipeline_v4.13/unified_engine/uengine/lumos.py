@@ -60,6 +60,12 @@ class LumosImageIntelligence:
             self.checkpoint_source = f"percival registry {model.get('version')}"
             self.checkpoint_hash = hashlib.sha256(json.dumps(im.get("params"), sort_keys=True).encode()).hexdigest()[:16]
             self.version = f"lumos@{model.get('version')}"
+        elif im is not None and im.get("type") == "cnn_ensemble" and im.get("members"):   # Stage 3: augmented seed ensemble
+            from uengine.percival.cnn import SeedEnsemble
+            self.net = SeedEnsemble.from_json(im); self.checkpoint_status = "registry_trained"
+            self.checkpoint_source = f"percival registry {model.get('version')} (seed ensemble of {len(im['members'])})"
+            self.checkpoint_hash = hashlib.sha256(json.dumps([m.get("params") for m in im["members"]], sort_keys=True).encode()).hexdigest()[:16]
+            self.version = f"lumos@{model.get('version')}"
         elif im is not None:
             self.checkpoint_status = "not_cnn"; self.checkpoint_error = f"image component is {im.get('type')} (no CNN weights)"
         return self

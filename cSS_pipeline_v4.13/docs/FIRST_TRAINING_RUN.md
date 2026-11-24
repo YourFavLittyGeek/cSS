@@ -65,3 +65,13 @@ split, audit, rules, code version) as *candidate* / *experimental*. Nothing beco
 `CSS_BASE=<project> python scripts/review_admin.py roles | role "NAME" expert --by ADMIN --reason TEXT --confirm "ASSIGN ROLE" |
 status STUDY | adjudicate STUDY CAND CALL --adjudicator NAME --reason TEXT | verify STUDY REVIEWER ... --confirm "VERIFY BLINDING"`.
 Existing reviews: `python scripts/review_migrate.py plan` (read only) before any `apply`.
+
+
+## Before the first real cohort (consolidation, 2026-11-24)
+- Automatic training cycles are **off** by default (`percival_autocycle`); start each cycle by hand in Training Center.
+- Register the **evaluation plan** (PERCIVAL › System › Validation governance: test size, metrics, acceptance, external / temporal validation)
+  and declare the first **milestone** before training. Without them a locked-test result is reported but cannot support acceptance; the locked
+  test cohort supports acceptance once per milestone.
+- Expert patient-level grades for the study-level check go in `labels/expert_grades.csv` (`study,total`), entered by the experts.
+- A 10-20 patient pilot is a technical pilot: below the engine's minimum data (30 studies, 10 per class) and below 5 test patients per class,
+  acceptance cannot pass; any activation is an override with a recorded reason (research use).

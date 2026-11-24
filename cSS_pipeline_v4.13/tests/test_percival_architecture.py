@@ -249,7 +249,9 @@ class TestShadow(unittest.TestCase):
     def test_split_is_locked_and_unimplemented_kinds_never_pass(self):
         st = self.store(); a = SG.split_of(st, ["P1", "P2", "P3"])["assignment"]; b = SG.split_of(st, ["P3", "P2", "P1", "P4"])["assignment"]
         self.assertEqual({k: b[k] for k in a}, a)
-        H = SG.register(st, "LUMOS", "lumos_pattern", [], "visual hypothesis")
+        with self.assertRaises(SG.ShadowError): SG.register(st, "LUMOS", "lumos_pattern", [], "visual hypothesis")     # Stage 4: never empty
+        H = SG.register(st, "LUMOS", "lumos_pattern", ["patch_minip_mean"], "visual hypothesis")
+        H["implemented"] = False; SG._js(SG._dir(st, "hypotheses", f"{H['id']}.json"), H)          # a record written before its kind existed
         self.assertEqual(SG.run_discovery(st, H["id"], synth_rows(), ["darkness_z"])["status"], "not_implemented")
 
 

@@ -126,7 +126,7 @@ def save_pat(): jsave("patients.json", PAT)
 import processing_manager as PM                       # v5.14-gui Previous Processing Manager
 import identity_gui as IDG                            # v5.16 patient / examination identification (Standard / Incognito, encrypted vault)
 IDG.init(B, PAT, SET)
-SET.setdefault("percival_autocycle", True); SET.setdefault("percival_cycle_n", 5); SET.setdefault("percival_test_fraction", 0.2); SET.setdefault("percival_learn_from", "labelled")
+SET.setdefault("percival_autocycle", False)   # Stage 6: automatic training cycles OFF by default (pilot); SET.setdefault("percival_cycle_n", 5); SET.setdefault("percival_test_fraction", 0.2); SET.setdefault("percival_learn_from", "labelled")
 import percival_gui as PG                             # v5.22 Percival Score (local)
 import blind_gate as BG                               # Phase 3A.2: per-study AI outputs withheld until the study's blind review is complete
 try: import openpyxl, openpyxl.workbook, openpyxl.styles, openpyxl.comments   # v5.24: imported once at start-up - a first import from two
@@ -222,6 +222,10 @@ def pm_execute(code, plan, note):
                         if run_logged([sys.executable, f"{SC}/surface_features.py", code], logf, env, code="pm:" + code) != 0:
                             open(logf, "a").write("WARNING: surface_features.py failed - detection results are unaffected\n")
                     if stage == "detect":
+                        try:                                                 # Stage 5: every detection run is an event with its detector version
+                            from uengine.percival import architecture as _AR
+                            PG._event("detection_run", "ALBUS", study=code, run=rid, detector=_AR.detector_version(B, code))
+                        except Exception: pass
                         pm_rank_like_production(code, env, logf)            # = run_css.sh [3c]: ranking model only for dev-split studies
                         e_ = ai_score(code, env); open(logf, "a").write("AI score (green-band candidates, not validated): " + ("written\n" if not e_ else "not available: " + e_ + "\n"))
                 elif stage == "unified":
@@ -1220,7 +1224,7 @@ def pg_init():
             save_settings=lambda: jsave("settings.json", SET), notify=lambda t, x: notify_c("done", "training", t, x), other_projects=other_projects)
 def pg_get(op, q):
     if op == "state": return PG.state()
-    if op in ("score", "history", "contracts", "pensieve_history"):                           # Phase 3A.2: not before the blind review
+    if op in ("score", "history", "contracts", "pensieve_history", "second_review"):          # Phase 3A.2: not before the blind review
         bs = BG.state(B, q.get("code", ""))
         if bs["pending"]: return dict(none=True, hidden=True, reason=bs["reason"]) if op == "score" else dict(ledger=[], hidden=True, reason=bs["reason"])
     if op == "score":
@@ -1251,9 +1255,19 @@ def pg_get(op, q):
     if op == "pensieve": return PG.pensieve_state()                                          # v5.25 PENSIEVE Core Memory
     if op == "pensieve_query": return PG.pensieve_query(q.get("component", "albus"))
     if op == "vault": return PG.vault_status()                                               # v5.25 PERCIVAL DATA VAULT status
-    if op == "missed_lesions":
-        from uengine.pensieve import get_pensieve
-        return dict(ok=True, missed_lesions=get_pensieve().get_missed_lesions(q.get("study_id") or q.get("code")))
+    if op == "missed_lesions":                                                                # Stage 1: legacy PENSIEVE reader retired
+        return dict(ok=False, retired=True, error="retired: missed-cSS marks live in review/ID_missed.csv (reviewer) and in the PENSIEVE index")
+    if op == "events":                                                                         # Stage 5: event log integrity + replay check
+        from uengine import event_log as EV
+        return dict(verify=EV.verify(PG.P()), recent=EV.read(PG.P())[-30:])
+    if op == "config": return PG.config_snapshot()                                             # Stage 5: the one versioned configuration
+    if op == "evaluation_plan": return dict(plan=PG.evaluation_plan(), template=PG.PLAN_TEMPLATE, consultations=PG.test_consultations(),
+                                            confirm_phrase=PG.PLAN_CONFIRM)                       # Stage 6: validation governance
+    if op == "reader_agreement": return PG.reader_agreement()
+    if op == "drift": return PG.drift_state()
+    if op == "analysis": return PG.analysis_state()                                            # Stage 3: small-data honesty analyses
+    if op == "study_level": return PG.study_level_state()                                      # Stage 3: study-level 0-4 vs expert grades
+    if op == "second_review": return PG.second_review(q.get("code", ""))                       # Stage 3: active learning (after the blind read)
     if op == "shadow_lab": return PG.shadow_lab_state()                                      # v5.25 SHADOW ML Research Lab
     if op == "dataset":
         from uengine.percival import datasets as DS
@@ -1309,6 +1323,10 @@ def pg_post(op, d):
         if op == "vault_backup": return PG.vault_backup(str(d.get("destination", "")))
         if op == "missed_lesion":                                                             # Phase 3A.5: disabled (it wrote unvalidated rows)
             return dict(ok=False, error="disabled: missed-cSS marks are recorded in the reviewer (validated, one journaled file per reviewer)")
+        if op == "component_freeze": return PG.component_freeze(d.get("component", ""), d.get("by", ""), d.get("reason", ""), d.get("confirm", ""))       # Stage 2
+        if op == "component_rollback": return PG.component_rollback(d.get("component", ""), d.get("by", ""), d.get("reason", ""), d.get("confirm", ""))
+        if op == "evaluation_plan": return PG.evaluation_plan_save(d.get("plan") or {}, d.get("by", ""), d.get("reason", ""), d.get("confirm", ""))   # Stage 6
+        if op == "milestone": return PG.milestone_declare(d.get("name", ""), d.get("by", ""), d.get("reason", ""), d.get("confirm", ""), bool(d.get("fresh_test_cohort")))
         if op == "pensieve_rebuild": return PG.pensieve_index_rebuild()
         if op.startswith("shadow_gov_"): return PG.shadow_gov_post(op[len("shadow_gov_"):], d)
         if op == "shadow_run": return PG.shadow_run_trial(str(d.get("target", "ALBUS")), str(d.get("hypothesis", "")), d.get("config", {}))

@@ -10,6 +10,28 @@ validation split. Output: logit of P(cSS | image patch)."""
 import numpy as np
 
 IN_SHAPE = (3, 49, 25)
+CHANNELS = ["swi_minip_along_normal", "swi_mean_along_normal", "object_footprint"]   # recorded in every model (phase / FLAIR: not in patch maps)
+AUGMENT_DOC = ("Stage 3 LUMOS small-data augmentation (anatomically plausible, training batches only): u-flip; rotation in the surface plane "
+               "(u-v) up to +-15 deg; intensity scale +-10 % and a linear bias field +-10 % across the patch on the SWI channels; 1.5 T vs 3 T "
+               "resolution simulation (block-average by 2 along v and back, p = 0.3). The footprint channel is only rotated / flipped.")
+
+
+def augment(Xb, r):
+    """anatomically plausible perturbations of a batch of (N, 3, U, V) maps (copy); deterministic for a given generator state"""
+    from scipy import ndimage as ndi
+    X = np.array(Xb, np.float32, copy=True); N, C, U, V = X.shape
+    for i in range(N):
+        if r.random() < 0.5: X[i] = X[i][:, ::-1, :]
+        ang = float(r.uniform(-15, 15))
+        if abs(ang) > 1:
+            for c in range(C): X[i, c] = ndi.rotate(X[i, c], ang, reshape=False, order=1, mode="nearest")
+        sc = float(r.uniform(0.9, 1.1)); gu, gv = r.uniform(-0.1, 0.1, 2)
+        field = 1 + gu * np.linspace(-1, 1, U)[:, None] + gv * np.linspace(-1, 1, V)[None, :]
+        for c in (0, 1): X[i, c] = (X[i, c] + 1) * sc * field - 1                  # SWI channels are (ratio - 1)
+        if r.random() < 0.3:                                                     # coarser through-plane / in-plane sampling
+            for c in (0, 1):
+                a = X[i, c, :, :V - V % 2].reshape(U, -1, 2).mean(2); X[i, c, :, :V - V % 2] = np.repeat(a, 2, axis=1)
+    return X
 
 
 def patch_maps(a):
@@ -92,8 +114,9 @@ class SmallCNN:
         loss = float(-(w * (y * np.log(pr + 1e-9) + (1 - y) * np.log(1 - pr + 1e-9))).sum() / w.sum())
         return g, loss
 
-    def fit(self, X, y, groups, epochs=40, lr=3e-3, l2=1e-4, batch=64, patience=6, val_frac=0.2):
-        """early stopping on a patient-held-out validation split (no patient in both)"""
+    def fit(self, X, y, groups, epochs=40, lr=3e-3, l2=1e-4, batch=64, patience=6, val_frac=0.2, augment_data=False, balanced=False):
+        """early stopping on a patient-held-out validation split (no patient in both). Stage 3: augment_data = anatomically plausible
+        augmentation (AUGMENT_DOC); balanced = class-balanced sampling of each epoch (minority oversampled) instead of loss weights only"""
         X = np.asarray(X, np.float32); y = np.asarray(y, np.float32); g = np.asarray(groups).astype(str); r = np.random.default_rng(self.seed)
         u = np.unique(g); vu = set(r.choice(u, max(1, int(round(val_frac * len(u)))), replace=False)) if len(u) >= 4 else set()
         va = np.isin(g, list(vu)); tr = ~va
@@ -101,11 +124,18 @@ class SmallCNN:
         pi = y[tr].mean(); wts = np.where(y == 1, 0.5 / max(pi, 1e-3), 0.5 / max(1 - pi, 1e-3)).astype(np.float32)
         m = {k: np.zeros_like(v) for k, v in self.p.items()}; v2 = {k: np.zeros_like(v) for k, v in self.p.items()}; t = 0
         best, best_p, bad = np.inf, None, 0; idx = np.where(tr)[0]
+        self.augmented, self.balanced = bool(augment_data), bool(balanced)
         for ep in range(epochs):
-            r.shuffle(idx)
-            for s in range(0, len(idx), batch):
-                b = idx[s:s + batch]; Xb = X[b].copy(); flip = r.random(len(b)) < 0.5; Xb[flip] = Xb[flip][:, :, ::-1, :]
-                gr, _ = self._grads(Xb, y[b], wts[b], l2); t += 1
+            if balanced:
+                pos, neg = idx[y[idx] == 1], idx[y[idx] == 0]; k = max(len(pos), len(neg))
+                ep_idx = np.r_[r.choice(pos, k, replace=len(pos) < k), r.choice(neg, k, replace=len(neg) < k)]; r.shuffle(ep_idx)
+            else:
+                r.shuffle(idx); ep_idx = idx
+            for s in range(0, len(ep_idx), batch):
+                b = ep_idx[s:s + batch]
+                if augment_data: Xb = augment(X[b], r)
+                else: Xb = X[b].copy(); flip = r.random(len(b)) < 0.5; Xb[flip] = Xb[flip][:, :, ::-1, :]
+                gr, _ = self._grads(Xb, y[b], (np.ones(len(b), np.float32) if balanced else wts[b]), l2); t += 1
                 for k in self.p:
                     m[k] = 0.9 * m[k] + 0.1 * gr[k]; v2[k] = 0.999 * v2[k] + 0.001 * gr[k] ** 2
                     self.p[k] -= (lr * (m[k] / (1 - 0.9 ** t)) / (np.sqrt(v2[k] / (1 - 0.999 ** t)) + 1e-8)).astype(np.float32)
@@ -121,8 +151,39 @@ class SmallCNN:
         return self
 
     def to_json(self): return dict(type="cnn", arch="SmallCNN(conv3x3x8-pool-conv3x3x16-gap+gmp-dense)", in_shape=list(IN_SHAPE), seed=self.seed,
-                                   params={k: v.tolist() for k, v in self.p.items()}, history=self.history)
+                                   params={k: v.tolist() for k, v in self.p.items()}, history=self.history, channels=CHANNELS,
+                                   augmented=getattr(self, "augmented", False), balanced=getattr(self, "balanced", False))
 
     @classmethod
     def from_json(cls, d):
         m = cls(d.get("seed", 0)); m.p = {k: np.array(v, np.float32) for k, v in d["params"].items()}; m.history = d.get("history", []); return m
+
+
+class SeedEnsemble:
+    """Stage 3 LUMOS for small data: K SmallCNNs (different seeds), augmented + class-balanced training, early stopping on patient-held-out
+    validation. logit = mean member logit (of the patch and its u-flip); spread = SD across members and flips -> the LUMOS uncertainty input.
+    member_variance reports the seed-to-seed variability (an honest small-data warning, never hidden)."""
+    def __init__(self, seed=0, k=3): self.seed, self.k, self.members = seed, k, []
+
+    def fit(self, X, y, groups, epochs=40, **kw):
+        self.members = [SmallCNN(self.seed + 17 * j).fit(X, y, groups, epochs=epochs, augment_data=True, balanced=True) for j in range(self.k)]
+        return self
+
+    def _all(self, X):
+        X = np.asarray(X, np.float32); Xf = X[:, :, ::-1, :]
+        return np.array([m.logit(X) for m in self.members] + [m.logit(Xf) for m in self.members])
+
+    def logit(self, X): return self._all(X).mean(0) if len(X) else np.zeros(0)
+
+    def logit_tta(self, X):
+        A = self._all(X); return A.mean(0), A.std(0)
+
+    def member_variance(self, X):
+        A = np.array([m.logit(np.asarray(X, np.float32)) for m in self.members]); return float(A.var(0).mean()) if len(X) else None
+
+    def to_json(self): return dict(type="cnn_ensemble", k=self.k, seed=self.seed, channels=CHANNELS, augment=AUGMENT_DOC,
+                                   members=[m.to_json() for m in self.members])
+
+    @classmethod
+    def from_json(cls, d):
+        e = cls(d.get("seed", 0), d.get("k", 3)); e.members = [SmallCNN.from_json(m) for m in d["members"]]; return e

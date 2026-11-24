@@ -22,7 +22,7 @@ review_state() derives Not started / In progress / Reviewed / Needs re-review fr
 import datetime, glob, hashlib, json, os, re, shutil, subprocess, sys
 import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from css_common import FP, match_calls, match_one_to_one, norm_call
+from css_common import FP, match_calls, match_one_to_one, norm_call, voxel_size_mm, TOL_MM, MARGIN_MM
 import review_io as RIO       # Phase 3A.1: crash-safe writes, cross-process study locks, append-only reviewer event journals
 import review_roles as RR     # Phase 3A.3: roles, adjudication permission, documented historical verification
 
@@ -81,10 +81,11 @@ def ledger(base, sid, cand=None):
     """-> (per-candidate call history {cand_id: [dict(reviewer, call, comment, time)] oldest first}, stale [dict], reviewers [names])"""
     cand = candidates(base, sid) if cand is None else cand
     hist, stale, names = {}, [], []
+    vmm = voxel_size_mm(base, sid)                       # Stage 4: millimetre tolerances when the SWI voxel size is known
     for s in sources(base, sid):
         names.append(s["reviewer"]); fmt = _mtime_str(os.path.join(base, s["file"]))
         has_fp = all(c in s["rows"].columns for c in FP)
-        mdec = match_one_to_one(cand, s["rows"]) if has_fp and len(cand) else None           # Phase 3B: whole file, one-to-one
+        mdec = match_one_to_one(cand, s["rows"], voxel_mm=vmm) if has_fp and len(cand) else None           # Phase 3B: whole file, one-to-one
         for ri, (_, r) in enumerate(s["rows"].iterrows()):
             call = norm_call(r.get("call")); call = call if isinstance(call, str) and call.strip() else ""
             if not call: continue
@@ -550,7 +551,9 @@ def _materialize(base, sid, cohort="", by="", scripts=HERE, rescore=True):
     rec["calls_sha256"] = _sha(p); rec["score_current"] = rec["scored_calls_sha256"] == cur_sha
     RIO.atomic_write_json(ep, rec)
     RIO.atomic_write_json(os.path.join(base, "review", f"{sid}_matching.json"), dict(       # Phase 3B: audit of every matching decision (derived)
-        study=sid, time=_now(), matcher="css_common.match_one_to_one (centroid <= 2 voxels, volume within 15 %, same hemisphere, ambiguity margin 0.5 voxel, contested -> unresolved)",
+        study=sid, time=_now(), matcher=(f"css_common.match_one_to_one (centroid <= {TOL_MM} mm at voxel {voxel_size_mm(base, sid)} mm, volume within 15 %, same hemisphere, "
+                                         f"ambiguity margin {MARGIN_MM} mm, contested -> unresolved)" if voxel_size_mm(base, sid) else
+                                         "css_common.match_one_to_one (voxel size unknown - fallback: centroid <= 2 voxels, volume within 15 %, same hemisphere, ambiguity margin 0.5 voxel, contested -> unresolved)"),
         summary=E["matching"], unresolved=[dict(reviewer=e["reviewer"], call=e["call"], time=e["time"], row_uid=e.get("row_uid"), match=e.get("match"),
                                                 carry=e.get("possible") and "possible lineage match - needs confirmation") for e in E["stale"]]))
     return rec

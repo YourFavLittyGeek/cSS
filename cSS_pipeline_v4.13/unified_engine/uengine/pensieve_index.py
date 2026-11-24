@@ -266,3 +266,39 @@ def history(base, sid, cand_id):
         return dict(built=True, candidate=dict(c) if c else None, expert_calls=q("expert_calls", "ORDER BY time"), consensus=q("consensus"),
                     predictions=q("predictions", "ORDER BY created"))
     finally: con.close()
+
+
+def reader_agreement(base, blind_only=True):
+    """Stage 6 inter-reader agreement baseline: Cohen's kappa (cSS vs not cSS; Unsure = abstention, excluded) between every pair of EXPERT
+    readers on the candidates both called - each reader's LAST call, by default only blind initial reads. Patient-level variability is not
+    modelled here (candidate-level kappa); CI by bootstrap over studies."""
+    import numpy as _np
+    p = path(base)
+    if not os.path.exists(p): return dict(available=False, reason="PENSIEVE index not built yet")
+    con = _connect(p)
+    try:
+        q = "SELECT study_id, candidate_uid, reviewer, call, read_phase, time FROM expert_calls WHERE role='expert'"
+        rows = con.execute(q).fetchall()
+    finally: con.close()
+    last = {}
+    for sid, uid, rev, call, phase, t in sorted(rows, key=lambda r: str(r[5])):
+        if blind_only and phase not in ("initial", None, ""): continue
+        c = str(call or "")
+        if c in ("cSS", "Vessel", "Vein", "Normal", "Artifact", "Microbleed", "Near ICH"): last[(sid, uid, rev)] = (1 if c == "cSS" else 0)
+    revs = sorted({k[2] for k in last}); out = []
+    for i, a in enumerate(revs):
+        for b in revs[i + 1:]:
+            shared = [(k[0], last[k], last[(k[0], k[1], b)]) for k in last if k[2] == a and (k[0], k[1], b) in last]
+            if len(shared) < 5: out.append(dict(a=a, b=b, n=len(shared), kappa=None, note="fewer than 5 shared calls")); continue
+            S = _np.array([s for s, _, _ in shared]); A = _np.array([x for _, x, _ in shared]); Bv = _np.array([y for _, _, y in shared])
+            def kap(x, y):
+                po = float(_np.mean(x == y)); pe = float(x.mean() * y.mean() + (1 - x.mean()) * (1 - y.mean()))
+                return None if pe >= 1 else (po - pe) / (1 - pe)
+            r = _np.random.default_rng(0); us = _np.unique(S); bs = []
+            for _ in range(300):
+                m = _np.concatenate([_np.where(S == u)[0] for u in r.choice(us, len(us))]); k_ = kap(A[m], Bv[m])
+                if k_ is not None: bs.append(k_)
+            out.append(dict(a=a, b=b, n=len(shared), studies=int(len(us)), kappa=kap(A, Bv), agreement=float(_np.mean(A == Bv)),
+                            kappa_ci=[float(_np.percentile(bs, 2.5)), float(_np.percentile(bs, 97.5))] if len(bs) > 50 else None))
+    return dict(available=bool(out), pairs=out, readers=revs, basis="expert readers' last " + ("blind initial " if blind_only else "") +
+                "calls on the same candidates; cSS vs not cSS, Unsure excluded; bootstrap over studies")

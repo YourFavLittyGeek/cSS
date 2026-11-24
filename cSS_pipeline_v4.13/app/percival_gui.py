@@ -222,7 +222,23 @@ def readiness():
                    f"{sum(1 for v in SPV['assignment'].values() if v == 'test')} test patients" if SPV else "not created yet (created at first use)")),
               dict(name="last dataset: leakage audit passed and only eligible expert labels", ok=bool(last) and (last.get("leakage_audit") or {}).get("passed") is True
                    and not last.get("readiness_problems"), detail=(f"{last['id']} {last['content_hash']}" if last else "no dataset built yet"))]
-    return dict(ready=all(c["ok"] for c in checks), checks=checks, policy="expert consensus of completed reviews; eligible provenance: "
+    # Stage 8: every prerequisite says what kind it is (real data / expert / approval / setting) - the readiness card lists exactly what is missing
+    for c, k in zip(checks, ("expert", "approval", "expert", "real_data", "setting", "real_data")): c["category"] = k
+    Pl = evaluation_plan(); ms = (Pl or {}).get("milestones") or []
+    n_blind = 0
+    try:
+        import review_blind as _RB
+        n_blind = sum(1 for s_ in SL if any(_RB.phase(B(), s_["code"], e)["completed"] for e in experts))
+    except Exception: n_blind = 0
+    checks += [dict(name="real MRI studies with a candidate list", category="real_data", ok=any(os.path.exists(os.path.join(B(), "review", f"{s_['code']}_candidates.csv")) for s_ in SL),
+                    detail=f"{sum(1 for s_ in SL if os.path.exists(os.path.join(B(), 'review', s_['code'] + '_candidates.csv')))} studies"),
+               dict(name="completed blind expert reads", category="expert", ok=n_blind > 0, detail=f"{n_blind} studies"),
+               dict(name="pre-registered evaluation plan", category="approval", ok=bool(Pl), detail=f"version {Pl['version']} by {Pl['registered_by']}" if Pl else "not registered (PERCIVAL › System › Evaluation plan)"),
+               dict(name="evaluation milestone declared", category="approval", ok=bool(ms), detail=ms[-1]["id"] + " " + ms[-1]["name"] if ms else "none"),
+               dict(name="automatic training cycles off for the pilot", category="setting", ok=not CTX["SET"].get("percival_autocycle", False),
+                    detail="on - switch off in Training Center" if CTX["SET"].get("percival_autocycle", False) else "off")]
+    missing = {k: [c["name"] for c in checks if not c["ok"] and c["category"] == k] for k in ("real_data", "expert", "approval", "setting")}
+    return dict(ready=all(c["ok"] for c in checks), checks=checks, missing=missing, policy="expert consensus of completed reviews; eligible provenance: "
                 "verified_blind_post_3A, historical_blinding_verified; patient-level locked split; leakage audit before training")
 
 
@@ -250,10 +266,16 @@ def _sources(sid):
     return out
 
 
+def IDS():
+    """Stage 5: the ONE identity service (patient, identity status, examination fingerprint, split assignment) - gathering, the split, the
+    leakage audit and SHADOW all read it (uengine/identity_service.py)"""
+    from uengine.identity_service import IdentityService
+    return IdentityService(P(), CTX["patient_of"], CTX.get("identity_of"), CTX.get("fingerprint_of"), float(CTX["SET"].get("percival_test_fraction", 0.2)))
+
+
 def _partition(patient):
     """3D: the ONE patient-level split (uengine/percival/split.py); created on first use with the configured fraction, then locked"""
-    from uengine.percival import split as SP
-    return SP.partition_of(P(), patient, float(CTX["SET"].get("percival_test_fraction", 0.2)))
+    return IDS().partition(patient)
 
 
 def _ledger_mod():
@@ -444,6 +466,58 @@ def gather(sid, labelled=True):
     with GLOCK: return _gather(sid, labelled)
 
 
+def nox_feature_set():
+    """Stage 2: the NOX feature list the Decision Engine trains on = the ACTIVE approved NOX version in the component registry
+    (built-in v000 = the 9 detector measurements). -> (columns, version). Only names that are measurement columns are accepted."""
+    from uengine.percival.meta import CHAR
+    from uengine.percival import component_registry as CR
+    try: A = CR.active(P(), "NOX")
+    except Exception: A = dict(version="v000", config={})
+    cols = [str(c) for c in ((A.get("config") or {}).get("feature_set") or CHAR)]
+    from uengine.shadow_governed import is_label_like
+    cols = [c for c in cols if not is_label_like(c)]
+    return cols, A.get("version", "v000")
+
+
+def component_configs():
+    """Stage 2: what the next training cycle uses from the component registry -> (features or None, frozen families or None).
+    NOX: feature_set (+ char_kind when frozen); LUMOS: image_kind when frozen; PERCIVAL fusion_kind when frozen. v000 = built-in, nothing frozen."""
+    from uengine.percival import component_registry as CR
+    try: A = {c: CR.active(P(), c) for c in CR.COMPONENTS}
+    except Exception: return None, None
+    cols, nxv = nox_feature_set()
+    feats = dict(char=cols, nox_version=nxv, lumos_version=A["LUMOS"].get("version", "v000"), albus_version=A["ALBUS"].get("version", "v000"))
+    nc, lc = A["NOX"].get("config") or {}, A["LUMOS"].get("config") or {}
+    frozen = {k: v for k, v in dict(char=nc.get("char_kind"), image=lc.get("image_kind"), fusion=lc.get("fusion_kind") or nc.get("fusion_kind")).items() if v}
+    changed = any(feats[k] != "v000" for k in ("nox_version", "lumos_version", "albus_version"))
+    return (feats if changed else None), (frozen or None)
+
+
+def component_freeze(comp, by, reason, confirm):
+    """Stage 2: freeze ONE component at its configuration in the active (else latest) model: a new registry version that later training
+    cycles reuse without re-selecting its family (the meta-model is refitted on top). Named person + typed phrase + reason; rollback with
+    component_rollback. Never changes the active PERCIVAL model."""
+    from uengine.percival import component_registry as CR
+    M = _model_any()
+    if not M or not M.get("component_config"): return dict(ok=False, error="no trained model with component configurations yet")
+    comp = str(comp).upper()
+    if comp not in ("NOX", "LUMOS"): return dict(ok=False, error="only NOX and LUMOS have trainable configurations (ALBUS changes go through SHADOW)")
+    cc = M["component_config"][comp]; cur = dict(CR.active(P(), comp).get("config") or {})
+    cfg = dict(cur, **({"char_kind": cc["char_kind"], "feature_set": cc["feature_set"]} if comp == "NOX" else {"image_kind": cc["image_kind"]}),
+               frozen_from_model=M["version"], component_sha256=(M.get("component_versions") or {}).get("char" if comp == "NOX" else "image", {}).get("sha256"))
+    try:
+        V = CR.approve(P(), comp, cfg, by, reason, confirm, evidence=dict(kind="component_freeze", model=M["version"],
+                       component_metrics=(M.get("component_metrics") or {}).get("char" if comp == "NOX" else "image")))
+    except CR.RegistryError as e: return dict(ok=False, error=str(e))
+    return dict(ok=True, version=V["version"], config=cfg)
+
+
+def component_rollback(comp, by, reason, confirm):
+    from uengine.percival import component_registry as CR
+    try: return dict(ok=True, active=CR.rollback(P(), str(comp).upper(), by, reason, confirm))
+    except CR.RegistryError as e: return dict(ok=False, error=str(e))
+
+
 def _gather(sid, labelled=True):
     import pandas as pd
     from uengine.percival.meta import CHAR, test_assignment
@@ -451,26 +525,38 @@ def _gather(sid, labelled=True):
     if not os.path.exists(cp): return []
     deps = [cp, os.path.join(B(), "uscore", "features", f"{sid}.json")]
     import review_calls_gui as RCG
-    key = RCG.file_key(deps, B()) + [int(may_read(sid))]                    # Phase 3D review: content hashes (JSON-stable lists)
+    NX, _nv = nox_feature_set(); EXTRA = [c for c in NX if c not in CHAR]   # Stage 2: approved extra NOX measurements are gathered too
+    deps.append(os.path.join(B(), "review", f"{sid}_qc.json"))                 # Stage 3: calibration subgroups
+    key = RCG.file_key(deps, B()) + [int(may_read(sid))] + ([["nox_extra"] + EXTRA] if EXTRA else [])   # Phase 3D review: content hashes
     cj, cz = P("cache", f"{sid}.json"), P("cache", f"{sid}.npz"); C = _jl(cj, {})
-    if C.get("key") != key or C.get("v") != 3 or not os.path.exists(cz):
+    if C.get("key") != key or C.get("v") != 4 or not os.path.exists(cz):
+        QC = _jl(os.path.join(B(), "review", f"{sid}_qc.json"), {}) or {}; AQ = QC.get("acquisition") or {}
+        fs = AQ.get("field_T")
+        sub = dict(field_strength=(None if fs in (None, "") else ("1.5T" if float(fs) < 2 else "3T")), sequence=AQ.get("sequence") or None,
+                   anatomy=("T1" if str(QC.get("anatomy", "")).startswith("T1") else QC.get("anatomy") or None), qc=QC.get("status") or None)
         cand = pd.read_csv(cp); pred = _predictors(sid); maps = _maps(sid) if may_read(sid) else {}
         rows = []
         for _, r in cand.iterrows():
             cid = int(r["cand_id"]); ch = {}
-            for c in CHAR:
+            _parts = [q for c_ in EXTRA if "*" in c_ for q in c_.split("*", 1)]
+            for c in dict.fromkeys(list(CHAR) + [c_ for c_ in EXTRA if "*" not in c_] + _parts):
                 src = "volume_mm3" if c == "log_volume_mm3" else c
                 v = r.get(src) if src in cand.columns else None
                 v = None if v is None or (isinstance(v, float) and np.isnan(v)) else float(v)
                 ch[c] = (float(np.log(max(v, 1.0))) if c == "log_volume_mm3" and v is not None else v)
+            for c in [c_ for c_ in EXTRA if "*" in c_]:                     # Stage 4: approved interaction = product of two measurements
+                a_, b_ = c.split("*", 1); ch[c] = None if ch.get(a_) is None or ch.get(b_) is None else float(ch[a_]) * float(ch[b_])
+            tier = r.get("review_tier") if "review_tier" in cand.columns else None
             rows.append(dict(study=sid, cand_id=cid, math=float(r["score_v4"]) if "score_v4" in cand.columns and not pd.isna(r["score_v4"]) else 0.0,
-                             hemi=str(r["hemi"]) if "hemi" in cand.columns else "", pred=pred.get(cid, {}), char=ch, has_maps=cid in maps))
+                             hemi=str(r["hemi"]) if "hemi" in cand.columns else "", pred=pred.get(cid, {}), char=ch, has_maps=cid in maps,
+                             albus=dict(review_tier=None if tier is None or (isinstance(tier, float) and np.isnan(tier)) else str(int(float(tier)))),
+                             subgroups=sub))
         os.makedirs(os.path.dirname(cz), exist_ok=True)
         with open(cz + ".tmp", "wb") as f_: np.savez_compressed(f_, **{str(k): v for k, v in maps.items()})
         os.replace(cz + ".tmp", cz)                                               # atomic: a reader never sees a half-written cache
-        C = dict(key=key, v=3, rows=rows); _js(cj, C)
+        C = dict(key=key, v=4, rows=rows); _js(cj, C)
     with np.load(cz) as Zf: Z = {k: Zf[k] for k in Zf.files}
-    rows = []; pat = CTX["patient_of"](sid) or None
+    rows = []; pat = IDS().patient(sid)
     test = bool(pat) and _partition(pat) == "test"                           # no patient: never trained on (eligibility); 3D split authority
     for r in C["rows"]:
         rows.append(dict(r, patient=pat, test=test, maps=Z.get(str(r["cand_id"]))))
@@ -573,7 +659,7 @@ def selection():
                         not_in_study_list=p["_orphan"], archived=bool(p.get("archived")), retired=bool(p.get("retired")),
                         included=bool(el) and not why, excluded_why=why, why=reason,
                         identity=identity(c)["status"],
-                        partition=None if not CTX["patient_of"](c) else _partition(CTX["patient_of"](c))))
+                        partition=IDS().record(c)["partition"]))
     return out
 
 
@@ -743,6 +829,8 @@ def promote(v, by="app user", why="made active by you", override=False):
     _set_status(v, "active", by, why)
     if cur.get("version") and cur["version"] != v: _set_status(cur["version"], "retired", by, f"replaced by {v}")
     R = _jl(P("registry", "promotions.json"), []); R.append(dict(version=v, previous=prev, at=time.strftime("%Y-%m-%d %H:%M:%S"), by=by, why=why)); _js(P("registry", "promotions.json"), R)
+    _event("rollback" if why == "rollback" else "approval", by, model=v, previous=prev, why=why, override=bool(override),
+           acceptance_passed=bool((M.get("acceptance") or {}).get("passed")))
     threading.Thread(target=score_all, daemon=True).start(); return dict(ok=True, version=v, previous=prev)
 
 
@@ -795,6 +883,38 @@ def _run_end(state_, **kw):
     if not RUN: return
     with LOCK: lg = list(JOB.get("log", []))
     RUN.update(state=state_, finished=time.strftime("%Y-%m-%d %H:%M:%S"), log=lg[-200:], **kw); _js(P("runs", RUN["id"] + ".json"), RUN)
+    _event("training_run", RUN.get("reason") or "PERCIVAL", run=RUN["id"], state=state_, dataset=kw.get("dataset"), version=kw.get("version"),
+           config=config_snapshot()["sha256"])
+
+
+def _event(etype, actor, **payload):
+    """Stage 5: append to the hash-chained project event log; a failure is logged, never raised into the caller"""
+    try:
+        from uengine import event_log as EV
+        return EV.append(P(), etype, actor, **payload)
+    except Exception as e:
+        log(f"[event log] {etype} not recorded ({type(e).__name__}: {e})"); return None
+
+
+CONFIG_KEYS = ("percival_test_fraction", "percival_learn_from", "percival_use_historical", "percival_autocycle", "learner_exclude", "features")
+
+
+def config_snapshot():
+    """Stage 5: ONE versioned configuration record - settings that change learning, feature flags, component versions, engine and rule
+    versions. Content-hashed; a changed configuration is stored once (percival/config/<sha>.json) with a config_changed event."""
+    from uengine.percival import component_registry as CR, eligibility as EL, meta as MT, split as SP
+    S = CTX.get("SET") or {}
+    try: comps = {c: CR.active(P(), c)["version"] for c in CR.COMPONENTS}
+    except Exception: comps = {}
+    sp = SP.current(P()) or {}
+    C = dict(settings={k: S.get(k) for k in CONFIG_KEYS if k in S}, components=comps, engine=MT.ENGINE, eligibility_rules=EL.RULES_VERSION,
+             split_version=sp.get("version"), active_model=active_version())
+    h = hashlib.sha256(json.dumps(C, sort_keys=True, default=str).encode()).hexdigest()[:16]
+    p = P("config", f"{h}.json")
+    if not os.path.exists(p):
+        _js(p, dict(C, sha256=h, first_seen=time.strftime("%Y-%m-%d %H:%M:%S")))
+        _event("config_changed", "PERCIVAL", sha256=h, components=comps)
+    return dict(C, sha256=h)
 
 
 def runs():
@@ -847,7 +967,7 @@ def _train(reason):
                 exs += _examples(s_["code"], dict(excluded=s_["code"] in ex or bool(s_["excluded_why"]), archived_out="archived" in s_["excluded_why"]))
         from uengine.percival import split as SP                                # 3C/3D: sources, split, leakage audit, readiness
         SPV = SP.current(P()) or {}
-        audit = SP.leakage_audit(exs, fingerprint_of=CTX.get("fingerprint_of"), held_out=SP.held_out_elsewhere(B()))
+        audit = SP.leakage_audit(exs, fingerprint_of=IDS().fingerprint, held_out=SP.held_out_elsewhere(B()))
         man = DS.build(exs, EL.RULES_VERSION, P(), sources={c: _sources(c) for c in sorted({e["study"] for e in exs})},
                        split=dict(version=SPV.get("version"), assignment_sha256=SPV.get("assignment_sha256"), test_fraction=SPV.get("test_fraction")),
                        extra=dict(leakage_audit=audit, settings=dict(learn_from=S.get("percival_learn_from", "labelled"),
@@ -876,15 +996,21 @@ def _train(reason):
         for c in sel: idc[identity(c)["status"]] = idc.get(identity(c)["status"], 0) + 1
         _transition("running", stage="components")
         v = f"v{len(versions()) + 1:03d}"
-        M = MT.train_cycle(rows, v, cnn_epochs=int(os.environ.get("CSS_PERCIVAL_EPOCHS", "30")), progress=lambda m, p: log(m, p), mins=_env_min())
+        feats, frozen = component_configs()                                   # Stage 2: active approved NOX feature set + frozen families
+        if feats: log(f"NOX feature set {feats['nox_version']}: {len(feats['char'])} measurements", 0.08)
+        if frozen: log("frozen components (component registry): " + ", ".join(f"{k}={v}" for k, v in frozen.items()), 0.08)
+        M = MT.train_cycle(rows, v, cnn_epochs=int(os.environ.get("CSS_PERCIVAL_EPOCHS", "30")), progress=lambda m, p: log(m, p), mins=_env_min(),
+                           features=feats, frozen=frozen)
         M["data"].update(dataset=man["id"], dataset_hash_manifest=man["content_hash"], eligibility_rules=EL.RULES_VERSION,
                          split=man.get("split"), leakage_audit=dict(passed=audit["passed"], checks=audit["checks"]),
                          feature_schema=DS.FEATURE_SCHEMA, patch_spec=DS.PATCH_SPEC, code_version=_code_version())
         from uengine.percival import architecture as AR                       # architecture: component-level version records
         M["component_versions"] = AR.component_versions(M)
+        M["config_snapshot"] = config_snapshot(); M["identity_digest"] = IDS().digest(sel)          # Stage 5: configuration + identity record
         M["data"]["identity"] = dict(idc, policy="only verified / declared patient identities are used (v5.25)")
         log("registering", 0.9)                                    # last cancellation point: nothing has been written to the registry yet
-        M["integrity"] = integ; M["reason"] = reason; M["run_id"] = RUN.get("id"); M["seed"] = 0; M["cnn_epochs"] = int(os.environ.get("CSS_PERCIVAL_EPOCHS", "30")); act = active(); acc = MT.acceptance(M, act); M["acceptance"] = acc
+        M["integrity"] = integ; M["reason"] = reason; M["run_id"] = RUN.get("id"); M["seed"] = 0; M["cnn_epochs"] = int(os.environ.get("CSS_PERCIVAL_EPOCHS", "30")); act = active(); acc = MT.acceptance(M, act)
+        acc = test_reuse_gate(M, acc, sorted({str(r["patient"]) for r in tv})); M["acceptance"] = acc     # Stage 6: no test-set reuse
         M["previous_active"] = act["version"] if act else None
         _js(P("registry", v, "model.json"), M)
         H = _jl(P("history.json"), []); t = M["test"]
@@ -916,7 +1042,7 @@ def _train(reason):
 def maybe_cycle():
     """controlled cycles: a new training cycle when N newly finished studies have accumulated since the last cycle"""
     S = CTX["SET"]
-    if not S.get("percival_autocycle", True) or not authorized() or JOB["state"] in ACTIVE_STATES: return False
+    if not S.get("percival_autocycle", False) or not authorized() or JOB["state"] in ACTIVE_STATES: return False
     done = {s["code"] for s in selection() if s["included"]}; last = set(_jl(P("last_cycle.json"), {}).get("finished", []))
     if len(done - last) >= int(S.get("percival_cycle_n", 5)): train_async(f"{len(done - last)} newly finished studies"); return True
     return False
@@ -1121,7 +1247,7 @@ def _shadow(version):
                     n += 1; diffs.append(abs(x["percival_score"] - a["percival_score"])); agree += int(x["band"] == a["band"])
                 cid = x["cand_id"]
                 if cid in lab and (sid, cid) not in learned and (sid, None) not in learned and x["percival_score"] is not None:
-                    ys.append(lab[cid]); ps.append(x["percival_score"] / 100); gs.append(CTX["patient_of"](sid))
+                    ys.append(lab[cid]); ps.append(x["percival_score"] / 100); gs.append(IDS().patient(sid))
                     pa.append(a["percival_score"] / 100 if a and a["percival_score"] is not None else np.nan)
                     fair.append((sid, cid) not in learned_a and (sid, None) not in learned_a)      # the ACTIVE model did not learn it either
             with LOCK: SJOB["progress"] = (k + 1) / max(1, len(pats))
@@ -1330,7 +1456,7 @@ def state():
     with LOCK: job = {k: v for k, v in JOB.items() if k != "log"}; jlog = JOB["log"][-60:]      # job FIRST (v5.23): a cycle finishing while
     vs = versions(); latest = load(vs[-1]) if vs else None; M = active(); sel = selection()      # this runs must not look finished with old versions
     strip = lambda m: None if not m else {k: v for k, v in m.items() if k not in ("components", "meta_ensemble")}
-    return dict(authorized=authorized(), autocycle=CTX["SET"].get("percival_autocycle", True), cycle_n=int(CTX["SET"].get("percival_cycle_n", 5)),
+    return dict(authorized=authorized(), autocycle=CTX["SET"].get("percival_autocycle", False), cycle_n=int(CTX["SET"].get("percival_cycle_n", 5)),
                 test_fraction=CTX["SET"].get("percival_test_fraction", 0.2), learn_from=CTX["SET"].get("percival_learn_from", "labelled"), job=job, log=jlog,
                 active=strip(M), latest=strip(latest), versions=vs, history=_jl(P("history.json"), []), promotions=_jl(P("registry", "promotions.json"), []),
                 selection=sel, n_selected=sum(1 for s in sel if s["included"]),
@@ -1495,9 +1621,7 @@ def architecture_state():
     for c in det: vers.setdefault(AR.detector_version(B(), c).get("version") or "unversioned", []).append(c)
     feats = sum(os.path.exists(os.path.join(B(), "uscore", "features", f"{c}.json")) for c in det)
     reg = CR.overview(P()); ps = PI.summary(B())
-    return dict(
-        names=AR.NAMES,
-        components=[
+    comps = [
             dict(key="ALBUS", name=AR.NAMES["ALBUS"], implementation="scripts/detect_css.py (candidate generation, rules E1–E30, score_v4)",
                  state="active" if det else "awaiting_data", detail=f"{len(det)} studies with a candidate list; detector versions: {len(vers)}",
                  versions={k: len(v) for k, v in vers.items()}, registry=reg["ALBUS"]["active"]["version"],
@@ -1523,11 +1647,64 @@ def architecture_state():
                  separation_ok=ps.get("separation_ok"), validation="reproducible: same sources -> same digest"),
             dict(key="SHADOW", name=AR.NAMES["SHADOW"], implementation="governed discovery: discovery / confirmation patients, PERCIVAL confirmation, human approval",
                  state="awaiting_data" if not X else "available", detail=f"{len(_shadow_listing())} hypotheses registered",
-                 validation="no discovery claimed without confirmation on separate patients")],
+                 validation="no discovery claimed without confirmation on separate patients")]
+    for c in comps: c["status"] = _status_of(c)                                       # Stage 8: one validation-status vocabulary
+    return dict(
+        names=AR.NAMES,
+        components=comps,
         flow=["MRI ingestion", "study registration + identity", "preprocessing", "ALBUS detection", "NOX quantitative analysis", "LUMOS visual analysis",
               "PERCIVAL integrated inference", "blinded expert review", "adjudication + eligible ground truth", "PENSIEVE history", "curated dataset",
               "training + evaluation", "model registry", "SHADOW discovery", "PERCIVAL confirmation", "human-approved component change"],
-        registry={k: dict(active=v["active"]["version"], versions=v["versions"]) for k, v in reg.items()})
+        registry={k: dict(active=v["active"]["version"], versions=v["versions"], signature_ok=v["active"].get("signature_ok")) for k, v in reg.items()},
+        described=_describe_components(M, X, det, reg), readiness=readiness(), retired=_retired(), config=config_snapshot(), events=_events_summary())
+
+
+# Stage 8: purpose / inputs / outputs / version / validation status of every component, read from this project
+COMPONENT_INFO = dict(
+    ALBUS=dict(purpose="find every candidate cSS focus on the SWI (mathematical detection: rules E1–E30, score_v4)",
+               inputs="skull-stripped SWI, anatomy labels (T1 or SWI SynthSeg), optional FLAIR / phase", outputs="ranked candidate list + exclusions (review/ID_candidates.csv)"),
+    NOX=dict(purpose="measure each candidate quantitatively (shape, darkness, position, continuity) for the learned decision",
+             inputs="the candidate mask and the MRI", outputs="the approved NOX measurement set + uScore x1–x5 (per candidate)"),
+    LUMOS=dict(purpose="read the candidate's surface-aligned MRI patch (visual intelligence)", inputs="3 patch maps (SWI minIP, mean, footprint)",
+               outputs="image log-odds + test-time-augmentation spread (uncertainty)"),
+    PERCIVAL=dict(purpose="combine ALBUS, NOX and LUMOS into one calibrated PERCIVAL score with reliability, disagreement and abstention",
+                  inputs="component log-odds, missing indicators, reliability signals, pairwise disagreement", outputs="PERCIVAL score 0–100, band, status, reasons"),
+    CORE=dict(purpose="fixed-weight comparison baseline", inputs="real NOX measurements of the candidate", outputs="comparison score (never the PERCIVAL prediction)"),
+    PENSIEVE=dict(purpose="per-project memory of expert decisions, missed lesions and predictions (derived, rebuildable)",
+                  inputs="reviewer journals, call ledger, missed-cSS marks, prediction ledger", outputs="history per candidate, attribution of errors to detector versions"),
+    SHADOW=dict(purpose="test proposed improvements on discovery patients; PERCIVAL confirms on unseen patients; a person approves",
+                inputs="eligible development labels + recorded measurements / patch statistics", outputs="hypotheses, discovery and confirmation records, approved component versions"))
+
+
+def _status_of(c):
+    s = c.get("state")
+    return {"active": "active", "built": "active", "available": "experimental", "enabled_comparison": "experimental", "off": "unavailable",
+            "trained_not_active": "experimental", "valid": "active", "untrained": "untrained", "not_built": "unavailable"}.get(s, "awaiting_data")
+
+
+def _describe_components(M, X, det, reg):
+    from uengine.percival import component_api as CI
+    iface = CI.describe(M or X)
+    out = {}
+    for k, info in COMPONENT_INFO.items():
+        v = dict(info)
+        if k in ("ALBUS", "NOX", "LUMOS"):
+            a = reg[k]["active"]; v.update(version=iface[k]["version"], registry_version=a["version"], signature_ok=a.get("signature_ok"), interface=iface[k]["interface"])
+        elif k == "PERCIVAL": v.update(version=(M or X or {}).get("version"), model_hash=(M or X or {}).get("model_hash"))
+        out[k] = v
+    return out
+
+
+def _retired():
+    from uengine.legacy_guard import RETIRED
+    return RETIRED
+
+
+def _events_summary():
+    try:
+        from uengine import event_log as EV
+        V = EV.verify(P()); return dict(events=V["events"], chain_ok=V["chain"]["ok"], registry_matches_events=V["registry_matches_events"])
+    except Exception as e: return dict(error=type(e).__name__)
 
 
 def _shadow_listing():
@@ -1597,6 +1774,17 @@ def _shadow_rows():
                  if pd.api.types.is_numeric_dtype(t[k])}
         if "volume_mm3" in feats and feats["volume_mm3"]: feats["log_volume_mm3"] = float(np.log(max(feats["volume_mm3"], 1e-3)))
         rows.append(dict(study=sid, cand_id=e["cand_id"], patient=e.get("patient"), partition="development", y=int(e["y"]), features=feats))
+    bad = {b_["study"] for b_ in IDS().check_rows(rows)}                       # Stage 5: a stale manifest identity is never used by SHADOW
+    rows = [r for r in rows if r["study"] not in bad and IDS().partition(r["patient"]) == "development"]
+    # Stage 4: LUMOS pattern variables = statistics of the candidate's patch maps (per channel mean / SD / mean |gradient| along u and v)
+    from uengine.percival.meta import patch_stats
+    from uengine.percival.cnn import CHANNELS
+    names = [f"patch_{c}_{st}" for st in ("mean", "sd", "grad_u", "grad_v") for c in ("minip", "mean", "footprint")]
+    for sid in {r["study"] for r in rows}:
+        mp = {g_["cand_id"]: g_.get("maps") for g_ in gather(sid, labelled=False)}
+        for r in rows:
+            if r["study"] == sid and mp.get(r["cand_id"]) is not None:
+                v = patch_stats(np.asarray(mp[r["cand_id"]], np.float32))[0]; r["features"].update({n: float(x) for n, x in zip(names, v)})
     return rows, f"dataset {man['id']}"
 
 
@@ -1618,10 +1806,15 @@ def shadow_gov_post(op, d):
     from uengine.percival import component_registry as CR
     try:
         if op == "register":
-            return dict(ok=True, hypothesis=SG.register(P(), d.get("target", "NOX"), d.get("kind", "nox_measurement"), d.get("variables") or [],
-                                                         d.get("rationale", ""), created_by="SHADOW (proposed by " + str(d.get("by") or "user") + ")"))
+            kind = d.get("kind", "nox_measurement")
+            return dict(ok=True, hypothesis=SG.register(P(), d.get("target") or SG.TARGET.get(kind, "NOX"), kind, d.get("variables") or [],
+                                                         d.get("rationale", ""), created_by="SHADOW (proposed by " + str(d.get("by") or "user") + ")",
+                                                         params=d.get("params")))
         rows, _ = _shadow_rows()
         base = (CR.active(P(), "NOX").get("config") or {}).get("feature_set") or CR.BASELINES["NOX"]["feature_set"]
+        if op == "suggest":                                                 # Stage 3: stability selection -> registered hypotheses only
+            cols = sorted({k for r in rows for k, v in r["features"].items() if v is not None and not k.startswith("patch_")})
+            return SG.suggest_nox(P(), rows, base, cols)
         if op == "discovery": return dict(ok=True, hypothesis=SG.run_discovery(P(), d["id"], rows, base))
         if op == "confirm": return dict(ok=True, hypothesis=SG.confirm(P(), d["id"], rows, actor="PERCIVAL"))
         if op == "approve":
@@ -1642,3 +1835,156 @@ def albus_state():
     return dict(evaluation=ev, registry=CR.overview(P())["ALBUS"],
                 note="Sensitivity counts only lesions experts found (detected + expert-marked missed); an approved detector version is recorded, "
                      "never applied automatically.")
+
+
+# ------------------------------------------------------------------ Stage 3: analyses, study-level model, second-review priority
+def analysis_state():
+    """the small-data honesty records of the active (else latest) model: missing data, learning curve, subgroup calibration, abstention,
+    reproducibility hash, feature list, component configuration and interface. Development cohort only (the locked test is separate)."""
+    M = _model_any()
+    if not M: return dict(available=False, reason="no PERCIVAL model has been trained in this project yet")
+    keys = ("missing_data", "learning_curve", "subgroup_calibration", "abstention", "model_hash", "model_hash_basis", "features", "component_config",
+            "component_interface", "reproducibility")
+    return dict(available=True, version=M.get("version"), **{k: M.get(k) for k in keys},
+                note="trained before Stage 3: no analyses recorded" if not M.get("model_hash") else "development cohort analyses; not a validation")
+
+
+def _expert_grades():
+    """expert patient-level grades: <project>/labels/expert_grades.csv (columns study, total 0-4) - entered by the experts, never derived"""
+    import csv
+    p = os.path.join(B(), "labels", "expert_grades.csv"); out = {}
+    if not os.path.exists(p): return out
+    with open(p) as f:
+        for r in csv.DictReader(f):
+            try: out[str(r["study"]).strip()] = int(float(r["total"]))
+            except (KeyError, TypeError, ValueError): pass
+    return out
+
+
+def study_level_state():
+    """explicit study-level model: candidates with PERCIVAL score >= 50 -> score_css.py (the reader's own 0-4 method) -> multifocality;
+    validated against expert patient grades (quadratic weighted kappa, exact agreement, Bland-Altman). Withheld studies are not counted."""
+    from uengine.percival import analysis as AN
+    pred = {}
+    for f in sorted(glob.glob(P("scores", "*.json"))):
+        sid = os.path.basename(f)[:-5]
+        if not may_read(sid): continue
+        t = ((_jl(f, {}) or {}).get("study_score") or {}).get("total")
+        if t is not None: pred[sid] = int(t)
+    E = _expert_grades()
+    return dict(mapping="candidates with PERCIVAL score >= 50 are accepted; score_css.py computes the 0-4 multifocality from them (unassessable "
+                        "studies, with no valid candidate score, are never counted as 0)",
+                n_scored=len(pred), n_expert=len(E), agreement=AN.study_agreement(pred, E),
+                expert_source="labels/expert_grades.csv (study, total) - expert-entered patient grades")
+
+
+def second_review(sid):
+    """Stage 3 active learning: second-review priority for ONE study whose blind read is complete (the route is blind-gated) - uncertain and
+    disagreeing candidates first. Never used to order or select the blind first read."""
+    from uengine.percival import analysis as AN
+    rec = _jl(P("scores", f"{sid}.json"), {}) or {}
+    if not rec.get("candidates"): return dict(ok=False, error="no PERCIVAL scores for this study")
+    return dict(ok=True, study=sid, model=rec.get("model"), queue=AN.prioritise(rec["candidates"]),
+                note="second-review priority only (after the blind first read); never applied to the blind first read")
+
+
+# ------------------------------------------------------------------ Stage 6: validation governance
+PLAN_CONFIRM = "REGISTER EVALUATION PLAN"
+PLAN_TEMPLATE = dict(
+    schema="percival-evaluation-plan/1.0",
+    test_size=dict(min_test_patients_per_class=5, target_test_patients_per_class=None, note="pre-register the locked-test size BEFORE looking at it"),
+    primary_metric="candidate-level AUC of the PERCIVAL score on the locked test cohort (patient bootstrap 95 % CI)",
+    secondary_metrics=["sensitivity at the red threshold", "specificity at the green threshold", "calibration slope / intercept", "Brier score",
+                       "study-level quadratic weighted kappa vs expert 0-4 grades", "missed-lesion recall (ALBUS)"],
+    acceptance=dict(auc_not_below_math=True, auc_not_below_active_minus=0.01, brier_not_above_active_plus=0.01, calibration_slope=[0.6, 1.6]),
+    reference="inter-reader agreement baseline (Cohen kappa, PENSIEVE) on the same cases",
+    external_validation=dict(planned=None, kind="temporal or multi-site cohort, separate from this project's locked test", note="required before any claim of generalisation"),
+    milestones=[])
+
+
+def evaluation_plan():
+    return _jl(P("evaluation_plan.json"), None)
+
+
+def evaluation_plan_save(plan, by, reason, confirm):
+    """pre-register (or amend - a new version, the old one kept) the evaluation plan: named person, typed phrase, reason"""
+    from uengine.percival import component_registry as CR
+    if confirm != PLAN_CONFIRM: return dict(ok=False, error=f"type exactly '{PLAN_CONFIRM}'")
+    if str(by or "").strip().lower() in CR.AUTOMATED or not str(reason or "").strip(): return dict(ok=False, error="a named person and a reason are required")
+    cur = evaluation_plan(); P_ = dict(PLAN_TEMPLATE, **{k: v for k, v in (plan or {}).items() if k in PLAN_TEMPLATE and k != "milestones"})
+    P_["milestones"] = (cur or {}).get("milestones", []); P_["version"] = ((cur or {}).get("version") or 0) + 1
+    P_.update(registered_by=str(by).strip(), reason=str(reason).strip(), at=time.strftime("%Y-%m-%d %H:%M:%S"))
+    if int((P_["test_size"] or {}).get("min_test_patients_per_class") or 0) < 5: return dict(ok=False, error="the test size cannot be below 5 patients per class")
+    if cur: _js(P("evaluation_plan_history", f"v{cur.get('version', 0):03d}.json"), cur)
+    _js(P("evaluation_plan.json"), P_); _event("config_changed", by, evaluation_plan=P_["version"]); return dict(ok=True, plan=P_)
+
+
+def milestone_declare(name, by, reason, confirm, fresh_test_cohort=False):
+    """declare the next evaluation milestone (each milestone may consult the locked test cohort ONCE for acceptance)"""
+    from uengine.percival import component_registry as CR
+    Pl = evaluation_plan()
+    if not Pl: return dict(ok=False, error="register the evaluation plan first")
+    if confirm != PLAN_CONFIRM or str(by or "").strip().lower() in CR.AUTOMATED or not str(reason or "").strip():
+        return dict(ok=False, error=f"a named person, a reason and the typed phrase '{PLAN_CONFIRM}' are required")
+    m = dict(id=f"M{len(Pl['milestones']) + 1}", name=str(name or "").strip() or f"milestone {len(Pl['milestones']) + 1}", by=str(by).strip(),
+             reason=str(reason).strip(), at=time.strftime("%Y-%m-%d %H:%M:%S"), fresh_test_cohort=bool(fresh_test_cohort))
+    Pl["milestones"].append(m); _js(P("evaluation_plan.json"), Pl); _event("config_changed", by, milestone=m["id"]); return dict(ok=True, milestone=m)
+
+
+def test_consultations():
+    p = P("split", "test_consultations.jsonl")
+    if not os.path.exists(p): return []
+    with open(p) as f: return [json.loads(x) for x in f if x.strip()]
+
+
+def test_reuse_gate(M, acc, test_patients):
+    """Stage 6: the locked test cohort supports ACCEPTANCE once per pre-registered milestone. Every consultation is recorded; a model
+    evaluated on a test set already used for acceptance at the current milestone stays experimental (the result is still reported)."""
+    acc = dict(acc, reasons=list(acc.get("reasons") or []))
+    if not test_patients or not (M.get("test") or {}).get("n"): return acc
+    dig = hashlib.sha256(json.dumps(test_patients).encode()).hexdigest()[:16]; Pl = evaluation_plan()
+    ms = (Pl or {}).get("milestones") or []; cur = ms[-1]["id"] if ms else None
+    used = [c for c in test_consultations() if c.get("milestone") == cur and c.get("test_digest") == dig and c.get("used_for_acceptance")]
+    if not Pl: acc["reasons"].append("no pre-registered evaluation plan: the locked test result is reported but cannot support acceptance")
+    elif not cur: acc["reasons"].append("no evaluation milestone declared: declare one before the locked test cohort can support acceptance")
+    elif used: acc["reasons"].append(f"the locked test cohort was already used for acceptance at milestone {cur} (model {used[0]['version']}): "
+                                     "declare the next milestone or add a fresh test cohort - test-set reuse is refused")
+    use = bool(Pl and cur and not used and not acc["reasons"])
+    rec = dict(version=M.get("version"), at=time.strftime("%Y-%m-%d %H:%M:%S"), milestone=cur, test_digest=dig, n_patients=len(test_patients),
+               used_for_acceptance=use, auc=((M.get("test") or {}).get("percival") or {}).get("auc"))
+    os.makedirs(P("split"), exist_ok=True)
+    with open(P("split", "test_consultations.jsonl"), "a") as f: f.write(json.dumps(rec, default=str) + "\n")
+    acc["passed"] = not acc["reasons"]; acc["test_consultation"] = rec
+    acc["criteria"] = (acc.get("criteria") or "") + " Stage 6: the locked test cohort supports acceptance once per pre-registered milestone."
+    return acc
+
+
+def reader_agreement():
+    from uengine import pensieve_index as PI
+    return PI.reader_agreement(B())
+
+
+def drift_state():
+    """Stage 6: calibration / drift monitoring by scanner, field strength and sequence: per subgroup the scored studies, the share of
+    candidates out of the training distribution and the mean PERCIVAL score; subgroups the active model never saw are flagged."""
+    M = active() or {}; seen = {}
+    for k, lv in ((M.get("subgroup_calibration") or {}).get("subgroups") or {}).items(): seen[k] = set(lv)
+    agg = {}; flagged = []
+    for f in sorted(glob.glob(P("scores", "*.json"))):
+        sid = os.path.basename(f)[:-5]
+        if not may_read(sid): continue
+        rec = _jl(f, {}) or {}; C = rec.get("candidates") or []
+        rows = list((_cached_rows(sid) or {}).values())
+        sub = ((rows or [{}])[0] or {}).get("subgroups") or {}
+        ood = sum(1 for c in C if any("out-of-distribution" in r_ for r_ in (c.get("reasons") or []))); n = len(C)
+        for k in ("field_strength", "sequence", "anatomy"):
+            lv = str(sub.get(k) or "unknown"); a = agg.setdefault(k, {}).setdefault(lv, dict(studies=0, candidates=0, ood=0, score_sum=0.0, scored=0))
+            a["studies"] += 1; a["candidates"] += n; a["ood"] += ood
+            for c in C:
+                if c.get("percival_score") is not None: a["score_sum"] += c["percival_score"]; a["scored"] += 1
+            if seen.get(k) and lv not in seen[k]: flagged.append(dict(study=sid, reason=f"{k} '{lv}' was not in the training data"))
+        if n and ood / n > 0.5: flagged.append(dict(study=sid, reason=f"{ood} of {n} candidates out of the training distribution"))
+    for k, lv in agg.items():
+        for v in lv.values(): v["ood_fraction"] = round(v["ood"] / v["candidates"], 3) if v["candidates"] else None; v["mean_score"] = round(v["score_sum"] / v["scored"], 1) if v["scored"] else None
+    return dict(by_subgroup=agg, flagged=flagged, model=M.get("version"),
+                note="monitoring only: a flagged study is reviewed by an expert; no recalibration is applied automatically")

@@ -15,8 +15,15 @@ patient separation). The old trials stay available only as labelled SYNTHETIC de
   approval      a named person (never SHADOW / PERCIVAL / an automated actor), typed phrase, reason; only after a passed confirmation (or an
                 explicit override with reason). Approval creates a new component version (component_registry) - previous version kept
                 for rollback. Synthetic evidence is stamped and can never be presented as a validated improvement.
-Implemented kinds: 'nox_measurement' (add a recorded quantitative measurement to NOX). Other kinds can be registered; their experiments
-are reported as not implemented (never as passed)."""
+Implemented kinds (Stage 4):
+  nox_measurement  add a recorded quantitative measurement to NOX (approval -> NOX feature set; the engine trains on it)
+  interaction      add the product of two NOX measurements (component interaction; approval -> NOX feature set 'a*b')
+  lumos_pattern    add an image-patch statistic (patch_* from the LUMOS patch maps) - approval records a LUMOS version (pattern list;
+                   the image network does not consume it yet - reported, never silently applied)
+  albus_rule       a detector rule / threshold change "exclude candidates with <measurement> <op> <threshold>", SENSITIVITY-GATED: evaluated
+                   against the current detector output on the SAME studies; any lost eligible cSS rejects it (fewer false positives never
+                   excuse lost lesions); approval records an ALBUS version with the proposed rule - the detector itself is never changed here
+Stability selection (suggest_nox) proposes NOX measurements as hypotheses only (discovery patients only) - never direct additions."""
 import hashlib
 import json
 import os
@@ -27,10 +34,18 @@ import numpy as np
 SALT = "percival-shadow-discovery-v1"
 CONFIRM_FRACTION = 0.4
 KINDS = ("nox_measurement", "albus_rule", "lumos_pattern", "interaction")
-IMPLEMENTED = ("nox_measurement",)
+IMPLEMENTED = ("nox_measurement", "albus_rule", "lumos_pattern", "interaction")
+RULE_OPS = (">", "<", ">=", "<=")
 FORBIDDEN = ("y", "label", "call", "expert", "cand_id", "study", "patient", "percival_score", "score_model", "rank_model", "reviewer",
              "adjudicat", "consensus", "gt_", "truth")
 LAMBDA = 1.0
+
+
+def is_label_like(v):
+    """a label, identifier or model output (never a measurement). Short tokens ('y') must match the whole name - as a substring 'y'
+    refused real measurements such as tortuosity or esd_y (fixed in Stage 2)."""
+    n = str(v).lower(); parts = set(n.replace("-", "_").split("_"))
+    return any((n == t or t in parts) if len(t) <= 2 else (t in n) for t in FORBIDDEN)
 
 
 class ShadowError(ValueError):
@@ -77,17 +92,30 @@ def _check_rows(rows):
     if any(r.get("y") not in (0, 1) for r in rows): raise ShadowError("refused: every example needs an eligible expert label (0/1)")
 
 
-def register(store, target_component, kind, variables, rationale, created_by="SHADOW"):
+TARGET = dict(nox_measurement="NOX", interaction="NOX", lumos_pattern="LUMOS", albus_rule="ALBUS")
+
+
+def register(store, target_component, kind, variables, rationale, created_by="SHADOW", params=None):
     if kind not in KINDS: raise ShadowError(f"unknown kind {kind}")
     if target_component not in ("ALBUS", "NOX", "LUMOS"): raise ShadowError("target must be ALBUS, NOX or LUMOS")
+    if target_component != TARGET[kind]: raise ShadowError(f"kind '{kind}' changes {TARGET[kind]}, not {target_component}")
     variables = [str(v) for v in (variables or [])]
+    if not variables: raise ShadowError("a hypothesis names at least one measurement / pattern (an empty hypothesis cannot be tested)")
     for v in variables:
-        if any(t in v.lower() for t in FORBIDDEN): raise ShadowError(f"refused: '{v}' is a label, identifier or model output - not a measurement")
+        if is_label_like(v): raise ShadowError(f"refused: '{v}' is a label, identifier or model output - not a measurement")
     if not str(rationale or "").strip(): raise ShadowError("a rationale is required")
+    params = dict(params or {})
+    if kind == "interaction" and len(variables) != 2: raise ShadowError("an interaction needs exactly two measurements")
+    if kind == "lumos_pattern" and not all(v.startswith("patch_") for v in variables): raise ShadowError("LUMOS patterns are patch statistics (patch_*)")
+    if kind == "albus_rule":
+        if len(variables) != 1 or params.get("op") not in RULE_OPS: raise ShadowError(f"an ALBUS rule needs one measurement and op in {RULE_OPS}")
+        try: params["threshold"] = float(params["threshold"])
+        except (KeyError, TypeError, ValueError): raise ShadowError("an ALBUS rule needs a numeric threshold")
+        params["feature"] = variables[0]
     d = _dir(store, "hypotheses"); os.makedirs(d, exist_ok=True)
     hid = f"H{len([f for f in os.listdir(d) if f.endswith('.json')]) + 1:03d}"
     H = dict(id=hid, target_component=target_component, kind=kind, variables=variables, rationale=str(rationale).strip(), created_by=created_by,
-             created=time.strftime("%Y-%m-%d %H:%M:%S"), status="registered", implemented=kind in IMPLEMENTED)
+             created=time.strftime("%Y-%m-%d %H:%M:%S"), status="registered", implemented=kind in IMPLEMENTED, params=params)
     _js(os.path.join(d, f"{hid}.json"), H); return H
 
 
@@ -139,16 +167,53 @@ def _prepare(store, H, rows, baseline_features):
     for r in rows: r["_side"] = S["assignment"][str(r["patient"])]
     disc = [r for r in rows if r["_side"] == "discovery"]; conf = [r for r in rows if r["_side"] == "confirmation"]
     if set(r["patient"] for r in disc) & set(r["patient"] for r in conf): raise ShadowError("patient in both discovery and confirmation")
+    if H["kind"] == "interaction":                                      # the product of the two measurements is the new variable
+        a, b = H["variables"]; name = f"{a}*{b}"
+        for r in rows:
+            va, vb = r["features"].get(a), r["features"].get(b)
+            r["features"][name] = None if va is None or vb is None else float(va) * float(vb)
+        return S, disc, conf, list(baseline_features), list(baseline_features) + [v for v in (a, b, name) if v not in baseline_features]
     return S, disc, conf, list(baseline_features), list(baseline_features) + [v for v in H["variables"] if v not in baseline_features]
+
+
+def _rule_hits(rows, P):
+    """True where the proposed ALBUS rule would EXCLUDE the candidate (missing measurement: never excluded)"""
+    import operator
+    op = {">": operator.gt, "<": operator.lt, ">=": operator.ge, "<=": operator.le}[P["op"]]
+    return np.array([r["features"].get(P["feature"]) is not None and bool(op(float(r["features"][P["feature"]]), P["threshold"])) for r in rows])
+
+
+def _wilson(k, n, z=1.96):
+    if n == 0: return None
+    p = k / n; d = 1 + z * z / n; c = (p + z * z / (2 * n)) / d; h = z * np.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d
+    return [float(c - h), float(c + h)]
+
+
+def rule_effect(rows, P):
+    """sensitivity-first evaluation of an ALBUS rule on the same studies: lost eligible cSS, removed false positives"""
+    hit = _rule_hits(rows, P); y = np.array([r["y"] for r in rows]); studies = {r["study"] for r in rows}
+    n1 = int((y == 1).sum()); lost = int((hit & (y == 1)).sum()); fp_removed = int((hit & (y == 0)).sum())
+    return dict(n_css=n1, lost_css=lost, lost=[dict(study=r["study"], cand_id=r["cand_id"]) for r, h in zip(rows, hit) if h and r["y"] == 1][:20],
+                false_positives_removed=fp_removed, fp_per_study_reduction=round(fp_removed / max(len(studies), 1), 3),
+                sensitivity_retained=(n1 - lost) / n1 if n1 else None, sensitivity_retained_ci=_wilson(n1 - lost, n1), studies=len(studies),
+                gate="rejected: loses eligible cSS (fewer false positives never excuse lost lesions)" if lost else
+                     ("no change" if not fp_removed else "sensitivity preserved on these studies"))
 
 
 def run_discovery(store, hid, rows, baseline_features, synthetic=False, seed=0, k=5):
     """SHADOW: experiment on discovery patients only. rows: dict(study, cand_id, patient, partition, y, features {name: value})"""
     H = load(store, hid)
-    if not H["implemented"]: H.update(status="not_implemented", note=f"experiments for kind '{H['kind']}' are not implemented"); _js(_dir(store, "hypotheses", f"{hid}.json"), H); return H
+    if not H.get("implemented", H["kind"] in IMPLEMENTED): H.update(status="not_implemented", note=f"experiments for kind '{H['kind']}' are not implemented"); _js(_dir(store, "hypotheses", f"{hid}.json"), H); return H
     if H.get("discovery"): raise ShadowError(f"{hid}: discovery already recorded (register a new hypothesis to change it)")
     from uengine.percival.meta import folds
     S, disc, conf, base_cols, ext_cols = _prepare(store, H, rows, baseline_features)
+    if H["kind"] == "albus_rule":                                        # sensitivity-gated, no model fitting: the rule's effect on discovery
+        E = rule_effect(disc, H["params"])
+        H["discovery"] = dict(by="SHADOW", at=time.strftime("%Y-%m-%d %H:%M:%S"), rule=H["params"], result=E, synthetic=bool(synthetic),
+                              patients=sorted({str(r["patient"]) for r in disc}), baseline="current detector output on the same studies",
+                              n_confirmation_patients_reserved=len({r["patient"] for r in conf}),
+                              evidence_note="SYNTHETIC data - infrastructure test, not a discovery" if synthetic else "development patients (discovery side)")
+        H["status"] = "rejected_sensitivity" if E["lost_css"] else "discovery_done"; _js(_dir(store, "hypotheses", f"{hid}.json"), H); return H
     y = np.array([r["y"] for r in disc], float); g = np.array([str(r["patient"]) for r in disc])
     if len(np.unique(g)) < 3 or min(y.sum(), (1 - y).sum()) < 3: raise ShadowError("too few discovery patients / labels for a cross-validated experiment")
     Xa, Xb = _X(disc, base_cols), _X(disc, ext_cols); pa, pb = np.full(len(y), np.nan), np.full(len(y), np.nan)
@@ -174,7 +239,21 @@ def confirm(store, hid, rows, actor="PERCIVAL", seed=0, min_patients=3):
     H = load(store, hid)
     if not H.get("discovery"): raise ShadowError(f"{hid}: no discovery result to confirm")
     if H.get("confirmation"): raise ShadowError(f"{hid}: already confirmed once - repeated confirmation is refused (no tuning on confirmation data)")
-    D = H["discovery"]; S, disc, conf, _, _ = _prepare(store, H, rows, D["baseline_features"])
+    D = H["discovery"]
+    if H["kind"] == "albus_rule":
+        if H["status"] == "rejected_sensitivity": raise ShadowError(f"{hid}: rejected in discovery (lost eligible cSS) - nothing to confirm")
+        S, disc, conf, _, _ = _prepare(store, H, rows, [])
+        leak = set(D["patients"]) & {str(r["patient"]) for r in conf}
+        if leak: raise ShadowError(f"refused: {len(leak)} confirmation patient(s) were used in discovery")
+        E = rule_effect(conf, H["params"]); enough = E["n_css"] >= 1 and len({r["patient"] for r in conf}) >= min_patients
+        passed = bool(enough and E["lost_css"] == 0 and E["false_positives_removed"] > 0)
+        H["confirmation"] = dict(by="PERCIVAL", at=time.strftime("%Y-%m-%d %H:%M:%S"), result=E, passed=passed, synthetic=D.get("synthetic"),
+                                 rule="passed iff the rule loses NO eligible cSS on confirmation patients AND removes false positives there",
+                                 reason=None if enough else "too few confirmation patients / cSS to confirm a sensitivity-preserving rule",
+                                 patients=sorted({str(r["patient"]) for r in conf}))
+        H["status"] = "confirmed" if passed else ("confirmation_insufficient" if not enough else "not_confirmed")
+        _js(_dir(store, "hypotheses", f"{hid}.json"), H); return H
+    S, disc, conf, _, _ = _prepare(store, H, rows, D["baseline_features"])
     leak = set(D["patients"]) & {str(r["patient"]) for r in conf}
     if leak: raise ShadowError(f"refused: {len(leak)} confirmation patient(s) were used in discovery")
     yd = np.array([r["y"] for r in disc], float); yc = np.array([r["y"] for r in conf], float); gc = np.array([str(r["patient"]) for r in conf])
@@ -207,8 +286,60 @@ def approve(store, hid, by, reason, confirm_phrase, override=False, allow_synthe
     cur = CR.active(store, H["target_component"]); cfg = dict(cur.get("config") or {})
     if H["kind"] == "nox_measurement":
         cfg["feature_set"] = list(cfg.get("feature_set") or []) + [v for v in H["variables"] if v not in (cfg.get("feature_set") or [])]
+    elif H["kind"] == "interaction":
+        name = "*".join(H["variables"]); cfg["feature_set"] = list(cfg.get("feature_set") or []) + ([name] if name not in (cfg.get("feature_set") or []) else [])
+    elif H["kind"] == "lumos_pattern":
+        cfg["patterns"] = list(cfg.get("patterns") or []) + [v for v in H["variables"] if v not in (cfg.get("patterns") or [])]
+        cfg["patterns_note"] = "recorded LUMOS pattern hypotheses; the image network does not consume them yet"
+    elif H["kind"] == "albus_rule":
+        cfg["proposed_rules"] = list(cfg.get("proposed_rules") or []) + [dict(H["params"], hypothesis=hid, applied_to_detector=False)]
+        cfg["rules_note"] = "approved rule proposals; the detector (scripts/detect_css.py) is changed only by a reviewed code / parameter release"
     V = CR.approve(store, H["target_component"], cfg, by, reason, confirm_phrase,
                    evidence=dict(hypothesis=hid, discovery=H["discovery"]["result"], confirmation=C.get("result"), override=bool(override and not C.get("passed"))),
                    synthetic=H["discovery"].get("synthetic"))
     H.update(status="approved", approved=dict(by=V["by"], at=V["created"], version=V["version"], override=bool(override and not C.get("passed"))))
     _js(_dir(store, "hypotheses", f"{hid}.json"), H); return H, V
+
+
+# ------------------------------------------------------------------ Stage 3: NOX stability selection -> hypotheses (never direct additions)
+def _l1_logistic(X, y, lam, iters=300):
+    """L1-penalised logistic regression by proximal gradient (ISTA) on standardised X -> coefficients (no intercept penalty)"""
+    n, p = X.shape; b = np.zeros(p); b0 = float(np.log((y.mean() + 1e-3) / (1 - y.mean() + 1e-3))); L = 0.25 * (np.linalg.norm(X, 2) ** 2 / n + 1e-9); t = 1.0 / L
+    for _ in range(iters):
+        z = np.clip(b0 + X @ b, -30, 30); pr = 1 / (1 + np.exp(-z)); gr = X.T @ (pr - y) / n; b0 -= t * float(np.mean(pr - y))
+        b = np.sign(b - t * gr) * np.maximum(np.abs(b - t * gr) - t * lam, 0.0)
+    return b
+
+
+def stability_selection(rows, cols, n_boot=50, lambdas=(0.02, 0.05, 0.1), seed=0):
+    """selection probability of each candidate measurement over half-samples of PATIENTS (Meinshausen-Buhlmann; max over the lambda grid)"""
+    y = np.array([r["y"] for r in rows], float); g = np.array([str(r["patient"]) for r in rows]); u = np.unique(g); X = _X(rows, cols)
+    med = np.nanmedian(np.where(np.isfinite(X), X, np.nan), axis=0); med = np.where(np.isfinite(med), med, 0.0)
+    X = np.where(np.isfinite(X), X, med); sd = X.std(0); sd[sd == 0] = 1.0; X = (X - X.mean(0)) / sd
+    r = np.random.default_rng(seed + 77); freq = np.zeros((len(lambdas), len(cols)))
+    for _ in range(n_boot):
+        m = np.isin(g, r.choice(u, max(2, len(u) // 2), replace=False))
+        if len(np.unique(y[m])) < 2: continue
+        for li, lam in enumerate(lambdas): freq[li] += _l1_logistic(X[m], y[m], lam) != 0
+    prob = (freq / max(n_boot, 1)).max(0)
+    return sorted(({"measurement": c, "selection_probability": round(float(p_), 3)} for c, p_ in zip(cols, prob)), key=lambda d: -d["selection_probability"])
+
+
+def suggest_nox(store, rows, baseline_features, candidate_cols, threshold=0.6, max_new=5, seed=0):
+    """stability selection over the recorded-only measurements on DISCOVERY patients only; measurements selected with probability >= threshold
+    are REGISTERED as nox_measurement hypotheses (created_by 'SHADOW stability selection') - they still need discovery, PERCIVAL
+    confirmation and human approval. Never adds a measurement to training."""
+    _check_rows(rows)
+    S = split_of(store, [r["patient"] for r in rows]); disc = [r for r in rows if S["assignment"][str(r["patient"])] == "discovery"]
+    cols = [c for c in candidate_cols if c not in baseline_features and not is_label_like(c)]
+    y = np.array([r["y"] for r in disc], float)
+    if not cols or len({r["patient"] for r in disc}) < 4 or min(y.sum(), (1 - y).sum()) < 3:
+        return dict(ok=False, reason="too few discovery patients / labels or no candidate measurements", selection=[])
+    sel = stability_selection(disc, cols, seed=seed); new = []
+    have = {tuple(h.get("variables") or []) for h in listing(store)}
+    for d in sel:
+        if d["selection_probability"] >= threshold and len(new) < max_new and (d["measurement"],) not in have:
+            new.append(register(store, "NOX", "nox_measurement", [d["measurement"]],
+                                f"stability selection on discovery patients: selection probability {d['selection_probability']}", created_by="SHADOW stability selection"))
+    return dict(ok=True, selection=sel, registered=[h["id"] for h in new], threshold=threshold, discovery_patients=len({r["patient"] for r in disc}),
+                note="proposals only: each must pass SHADOW discovery, PERCIVAL confirmation and named human approval")

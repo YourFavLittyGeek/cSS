@@ -53,8 +53,12 @@ def versions(store, comp):
 
 
 def load(store, comp, v):
-    if v == "v000": return dict(version="v000", component=comp, config=BASELINES[comp], parent=None, by="built-in", baseline=True)
-    return _jl(os.path.join(_d(store, comp), f"{v}.json"))
+    if v == "v000": return dict(version="v000", component=comp, config=BASELINES[comp], parent=None, by="built-in", baseline=True, signature_ok=True)
+    V = _jl(os.path.join(_d(store, comp), f"{v}.json"))
+    if V is not None:                                                     # Stage 7: local integrity signature (approval_signing.py)
+        from uengine import approval_signing as AS
+        V["signature_ok"] = AS.verify(V)
+    return V
 
 
 def active(store, comp):
@@ -81,9 +85,14 @@ def approve(store, comp, config, by, reason, confirm, evidence, synthetic=False)
     V = dict(version=v, component=comp, config=config, parent=cur["version"], by=str(by).strip(), reason=str(reason).strip(),
              created=time.strftime("%Y-%m-%d %H:%M:%S"), evidence=evidence, synthetic=bool(synthetic),
              note="SYNTHETIC evidence - infrastructure test only, not a validated improvement" if synthetic else "")
+    from uengine import approval_signing as AS
+    V["signature"] = AS.sign(V)
     _js(os.path.join(_d(store, comp), f"{v}.json"), V)
     _js(os.path.join(_d(store, comp), "active.json"), dict(version=v, previous=cur["version"], by=V["by"], at=V["created"]))
     _log(store, comp, event="approved_and_activated", version=v, parent=cur["version"], by=V["by"], reason=V["reason"], synthetic=bool(synthetic))
+    from uengine import event_log as EV                                     # Stage 5: the event log is authoritative for active versions
+    EV.append(store, "component_change", V["by"], component=comp, version=v, parent=cur["version"], reason=V["reason"], synthetic=bool(synthetic),
+              signature=V.get("signature"))
     return V
 
 
@@ -96,6 +105,8 @@ def rollback(store, comp, by, reason, confirm):
     _js(os.path.join(_d(store, comp), "active.json"), dict(version=prev, previous=cur["version"], by=str(by).strip(), at=time.strftime("%Y-%m-%d %H:%M:%S"),
                                                          rolled_back=cur["version"]))
     _log(store, comp, event="rolled_back", version=cur["version"], now_active=prev, by=str(by).strip(), reason=str(reason).strip())
+    from uengine import event_log as EV
+    EV.append(store, "rollback", str(by).strip(), component=comp, rolled_back=cur["version"], now_active=prev, reason=str(reason).strip())
     return load(store, comp, prev)
 
 
