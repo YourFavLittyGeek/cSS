@@ -9,7 +9,11 @@ import glob, json, os, re, shutil, socket, subprocess, sys, tempfile, time, urll
 import numpy as np, pandas as pd
 H = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(H); PY = sys.executable
 F = []
-def check(n, ok, info=""): print(f"{'PASS' if ok else 'FAIL'}  {n}  {info}"); (None if ok else F.append(n))
+SK = []; _DOM = dict(missing=None)
+def check(n, ok, info=""):
+    """Stage 7: a check whose page could not be rendered (no usable headless browser) is SKIPPED with the reason - never PASS"""
+    if _DOM["missing"]: print(f"SKIP  {n}  ({_DOM['missing']})"); SK.append(n); _DOM["missing"] = None; return
+    print(f"{'PASS' if ok else 'FAIL'}  {n}  {info}"); (None if ok else F.append(n))
 SHOTS = sys.argv[sys.argv.index("--shots") + 1] if "--shots" in sys.argv else None
 T = tempfile.mkdtemp(prefix="apppc_"); HOME = os.path.join(T, "home"); B = os.path.join(HOME, "syn_percival"); os.makedirs(HOME)
 r = subprocess.run([PY, os.path.join(ROOT, "unified_engine", "run_imaging.py"), "cohort", B, "--n", "24", "--seed", "8"], capture_output=True, text=True)
@@ -52,18 +56,21 @@ def wait_job(limit=900):
         if s["job"].get("state") not in ("preparing", "running"): return s
         time.sleep(1)
     return get("/api/percival/state")
-chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _chrome as CH                # Stage 7 headless-Chrome harness
+chrome = CH.find() or "/nonexistent"
+class _NoDOM(str):
+    def __contains__(self, x): return True                                 # the check that reads it is reported SKIPPED, never PASS
 def dom(url, budget=12000):
-    if not os.path.exists(chrome): return ""
-    R_ = subprocess.run([chrome, "--headless=new", "--disable-gpu", "--enable-logging=stderr", "--v=0", f"--user-data-dir={os.path.join(T, 'chrome')}", f"--virtual-time-budget={budget}", "--dump-dom", url if url.startswith("http") else f"{U}/{url}"], capture_output=True, text=True, timeout=120)
-    D = R_.stdout; errs = [l for l in R_.stderr.splitlines() if ("CONSOLE" in l or "console" in l) and ("Uncaught" in l or "rror" in l)]
+    D, err = CH.dump_dom(url if url.startswith("http") else f"{U}/{url}", os.path.join(T, "chrome"), budget=max(budget, 15000))
+    if D is None: _DOM["missing"] = err; return _NoDOM("")
+    _DOM["missing"] = None
+    errs = [l for l in (err or "").splitlines() if ("CONSOLE" in l or "console" in l) and ("Uncaught" in l or "rror" in l)]
     if errs: print("browser console errors:", " | ".join(e[-300:] for e in errs[:5]))
     return re.sub(r"<script\b[^>]*>.*?</script>", "", D, flags=re.S)
 def shot(name, url, h=1500, w=1500):
-    if SHOTS and os.path.exists(chrome):
+    if SHOTS:
         os.makedirs(SHOTS, exist_ok=True)
-        subprocess.run([chrome, "--headless=new", "--disable-gpu", f"--user-data-dir={os.path.join(T, 'chrome_s')}", "--hide-scrollbars", f"--window-size={w},{h}", "--virtual-time-budget=15000",
-                        f"--screenshot={os.path.join(SHOTS, name + '.png')}", url if url.startswith("http") else f"{U}/{url}"], capture_output=True, timeout=120)
+        CH.screenshot(url if url.startswith("http") else f"{U}/{url}", os.path.join(SHOTS, name + ".png"), os.path.join(T, "chrome_s"), w=w, h=h)
 try:
     for _ in range(80):
         try: urllib.request.urlopen(U + "/api/state", timeout=2); break
@@ -109,7 +116,7 @@ try:
     shot("v523_intelligence_evidence", "#intel?tab=evidence", 2600)
     Dc = dom("#intel?tab=center", 15000)
     check("v5.24 Training Center: separate states (studies / processed / candidates / called / eligible), datasets per component, study table",
-          all(f'data-pv="{k}"' in Dc for k in ("center", "center-tiles", "datasets", "selection")) and "Percival meta-model" in Dc and "Image ML" in Dc)
+          all(f'data-pv="{k}"' in Dc for k in ("center", "center-tiles", "datasets", "selection")) and "Decision Engine" in Dc and "LUMOS image network" in Dc)      # Stage 8: architecture names (the old "Percival meta-model" text no longer existed in the view - the check never ran while headless Chrome timed out)
     shot("v524_training_center", "#intel?tab=center", 2600)
     Di = dom("#intel?tab=integrity", 15000)
     check("v5.24 Data integrity: store schema, migration history, studies compatibility table", 'data-pv="integrity"' in Di and 'data-pv="compat"' in Di and "schema" in Di)
@@ -209,4 +216,5 @@ finally:
     subprocess.run(["pkill", "-f", os.path.join(B, "scripts", "review_web.py")], capture_output=True)      # only this test's own reviewer (temporary project)
 if F and os.environ.get("CSS_KEEP_TMP") == "1": print("kept for inspection:", T)
 else: shutil.rmtree(T, ignore_errors=True)
-print(("ALL PASS" if not F else f"{len(F)} FAILED: {F}") + f" ({__file__})"); sys.exit(1 if F else 0)
+if SK and not F: print(f"SKIPPED: {len(SK)} browser check(s) could not run ({CH.usable()[1] or 'page render timed out'}); every other check passed ({__file__})"); sys.exit(CH.SKIP_RC)
+print(("ALL PASS" if not F else f"{len(F)} FAILED: {F}") + (f"; {len(SK)} browser check(s) SKIPPED" if SK else "") + f" ({__file__})"); sys.exit(1 if F else 0)

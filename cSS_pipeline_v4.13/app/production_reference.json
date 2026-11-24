@@ -9,9 +9,11 @@
   "change": "RC1: line 377 summary print uses str() for numeric region labels (crashed after scoring when the FreeSurfer colour table is absent); scores, rules and outputs unchanged"
  },
  "css_common.py": {
-  "sha256_v514": "9fe6a2fb09fbb4d5cbd2fcc472b1c31caf7a271b213b44abb91be174c707355c",
+  "sha256_v514": "49916ac9b326e10a8b95b4d23457cf36e3e08796fe05639796ab9ea18bde1b0b",
   "same_as_115721f": false,
-  "change": "v5.25: enhanced spatial lesion matching (ambiguity detection, collision prevention, hemisphere enforcement)"
+  "change": "v5.25: enhanced spatial lesion matching (ambiguity detection, collision prevention, hemisphere enforcement); Phase 3B (8c2f611/106593a): match_one_to_one one-to-one matcher (ambiguous / contested -> unresolved); Stage 4 (2026-11-24): millimetre matching tolerances when the SWI voxel size is known (TOL_MM 1.5, MARGIN_MM 0.4; voxel fallback unchanged)",
+  "previous_sha256": "9fe6a2fb09fbb4d5cbd2fcc472b1c31caf7a271b213b44abb91be174c707355c",
+  "reference_updated": "2026-11-24 Stage 7: reference re-pinned to the reviewed matcher changes - the detector / scorer files are unchanged"
  },
  "css_qc.py": {
   "sha256_v514": "ffc6af1656f7e23ce8262e6ffe3de6f73981d4629c424839acb86d2f3cf0442c",

@@ -214,7 +214,9 @@ lab = PG.label_summary("SYNOLD"); c6 = next(c for c in PG.candidates_of("SYNOLD"
 check(lab["unrecognised"] == ["Calcification?"] and c6["status"] == "unrecognised" and "UNRECOGNISED_CALL" in c6["reasons"]
       and "Calcification?" in PG.state()["unrecognised"], "K13 an unrecognised call is kept, reported (Data integrity), never silently dropped", str(lab.get("unrecognised")))
 E1 = EL2.evaluate(dict(label_kind="css", authorized=True, has_image=False, n_char=True, has_predictors=False, test=True))
-check(set(EL2.COMPONENTS) == {"char", "image", "fusion", "meta", "predictor", "shadow"} and not E1["components"]["image"]["ok"] and E1["components"]["char"]["ok"]
+# Stage 7: reference updated - eligibility rules 1.3 (v5.25, commit 26568a1) added the 'detection' and 'segmentation' components (missed-cSS
+# support for detection learning; segmentation needs a 2D contour / 3D mask). The per-component semantics checked below are unchanged.
+check(set(EL2.COMPONENTS) == {"char", "image", "fusion", "meta", "predictor", "shadow", "detection", "segmentation"} and not E1["components"]["image"]["ok"] and E1["components"]["char"]["ok"]
       and not E1["components"]["predictor"]["ok"] and E1["components"]["shadow"]["ok"] and E1["components"]["image"]["missing"] and E1["components"]["predictor"]["missing"],
       "K14 eligibility per component incl. predictor + shadow; missing requirements in words; eligible for one, not another", json.dumps(E1)[:300])
 c1 = next(c for c in PG.candidates_of("SYNOLD")["candidates"] if c["cand_id"] == 1)

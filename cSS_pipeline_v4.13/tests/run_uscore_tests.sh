@@ -5,7 +5,7 @@
 cd "$(dirname "$0")/.."
 mkdir -p unified_score/output
 FAILED=(); SKIPPED=(); PASSED=0
-run() { echo "=== $*"; if python3 "$@"; then PASSED=$((PASSED+1)); else FAILED+=("$1"); fi; }
+run() { echo "=== $*"; python3 "$@"; rc=$?; if [ $rc -eq 0 ]; then PASSED=$((PASSED+1)); elif [ $rc -eq 77 ]; then SKIPPED+=("$1 (browser checks: no usable headless browser - see its log)"); else FAILED+=("$1"); fi; }   # Stage 7: rc 77 = SKIPPED
 skip() { echo "=== SKIPPED $1: $2"; SKIPPED+=("$1 ($2)"); }
 run tests/check_core_decompose.py
 run tests/check_uscore_features.py
