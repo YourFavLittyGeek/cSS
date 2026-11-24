@@ -23,7 +23,9 @@ R=$(python $S/eval_synthetic.py PH1S | grep RESULT); echo "$R"
 FOUND=$(echo "$R" | sed -E 's/.*found=([0-9]+).*/\1/')
 [ "$FOUND" -ge 4 ] || { echo "FAIL: sensitivity too low ($FOUND/8)"; exit 1; }
 echo "== scoring with truth";  python $S/score_css.py PH1S --truth > $T/score_test.log; grep -A2 "cSS multifocality" $T/score_test.log
-echo "== interactive reviewer (headless test mode)"; python $S/review_css.py PH1S --top 8 --redo > $T/review_test.log; grep "cSS multifocality" $T/review_test.log
+echo "== interactive reviewer (headless test mode)"
+python $S/review_admin.py role "Test Reader" expert --by "test suite" --reason "fixture: designated expert" --confirm "ASSIGN ROLE" > /dev/null   # Phase 3A.3
+python $S/review_css.py PH1S --top 8 --redo --reviewer "Test Reader" > $T/review_test.log; grep "cSS multifocality" $T/review_test.log
 echo "== calls survive a detector re-run (fingerprint matching)"
 cp $T/review/PH1S_candidates.csv $T/old_cand.csv
 python $S/detect_css.py PH1S -2.3 80 3 > /dev/null

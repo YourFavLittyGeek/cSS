@@ -268,15 +268,24 @@ def label_summary(sid):
     det = {}
     try:
         cand = L.candidates(B(), sid); E = L.effective(B(), sid, "", pol, cand)
-        for r in E["rows"]:
-            call = r.get("effective_call") or ""
-            if not call: continue
+        if E.get("problems"):                                                  # Phase 3A.5: a reviewer file does not match its journal
+            raise RuntimeError("review files need repair: " + "; ".join(E["problems"])[:300])
+        GT = {"no_expert": "NO_EXPERT", "abstained": None, "unrecognised": None, "insufficient": "INSUFFICIENT_QUORUM", "disagreement": None}
+        for r in E["rows"]:                                                    # Phase 3A.3: expert ground truth only
+            H = r.get("history") or []
+            if not H: continue
             last = {}
-            for e in r.get("history") or []: last[e["reviewer"]] = e["call"]
-            ks = {_kind(x) for x in last.values()} & {"css", "mimic"}
-            k = _kind(call)
-            det[int(r["cand_id"])] = dict(kind=k, y=1 if k == "css" else 0 if k == "mimic" else None, call=call, source="review",
-                                          reviewer=r.get("source_reviewer", ""), conflict=len(ks) > 1, calls=last)
+            for e in H: last[e["reviewer"]] = e["call"]
+            st = r.get("status"); call = r.get("effective_call") or ""
+            if st in ("resolved", "adjudicated"):
+                k = _kind(call); ok = bool(r.get("primary_eligible"))
+                det[int(r["cand_id"])] = dict(kind=k, y=(1 if k == "css" else 0 if k == "mimic" else None) if ok else None, call=call, source="review",
+                                              reviewer=r.get("source_reviewer", ""), conflict=False, calls=last, gt_status=st, gt_class=r.get("provenance_class", ""),
+                                              gt_block=None if ok or k not in ("css", "mimic") else "NOT_PRIMARY_GROUND_TRUTH")
+            else:
+                lc = H[-1]["call"]; k = "uncertain" if st == "abstained" else ("disputed" if st == "disagreement" else "unrecognised" if st == "unrecognised" else _kind(lc))
+                det[int(r["cand_id"])] = dict(kind=k, y=None, call=lc if st == "unrecognised" else "", source="review", reviewer="", conflict=st == "disagreement", calls=last,
+                                              gt_status=st, gt_class="", gt_block=GT.get(st, "NO_EXPERT"))
         n_hist = 0
         if use_h:
             for cid, H in _historical(sid, cand).items():
@@ -284,13 +293,15 @@ def label_summary(sid):
                 last = {}
                 for e in H: last[e["reviewer"]] = e["call"]
                 ks = {_kind(x) for x in last.values()} & {"css", "mimic"}; call = H[-1]["call"]; k = _kind(call)
-                det[cid] = dict(kind=k, y=1 if k == "css" else 0 if k == "mimic" else None, call=call, source="historical",
-                                reviewer=H[-1]["reviewer"], conflict=len(ks) > 1, calls=last, file=H[-1]["file"]); n_hist += 1
+                det[cid] = dict(kind=k, y=None, call=call, source="historical", reviewer=H[-1]["reviewer"], conflict=len(ks) > 1, calls=last,
+                                file=H[-1]["file"], gt_status="historical", gt_class="historical_blinding_unknown",
+                                gt_block="NOT_PRIMARY_GROUND_TRUTH"); n_hist += 1          # Phase 3A.6: never primary unless adjudicated
         out = {cid: d["y"] for cid, d in det.items() if d["y"] is not None}
         st = L.review_state(B(), sid, "", pol)
 
-        # Discover reviewer-drawn missed cSS lesions (review/{sid}_missed.csv & Pensieve)
-        missed_detail = {}
+        # Phase 3A.3: missed cSS from the reviewer-owned records (the derived review/{sid}_missed.csv); the reviewer's role and the read
+        # provenance decide eligibility. Pensieve-only rows have no provenance and are not used.
+        missed_detail = {}; roles = L.RR.current(B()); verified = L.RR.verified_reviewers(B(), sid)
         missed_csv = os.path.join(B(), "review", f"{sid}_missed.csv")
         if os.path.exists(missed_csv):
             try:
@@ -298,36 +309,24 @@ def label_summary(sid):
                 m_df = _mpd.read_csv(missed_csv, dtype=str).fillna("")
                 for _, mr in m_df.iterrows():
                     mid = str(mr.get("missed_id", "")).strip()
-                    if mid:
-                        missed_detail[f"missed_{mid}"] = dict(
-                            missed_id=mid, reviewer=str(mr.get("reviewer", "")), time=str(mr.get("time", "")),
-                            vox=(int(float(mr["vox_i"])), int(float(mr["vox_j"])), int(float(mr["vox_k"]))) if "vox_i" in mr and mr["vox_i"] else (0,0,0),
-                            mm=(float(mr["x_mm"]), float(mr["y_mm"]), float(mr["z_mm"])) if "x_mm" in mr and mr["x_mm"] else (0.0,0.0,0.0),
-                            plane=str(mr.get("plane", "")), slice_idx=int(float(mr["slice"])) if "slice" in mr and mr["slice"] else 0,
-                            shape=str(mr.get("shape", "point")), points=str(mr.get("points", "[]")),
-                            comment=str(mr.get("comment", "")), detector_fate=str(mr.get("detector_fate", "")),
-                            albus_detected=False, kind="css", y=1
-                        )
+                    if not mid: continue
+                    rev = str(mr.get("reviewer", "")); role = L.RR.role_of(B(), rev, roles)
+                    if mr.get("read_phase") == "initial" and mr.get("ai_visible") == "False": klass = "verified_blind_post_3A"
+                    elif mr.get("read_phase"): klass = "not_blind_post_3A"
+                    else: klass = "historical_blinding_verified" if L.slug(rev) in verified else "historical_blinding_unknown"
+                    blk = "REVIEWER_NOT_EXPERT" if role != "expert" else (None if klass in L.PRIMARY_ELIGIBLE else "NOT_PRIMARY_GROUND_TRUTH")
+                    missed_detail[f"missed_{mid}"] = dict(
+                        missed_id=mid, reviewer=rev, role=role, time=str(mr.get("time", "")),
+                        vox=(int(float(mr["vox_i"])), int(float(mr["vox_j"])), int(float(mr["vox_k"]))) if mr.get("vox_i") else (0, 0, 0),
+                        mm=(float(mr["x_mm"]), float(mr["y_mm"]), float(mr["z_mm"])) if mr.get("x_mm") else (0.0, 0.0, 0.0),
+                        plane=str(mr.get("plane", "")), slice_idx=int(float(mr["slice"])) if mr.get("slice") else 0,
+                        shape=str(mr.get("shape", "point")), points=str(mr.get("points", "[]")), comment=str(mr.get("comment", "")),
+                        detector_fate=str(mr.get("detector_fate", "")), context=str(mr.get("context", "")), gt_class=klass, gt_block=blk,
+                        albus_detected=False, kind="css", y=1 if blk is None else None)
             except Exception: pass
-        try:
-            from uengine.pensieve import get_pensieve
-            p_mem = get_pensieve()
-            for pm in p_mem.get_missed_lesions(sid):
-                mk = f"missed_{pm['missed_id']}"
-                if mk not in missed_detail:
-                    missed_detail[mk] = dict(
-                        missed_id=str(pm["missed_id"]), reviewer=pm.get("reviewer_id", ""), time=str(pm.get("created_at", "")),
-                        vox=(pm.get("vox_i", 0), pm.get("vox_j", 0), pm.get("vox_k", 0)),
-                        mm=(pm.get("x_mm", 0.0), pm.get("y_mm", 0.0), pm.get("z_mm", 0.0)),
-                        plane=str(pm.get("plane", "")), slice_idx=pm.get("slice_idx", 0),
-                        shape=str(pm.get("shape", "point")), points=str(pm.get("points_json", "[]")),
-                        comment=str(pm.get("comment", "")), detector_fate=str(pm.get("detector_fate", "")),
-                        albus_detected=False, kind="css", y=1
-                    )
-        except Exception: pass
 
         res = dict(labels=out, detail=det, css=sum(out.values()), mimic=len(out) - sum(out.values()),
-                   missed_detail=missed_detail, n_missed=len(missed_detail), css_with_missed=sum(out.values()) + len(missed_detail),
+                   missed_detail=missed_detail, n_missed=len(missed_detail), css_with_missed=sum(out.values()) + sum(1 for m_ in missed_detail.values() if m_["y"] == 1),
                    unused=sum(1 for d in det.values() if d["y"] is None), stale=len(E.get("stale") or []),
                    unrecognised=sorted({d["call"] for d in det.values() if d["kind"] == "unrecognised"}),
                    conflicts=sum(1 for d in det.values() if d["conflict"]), historical=n_hist,
@@ -458,7 +457,7 @@ def _examples(sid, meta, rows=None):
         has_img = None if r is None else bool(r.get("maps") is not None if rows is not None else r.get("has_maps"))
         n_char = None if r is None else sum(v is not None for v in (r.get("char") or {}).values())
         has_pred = None if r is None else any(v is not None for v in (r.get("pred") or {}).values())
-        ev = EL.evaluate(dict(label_kind=d["kind"], conflict=d["conflict"] and S.get("percival_conflicts", "exclude") == "exclude",
+        ev = EL.evaluate(dict(label_kind=d["kind"], conflict=d["conflict"], gt_block=d.get("gt_block"),   # Phase 3A: unresolved never used
                               historical=d["source"] == "historical", study_excluded=meta.get("excluded"), study_archived=meta.get("archived_out"),
                               duplicate=meta.get("duplicate"), authorized=may_read(sid), has_image=has_img is not False, n_char=n_char is None or n_char > 0,
                               has_predictors=has_pred is not False, test=test, qc=meta.get("qc"), identity=idn["status"]))
@@ -468,10 +467,12 @@ def _examples(sid, meta, rows=None):
                         missing=sorted({m for v in ev["components"].values() for m in v.get("missing", [])}),
                         rules=EL.RULES_VERSION, evaluated=time.strftime("%Y-%m-%d %H:%M:%S"), checked=r is not None))
 
-    for mid, md in sorted(lab.get("missed_detail", {}).items()):
-        out.append(dict(study=sid, cand_id=mid, patient=pat, identity=idn["status"], y=1, call="cSS", label_source="expert_missed_lesion",
-                        reviewer=md.get("reviewer", ""), partition="test" if test else "development", status="eligible",
-                        reasons=["LOCKED_TEST"] if test else [],
+    for mid, md in sorted(lab.get("missed_detail", {}).items()):              # Phase 3A.3: through the eligibility engine (was always 'eligible')
+        ev = EL.evaluate(dict(label_kind="css", gt_block=md.get("gt_block"), study_excluded=meta.get("excluded"), study_archived=meta.get("archived_out"),
+                              duplicate=meta.get("duplicate"), authorized=may_read(sid), has_image=True, n_char=True, test=test, identity=idn["status"]))
+        out.append(dict(study=sid, cand_id=mid, patient=pat, identity=idn["status"], y=md.get("y"), call="cSS", label_source="expert_missed_lesion",
+                        reviewer=md.get("reviewer", ""), partition=ev["partition"], status=ev["status"], gt_class=md.get("gt_class", ""),
+                        reasons=ev["reasons"],
                         components=dict(char=False, image=True, fusion=False, meta=True, predictor=False, shadow=True,
                                         detection=True, segmentation=md.get("shape") in ("pen", "rect", "polygon")),
                         component_reasons=dict(char=["NO_MEASUREMENTS"], fusion=["NO_MEASUREMENTS"]),

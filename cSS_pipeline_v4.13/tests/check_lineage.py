@@ -50,8 +50,10 @@ check("lineage: E shrunk -> possible", byo[5]["status"] == "possible", byo[5]["w
 check("lineage: F newly detected; both halves of C 'possible', not new", {x["new_cand_id"]: x["status"] for x in L["new"]} == {1: "matched", 2: "matched", 3: "possible", 4: "possible", 5: "possible", 6: "new"}
       and L["summary"] == dict(confident=2, possible=2, no_match=1, new=1, n_old=5, n_new=6))
 check("lineage written for the run and as the active comparison", os.path.exists(os.path.join(B, "runs", SID, man["run_id"], "lineage.json")) and os.path.exists(os.path.join(B, "review", f"{SID}_lineage.json")))
+import review_roles as RR                                                     # Phase 3A.3: only designated experts decide (fixture)
+for n_ in ("Dr A", "Dr B"): RR.set_role(B, n_, "expert", "test admin", "fixture", RR.CONFIRM_ROLE)
 E = CL.effective(B, SID); ef = {r["cand_id"]: r for r in E["rows"]}
-check("identical candidate keeps its call (same object)", ef[1]["effective_call"] == "cSS" and ef[1]["source_rule"] == "newest")
+check("identical candidate keeps its call (same object)", ef[1]["effective_call"] == "cSS" and ef[1]["source_rule"].startswith("expert consensus"))
 check("re-detected (shifted) candidate keeps its call, with provenance", ef[2]["effective_call"] == "Vessel" and ("re-attached" in ef[2]["source_rule"] or "carried over" in ef[2]["source_rule"]), ef[2]["source_rule"])
 check("possible matches and new candidates get NO call automatically", all(ef[c]["effective_call"] == "" for c in (3, 4, 5, 6)))
 pend = CL.pending_confirmations(B, SID)

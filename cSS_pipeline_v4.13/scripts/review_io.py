@@ -210,7 +210,12 @@ def read_journal(path):
 
 def journal_append(base, sid, reviewer, kind, **fields):
     """append one event to the reviewer's journal (caller holds the study lock) -> the event"""
-    p = journal_path(base, sid, reviewer); ev, _ = read_journal(p)
+    return journal_append_file(journal_path(base, sid, reviewer), sid, reviewer, kind, **fields)
+
+
+def journal_append_file(p, sid, reviewer, kind, **fields):
+    """append one event to the journal file p (hash chain, fsync; caller holds the matching lock) -> the event"""
+    ev, _ = read_journal(p)
     last = ev[-1] if ev else None
     e = dict(schema=SCHEMA, seq=(int(last["seq"]) + 1) if last else 1, prev=sha256_bytes(_line_bytes(last)) if last else "",
              time=_now(), study=sid, reviewer=str(reviewer).strip(), kind=kind, **fields)
@@ -262,7 +267,7 @@ def table_states(events):
             for k in e.get("removed", []): lines.pop(k, None)
             for k, ln in e.get("upserts", {}).items(): lines[k] = ln
             if e.get("order") is not None: order = list(e["order"])
-            else: order = [k for k in order if k in lines] + [k for k in e.get("upserts", {}) if k not in order]
+            else: order = [k for k in order if k in lines] + [k for k in sorted(e.get("upserts", {})) if k not in order]   # deterministic (journal lines have sorted keys)
         txt = _render(header, order, lines) if header else ""
         out.append((e, txt, header, list(order), dict(lines)))
     return out
@@ -316,6 +321,22 @@ def ensure_table(base, sid, reviewer, table, path, need=("call",)):
     return dict(status="recovered", detail=f"{rel}: {why} - rebuilt from the event journal" + (f" (damaged copy kept in {q})" if q else ""))
 
 
+def check_table(base, sid, reviewer, table, path, need=("call",)):
+    """READ-ONLY (Phase 3A.3): does the reviewer's file match its journal? -> dict(status, detail). status: ok | no_journal (a readable file
+    written before journaling) | missing | behind_journal | unreadable | external_change. Nothing is written or repaired."""
+    rel = os.path.relpath(path, base); ev, probs = _table_events(base, sid, reviewer, table)
+    exists = os.path.exists(path); cur = open(path, "rb").read() if exists else b""
+    if not ev:
+        if exists and not _readable(cur.decode("utf-8", "replace"), need): return dict(status="unreadable", detail=f"{rel} cannot be read")
+        return dict(status="no_journal", detail="")
+    head = table_states(ev)[-1][1]
+    if exists and sha256_bytes(cur) == sha256_bytes(head.encode()): return dict(status="ok", detail="")
+    if not exists: return dict(status="missing", detail=f"{rel} is missing (the journal has it)")
+    if not _readable(cur.decode("utf-8", "replace"), need): return dict(status="unreadable", detail=f"{rel} cannot be read")
+    if probs: return dict(status="behind_journal", detail=f"{rel}: journal problems {probs[:2]}")
+    return dict(status="external_change", detail=f"{rel} differs from its journal (changed outside the reviewer or behind it)")
+
+
 def write_table(base, sid, reviewer, table, path, df, key_cols, kind, **info):
     """write a reviewer's CSV table (exact pandas to_csv text, unchanged format) with a write-ahead journal event holding the changed
     records. The caller holds the study lock and has called ensure_table. -> the event (None when nothing changed)"""
@@ -344,7 +365,7 @@ def write_table(base, sid, reviewer, table, path, df, key_cols, kind, **info):
         else:
             removed = [k for k in oorder if k not in new_lines]
             upserts = {k: v for k, v in new_lines.items() if olines.get(k) != v}
-            implied = [k for k in oorder if k in new_lines] + [k for k in keys if k not in oorder]
+            implied = [k for k in oorder if k in new_lines] + [k for k in sorted(upserts) if k not in oorder]   # what the replay will produce
             order = None if implied == keys else keys
         e = journal_append(base, sid, reviewer, kind, table=table, file=rel, header=header if header != oh else None, removed=removed,
                            upserts=upserts, order=order, file_sha256=sha256_bytes(text.encode()), **info)

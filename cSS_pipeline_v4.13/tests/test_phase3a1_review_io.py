@@ -232,6 +232,16 @@ class TestTableJournal(unittest.TestCase):
         self.assertEqual(open(self.p, "rb").read(), final)
         self.assertTrue(RIO.verify_study(self.b, "S1")["ok"])
 
+    def test_records_added_in_non_sorted_order_rebuild_exactly(self):
+        self.write([row(10, "cSS"), row(9, "Vessel"), row(2, "Normal")])       # one write, record keys not in text order ("10|" < "2|" < "9|")
+        self.assertEqual(self.ensure()["status"], "ok")                        # the journal already agrees with the file (no repair needed)
+        self.write([row(10, "cSS"), row(9, "Vessel"), row(2, "Normal"), row(11, "Artifact"), row(3, "cSS")])
+        ev, _ = RIO.read_journal(RIO.journal_path(self.b, "S1", "Reader A"))
+        self.assertEqual([e["kind"] for e in ev], ["call", "call"])            # no external-change / recovery event was needed
+        final = open(self.p, "rb").read()
+        self.assertEqual(self.ensure()["status"], "ok")
+        os.remove(self.p); self.ensure(); self.assertEqual(open(self.p, "rb").read(), final)
+
     def test_crash_between_journal_and_file_rolls_forward(self):
         self.write([row(1, "cSS")]); before = open(self.p, "rb").read()
         df = calls_df([row(1, "cSS"), row(2, "Vessel")]); csv = os.path.join(self.b, "next.csv"); df.to_csv(csv, index=False)
@@ -310,19 +320,23 @@ class TestReviewerServer(unittest.TestCase):
         self.b = new_project(); self.ids = make_study(self.b)
 
     def test_concurrent_windows_lose_no_call_or_missed_mark(self):
+        import review_roles as RR                                              # Phase 3A.3: the shared file holds EXPERT consensus only
+        RR.set_role(self.b, "Reader A", "expert", "test admin", "fixture", RR.CONFIRM_ROLE)
         slow = dict(PERCIVAL_TEST_SLOW_AT="review_io.table_write=0.08")             # widens any read-modify-write race
         A, B2 = Server(self.b, env=slow), Server(self.b, env=slow)
         try:
             A.post("/api/reviewer", dict(name="Reader A"))
-            jobs = []
+            jobs = []; replies = []
+            post = lambda srv, path, body: replies.append((path, body.get("comment", body.get("cand_id")), srv.post(path, body)))
             for k, cid in enumerate(self.ids):                                       # the SAME reviewer in two windows, interleaved
                 srv = A if k % 2 else B2
-                jobs.append(threading.Thread(target=srv.post, args=("/api/call", dict(study="S1", reviewer="Reader A", cand_id=cid, call="cSS"))))
-                jobs.append(threading.Thread(target=srv.post, args=("/api/missed", dict(study="S1", reviewer="Reader A" if k % 2 else "Reader B",
-                                                                                        action="add", ijk=[3 + k, 3, 3], comment=f"m{k}"))))
+                jobs.append(threading.Thread(target=post, args=(srv, "/api/call", dict(study="S1", reviewer="Reader A", cand_id=cid, call="cSS"))))
+                jobs.append(threading.Thread(target=post, args=(srv, "/api/missed", dict(study="S1", reviewer="Reader A" if k % 2 else "Reader B",
+                                                                                              action="add", ijk=[3 + k, 3, 3], comment=f"m{k}"))))
             [j.start() for j in jobs]; [j.join() for j in jobs]
         finally:
             A.stop(); B2.stop()
+        self.assertEqual([r for r in replies if not r[2].get("ok")], [], "every request must succeed (otherwise its cause is shown here)")
         c = pd.read_csv(os.path.join(self.b, "review", "S1_calls_Reader_A.csv"))
         self.assertEqual(sorted(c.cand_id.astype(int)), sorted(self.ids))
         m = pd.read_csv(os.path.join(self.b, "review", "S1_missed.csv"))
@@ -387,7 +401,9 @@ class TestReviewerServer(unittest.TestCase):
         finally: A.stop()
         ev, _ = RIO.read_journal(RIO.journal_path(self.b, "S1", "Reader A"))
         dele = [e for e in ev if e.get("kind") == "missed_delete"]
-        self.assertEqual(len(dele), 1); self.assertTrue(dele[0]["rows"][0]["deleted"]); self.assertEqual(dele[0]["rows"][0]["comment"], "first")
+        self.assertEqual(len(dele), 1); self.assertEqual(dele[0]["rows"][0]["status"], "deleted"); self.assertEqual(dele[0]["rows"][0]["comment"], "first")
+        own = pd.read_csv(os.path.join(self.b, "review", "S1_missed_by_Reader_A.csv"))            # Phase 3A.3: tombstone kept in the reviewer's file
+        self.assertEqual(sorted(own.status), ["active", "deleted"])
         os.remove(os.path.join(self.b, "review", "S1_missed.csv"))
         A = Server(self.b)
         try: m = A.get("/api/meta?study=S1&reviewer=Reader%20A")
@@ -397,28 +413,27 @@ class TestReviewerServer(unittest.TestCase):
 
 # ====================================================================== other writers of reviewer files
 class TestLedgerWriters(unittest.TestCase):
-    def test_consolidate_keeps_removed_calls_in_the_journal_and_restore_becomes_the_head(self):
+    def test_consolidation_is_refused_and_a_restore_becomes_the_journal_head(self):
         import call_ledger as CL
         b = new_project()
         pd.DataFrame([dict(cand_id=1, vox_i=11, vox_j=12, vox_k=8, volume_mm3=31.0)]).to_csv(os.path.join(b, "review", "S1_candidates.csv"), index=False)
-        for rev, call, t in (("Reader A", "cSS", "2026-11-01 10:00:00"), ("Reader B", "Vessel", "2026-11-02 10:00:00")):
-            p = os.path.join(b, "review", f"S1_calls_{RIO.slug(rev)}.csv")
-            with RIO.study_lock(b, "S1"):
-                RIO.write_table(b, "S1", rev, "calls", p, calls_df([dict(row(1, call, rev=rev), time=t)]), ["cand_id"] + FP, "call")
-        done = CL.consolidate(b, ["S1"], CL.CONFIRM, by="tester")
-        self.assertEqual(done[0]["removed"], 1)
-        ev, _ = RIO.read_journal(RIO.journal_path(b, "S1", "Reader A"))
-        self.assertEqual(ev[-1]["kind"], "consolidate"); self.assertEqual(len(ev[-1]["removed"]), 1)
-        self.assertIn("cSS", json.dumps(ev[0]["upserts"]))                           # the removed expert call is still in the history
-        CL.restore(b, "S1", done[0]["archive"])
-        self.assertIn("cSS", open(os.path.join(b, "review", "S1_calls_Reader_A.csv")).read())
+        p = os.path.join(b, "review", "S1_calls_Reader_A.csv")
+        with RIO.study_lock(b, "S1"): RIO.write_table(b, "S1", "Reader A", "calls", p, calls_df([row(1, "cSS")]), ["cand_id"] + FP, "call")
+        before = open(p, "rb").read()
+        with self.assertRaises(PermissionError): CL.consolidate(b, ["S1"], CL.CONFIRM, by="tester")      # Phase 3A.4: removed
+        self.assertEqual(open(p, "rb").read(), before)
+        with RIO.study_lock(b, "S1"): RIO.write_table(b, "S1", "Reader A", "calls", p, calls_df([row(1, "Vessel")]), ["cand_id"] + FP, "call")
+        arch = os.path.join(b, "review", "call_history", "S1", "manual_1"); os.makedirs(arch); open(os.path.join(arch, "S1_calls_Reader_A.csv"), "wb").write(before)
+        CL.restore(b, "S1", os.path.relpath(arch, b))
+        self.assertEqual(open(p, "rb").read(), before)
         ev, _ = RIO.read_journal(RIO.journal_path(b, "S1", "Reader A")); self.assertEqual(ev[-1]["kind"], "restore")
+        self.assertIn("Vessel", json.dumps(ev))                                  # the later call stays in the history
         with RIO.study_lock(b, "S1"):
-            self.assertEqual(RIO.ensure_table(b, "S1", "Reader A", "calls", os.path.join(b, "review", "S1_calls_Reader_A.csv"))["status"], "ok")
+            self.assertEqual(RIO.ensure_table(b, "S1", "Reader A", "calls", p)["status"], "ok")
 
     def test_policy_changes_from_parallel_processes_are_all_kept(self):
         b = new_project()
-        code = "import call_ledger as CL, sys\nfor k in range(5): CL.set_policy({b!r}, 'study', 'S%d_%d' % ({n}, k), dict(mode='newest'), by='p{n}')"
+        code = "import call_ledger as CL, sys\nfor k in range(5): CL.set_policy({b!r}, 'study', 'S%d_%d' % ({n}, k), dict(mode='consensus', quorum=1 + k % 2), by='p{n}')"
         ps = [subprocess.Popen([sys.executable, "-c", f"import sys; sys.path[:0] = {CHILD_PATH!r}\n" + code.format(b=b, n=n)]) for n in range(4)]
         [p.wait(60) for p in ps]
         P = json.load(open(os.path.join(b, "review", "call_policy.json")))

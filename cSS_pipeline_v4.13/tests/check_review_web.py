@@ -9,7 +9,8 @@ for f in ("PH3_calls.csv", "PH3_calls_Reader_A.csv", "PH3_calls_Reader_B.csv", "
           "call_policy.json", "PH3_effective.json", "PH3_lineage.json", "PH3_lineage_decisions.json"):            # v5.15+: ledger files, so the test can be re-run
     if os.path.exists(f"{B}/review/{f}"): os.remove(f"{B}/review/{f}")
 import shutil as _sh, glob as _gl; _sh.rmtree(f"{B}/review/call_history/PH3", ignore_errors=True)
-for f in _gl.glob(f"{B}/review/PH3_final*.json") + _gl.glob(f"{B}/review/PH3_score_rev_*.json") + _gl.glob(f"{B}/review/PH3_excluded_audit_*.csv") + _gl.glob(f"{B}/review/PH3_calls_*.csv") + _gl.glob(f"{B}/review/PH3_events_*.jsonl"):
+for f in _gl.glob(f"{B}/review/PH3_final*.json") + _gl.glob(f"{B}/review/PH3_score_rev_*.json") + _gl.glob(f"{B}/review/PH3_excluded_audit_*.csv") + _gl.glob(f"{B}/review/PH3_calls_*.csv") + _gl.glob(f"{B}/review/PH3_events_*.jsonl") + _gl.glob(f"{B}/review/PH3_missed*") \
+        + _gl.glob(f"{B}/review/project_roles_events.jsonl"):
     os.remove(f)                                                     # reviewer-made files of an earlier run of this test (detector outputs are kept)
 srv = subprocess.Popen([sys.executable, f"{S}/review_web.py", "PH3", "--no-browser", "--port", "8931", "--audit"], stdout=subprocess.PIPE, text=True)
 U = srv.stdout.readline().split("http://")[1].split()[0]; U = "http://" + U.rstrip("/")
@@ -45,6 +46,8 @@ sys.path.insert(0, S); import review_blind as _RB, review_io as _RIO
 for _r in ("Reader A", "Reader B", "Reader C", "Reader D", "Reader X", "Reader Z", "Reader Q"):
     with _RIO.study_lock(B, "PH3"): _RIO.journal_append(B, "PH3", _r, "initial_completed", n_candidates=0, n_called=0, note="test fixture: earlier blind read")
     _RB.unblind(B, "PH3", _r)
+import review_roles as _RR                                                     # Phase 3A.3: Reader A and B are designated experts (fixture)
+for _r in ("Reader A", "Reader B"): _RR.set_role(B, _r, "expert", "test admin", "fixture", _RR.CONFIRM_ROLE)
 m = get("/api/meta?study=PH3&reviewer=Reader%20A"); n = len(m["cands"])
 if m.get("blind") or m["read_phase"]["phase"] != "second_look": fail("after a completed read + unblind the second look is open")
 if not n or any(not (0 <= c["ai"]["score"] <= 1) or c["ai"]["band"] not in ("green", "yellow", "red") or not c["ai"]["suspect"] for c in m["cands"]):
@@ -81,7 +84,7 @@ post("/api/call", dict(study="PH3", reviewer="Reader A", cand_id=ids[1], call="V
 g = post("/api/finish", dict(study="PH3", reviewer="Reader A", final=True, n_differ=1, meter_visible=1, comparison_shown=True))
 if g.get("error") or not os.path.exists(f"{B}/review/PH3_final_Reader_A.json"): fail(f"final save failed: {g.get('error')}")
 fin = json.load(open(f"{B}/review/PH3_final_Reader_A.json"))
-if not fin.get("primary"): fail("Reader A saved first and must be the primary reviewer")
+if fin.get("primary"): fail("Phase 3A: nobody becomes the primary reviewer automatically")
 if fin["reviewer"] != "Reader A" or fin["n_revoted"] != 1 or fin["reviewer_score"]["multifocality_0_4"] != g["reader_score"]["multifocality_0_4"]: fail(f"final record: {fin}")
 rep = pd.read_csv(f"{B}/review/css_report.csv")
 if list(rep.Study) != ["PH3"] or "cSS score (0-4)" not in rep.columns or "Category" not in rep.columns: fail(f"report: {rep}")
@@ -98,11 +101,11 @@ mb = get("/api/meta?study=PH3&reviewer=Reader%20B")["calls"][str(ids[0])]
 if mb["call"] != "Microbleed" or mb["comment"].startswith("[imported"): fail(f"Microbleed call / import marker not cleared: {mb}")
 gb = post("/api/finish", dict(study="PH3", reviewer="Reader B", final=True, read_mode="validation"))
 if gb["counts"].get("Microbleed") != 1 or gb["counts"].get("cSS", 0) != 0: fail(f"Reader B counts: {gb['counts']}")
-# v5.15 (user decision 2026-11-20): every reviewer is kept; the shared ID_calls.csv / ID_score.json hold the EFFECTIVE calls, by default
-# the NEWEST call of any reviewer. Reader B's newer Microbleed call is now effective; Reader A's own file is untouched; the earlier shared
-# files were copied to review/call_history/ first; choosing Reader A restores A's calls as the effective ones.
+# Phase 3A (supersedes v5.15 newest-wins): every reviewer is kept; the shared ID_calls.csv / ID_score.json hold the EFFECTIVE calls = the
+# consensus of designated experts. Reader A (cSS) and Reader B (Microbleed) disagree -> unresolved; Reader A's own file is untouched; the
+# earlier shared files were copied to review/call_history/ first; the administrator choosing Reader A as reference expert restores A's calls.
 sh = pd.read_csv(f"{B}/review/PH3_calls.csv").set_index("cand_id").call
-if sh.get(ids[0]) != "Microbleed": fail(f"newest call (Reader B: Microbleed) must be effective: {dict(sh)}")
+if ids[0] in sh.index: fail(f"Phase 3A: experts disagree (Reader A cSS, Reader B Microbleed) -> unresolved, left out of the shared file: {dict(sh)}")
 if list(pd.read_csv(f"{B}/review/PH3_calls.csv").columns) != ["cand_id", "call", "vox_i", "vox_j", "vox_k", "volume_mm3"]: fail("ID_calls.csv format changed")
 if pd.read_csv(f"{B}/review/PH3_calls_Reader_A.csv").set_index("cand_id").call.get(ids[0]) != "cSS": fail("Reader A's own calls were changed")
 if json.load(open(f"{B}/review/PH3_score.json"))["multifocality_0_4"] != 0: fail("shared score must follow the effective calls")
@@ -110,8 +113,10 @@ hist = os.listdir(f"{B}/review/call_history/PH3")
 if not any(h.endswith("_PH3_calls.csv") and open(f"{B}/review/call_history/PH3/{h}").read() == shared_before for h in hist): fail("earlier shared calls not archived")
 if not any(h.endswith("_PH3_score.json") and open(f"{B}/review/call_history/PH3/{h}").read() == score_before for h in hist): fail("earlier shared score not archived")
 eff = json.load(open(f"{B}/review/PH3_effective.json"))
-if eff["rule"] != {"mode": "newest"} or eff["score_current"] is not True: fail(f"effective record: {eff}")
-post("/api/primary", dict(study="PH3", reviewer="Reader A", name="Reader A"))                 # = use Reader A's calls for this study
+if eff["rule"] != {"mode": "consensus", "quorum": 1} or eff["score_current"] is not True or eff["status_counts"]["disagreement"] != 1: fail(f"effective record: {eff}")
+if "error" not in post("/api/primary", dict(study="PH3", reviewer="Reader A", name="Reader A")): fail("Phase 3A: a reviewer window cannot choose the reference expert")
+sys.path.insert(0, S); import call_ledger as _CL                                   # the administrator chooses Reader A as reference expert (app / review_admin)
+_CL.set_policy(B, "study", "PH3", dict(mode="reference", reviewer="Reader A", fallback="none"), by="test admin"); _CL.materialize(B, "PH3", by="test admin", rescore=True)
 if open(f"{B}/review/PH3_calls.csv").read() != shared_before: fail("choosing Reader A must make A's calls effective again")
 if json.load(open(f"{B}/review/PH3_score.json"))["multifocality_0_4"] != json.loads(score_before)["multifocality_0_4"]: fail("score must follow Reader A again")
 if not os.path.exists(f"{B}/review/PH3_score_rev_Reader_B.json") or gb["reader_score"]["multifocality_0_4"] != 0: fail(f"Reader B own score: {gb.get('reader_score')}")
@@ -120,8 +125,8 @@ if fb["primary"] or fb["n_microbleed"] != 1 or fb["read_mode"] != "second look" 
 rep = pd.read_csv(f"{B}/review/css_report.csv")
 if sorted(rep.Reviewer) != ["Reader A", "Reader B"] or "Microbleeds called" not in rep.columns: fail(f"report rows per reviewer: {rep[['Study', 'Reviewer']]}")
 if get("/api/meta?study=PH3&reviewer=Reader%20A")["final"]["reviewer"] != "Reader A": fail("final record must be per reviewer")
-post("/api/primary", dict(study="PH3", reviewer="Reader B", name="Reader B"))
-if get("/api/meta?study=PH3&reviewer=")["primary"] != "Reader B": fail("primary reviewer not changed")
+if "error" not in post("/api/primary", dict(study="PH3", reviewer="Reader B", name="Reader B")) or get("/api/meta?study=PH3&reviewer=")["primary"]: fail("Phase 3A: primary not changeable from a reviewer window")
+_CL.set_policy(B, "study", "PH3", None, by="test admin")
 # v5.7 validation read: excluded-object audit sample, separate audit file, never scored, import refused
 mv = get("/api/meta?study=PH3&reviewer=Reader%20C&mode=validation")
 au = [c_ for c_ in mv["cands"] if c_.get("audit")]

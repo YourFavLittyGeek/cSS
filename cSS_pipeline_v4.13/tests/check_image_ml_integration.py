@@ -30,6 +30,7 @@ for p in glob.glob(os.path.join(B, "unified_engine", "image_truth", "SYN*.csv"))
 import percival_gui as PG
 from uengine.percival import meta as MT, datasets as DS
 PAT = json.load(open(os.path.join(B, "app_data", "patients.json")))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import gt_fixture; gt_fixture.ground_truth(B)   # Phase 3A fixture: experts + documented verification
 PG.init(B=B, SC=os.path.join(B, "scripts"), SET=dict(features={}, percival_test_fraction=0.2), patients=lambda: list(PAT), is_reviewed=lambda c: True,
         label=lambda c: c, patient_of=lambda c: c, fingerprint_of=lambda c: "", save_settings=lambda: None, notify=lambda *a: None)
 PG.authorize(True); os.environ["CSS_PERCIVAL_EPOCHS"] = "10"

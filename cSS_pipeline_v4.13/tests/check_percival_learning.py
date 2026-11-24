@@ -40,6 +40,8 @@ def calls(B, sid, rows, name="calls", reviewer=None, sub="review"):
     d = pd.DataFrame(rows, columns=["cand_id", "call", "vox_i", "vox_j", "vox_k", "volume_mm3"])
     if reviewer: d["reviewer"] = reviewer; d["time"] = time.strftime("%Y-%m-%d %H:%M:%S")
     os.makedirs(os.path.join(B, sub), exist_ok=True); d.to_csv(os.path.join(B, sub, f"{sid}_{name}.csv"), index=False)
+    if name == "calls" and sub == "review" and sid in ("SYNOLD", "SYNRED"):   # Phase 3A: unnamed legacy calls never decide; the same calls as a named
+        d.assign(reviewer="Era Reader", time="2025-06-01 10:00:00").to_csv(os.path.join(B, sub, f"{sid}_calls_Era_Reader.csv"), index=False)   # pre-3A reviewer
 C6 = [(i, 10 * i, 20, 30, 40.0 + i, 1.0, 2.0) for i in range(1, 7)]
 def fp(i): return (10 * i, 20, 30, 40.0 + i)
 
@@ -95,6 +97,8 @@ before = ST._files(os.path.join(NB, "percival")); init(NB, [])
 check(not PG.STORE["ok"] and "newer" in PG.STORE["error"] and ST._files(os.path.join(NB, "percival")) == before and PG.state()["store"]["ok"] is False,
       "H8 store of a newer app refused, untouched, clear message", PG.STORE["error"])
 init(B, PAT, other=lambda: [dict(path=E, kind="previous Percival version", patients=[dict(code="M77", fingerprint="fp-SYNHIST")])])
+sys.path.insert(0, HERE); import gt_fixture                                   # Phase 3A fixture: designated experts + documented verification
+gt_fixture.ground_truth(B, ["Era Reader", "Reader A", "Reader B"])
 
 # ------------------------------------------------------------------ A / B legacy + re-detection
 S0 = {s["code"]: s for s in PG.selection()}
@@ -115,7 +119,7 @@ check(C[3]["status"] == "excluded" and C[3]["reasons"][0] == "UNCERTAIN", "C3 Un
 check(C[4]["status"] == "excluded" and C[4]["reasons"][0] == "OUT_OF_SCOPE", "C4 Near ICH excluded as out of scope")
 check(C[5]["status"] == "needs_adjudication" and C[5]["reasons"][0] == "CONFLICT" and C[5]["reasons_text"], "C5 reviewers disagree -> needs adjudication, with reason text", str(C[5]))
 SET["percival_conflicts"] = "effective"; C5 = {c["cand_id"]: c for c in PG.candidates_of("SYNMIX")["candidates"]}[5]
-check(C5["status"] == "eligible" and C5["y"] == 0, "C6 setting 'use the effective call': the newest call (Artifact) is used", str(C5)); SET["percival_conflicts"] = "exclude"
+check(C5["status"] == "needs_adjudication" and C5["y"] is None, "C6 Phase 3A: no setting resolves a disagreement (newest-wins removed) - only adjudication", str(C5)); SET["percival_conflicts"] = "exclude"
 SET["learner_exclude"] = ["SYNMIX"]; S2 = {s["code"]: s for s in PG.selection()}
 check(not S2["SYNMIX"]["included"] and S2["SYNMIX"]["excluded_why"] == "excluded by you", "C7 study left out by the user: not used, reason shown"); SET.pop("learner_exclude")
 from uengine.percival import eligibility as EL
@@ -126,6 +130,9 @@ check(EL.evaluate(dict(label_kind="css", duplicate=True))["reasons"][0] == "DUPL
 
 # ------------------------------------------------------------------ D revision / withdrawal
 calls(B, "SYNMIX", [(1, "cSS", *fp(1)), (2, "Vessel", *fp(2)), (3, "cSS", *fp(3)), (4, "Near ICH", *fp(4)), (5, "cSS", *fp(5))], name="calls_Reader_A", reviewer="Reader A")
+C = {c["cand_id"]: c for c in PG.candidates_of("SYNMIX")["candidates"]}
+check(C[3]["status"] == "excluded" and "NOT_PRIMARY_GROUND_TRUTH" in C[3]["reasons"], "D0 Phase 3A: a call changed outside the reviewer after verification is not verified", str(C[3]))
+gt_fixture.ground_truth(B, ["Reader A"], ["SYNMIX"])                          # the revised read verified again (documented)
 C = {c["cand_id"]: c for c in PG.candidates_of("SYNMIX")["candidates"]}
 check(C[3]["status"] == "eligible" and C[3]["y"] == 1, "D1 revised call (Unsure -> cSS) becomes an eligible positive", str(C[3]))
 calls(B, "SYNMIX", [(1, "cSS", *fp(1)), (3, "cSS", *fp(3)), (4, "Near ICH", *fp(4)), (5, "cSS", *fp(5))], name="calls_Reader_A", reviewer="Reader A")
@@ -142,16 +149,16 @@ check(os.path.exists(hist_f) and hashlib.sha256(open(hist_f, "rb").read()).hexdi
       and json.load(open(os.path.join(B, "historical", "SYNHIST", "review", "SOURCE.json")))["copies"][0]["verified"] == "sha256",
       "E2 copied with verification; earlier project unchanged; provenance recorded")
 H = {c["cand_id"]: c for c in PG.candidates_of("SYNHIST")["candidates"]}
-check(H.get(1, {}).get("label_source") == "historical" and H[1]["y"] == 1 and "HISTORICAL_LABEL" in H[1]["reasons"] and H[6]["y"] == 1 and H[2]["y"] == 0,
-      "E3 earlier-version labels used, matched by fingerprint, marked as such", str(H))
+check(H.get(1, {}).get("label_source") == "historical" and H[1]["y"] is None and "NOT_PRIMARY_GROUND_TRUTH" in H[1]["reasons"] and H[6]["call"] == "cSS" and H[2]["call"] == "Vessel",
+      "E3 Phase 3A: earlier-version labels kept, matched by fingerprint, marked - not primary ground truth (blinding unknown)", str(H))
 calls(B, "SYNHIST", [(1, "Artifact", *fp(1))], name="calls_Reader_A", reviewer="Reader A")
 H = {c["cand_id"]: c for c in PG.candidates_of("SYNHIST")["candidates"]}
-check(H[1]["label_source"] == "review" and H[1]["y"] == 0 and H[6]["label_source"] == "historical", "E4 a current call always wins over an earlier-version call", str(H[1]))
+check(H[1]["label_source"] == "review" and H[1]["call"] == "Artifact" and H[6]["label_source"] == "historical", "E4 a current call always wins over an earlier-version call", str(H[1]))
 check(PG.recoverable_reviews() == [], "E5 nothing recovered twice")
 
 # ------------------------------------------------------------------ F orphan
 S = {s["code"]: s for s in PG.selection()}
-check(S.get("SYNORPH", {}).get("included") and S["SYNORPH"]["not_in_study_list"], "F1 reviewed study missing from the study list is offered and marked")
+check("SYNORPH" in S and S["SYNORPH"]["not_in_study_list"] and not S["SYNORPH"]["included"], "F1 reviewed study missing from the study list is offered and marked (Phase 3A: its unnamed legacy calls give no ground truth)")
 rep = PG.compat_report()
 check(rep["n_orphans"] == 1 and any("not in the study list" in i for r in rep["studies"] for i in r["issues"]) and rep["store"]["schema"] == ST.SCHEMA
       and any(r["review_format"].startswith("legacy shared") for r in rep["studies"]), "F2 Data integrity report: orphan, legacy format, store schema", json.dumps(rep["store"])[:300])
@@ -160,7 +167,7 @@ check(rep["n_orphans"] == 1 and any("not in the study list" in i for r in rep["s
 ex = [e for s in PG.selection() for e in PG._examples(s["code"], {})]
 m1 = DS.build(ex, EL.RULES_VERSION, PG.P()); m2 = DS.build(ex, EL.RULES_VERSION, PG.P())
 check(m1["id"] == m2["id"] and len(glob.glob(PG.P("datasets", "ds*.json"))) == 1, "G1 same reviews -> same dataset id, stored once", m1["id"])
-calls(B, "SYNORPH", [(1, "Vessel", *fp(1))]); ex2 = [e for s in PG.selection() for e in PG._examples(s["code"], {})]
+calls(B, "SYNRED", [(1, "Vessel", *fp(1)), (2, "cSS", *fp(2))]); ex2 = [e for s in PG.selection() for e in PG._examples(s["code"], {})]   # Phase 3A: an expert review changes
 m3 = DS.build(ex2, EL.RULES_VERSION, PG.P())
 check(m3["id"] != m1["id"] and m3["content_hash"] != m1["content_hash"] and m3["components"]["meta"], "G2 a changed review -> a new dataset version", f"{m1['id']} {m3['id']}")
 check(all(k in m3 for k in ("rules_version", "feature_schema", "patch_spec", "label_sources", "excluded_by_reason")), "G3 manifest records rules, feature schema, patch spec, label sources, exclusions")

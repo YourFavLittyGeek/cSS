@@ -30,6 +30,7 @@ for sid in studies:
     json.dump(dict(reviewer="Dr Syn", saved="2026-11-21 10:05:00"), open(os.path.join(B, "review", f"{sid}_final_Dr_Syn.json"), "w"))
     pats.append(dict(code=sid, cohort="SYN", status="done", fingerprint="", series={}, steps_done={}, added=0, mode="semi", anatomy="synthseg", pathway="synthseg"))
 os.makedirs(os.path.join(B, "app_data"), exist_ok=True); json.dump(pats, open(os.path.join(B, "app_data", "patients.json"), "w"))
+sys.path.insert(0, H); import gt_fixture; gt_fixture.ground_truth(B, ["Dr Syn"])   # Phase 3A fixture: designated expert + documented verification
 shutil.copytree(os.path.join(ROOT, "scripts"), os.path.join(B, "scripts"), ignore=shutil.ignore_patterns("__pycache__"))
 def free_port():
     s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close(); return p

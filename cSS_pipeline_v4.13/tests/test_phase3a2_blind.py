@@ -141,8 +141,8 @@ def every_route(srv, rev, base):
     p("/api/primary", dict(study="S1", reviewer=rev, name=rev))
     p("/api/call", dict(study="S1", reviewer=rev, cand_id=first, call="cSS", meter="0.987654", mode=""))
     p("/api/call", dict(study="S1", reviewer=rev, cand_id=first, comment="mine"))
-    for c in mv["cands"]:
-        if c["id"] not in [x["id"] for x in m["cands"]]: p("/api/call", dict(study="S1", reviewer=rev, cand_id=c["id"], call="Normal", mode="validation"))
+    for c in mv["cands"]:            # every listed object (audit objects share the shuffled ids, so a single call may land on one of them)
+        if c["id"] != first: p("/api/call", dict(study="S1", reviewer=rev, cand_id=c["id"], call="Normal", mode="validation"))
     p("/api/call", dict(study="S1", reviewer=rev, cand_id=999999, call="cSS"))
     p("/api/missed", dict(study="S1", reviewer=rev, action="add", ijk=[2, 2, 2], comment="my mark"))
     p("/api/missed", dict(study="S1", reviewer=rev, action="add", ijk=m["cands"][0]["centre"], comment="on a candidate"))   # its fate names the candidate
@@ -168,7 +168,7 @@ class TestBlindRead(unittest.TestCase):
                         for c in node.comparators:
                             if isinstance(c, ast.Constant) and isinstance(c.value, str): handled.add((meth, c.value))
         self.assertEqual(handled, set(RW.ROUTES), "every handled route must be classified, and every classified route handled")
-        self.assertTrue(all(v in ("static", "image", "settings", "redacted", "refused", "write") for v in RW.ROUTES.values()))
+        self.assertTrue(all(v in ("static", "image", "settings", "redacted", "refused", "write", "removed") for v in RW.ROUTES.values()))
 
     def test_no_route_leaks_ai_content_or_original_ids_during_the_blind_read(self):
         srv = Server(self.b, "--show-excluded")
@@ -289,14 +289,15 @@ class TestBlindRead(unittest.TestCase):
         srv = Server(self.b)
         try:
             r = srv.post("/api/missed", dict(study="S1", reviewer="Reader A", action="delete", id=1))
-            self.assertIn("no such missed-cSS mark of yours", r["error"])
+            self.assertTrue("no such missed-cSS mark of yours" in r["error"] or "recorded before Phase 3A" in r["error"], r)
         finally: srv.stop()
         self.assertIn("SENTINEL_OTHER_MISSED", open(os.path.join(self.b, "review", "S1_missed.csv")).read())
 
     def test_internal_errors_are_generic_and_logged_without_numbers(self):
         srv = Server(self.b)
         try:
-            r = srv.post("/api/missed", dict(study="S1", reviewer="Reader A", action="add"))
+            r = srv.post("/api/snapshot", dict(study="S1", reviewer="Reader A", image="data:image/png;base64," + "A" * 400, name="e.png",
+                                               folder=os.path.join(self.b, "snaps"), sidecar=True, meta="not a dict"))      # an unexpected internal error
             time.sleep(0.3)
         finally: srv.stop()
         self.assertRegex(r["error"], r"^the request could not be completed \(reference [0-9a-f]{8}\)$")

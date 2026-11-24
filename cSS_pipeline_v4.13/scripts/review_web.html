@@ -277,6 +277,7 @@ const CALLLBL={cSS:"cSS",Vessel:"Vessel",Normal:"Normal cortex",Artifact:"Artifa
 const CALLCOL={cSS:"#2e9d4a",Vessel:"#3b82e0",Normal:"#8a8f98",Artifact:"#e07a1f",Microbleed:"#b0306a",Unsure:"#c9a400","Near ICH":"#9b4fc0"};
 const did=c=>c.disp||c.id;      // number shown to the reader (shuffled 1..N in a validation read)
 let vmode=false;
+const WSM=new URLSearchParams(location.search).get("wholestudy")==="1";   // Phase 3A.3: independent whole-study search (no detector output)
 const BANDCOL={green:"#3aa655",yellow:"#c99a1c",red:"#d64545"};
 (function(){try{const x=new XMLHttpRequest();x.open("GET","/api/vset",false);x.send();if(x.status===200){const o=JSON.parse(x.responseText||"{}");for(const k in o)localStorage.setItem("css_"+k,JSON.stringify(o[k]))}}catch(e){}})();
 let vsetT=null;function vsetPush(k,v){if(String(k).startsWith("vmode_"))return;(vsetPush.q=vsetPush.q||{})[k]=v;clearTimeout(vsetT);vsetT=setTimeout(()=>{const q=vsetPush.q;vsetPush.q={};fetch("/api/vset",{method:"POST",headers:{"Content-Type":"application/json","X-CSS":"1"},body:JSON.stringify(q)}).catch(()=>{})},400)}
@@ -436,7 +437,7 @@ const reviewer=()=>$("#reviewer").value.trim();
 function setMissed(m){missed=(m||[]).map(r=>{let pts=null;try{pts=r.points?JSON.parse(r.points):null}catch(e){}return Object.assign({},r,{pts:(pts&&r.plane!==""&&r.shape!=="point")?pts:null})});renderMissed()}
 let loadSeq=0;
 async function loadStudy(sid){status("loading study ...");const my=++loadSeq,stale=()=>my!==loadSeq;   // a newer load wins
-  const M0=await api(`/api/meta?study=${sid||""}&reviewer=${encodeURIComponent(reviewer())}`);if(stale())return;M=M0;[nx,ny,nz]=M.shape;vox=M.vox;vols={};luts={};WLs={};seqmeta={};M.seqs.forEach(s=>seqmeta[s.key]=s);
+  const M0=await api(`/api/meta?study=${sid||""}&reviewer=${encodeURIComponent(reviewer())}${WSM?"&mode=wholestudy":""}`);if(stale())return;M=M0;[nx,ny,nz]=M.shape;vox=M.vox;vols={};luts={};WLs={};seqmeta={};M.seqs.forEach(s=>seqmeta[s.key]=s);
   {const G=M.groups||{},gs=Object.keys(G),cur=gs.find(g=>G[g].includes(M.study));$("#cohort").classList.toggle("hide",!gs.length);
    if(gs.length)$("#cohort").innerHTML=gs.map(g=>`<option ${g===cur?"selected":""}>${esc(g)}</option>`).join("");
    const list=cur?G[cur].filter(s=>M.studies.includes(s)):M.studies,i=list.indexOf(M.study);
@@ -444,9 +445,9 @@ async function loadStudy(sid){status("loading study ...");const my=++loadSeq,sta
    $("#prevStudy").disabled=i<=0;$("#nextStudy").disabled=i<0||i>=list.length-1;$("#prevStudy").onclick=()=>loadStudy(list[i-1]);$("#nextStudy").onclick=()=>loadStudy(list[i+1])}
   $("#seq").innerHTML=M.seqs.map((s,i)=>`<option value="${s.key}">${s.label}  (${i+1})</option>`).join("");
   $("#revlist").innerHTML=M.reviewers.names.map(n=>`<option value="${esc(n)}">`).join("");
-  if(!reviewer()&&M.reviewers.last){$("#reviewer").value=M.reviewers.last;const Mr=await api(`/api/meta?study=${M.study}&reviewer=${encodeURIComponent(reviewer())}`);if(stale())return;M=Mr}
+  if(!reviewer()&&M.reviewers.last){$("#reviewer").value=M.reviewers.last;const Mr=await api(`/api/meta?study=${M.study}&reviewer=${encodeURIComponent(reviewer())}${WSM?"&mode=wholestudy":""}`);if(stale())return;M=Mr}
   // v5.7 validation read: default ON when this reviewer has no final record for the study; an explicit choice is remembered
-  {const want=M.blind?true:reviewer()?(LS("blind",false)?LS("vmode_"+M.study+"|"+reviewer(),!M.final):(!M.open_read&&LS("vmode_"+M.study+"|"+reviewer(),!M.final))):false;if(M.open_read&&typeof showAI!=="undefined"&&!showAI){showAI=true}
+  {const want=WSM?false:M.blind?true:reviewer()?(LS("blind",false)?LS("vmode_"+M.study+"|"+reviewer(),!M.final):(!M.open_read&&LS("vmode_"+M.study+"|"+reviewer(),!M.final))):false;if(M.open_read&&typeof showAI!=="undefined"&&!showAI){showAI=true}
    if(want){const M1=await api(`/api/meta?study=${M.study}&reviewer=${encodeURIComponent(reviewer())}&mode=validation`);if(stale())return;M=M1}vmode=want&&M.mode==="validation";
    M.cands.forEach(c=>c.disp=c.id);
    if(vmode){let h=0;for(const ch of M.study+"|"+reviewer())h=(h*31+ch.charCodeAt(0))>>>0;const rnd=()=>{h=(h*1664525+1013904223)>>>0;return h/4294967296};
@@ -455,7 +456,7 @@ async function loadStudy(sid){status("loading study ...");const my=++loadSeq,sta
    paintMode()}
   mir=LS("mir_"+M.study,false);sideChk=M.side_check||null;calls=M.calls||{};undo=[];draft=null;revoteMode=false;readerScore=M.reader_score||null;finalRec=M.final||null;
   const b=$("#banner"),msg=[M.qc,M.note,sideChk&&sideChk.bad?sideMsg():""].filter(Boolean).join("  ·  ");$("#seqnote").textContent=M.missing_seqs.length?("Not imported for this patient: "+M.missing_seqs.join(", ")):"";b.textContent=msg;b.style.display=msg?"block":"none";
-  const lr=await fetch(`/api/labels?study=${M.study}&reviewer=${encodeURIComponent(reviewer())}&mode=${vmode?"validation":""}`);const LB=new Uint16Array(await lr.arrayBuffer());if(stale())return;LAB=LB;
+  const lr=await fetch(`/api/labels?study=${M.study}&reviewer=${encodeURIComponent(reviewer())}&mode=${WSM?"wholestudy":vmode?"validation":""}`);const LB=new Uint16Array(await lr.arrayBuffer());if(stale())return;LAB=LB;
   await loadVol("swi");if(stale())return;panes.forEach(p=>{p.seq="swi";p.mip=false});fitView();
   buildStrip();setMissed(M.missed);const first=M.cands.findIndex(c=>!isDone(c));go(first<0?0:first);status("");
   if(!reviewer())status("Enter your name (upper right) before the first decision.",true)}
@@ -678,7 +679,7 @@ $("#grip").addEventListener("mousedown",e=>{e.preventDefault();resizing=true;con
 
 // ---------- missed cSS ----------
 function renderMissed(){$("#misslist").innerHTML=missed.length?missed.map(m=>`<div class="miss"><button class="btn" data-go="${m.missed_id}" title="go to it">${m.missed_id}</button><input type="text" data-mid="${m.missed_id}" value="${esc(m.comment)}" placeholder="note (${esc(m.reviewer)})"><button class="btn" data-del="${m.missed_id}" title="delete">×</button></div><div class="mut sm" style="margin:-2px 0 6px 2px">${esc(m.shape||"point")} · ${esc(m.detector_fate||"")}</div>`).join(""):'<span class="mut sm">None. Press X, draw a rectangle or trace with the pen, then Save.</span>';if(M)paintLists()}
-async function missedApi(body){if(!reviewer()){status("Enter your name first.",true);return false}try{const r=await api("/api/missed",Object.assign({study:M.study,reviewer:reviewer()},body));setMissed(r.missed);draw();status("✓ Saved · "+r.saved.slice(11));return true}catch(e){status("NOT SAVED: "+e.message,true);return false}}
+async function missedApi(body){if(!reviewer()){status("Enter your name first.",true);return false}try{const r=await api("/api/missed",Object.assign({study:M.study,reviewer:reviewer(),mode:WSM?"wholestudy":""},body));setMissed(r.missed);draw();status("✓ Saved · "+r.saved.slice(11));return true}catch(e){status("NOT SAVED: "+e.message,true);return false}}
 function setShape(s){shape=s;$("#dRect").classList.toggle("on",s==="rect");$("#dPen").classList.toggle("on",s==="pen");if(draft&&draft.type!==s){draft=null;draw()}}
 async function saveDraft(){if(!draft||!draft.strokes.length||(draft.type==="rect"&&draft.strokes[0].length<2)){$("#readout").textContent="Draw the missed cSS first.";return}
   const ok=await missedApi({action:"add",plane:draft.k,slice:draft.s,shape:draft.type,strokes:draft.strokes,comment:$("#dNote").value});if(ok){draft=null;$("#dNote").value="";$("#readout").textContent="Missed cSS saved. Draw another, or Esc to finish.";draw()}}
@@ -768,6 +769,7 @@ function openSnapFolder(){const f=snap.folder||(M&&M.snapdir)||"";api("/api/open
 // ---------- actions, menu bar, right-click menu ----------
 function tog(){$("#aibody").style.display=showAI&&!vmode?"":"none";LSS("mark",showMark);LSS("other",showOther);LSS("auto",autoNext);LSS("ai",showAI);LSS("text",showText);LSS("cross2",showCross);draw()}
 const A={m3d:{l:"3-D analysis of the candidate…",ic:"cube",f:()=>m3Open()},savefinal:{l:"Save final",k:MOD+(MAC?"":"+")+"↩",ic:"disk",f:()=>saveFinal()},
+ ws:{l:"Whole-study search for missed cSS (no candidates shown)",ic:"eye",f:()=>{location.search="?wholestudy=1"}},
  blind:{l:"Blind read (no AI, audit objects)",ic:"eye",f:()=>{const v=!LS("blind",false);LSS("blind",v);setVmode(v)},on:()=>vmode},
  openset:{l:"Settings…",ic:"gear",f:()=>openSet()},s3:{l:"3-D shape card",k:"3",ic:"cube",f:()=>s3Toggle(),on:()=>showS3},
  screencap:{l:"Screenshot",ic:"cam",f:()=>screenCap()},
@@ -802,7 +804,7 @@ const seqItems=()=>M.seqs.map((s,i)=>({l:s.label,k:String(i+1),ic:"seq",f:()=>se
 const themeItems=()=>["light","dark","blue"].map(t=>({l:t==="blue"?"Eye-preserving blue":"Theme: "+t,ic:t==="light"?"sun":"moon",f:()=>theme(t),on:()=>document.documentElement.dataset.theme===t}));
 const studyItems=()=>M.studies.map(s=>({l:s,ic:"folder",f:()=>loadStudy(s),on:()=>s===M.study}));
 const planeItems=()=>PLN.map((n,i)=>({l:n,ic:"cube",f:()=>setPlane(i),on:()=>panes[act]&&panes[act].plane===i}));
-const MENUS={file:()=>[{sub:"Open patient",ic:"folder",items:studyItems},"savefinal","summary","blind","-","import","exportcsv","-","screencap","snap","snapfolder"],
+const MENUS={file:()=>[{sub:"Open patient",ic:"folder",items:studyItems},"savefinal","summary","blind","ws","-","import","exportcsv","-","screencap","snap","snapfolder"],
  cand:()=>["prev","next","unread","-","call_y","call_v","call_n","call_a","call_u","call_h","-","undo","clear","comment","miss","audit"],
  view:()=>[{sub:"Plane",ic:"cube",k:"Tab",items:planeItems},{sub:"Sequence",ic:"seq",items:seqItems},{sub:"Layout",ic:"l4",k:"\\",items:()=>["lay1","lay2","lay4"]},"-","zin","zout","fit","actual","reset","centre","-","mark","mip","mag","s3","m3d","hidepanel"],
  tools:()=>["pan","zoomtool","wl","scroll","-","ruler","dark","side","-","screencap","snap","snapas","-","help"],
@@ -1043,4 +1045,9 @@ async function uLoad(){const b=$("#ubody");if(!b||!M||!M.cands||!M.cands.length)
 {const g0=go;go=function(i,k){const out=g0(i,k);uLoad();return out}}
 {const p=new URLSearchParams(location.search),ws=p.get("study"),wc=p.get("cand");if(wc){let n=0;const t=setInterval(()=>{n++;
   if(M&&M.cands&&M.cands.length&&(!ws||M.study===ws)){const i=M.cands.findIndex(c=>String(c.id)===wc);if(i>=0)go(i);clearInterval(t)}if(n>60)clearInterval(t)},250)}}
+
+// Phase 3A.3: whole-study search banner - mark every cSS you find (no candidates are shown), then record the search as complete
+if(WSM){document.body.insertAdjacentHTML("afterbegin",'<div id="wsbar" style="position:fixed;top:0;left:0;right:0;z-index:99;background:#264;color:#fff;padding:4px 10px;font-size:13px">Whole-study search: no candidates, outlines or AI are shown. Mark every cSS you find. <button id="wsdone">Search complete</button></div>');
+  document.getElementById("wsdone").onclick=async()=>{if(!reviewer()){status("Enter your name first.",true);return}
+    try{const r=await api("/api/wholestudy",{study:M.study,reviewer:reviewer(),action:"complete"});status("✓ Whole-study search recorded ("+(r.whole_study.n_marks||0)+" mark(s))")}catch(e){status("NOT SAVED: "+e.message,true)}}}
 </script></body></html>

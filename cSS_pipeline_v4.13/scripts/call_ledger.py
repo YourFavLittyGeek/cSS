@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""call_ledger.py - every reviewer's calls are kept; the EFFECTIVE call of each candidate follows a policy (default: newest).
+"""call_ledger.py - every reviewer's calls are kept; the EFFECTIVE call of each candidate follows a policy.
+Phase 3A.3/3A.4: call-policy/2.0 - consensus of explicitly designated EXPERTS (review_roles.py) with a quorum, or one reference expert;
+newest-wins and the automatic primary reviewer are gone. Per candidate: resolved / adjudicated / disagreement / abstained / insufficient /
+no_expert / missing; only resolved or adjudicated candidates get an effective call. Imported / inherited / carried calls never count as
+independent reviews. Each counted call has a provenance class from the reviewer journals (verified_blind_post_3A, historical_blinding_verified,
+historical_blinding_unknown, historical_adjudicated, not_blind_post_3A); only verified / adjudicated classes are primary training ground truth.
+The text below describes the v5.15 design (sources, re-attachment, lineage) that is unchanged.
 Research software. Shared by the reviewer (review_web.py) and the app (css_app.py).
 
 Sources (never rewritten here, except by the explicit, confirmed consolidate()):
@@ -18,6 +24,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from css_common import FP, match_calls, norm_call
 import review_io as RIO       # Phase 3A.1: crash-safe writes, cross-process study locks, append-only reviewer event journals
+import review_roles as RR     # Phase 3A.3: roles, adjudication permission, documented historical verification
 
 LEDGER_VERSION = "call-ledger/1.0"
 POLICY_SCHEMA = "call-policy/1.0"
@@ -82,6 +89,9 @@ def ledger(base, sid, cand=None):
             t = str(r.get("time")) if isinstance(r.get("time"), str) and str(r.get("time")).strip() else fmt
             ent = dict(reviewer=s["reviewer"], call=call, comment=str(r.get("comment")) if isinstance(r.get("comment"), str) else "", time=t,
                        file=s["file"])
+            if s["origin"] == "reviewer file":                                 # Phase 3A.3: where to find this record's journal evidence
+                ent["file_slug"] = os.path.basename(s["file"])[len(f"{sid}_calls_"):-4]
+                if all(c in s["rows"].columns for c in ["cand_id"] + FP): ent["row_key"] = "|".join(str(r[c]) for c in ["cand_id"] + FP)
             cid = None
             if all(c in s["rows"].columns for c in FP) and len(cand):
                 m, _ = match_calls(cand, pd.DataFrame([r]))
@@ -164,27 +174,52 @@ def decide_carry(base, sid, row_uid, reviewer_of_call, time_of_call, decision, b
     return dict(ok=True, decision=decision)
 
 
-# ---------------------------------------------------------------- policy
+# ---------------------------------------------------------------- policy (Phase 3A.3: call-policy/2.0 - expert consensus; newest-wins removed)
+POLICY_V2 = "call-policy/2.0"
+DEFAULT_RULE = dict(mode="consensus", quorum=1)
+
+
 def policy_path(base): return os.path.join(base, "review", "call_policy.json")
 
 
+def _upgrade_rule(r):
+    """a stored call-policy/1.0 rule read under 2.0: 'newest' -> consensus, 'reviewer' -> reference with no fallback (noted)"""
+    if not isinstance(r, dict): return dict(DEFAULT_RULE)
+    if r.get("mode") == "newest": return dict(DEFAULT_RULE, upgraded_from="newest")
+    if r.get("mode") == "reviewer": return dict(mode="reference", reviewer=str(r.get("reviewer", "")).strip(), fallback="none", upgraded_from="reviewer")
+    return r
+
+
 def load_policy(base):
-    p = policy_path(base)
+    p = policy_path(base); P = None
     if os.path.exists(p):
         try:
             with open(p) as f: P = json.load(f)
-            if P.get("schema") == POLICY_SCHEMA: return P
-        except Exception: pass
-    return dict(schema=POLICY_SCHEMA, default=dict(mode="newest"), cohorts={}, studies={}, history=[])
+        except Exception: P = None
+    if not isinstance(P, dict): return dict(schema=POLICY_V2, default=dict(DEFAULT_RULE), cohorts={}, studies={}, history=[])
+    if P.get("schema") != POLICY_V2:                                       # 1.0 file: read as 2.0 (the file itself is migrated by review_migrate)
+        P = dict(schema=POLICY_V2, legacy_schema=P.get("schema"), default=_upgrade_rule(P.get("default")),
+                 cohorts={k: _upgrade_rule(v) for k, v in (P.get("cohorts") or {}).items()},
+                 studies={k: _upgrade_rule(v) for k, v in (P.get("studies") or {}).items()}, history=list(P.get("history") or []))
+    return P
 
 
-def _valid_rule(rule):
-    if not isinstance(rule, dict) or rule.get("mode") not in ("newest", "reviewer"): raise ValueError("rule mode must be 'newest' or 'reviewer'")
-    if rule["mode"] == "reviewer":
-        if not str(rule.get("reviewer", "")).strip(): raise ValueError("a reviewer rule needs the reviewer's name")
-        if rule.get("fallback", "newest") not in ("newest", "none"): raise ValueError("fallback must be 'newest' or 'none'")
-        return dict(mode="reviewer", reviewer=str(rule["reviewer"]).strip(), fallback=rule.get("fallback", "newest"))
-    return dict(mode="newest")
+def _valid_rule(rule, base=None):
+    if not isinstance(rule, dict): raise ValueError("a rule is required")
+    m = rule.get("mode")
+    if m in ("newest", "reviewer"): raise ValueError("refused: 'newest' / 'reviewer with newest fallback' were removed in Phase 3A - use 'consensus' or 'reference'")
+    if m == "consensus":
+        q = int(rule.get("quorum", 1))
+        if q < 1 or q > 9: raise ValueError("quorum must be 1-9 expert calls")
+        return dict(mode="consensus", quorum=q)
+    if m == "reference":
+        name = str(rule.get("reviewer", "")).strip()
+        if not name: raise ValueError("a reference expert is required")
+        if base is not None and RR.role_of(base, name) != "expert": raise PermissionError(f"refused: {name} is not an expert (assign the role first)")
+        fb = rule.get("fallback", "none")
+        if fb not in ("none", "consensus"): raise ValueError("fallback must be 'none' or 'consensus'")
+        return dict(mode="reference", reviewer=name, fallback=fb)
+    raise ValueError("rule mode must be 'consensus' or 'reference'")
 
 
 def set_policy(base, scope, target, rule, by=""):
@@ -194,14 +229,15 @@ def set_policy(base, scope, target, rule, by=""):
 
 
 def _set_policy(base, scope, target, rule, by=""):
-    P = load_policy(base); rule = None if rule is None else _valid_rule(rule)
-    if scope == "all": P["default"] = rule or dict(mode="newest")
+    P = load_policy(base); rule = None if rule is None else _valid_rule(rule, base)
+    if scope == "all": P["default"] = rule or dict(DEFAULT_RULE)
     elif scope in ("cohort", "study"):
         key = "cohorts" if scope == "cohort" else "studies"
         if not str(target or "").strip(): raise ValueError(f"{scope} scope needs a target")
         if rule is None: P[key].pop(target, None)
         else: P[key][target] = rule
     else: raise ValueError("scope must be all, cohort or study")
+    P["schema"] = POLICY_V2
     P["history"].append(dict(time=_now(), scope=scope, target=target or "", rule=rule, by=by or ""))
     RIO.atomic_write_json(policy_path(base), P); return P
 
@@ -214,36 +250,187 @@ def cohort_of(base, sid):
 
 
 def resolve(P, sid, cohort=""):
-    if sid in P.get("studies", {}): return P["studies"][sid], "study"
-    if cohort and cohort in P.get("cohorts", {}): return P["cohorts"][cohort], "cohort"
-    return P.get("default") or dict(mode="newest"), "all studies"
+    if sid in P.get("studies", {}): return _upgrade_rule(P["studies"][sid]), "study"
+    if cohort and cohort in P.get("cohorts", {}): return _upgrade_rule(P["cohorts"][cohort]), "cohort"
+    return _upgrade_rule(P.get("default") or dict(DEFAULT_RULE)), "all studies"
 
 
 def describe_rule(rule):
-    if rule.get("mode") == "reviewer":
-        return f"calls of {rule['reviewer']}" + (" (newest call where they did not call)" if rule.get("fallback", "newest") == "newest" else " only")
-    return "newest call of any reviewer"
+    if rule.get("mode") == "reference":
+        return f"calls of the reference expert {rule['reviewer']}" + (" (expert consensus where they did not call)" if rule.get("fallback") == "consensus" else " only")
+    q = int(rule.get("quorum", 1))
+    return f"consensus of designated experts (at least {q} definite expert call{'s' if q > 1 else ''}, all agreeing)"
+
+
+# ---------------------------------------------------------------- provenance (Phase 3A.3 / 3A.6)
+CLASSES = ("verified_blind_post_3A", "historical_blinding_verified", "historical_blinding_unknown", "historical_adjudicated", "not_blind_post_3A")
+PRIMARY_ELIGIBLE = ("verified_blind_post_3A", "historical_blinding_verified", "historical_adjudicated")
+_RANK = {"verified_blind_post_3A": 3, "historical_blinding_verified": 2, "historical_adjudicated": 2, "historical_blinding_unknown": 1, "not_blind_post_3A": 0}
+PREFILL = ("[imported", "[inherited", "[old calls", "[confirmed carry-over")
+NOT_INDEPENDENT_KINDS = ("import", "inherit", "carry_confirm", "consolidate", "restore")
+
+
+def call_class(call):
+    c = norm_call(call) if isinstance(call, str) else ""
+    if c == "cSS": return "positive"
+    if c in ("Vessel", "Normal", "Artifact", "Microbleed"): return "negative"
+    if c == "Near ICH": return "out_of_scope"
+    if c == "Unsure": return "abstain"
+    return "unrecognised" if c else ""
+
+
+def evidence(base, sid, file_slug):
+    """journal evidence per record of a reviewer's calls file: {record key: dict(kind, read_phase, ai_visible, released)}. A record that only
+    came from a snapshot (written before journaling, external change, restore) has no evidence."""
+    ev, _ = RIO.read_journal(RIO.journal_path(base, sid, file_slug))
+    ev = [e for e in ev if e.get("table") == "calls"]
+    out = {}; prev_lines = {}
+    for e, _txt, _h, _order, lines in RIO.table_states(ev):
+        if "snapshot" in e: out = {}; prev_lines = lines; continue
+        by_text = {}
+        for k, ln in prev_lines.items(): by_text.setdefault(ln, out.get(k))
+        info = dict(kind=e.get("kind"), read_phase=e.get("read_phase"), ai_visible=e.get("ai_visible"), released=bool(e.get("ai_released_in_app")))
+        new = {}
+        for k, ln in lines.items():
+            if k in (e.get("upserts") or {}): new[k] = by_text.get(ln) if ln in by_text else info     # unchanged text re-keyed: keep its evidence
+            else: new[k] = out.get(k)
+        out = {k: v for k, v in new.items() if v is not None}; prev_lines = lines
+    return out
+
+
+def _klass(ent, verified):
+    ev = ent.get("evidence")
+    if ev:
+        if ev.get("kind") in NOT_INDEPENDENT_KINDS: return "not_blind_post_3A"
+        if ev.get("read_phase") == "initial" and ev.get("ai_visible") is False and not ev.get("released"): return "verified_blind_post_3A"
+        if ev.get("read_phase") in ("initial", "second_look", "unblinded_legacy") or ev.get("ai_visible") is not None: return "not_blind_post_3A"
+    v = verified.get(ent.get("slug"))
+    if v and (not v.get("records") or v["records"].get(ent.get("row_key", "")) == ent.get("call") or
+              norm_call(v["records"].get(ent.get("row_key", ""), "")) == ent.get("call")):      # only the calls that were verified
+        return "historical_blinding_verified"
+    return "historical_blinding_unknown"
+
+
+# ---------------------------------------------------------------- integrity (Phase 3A.5: reads verify the journals; unsafe rebuilds refused)
+def integrity(base, sid):
+    """READ-ONLY: every reviewer calls file against its journal -> [problem text] (empty = consistent)"""
+    out = []; pre = os.path.join(base, "review", f"{sid}_calls_")
+    for p in sorted(glob.glob(pre + "*.csv")):
+        st = RIO.check_table(base, sid, p[len(pre):-4], "calls", p)
+        if st["status"] not in ("ok", "no_journal"): out.append(f"{os.path.basename(p)}: {st['status']} - {st['detail']}")
+    return out
+
+
+# ---------------------------------------------------------------- adjudication (Phase 3A.4)
+def adjudications(base, sid, cand=None):
+    """current adjudication per current candidate {cand_id: event} (latest per fingerprint; withdrawals honoured; fingerprint-matched)"""
+    ev, _ = RIO.read_journal(RIO.journal_path(base, sid, RR.ADJUDICATION))
+    cur = {}
+    for e in ev:
+        k = e.get("fp_key")
+        if e.get("kind") == "adjudicate": cur[k] = e
+        elif e.get("kind") == "adjudication_withdrawn": cur.pop(k, None)
+    cand = candidates(base, sid) if cand is None else cand; out = {}
+    for e in cur.values():
+        cid = match_one(cand, dict({f: e["fp"][f] for f in FP}, call=e.get("call", ""))) if e.get("fp") else None
+        if cid is not None: out[int(cid)] = e
+    return out
+
+
+def adjudicate(base, sid, cand_id, call, by, reason):
+    """an expert with the adjudication permission decides an unresolved candidate; the reviewers' calls are kept unchanged"""
+    if not str(reason or "").strip(): raise ValueError("refused: a reason is required")
+    if not RR.may_adjudicate(base, by): raise PermissionError(f"refused: {by} is not an expert with the adjudication permission")
+    c = norm_call(call)
+    if call_class(c) not in ("positive", "negative", "out_of_scope"): raise ValueError("an adjudicated call must be definite (not Unsure)")
+    with RIO.study_lock(base, sid):
+        cand = candidates(base, sid); E = effective(base, sid, cand=cand)
+        row = next((r for r in E["rows"] if r["cand_id"] == int(cand_id)), None)
+        if row is None: raise ValueError("unknown candidate")
+        if not row["history"]: raise ValueError("refused: nothing to adjudicate - no reviewer called this candidate")
+        r = cand.set_index("cand_id").loc[int(cand_id)]; fp = {f: (float(r[f]) if f == "volume_mm3" else int(r[f])) for f in FP}
+        e = RIO.journal_append(base, sid, RR.ADJUDICATION, "adjudicate", cand_id=int(cand_id), fp=fp, fp_key="|".join(str(fp[f]) for f in FP), call=c,
+                               by=str(by).strip(), reason=str(reason).strip()[:500], status_before=row["status"],
+                               calls_seen=[dict(reviewer=x["reviewer"], call=x["call"], role=x.get("role"), prefilled=x.get("prefilled", False)) for x in row["history"]])
+    return dict(ok=True, event=e)
+
+
+def withdraw_adjudication(base, sid, cand_id, by, reason):
+    if not RR.may_adjudicate(base, by): raise PermissionError(f"refused: {by} is not an expert with the adjudication permission")
+    with RIO.study_lock(base, sid):
+        a = adjudications(base, sid).get(int(cand_id))
+        if not a: raise ValueError("no adjudication for this candidate")
+        return dict(ok=True, event=RIO.journal_append(base, sid, RR.ADJUDICATION, "adjudication_withdrawn", cand_id=int(cand_id), fp_key=a["fp_key"],
+                                                     by=str(by).strip(), reason=str(reason or "").strip()[:500]))
 
 
 # ---------------------------------------------------------------- effective calls
+STATUSES = ("resolved", "adjudicated", "disagreement", "abstained", "unrecognised", "insufficient", "no_expert", "missing")
+
+
 def effective(base, sid, cohort="", policy=None, cand=None):
-    """-> dict(rule, scope, rows [per current candidate], stale, reviewers)"""
+    """-> dict(rule, scope, rows [per current candidate], stale, reviewers, problems). Per candidate: status (resolved / adjudicated /
+    disagreement / abstained / insufficient / no_expert / missing), effective_call (resolved or adjudicated only), provenance class,
+    primary_eligible, and every reviewer's call with role / prefilled / evidence (nothing is dropped)."""
     cand = candidates(base, sid) if cand is None else cand
     P = load_policy(base) if policy is None else policy; rule, scope = resolve(P, sid, cohort or cohort_of(base, sid))
-    hist, stale, names = ledger(base, sid, cand); rows = []
+    roles = RR.current(base); verified = RR.verified_reviewers(base, sid)
+    hist, stale, names = ledger(base, sid, cand)
+    ev_cache = {}
+    for H in hist.values():
+        for e in H:
+            e["slug"] = slug(e["reviewer"]) if e["reviewer"] != LEGACY else ""
+            e["role"] = RR.role_of(base, e["reviewer"], roles) if e["reviewer"] != LEGACY else "unknown"
+            e["prefilled"] = str(e.get("comment", "")).startswith(PREFILL)        # imported / inherited / another reviewer's call confirmed
+            #   (a confident lineage carry-over or a fingerprint re-attachment is the SAME reviewer's own call on the same lesion: counted)
+            fs = e.get("file_slug")
+            if fs:
+                if fs not in ev_cache: ev_cache[fs] = evidence(base, sid, fs)
+                e["evidence"] = ev_cache[fs].get(e.get("row_key", ""))
+            e["class"] = _klass(e, verified)
+    adj = adjudications(base, sid, cand); known_experts = sorted({e["reviewer"] for H in hist.values() for e in H if e["role"] == "expert"})
+    rows = []
     for cid in [int(x) for x in cand.cand_id] if len(cand) else []:
-        H = hist.get(cid, []); pick, how = None, ""
-        if rule["mode"] == "reviewer":
-            own = [e for e in H if e["reviewer"].strip() == rule["reviewer"]]
-            if own: pick, how = own[-1], "chosen reviewer"
-            elif rule.get("fallback", "newest") == "newest" and H: pick, how = H[-1], "newest (chosen reviewer did not call it)"
-        elif H: pick, how = H[-1], "newest"
-        if pick and pick.get("carried"): how += " · carried over from the earlier run (confident match)"
-        elif pick and pick.get("matched"): how += " · re-attached after re-detection (fingerprint)"
-        rows.append(dict(cand_id=cid, effective_call=pick["call"] if pick else "", source_reviewer=pick["reviewer"] if pick else "",
-                         source_time=pick["time"] if pick else "", source_rule=how, n_reviewers=len({e["reviewer"] for e in H}),
-                         disagreement=len({e["call"] for e in H}) > 1, history=H))
-    return dict(rule=rule, scope=scope, rule_text=describe_rule(rule), rows=rows, stale=stale, reviewers=sorted(set(names)), ledger_version=LEDGER_VERSION)
+        H = hist.get(cid, []); latest = {}
+        for e in H: latest[e["reviewer"]] = e                                  # oldest first -> each reviewer's latest call
+        experts = [e for e in latest.values() if e["role"] == "expert" and not e["prefilled"]]
+        votes = [e for e in experts if call_class(e["call"]) in ("positive", "negative", "out_of_scope")]
+        pick, status, how = [], "missing", ""
+        if rule["mode"] == "reference":
+            ref = [e for e in experts if slug(e["reviewer"]) == slug(rule["reviewer"]) and call_class(e["call"]) != "abstain"]
+            if ref: pick, status, how = ref, "resolved", "reference expert"
+            elif rule.get("fallback") != "consensus": status = "missing" if not H else ("abstained" if any(slug(e["reviewer"]) == slug(rule["reviewer"]) for e in experts) else "no_expert")
+        if not pick and status == "missing" and (rule["mode"] == "consensus" or rule.get("fallback") == "consensus"):
+            q = int(rule.get("quorum", 1)) if rule["mode"] == "consensus" else 1
+            if not H: status = "missing"
+            elif not experts: status = "no_expert"
+            elif not votes: status = "unrecognised" if any(call_class(e["call"]) == "unrecognised" for e in experts) else "abstained"
+            elif len({call_class(e["call"]) for e in votes}) > 1: status = "disagreement"
+            elif len(votes) < q: status = "insufficient"
+            else: pick, status, how = votes, "resolved", "expert consensus"
+        a = adj.get(cid); call = ""
+        if a:
+            status, how, call = "adjudicated", f"adjudicated by {a.get('by')}", a["call"]
+            klass = "verified_blind_post_3A" if votes and all(e["class"] == "verified_blind_post_3A" for e in votes) else "historical_adjudicated"
+        elif status == "resolved":
+            if any(e.get("carried") for e in pick): how += " · carried over from the earlier run (confident match)"
+            elif any(e.get("matched") for e in pick): how += " · re-attached after re-detection (fingerprint)"
+            cnt = {}
+            for e in pick: cnt[norm_call(e["call"])] = cnt.get(norm_call(e["call"]), 0) + 1
+            call = sorted(cnt, key=lambda c_: (-cnt[c_], c_))[0]
+            klass = min((e["class"] for e in pick), key=lambda k_: _RANK[k_])
+        else: klass = ""
+        rows.append(dict(cand_id=cid, status=status, effective_call=call, provenance_class=klass,
+                         primary_eligible=bool(call) and klass in PRIMARY_ELIGIBLE and call_class(call) in ("positive", "negative"),
+                         source_reviewer=", ".join(sorted(e["reviewer"] for e in pick)) if pick else (a.get("by", "") if a else ""),
+                         source_time=max((e["time"] for e in pick), default=a.get("time", "") if a else ""), source_rule=how,
+                         n_reviewers=len(latest), n_expert_calls=len(experts), n_abstentions=sum(1 for e in experts if call_class(e["call"]) == "abstain"),
+                         experts_missing=[x for x in known_experts if x not in latest],
+                         subtype_mixed=status == "resolved" and len({norm_call(e["call"]) for e in pick}) > 1,
+                         disagreement=status == "disagreement" or len({call_class(e["call"]) for e in latest.values() if call_class(e["call"]) not in ("abstain", "")}) > 1,
+                         adjudication=a, history=H))
+    return dict(rule=rule, scope=scope, rule_text=describe_rule(rule), rows=rows, stale=stale, reviewers=sorted(set(names)), ledger_version=LEDGER_VERSION,
+                problems=integrity(base, sid), roles={k: v["role"] for k, v in roles.items()})
 
 
 def completions(base, sid):
@@ -261,9 +448,10 @@ def completions(base, sid):
 
 
 def review_state(base, sid, cohort="", policy=None):
-    """Not started / In progress / Reviewed / Needs re-review, with the reason (read only)"""
+    """Not started / In progress / Reviewed / Needs re-review = REVIEW PROGRESS (any reviewer's calls), read only; ground-truth resolution is
+    reported separately (n_resolved / n_unresolved)"""
     cand = candidates(base, sid); E = effective(base, sid, cohort, policy, cand)
-    n = len(E["rows"]); called = sum(1 for r in E["rows"] if r["effective_call"]); comp = completions(base, sid)
+    n = len(E["rows"]); called = sum(1 for r in E["rows"] if r["history"]); comp = completions(base, sid)
     any_calls = called or E["stale"]
     last = comp[-1] if comp else None
     cpath = os.path.join(base, "review", f"{sid}_candidates.nii.gz")
@@ -276,9 +464,11 @@ def review_state(base, sid, cohort="", policy=None):
             f", {pend} of them need your confirmation)" if pend else ")")
     elif called < n: st, why = "in_progress", f"{called} of {n} candidates called" + ("" if last else "; not finished")
     else: st, why = "in_progress", f"all {n} called but the review was not finished (no finish / final save)"
+    res = sum(1 for r in E["rows"] if r["status"] in ("resolved", "adjudicated"))
     return dict(state=st, label=STATE_LABEL[st], reason=why, n_candidates=n, n_called=called, n_stale=len(E["stale"]), completions=comp,
-                n_carried=sum(1 for r in E["rows"] if "carried over" in r.get("source_rule", "")), n_pending_confirmation=sum(1 for e in E["stale"] if e.get("possible") and not e.get("decision")),
-                reviewers=E["reviewers"], rule_text=E["rule_text"], scope=E["scope"])
+                n_carried=sum(1 for r in E["rows"] if any(e.get("carried") for e in r["history"])), n_pending_confirmation=sum(1 for e in E["stale"] if e.get("possible") and not e.get("decision")),
+                reviewers=E["reviewers"], rule_text=E["rule_text"], scope=E["scope"], n_resolved=res, n_unresolved=n - res,
+                n_disagreement=sum(1 for r in E["rows"] if r["status"] == "disagreement"), problems=E["problems"])
 
 
 def _sha(p):
@@ -287,15 +477,19 @@ def _sha(p):
 
 
 def materialize(base, sid, cohort="", by="", scripts=HERE, rescore=True):
-    """write the effective calls into review/ID_calls.csv (legacy format) and (rescore=True) re-score with mark_css.py; the earlier
-    ID_calls.csv / ID_score.json are copied to review/call_history/ID/ first. The shared file is DERIVED from the reviewer files (their
-    event journals are the provenance record); it is never an authoritative source."""
+    """write the RESOLVED effective calls (expert consensus / reference expert / adjudication) into review/ID_calls.csv (legacy format) and
+    (rescore=True) re-score with mark_css.py; the earlier ID_calls.csv / ID_score.json are copied to review/call_history/ID/ first. The shared
+    file is DERIVED from the reviewer files and their journals; it is never an authoritative source. Phase 3A.5: refused (nothing written,
+    the previous derived files kept) when a reviewer file does not match its journal."""
     with RIO.study_lock(base, sid):                                        # Phase 3A.1: one writer per study across processes
         return _materialize(base, sid, cohort, by, scripts, rescore)
 
 
 def _materialize(base, sid, cohort="", by="", scripts=HERE, rescore=True):
     cand = candidates(base, sid); E = effective(base, sid, cohort, cand=cand)
+    if E["problems"]:
+        return dict(study=sid, time=_now(), by=by, refused=True, problems=E["problems"], changed=False, score_ok=None,
+                    score_note="shared calls not rebuilt: " + "; ".join(E["problems"])[:500])
     eff = {r["cand_id"]: r["effective_call"] for r in E["rows"] if r["effective_call"]}
     c = cand.set_index("cand_id") if len(cand) else None
     rows = [dict(cand_id=k, call=v, **{f: c.loc[k, f] for f in FP}) for k, v in sorted(eff.items())]
@@ -310,8 +504,9 @@ def _materialize(base, sid, cohort="", by="", scripts=HERE, rescore=True):
         try:
             with open(ep) as f: prev = json.load(f)
         except Exception: prev = {}
-    rec = dict(study=sid, time=_now(), by=by, rule=E["rule"], scope=E["scope"], rule_text=E["rule_text"], n_effective=len(eff),
-               sources={r: sum(1 for x in E["rows"] if x["source_reviewer"] == r) for r in E["reviewers"]}, ledger_version=LEDGER_VERSION,
+    rec = dict(study=sid, time=_now(), by=by, rule=E["rule"], scope=E["scope"], rule_text=E["rule_text"], n_effective=len(eff), policy_schema=POLICY_V2,
+               n_unresolved=sum(1 for r in E["rows"] if not r["effective_call"]), status_counts={k: sum(1 for r in E["rows"] if r["status"] == k) for k in STATUSES},
+               sources={r: sum(1 for x in E["rows"] if r in x["source_reviewer"].split(", ")) for r in E["reviewers"]}, ledger_version=LEDGER_VERSION,
                changed=old_txt != new_txt, backup="")
     if old_txt != new_txt:
         hd = os.path.join(base, "review", "call_history", sid); os.makedirs(hd, exist_ok=True); ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -332,50 +527,17 @@ def _materialize(base, sid, cohort="", by="", scripts=HERE, rescore=True):
     return rec
 
 
-# ---------------------------------------------------------------- explicit, confirmed consolidation (destructive, archived first)
+# ---------------------------------------------------------------- consolidation REMOVED (Phase 3A.4): it deleted other reviewers' calls
 CONFIRM = "REWRITE OLD CALLS"
 
 
 def consolidate_plan(base, sids):
-    out = []
-    for sid in sids:
-        hist, _, _ = ledger(base, sid); drop = sum(len(v) - 1 for v in hist.values() if len(v) > 1)
-        out.append(dict(study=sid, candidates_with_history=sum(len(v) > 1 for v in hist.values()), calls_to_remove=drop))
-    return out
+    return [dict(study=sid, removed_feature=True, note="consolidation was removed in Phase 3A: reviewers' calls are never deleted; resolve disagreements by adjudication")
+            for sid in sids]
 
 
 def consolidate(base, sids, confirm, by=""):
-    """keep only the newest call of each candidate in the reviewer files (other reviewers' older calls removed). Refused unless confirm
-    equals CONFIRM. Every affected file is copied to review/call_history/ID/consolidate_<time>/ first; restore() undoes it."""
-    if confirm != CONFIRM: raise PermissionError(f"refused: type exactly '{CONFIRM}' to confirm")
-    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f"); done = []
-    for sid in sids:
-        with RIO.study_lock(base, sid):                                      # Phase 3A.1: the removed calls stay in each reviewer's journal
-            pre = os.path.join(base, "review", f"{sid}_calls_")
-            for s in sources(base, sid):
-                if s["origin"] == "reviewer file": RIO.ensure_table(base, sid, os.path.join(base, s["file"])[len(pre):-4], "calls", os.path.join(base, s["file"]))
-            cand = candidates(base, sid); hist, _, _ = ledger(base, sid, cand)
-            newest = {cid: (v[-1]["reviewer"], v[-1]["time"]) for cid, v in hist.items()}
-            arch = os.path.join(base, "review", "call_history", sid, f"consolidate_{ts}"); os.makedirs(arch, exist_ok=True)
-            for f in glob.glob(os.path.join(base, "review", f"{sid}_calls*.csv")) + glob.glob(os.path.join(base, "review", f"{sid}_final_*.json")) \
-                    + glob.glob(os.path.join(base, "review", f"{sid}_score*.json")) + glob.glob(os.path.join(base, "review", f"{sid}_review_log.csv")):
-                shutil.copy2(f, arch)
-            removed = 0
-            for s in sources(base, sid):
-                if s["origin"] != "reviewer file": continue
-                d = s["rows"]; keep = []
-                for _, r in d.iterrows():
-                    m, _ = match_calls(cand, pd.DataFrame([r])) if len(cand) and all(c in d.columns for c in FP) else ({}, 0)
-                    cid = next(iter(m)) if m else None
-                    t = str(r.get("time")) if isinstance(r.get("time"), str) and str(r.get("time")).strip() else _mtime_str(os.path.join(base, s["file"]))
-                    ok = cid is None or not isinstance(r.get("call"), str) or newest.get(cid) == (s["reviewer"], t)
-                    keep.append(ok); removed += 0 if ok else 1
-                RIO.write_table(base, sid, os.path.join(base, s["file"])[len(pre):-4], "calls", os.path.join(base, s["file"]), d[keep],
-                                ["cand_id"] + FP if all(c in d.columns for c in FP) else ["cand_id"], "consolidate", by=by, archive=os.path.relpath(arch, base),
-                                n_removed=int(sum(1 for x in keep if not x)))
-            set_policy(base, "study", sid, dict(mode="newest"), by=by or "consolidate")
-            done.append(dict(study=sid, removed=removed, archive=os.path.relpath(arch, base)))
-    return done
+    raise PermissionError("refused: consolidation was removed in Phase 3A (it deleted reviewers' calls) - disagreements are resolved by adjudication")
 
 
 def restore(base, sid, archive_rel):

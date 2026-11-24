@@ -591,6 +591,7 @@ class TestScientificIntegrity(unittest.TestCase):
         cand.to_csv(os.path.join(rv, "SYN1_candidates.csv"), index=False)
         calls = cand.iloc[:3].assign(call=["cSS", "Vessel", "Unsure"], reviewer="alice", time="2026-11-23 10:00:00", comment="")
         calls.to_csv(os.path.join(rv, "SYN1_calls_alice.csv"), index=False)
+        import gt_fixture; gt_fixture.ground_truth(self.base, ["alice"], ["SYN1"])    # Phase 3A: a designated expert + documented verification
         spec = importlib.util.spec_from_file_location("call_ledger_p0", os.path.join(ROOT, "scripts", "call_ledger.py"))
         L = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(L)

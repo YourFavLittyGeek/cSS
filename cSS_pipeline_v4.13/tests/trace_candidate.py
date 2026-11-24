@@ -86,6 +86,7 @@ step(10, "Expert review (reviewer file format)", s10)
 import percival_gui as PG
 P_ = json.load(open(os.path.join(B, "app_data", "patients.json")))
 SET = dict(features={}, percival_test_fraction=0.25)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import gt_fixture; gt_fixture.ground_truth(B)   # Phase 3A fixture: experts + documented verification
 PG.init(B=B, SC=os.path.join(B, "scripts"), SET=SET, patients=lambda: list(P_), is_reviewed=lambda c: True, label=lambda c: c, patient_of=lambda c: c,
         fingerprint_of=lambda c: "", save_settings=lambda: None, notify=lambda *a: None)
 PG.authorize(True)

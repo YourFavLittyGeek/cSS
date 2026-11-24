@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Interactive cSS review: shows each suspected candidate, you agree or disagree.
-usage: review_css.py SUBJECT [--top N] [--redo] [--by-tier | --by-priority | --by-model | --by-legacy]
+usage: review_css.py SUBJECT --reviewer "NAME" [--top N] [--redo] [--by-tier | --by-priority | --by-model | --by-legacy]
+  Phase 3A.5: decisions are saved ONLY under a reviewer name (--reviewer or $CSS_REVIEWER), into that reviewer's own journaled calls file
+  (review/ID_calls_<name>.csv; review_io) marked as an UNBLINDED legacy read (the detector order and evidence are visible here); the shared
+  review/ID_calls.csv is then re-built from the call ledger (expert consensus). Without a name nothing is saved.
   --by-priority (v5.1.3, opt-in): order by review_priority_rank (1 high-priority cSS ... 4 other mimic; css_tiers.py),
   then cand_id. Every candidate is still shown.
   --by-model (v5.0, opt-in): order by rank_model (rank_candidates.py; trained ranking model). Falls back to the
@@ -39,6 +42,8 @@ redo = "--redo" in sys.argv
 base = os.environ.get("CSS_BASE", os.path.expanduser("~/css_project"))
 csv = f"{base}/review/{subj}_candidates.csv"
 calls_csv = f"{base}/review/{subj}_calls.csv"
+REVIEWER = (sys.argv[sys.argv.index("--reviewer") + 1] if "--reviewer" in sys.argv else os.environ.get("CSS_REVIEWER", "")).strip()
+if not REVIEWER: print("NOTE: no reviewer name (--reviewer NAME): decisions will NOT be saved (Phase 3A: unprovenanced labels are refused)")
 
 swi = nib.as_closest_canonical(nib.load(f"{base}/data/{subj}_swi.nii"))      # RAS for display
 cnd = nib.as_closest_canonical(nib.load(f"{base}/review/{subj}_candidates.nii.gz"))
@@ -75,8 +80,10 @@ calls = {}
 if not redo:
     # v4 fix: calls are matched by candidate fingerprint (centroid + volume), not by rank, so a
     # re-run of the detector can no longer attach an old call to a different lesion
-    calls, warn = load_calls(base, subj, df)
-    if warn: print("WARNING:", warn)
+    _own = f"{base}/review/{subj}_calls_{__import__('review_io').slug(REVIEWER)}.csv" if REVIEWER else ""
+    if _own and os.path.exists(_own):                                       # resume from the reviewer's OWN calls (fingerprint-matched)
+        from css_common import match_calls
+        _m, _ = match_calls(df, pd.read_csv(_own)); calls = dict(_m or {})
 KEYS = {"y": "cSS", "v": "Vessel", "o": "Normal", "a": "Artifact", "i": "Near ICH", "u": "Unsure"}
 COL = {"cSS": "#2e7d32", "Vessel": "#1565c0", "Normal": "#6d6d6d", "Artifact": "#ef6c00",
        "Near ICH": "#8e24aa", "Unsure": "#c9a400"}
@@ -213,10 +220,25 @@ class Reviewer:
         elif k == "q": self.finish()
 
     def save(self):
-        save_calls(base, subj, df, calls)
+        save_provenanced(calls)
 
     def finish(self):
         self.save(); plt.close(self.fig)
+
+def save_provenanced(calls):
+    """Phase 3A.5: the reviewer's own calls file, journaled, under the study lock (never the shared file directly)"""
+    if not REVIEWER: return
+    import review_io as RIO
+    p = f"{base}/review/{subj}_calls_{RIO.slug(REVIEWER)}.csv"; FPc = ["vox_i", "vox_j", "vox_k", "volume_mm3"]; c = df.set_index("cand_id")
+    with RIO.study_lock(base, subj):
+        RIO.ensure_table(base, subj, REVIEWER, "calls", p)
+        old = pd.read_csv(p) if os.path.exists(p) else pd.DataFrame(columns=["cand_id", "call", "comment", "reviewer", "time"] + FPc + ["fine_code"])
+        keep = [r for r in old.to_dict("records") if int(r["cand_id"]) not in calls]
+        rows = keep + [dict(cand_id=k, call=v, comment="", reviewer=REVIEWER, time=__import__("time").strftime("%Y-%m-%d %H:%M:%S"),
+                            **{f: c.loc[k, f] for f in FPc}, fine_code="") for k, v in sorted(calls.items())]
+        RIO.write_table(base, subj, REVIEWER, "calls", p, pd.DataFrame(rows, columns=["cand_id", "call", "comment", "reviewer", "time"] + FPc + ["fine_code"]),
+                        ["cand_id"] + FPc, "review_css", read_phase="unblinded_legacy", ai_visible=True, tool="review_css.py")
+
 
 R = Reviewer()
 if os.environ.get("CSS_REVIEW_TEST"):
@@ -236,8 +258,14 @@ not_rev = len(df) - len(calls)
 if not_rev:
     print(f"WARNING: {not_rev} of {len(df)} candidates NOT reviewed - the score is a lower bound "
           f"(continue with: review_css.py {subj})")
-cmd = [sys.executable, f"{base}/scripts/mark_css.py", subj, ",".join(map(str, accepted)) or "none",
-       "--reviewed", ",".join(map(str, sorted(calls))) or "none"]
-if ich: cmd += ["--ich", ",".join(map(str, ich))]
-subprocess.run(cmd, check=False)
-print(f"decisions saved: {calls_csv}")
+if not REVIEWER:
+    print("decisions NOT saved: give --reviewer NAME (Phase 3A: every saved call needs a reviewer and provenance)"); sys.exit(0)
+import call_ledger as CL                                                     # shared calls + score = DERIVED from the ledger (expert consensus)
+_rec = CL.materialize(base, subj, by=REVIEWER, scripts=os.path.dirname(os.path.abspath(__file__)), rescore=True)
+if _rec.get("refused"): print("shared calls NOT rebuilt:", "; ".join(_rec.get("problems", [])))
+_sp = f"{base}/review/{subj}_score.json"
+if os.path.exists(_sp):                                                     # the score of the DERIVED (expert-consensus) calls
+    import json as _json; _j = _json.load(open(_sp))
+    print(f"\n{subj}  cSS multifocality score: {_j.get('multifocality_0_4')}/4   ({_j.get('category', '')})   [shared score = expert consensus]")
+else: print(_rec.get("score_note", ""))
+print(f"decisions saved: {base}/review/{subj}_calls_{__import__('review_io').slug(REVIEWER)}.csv (shared {calls_csv} = expert consensus)")

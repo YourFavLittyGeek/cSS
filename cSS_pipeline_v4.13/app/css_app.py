@@ -1107,6 +1107,7 @@ def calls_get(op, q):
         if op == "study":
             p = pget(q.get("code", "")); return RCG.study_calls(B, q["code"], (p or {}).get("cohort", "")) if p else dict(error="unknown study")
         if op == "consolidate_plan": return RCG.consolidate_plan(B, PAT, q.get("scope", "study"), q.get("target", ""))
+        if op == "roles": return RCG.roles(B)                                                    # Phase 3A.3
         return dict(error=f"unknown {op}")
     except Exception as e: return dict(error=f"{type(e).__name__}: {e}"[-400:])
 def calls_post(op, d):
@@ -1118,6 +1119,15 @@ def calls_post(op, d):
             if d.get("confirm") is None: return dict(ok=False, needs_confirm=True, error="destructive: type the confirmation phrase")
             return RCG.consolidate(B, PAT, d.get("scope", "study"), d.get("target", ""), str(d.get("confirm")), by=by)
         if op == "restore": return RCG.restore(B, d["code"], d["archive"])
+        # Phase 3A.3/3A.4 administration (local administrator; typed confirmation + reason; every change journaled)
+        if op == "role": return RCG.set_role(B, d.get("name", ""), d.get("role", ""), by, d.get("reason", ""), d.get("confirm", ""))
+        if op == "adjudicator": return RCG.set_adjudicator(B, d.get("name", ""), bool(d.get("allowed")), by, d.get("reason", ""), d.get("confirm", ""))
+        if op == "verify_historical": return RCG.verify_historical(B, str(d.get("code", "")), d.get("reviewer", ""), by, d.get("reason", ""), d.get("evidence", ""), d.get("confirm", ""))
+        if op in ("adjudicate", "withdraw_adjudication"):
+            p = pget(str(d.get("code", "")))
+            if not p: return dict(ok=False, error="unknown study")
+            if op == "adjudicate": return RCG.adjudicate(B, p["code"], p.get("cohort", ""), d.get("cand_id"), d.get("call", ""), str(d.get("adjudicator", "")), d.get("reason", ""))
+            return RCG.withdraw_adjudication(B, p["code"], p.get("cohort", ""), d.get("cand_id"), str(d.get("adjudicator", "")), d.get("reason", ""))
         return dict(ok=False, error=f"unknown {op}")
     except PermissionError as e: return dict(ok=False, refused=True, error=str(e))
     except Exception as e: return dict(ok=False, error=f"{type(e).__name__}: {e}"[-400:])
@@ -1276,31 +1286,8 @@ def pg_post(op, d):
         if op == "vault_create": return PG.vault_create(str(d.get("destination", "")), name=str(d.get("name", "PERCIVAL_VAULT")))
         if op == "vault_eject": return PG.vault_eject()
         if op == "vault_backup": return PG.vault_backup(str(d.get("destination", "")))
-        if op == "missed_lesion":
-            study_id = str(d.get("study_id") or d.get("code") or "")
-            missed_id = str(d.get("missed_id") or int(time.time()))
-            reviewer_id = str(d.get("reviewer_id") or "reviewer")
-            vx = int(d.get("vox_i", 0)); vy = int(d.get("vox_j", 0)); vz = int(d.get("vox_k", 0))
-            mx = float(d.get("x_mm", 0.0)); my = float(d.get("y_mm", 0.0)); mz = float(d.get("z_mm", 0.0))
-            plane = str(d.get("plane", "axial"))
-            slice_idx = int(d.get("slice_idx", 0))
-            shape = str(d.get("shape", "contour"))
-            pts = d.get("points") or []
-            pts_json = json.dumps(pts) if not isinstance(pts, str) else pts
-            comm = str(d.get("comment", ""))
-            from uengine.pensieve import get_pensieve
-            muid = get_pensieve().record_missed_lesion(
-                study_id, missed_id, reviewer_id,
-                (vx, vy, vz), (mx, my, mz),
-                slice_idx, plane, shape, pts_json, comm, "unproposed"
-            )
-            missed_csv = os.path.join(B, "review", f"{study_id}_missed.csv")
-            os.makedirs(os.path.dirname(missed_csv), exist_ok=True)
-            hdr = not os.path.exists(missed_csv)
-            with open(missed_csv, "a") as mf:
-                if hdr: mf.write("missed_id,reviewer,time,slice,plane,shape,vox_i,vox_j,vox_k,x_mm,y_mm,z_mm,comment\n")
-                mf.write(f"{missed_id},{reviewer_id},{time.strftime('%Y-%m-%d %H:%M:%S')},{slice_idx},{plane},{shape},{vx},{vy},{vz},{mx},{my},{mz},{comm}\n")
-            return dict(ok=True, missed_uid=muid, study_id=study_id, missed_id=missed_id)
+        if op == "missed_lesion":                                                             # Phase 3A.5: disabled (it wrote unvalidated rows)
+            return dict(ok=False, error="disabled: missed-cSS marks are recorded in the reviewer (validated, one journaled file per reviewer)")
         if op == "shadow_run": return PG.shadow_run_trial(str(d.get("target", "ALBUS")), str(d.get("hypothesis", "")), d.get("config", {}))
         if op == "score_unified": return PG.score_study_unified(str(d.get("study_id", "")))
         return dict(ok=False, error=f"unknown {op}")

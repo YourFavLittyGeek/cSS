@@ -19,7 +19,9 @@ def run(*a):
     return r.stdout
 run(f"{HERE}/phantom_v4.py", "PH3", "1"); run(f"{S}/align_seg.py", "PH3")
 shutil.copy(f"{T}/work/PH3_seg_swispace.nii.gz", f"{T}/work/PH3_t1seg_swispace.nii.gz")
-run(f"{S}/detect_css.py", "PH3"); run(f"{S}/review_css.py", "PH3", "--redo")          # test mode: calls cycle cSS / Vessel / Near ICH / Normal
+run(f"{S}/detect_css.py", "PH3")
+run(f"{S}/review_admin.py", "role", "Old Reader", "expert", "--by", "test", "--reason", "fixture", "--confirm", "ASSIGN ROLE")   # Phase 3A.3
+run(f"{S}/review_css.py", "PH3", "--redo", "--reviewer", "Old Reader")          # test mode: calls cycle cSS / Vessel / Near ICH / Normal
 json.dump(dict(names=["Tester"], last="Tester"), open(f"{T}/review/reviewers.json", "w"))
 n0 = len(pd.read_csv(f"{T}/review/PH3_candidates.csv"))
 import hashlib

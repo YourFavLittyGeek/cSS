@@ -31,7 +31,7 @@ for sid in studies:
             x2_core_contrast_nu=rng.normal(0.4 + 0.4 * yn[idx], 0.3), x3_pial_distance_mm=rng.normal(1, 0.6), x4_sulcal_alignment=rng.normal(0.3 + 0.3 * yn[idx], 0.3),
             x5_extracranial_mm=rng.normal(2 - 1.2 * yn[idx], 1)).items()}) for idx, i in enumerate(c.cand_id)]
     os.makedirs(os.path.join(B, "uscore", "features"), exist_ok=True); json.dump(dict(study=sid, records=recs), open(os.path.join(B, "uscore", "features", f"{sid}.json"), "w"))
-    pd.DataFrame(dict(cand_id=list(c.cand_id), call=["cSS" if v else "Vessel" for v in yy])).to_csv(os.path.join(B, "review", f"{sid}_calls.csv"), index=False)
+    pd.DataFrame(dict(cand_id=list(c.cand_id), call=["cSS" if v else "Vessel" for v in yy], reviewer="Dr Syn")).to_csv(os.path.join(B, "review", f"{sid}_calls_Dr_Syn.csv"), index=False)   # Phase 3A: a named reviewer (unnamed legacy calls never decide)
 # one reviewer conflict + one indeterminate call (must be excluded, reported)
 pd.DataFrame(dict(cand_id=[1], call=["cSS"])).to_csv(os.path.join(B, "review", f"{studies[1]}_calls_Dr_A.csv"), index=False)
 pd.DataFrame(dict(cand_id=[1], call=["Vessel"])).to_csv(os.path.join(B, "review", f"{studies[1]}_calls_Dr_B.csv"), index=False)
@@ -39,6 +39,7 @@ import percival_gui as PG
 from uengine.percival import meta as MT
 SET = dict(features=dict(train_include_archived=True), percival_autocycle=True, percival_cycle_n=5, percival_test_fraction=0.25)
 PATIENT = {s: f"pt{(k // 2):02d}" for k, s in enumerate(studies)}                 # two studies per patient (patient-level separation)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import gt_fixture; gt_fixture.ground_truth(B)   # Phase 3A fixture: experts + documented verification
 PG.init(B=B, SC=os.path.join(ROOT, "scripts"), SET=SET, patients=lambda: [dict(code=s, cohort="SYN") for s in studies], is_reviewed=lambda c: True,
         label=lambda c: c, patient_of=lambda c: PATIENT[c], save_settings=lambda: None, notify=lambda *a: None, fingerprint_of=lambda c: "")
 os.environ["CSS_LEARN_MIN"] = "10,60,8"; os.environ["CSS_PERCIVAL_EPOCHS"] = "15"
@@ -124,7 +125,7 @@ if M:
     PG.promote(vs[-1], why="test", override=True); time.sleep(4); led1 = sorted(glob.glob(PG.P("ledger", studies[0], "*.json")))
     check("prediction ledger: the old model's assessment is kept unchanged, the new one added", len(led1) == len(led0) + 1 and all(json.load(open(p))["model"] for p in led1))
     # v5.23 expert-review snapshot: label + the prediction that existed at review time, immutable
-    json.dump(dict(study=studies[0], reviewer="Dr A", saved=time.strftime("%Y-%m-%d %H:%M:%S"), meter_visible=1, read_mode="second look"), open(os.path.join(B, "review", f"{studies[0]}_final_Dr_A.json"), "w"))
+    json.dump(dict(study=studies[0], reviewer="Dr Syn", saved=time.strftime("%Y-%m-%d %H:%M:%S"), meter_visible=1, read_mode="second look"), open(os.path.join(B, "review", f"{studies[0]}_final_Dr_Syn.json"), "w"))   # Phase 3A: the reviewer who made the calls
     n1 = PG.snapshot_study(studies[0]); n2 = PG.snapshot_study(studies[0]); R = PG.reviews_of(studies[0])
     ok_ = n1 == 1 and n2 == 0 and len(R) == 1 and R[0]["labels"] and R[0]["percival_at_review"] and R[0]["percival_at_review"]["model"] in vs \
           and any(c.get("patch_sha256") for c in R[0]["candidates"]) and R[0]["percival_visible_to_reviewer"] == 1 and R[0]["processing"]["candidates_sha256"]

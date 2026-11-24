@@ -329,6 +329,36 @@ class Study:
     def ctx(self, reviewer):
         return RB.Ctx(B, self, reviewer, self.audit_rows(reviewer))
 
+    # ---------- Phase 3A.3: independent whole-study search for missed cSS (no detector output shown) ----------
+    def ws_state(self, reviewer):
+        out = dict(started=False, completed=False, detector_seen_before=None, started_at="", completed_at="", n_marks=None)
+        if not str(reviewer or "").strip(): return out
+        ev, _ = RIO.read_journal(RIO.journal_path(B, self.sid, reviewer))
+        for e in ev:
+            if e.get("kind") == "whole_study_started" and not out["started"]: out.update(started=True, started_at=e.get("time", ""), detector_seen_before=e.get("detector_seen_before"))
+            elif e.get("kind") == "whole_study_completed": out.update(completed=True, completed_at=e.get("time", ""), n_marks=e.get("n_marks"))
+        return out
+
+    def ws_start(self, reviewer):
+        with RIO.study_lock(B, self.sid):
+            st = self.ws_state(reviewer)
+            if st["started"]: return st
+            ev, _ = RIO.read_journal(RIO.journal_path(B, self.sid, reviewer))
+            seen = any(e.get("kind") in ("blind_ids", "call", "comment", "clear", "undo", "revote", "audit_call", "finish", "import", "inherit") for e in ev) \
+                or os.path.exists(self.rpath(reviewer))
+            RIO.journal_append(B, self.sid, reviewer, "whole_study_started", detector_seen_before=bool(seen),
+                               note="whole-study search: no candidate, outline or AI content is shown")
+            return self.ws_state(reviewer)
+
+    def ws_complete(self, reviewer):
+        with RIO.study_lock(B, self.sid):
+            st = self.ws_state(reviewer)
+            if not st["started"]: raise RB.BlindError("open the whole-study search first", 409)
+            if st["completed"]: return st
+            own = self._mread(self.mpath(reviewer)); n = int(((own.status == "active") & (own.context == "whole_study")).sum())
+            RIO.journal_append(B, self.sid, reviewer, "whole_study_completed", n_marks=n, none_found=n == 0, detector_seen_before=st["detector_seen_before"])
+            return self.ws_state(reviewer)
+
     def audit_cands(self, reviewer):
         xd, xl = self._excluded(); out = []; revealed = SHOW_EXCL or load_final(self.sid, reviewer) is not None
         for e in self.audit_ids(reviewer):
@@ -493,7 +523,6 @@ class Study:
                         pd.DataFrame(rows, columns=["cand_id", "call", "comment", "reviewer", "time"] + FP + ["fine_code"]), ["cand_id"] + FP, action,
                         cand_id=None if cand_id is None else int(cand_id), call=v.get("call", ""), fine=v.get("fine", ""), comment=v.get("comment", ""),
                         client_meter="" if ai is None else str(ai), **info)
-        primary(self.sid, reviewer, if_missing=True)                              # kept for display / the "use this reviewer" choice
         CL.materialize(B, self.sid, by=reviewer, rescore=False)                  # v5.15: shared ID_calls.csv = effective calls (no re-score per click)
 
         # v5.25 Synchronize candidate review calls into PENSIEVE memory
@@ -524,19 +553,105 @@ class Study:
             RIO.append_line(lp, ",".join([now(), q(reviewer), action, str(cand_id), q(v.get("call", "")), q(v.get("comment", "")),
                                           "" if ai is None else str(ai)] + [str(c.loc[cand_id, k]) for k in FP]))
 
-    # ---------- missed cSS marks ----------
+    # ---------- missed cSS marks (Phase 3A.3: one file per reviewer, tombstones, ids never reused; the shared file is derived) ----------
     MCOLS = ["missed_id", "reviewer", "time", "vox_i", "vox_j", "vox_k", "x_mm", "y_mm", "z_mm", "can_i", "can_j", "can_k",
              "comment", "plane", "slice", "shape", "points", "detector_fate"]
+    RCOLS = MCOLS + ["status", "deleted_at", "deleted_by", "context", "read_phase", "ai_visible"]
+    DCOLS = MCOLS + ["context", "read_phase", "ai_visible", "source"]          # derived shared file: the old columns first (consumers unchanged)
+
+    def mpath(self, reviewer): return f"{B}/review/{self.sid}_missed_by_{slug(reviewer)}.csv"
+    def _mshared(self): return f"{B}/review/{self.sid}_missed.csv"
+    def _mlegacy(self): return f"{B}/review/{self.sid}_missed_legacy.csv"
+    def _msidecar(self): return f"{B}/review/{self.sid}_missed.derived.json"
+
+    def _mrev_files(self): return sorted(glob.glob(f"{B}/review/{self.sid}_missed_by_*.csv"))
+
+    def _mread(self, p):
+        m = pd.read_csv(p, dtype=str, keep_default_na=False) if os.path.exists(p) else pd.DataFrame(columns=self.RCOLS)
+        for c in self.RCOLS:
+            if c not in m.columns: m[c] = ""
+        return m[self.RCOLS]
+
+    def _mlegacy_rows(self, p=None):
+        """rows of the pre-3A shared file, parsed by header; rows whose field count does not match the header are left out (reported)"""
+        import csv
+        p = p or self._mlegacy(); out, bad = [], 0
+        if not os.path.exists(p): return out, bad
+        with open(p, newline="") as f: R = list(csv.reader(f))
+        if not R: return out, bad
+        hd = R[0]
+        for row in R[1:]:
+            if not row: continue
+            if len(row) != len(hd): bad += 1; continue
+            r = dict(zip(hd, row))
+            try: int(float(r.get("missed_id", ""))); [int(float(r.get(k, ""))) for k in ("vox_i", "vox_j", "vox_k")]
+            except ValueError: bad += 1; continue
+            out.append(r)
+        return out, bad
+
+    def _mall_ids(self):
+        ids = []
+        for p in self._mrev_files(): ids += [int(float(x)) for x in self._mread(p).missed_id if str(x).strip()]
+        ids += [int(float(r["missed_id"])) for r in self._mlegacy_rows()[0]]
+        for _, e in RIO.study_events(B, self.sid):                             # ids of earlier (3A.1) journaled marks too: never reused
+            ids += [int(x) for x in e.get("missed_ids") or [] if str(x).lstrip("-").isdigit()]
+        return ids
+
+    def _mpreserve(self, by):
+        """the shared file must be the DERIVED one; a pre-3A file is kept as the legacy source, a file changed by another program is kept aside"""
+        p = self._mshared()
+        if not os.path.exists(p): return
+        sc = json.load(open(self._msidecar())) if os.path.exists(self._msidecar()) else None
+        cur = open(p, "rb").read()
+        if sc and sc.get("sha256") == RIO.sha256_bytes(cur): return
+        if sc is None and os.path.exists(self._mlegacy()) and RIO.sha256_file(self._mlegacy()) == RIO.sha256_bytes(cur): return   # preserved by the migration
+        who = by or "(missed-lesion storage)"
+        if sc is None and not os.path.exists(self._mlegacy()):
+            RIO.journal_append(B, self.sid, who, "missed_legacy_preserved", file=os.path.relpath(self._mlegacy(), B), snapshot=cur.decode("utf-8", "replace"),
+                               file_sha256=RIO.sha256_bytes(cur), note="pre-3A shared missed-cSS file kept unchanged as the legacy source")
+            RIO.atomic_copy(p, self._mlegacy())
+        else:
+            dst = f"{B}/review/{self.sid}_missed_external_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+            RIO.journal_append(B, self.sid, who, "missed_external_preserved", file=os.path.relpath(dst, B), snapshot=cur.decode("utf-8", "replace"),
+                               file_sha256=RIO.sha256_bytes(cur), note="the shared missed-cSS file was changed outside the reviewer; kept aside, not used")
+            RIO.atomic_copy(p, dst)
+
+    def _mrows(self, legacy_path=None):
+        rows = []
+        for r in self._mlegacy_rows(legacy_path)[0]: rows.append(dict({c: r.get(c, "") for c in self.MCOLS}, context="", read_phase="", ai_visible="", source="legacy"))
+        for p in self._mrev_files():
+            for r in self._mread(p).to_dict("records"):
+                if r["status"] == "active": rows.append(dict({c: r[c] for c in self.MCOLS}, context=r["context"], read_phase=r["read_phase"], ai_visible=r["ai_visible"], source="reviewer"))
+        rows.sort(key=lambda r: int(float(r["missed_id"])))
+        return rows
+
+    def _mrebuild(self):
+        txt = pd.DataFrame(self._mrows(), columns=self.DCOLS).to_csv(index=False)
+        if not (os.path.exists(self._mshared()) and RIO.sha256_file(self._mshared()) == RIO.sha256_bytes(txt.encode())):
+            RIO.atomic_write_text(self._mshared(), txt)
+        RIO.atomic_write_json(self._msidecar(), dict(sha256=RIO.sha256_bytes(txt.encode()), derived_from=[os.path.basename(p) for p in self._mrev_files()]
+                                                     + ([os.path.basename(self._mlegacy())] if os.path.exists(self._mlegacy()) else []), note="derived file - do not edit"))
 
     def missed(self, by=""):
-        p = f"{B}/review/{self.sid}_missed.csv"
-        with RIO.study_lock(B, self.sid): RIO.ensure_missed(B, self.sid, p, by)          # Phase 3A.1
-        if not os.path.exists(p): return pd.DataFrame(columns=self.MCOLS)
-        m = pd.read_csv(p, dtype=str).fillna("")
+        """every reviewer's active marks + the legacy marks (the derived shared file), typed for the viewer. Without a reviewer name (anonymous
+        view) nothing is written: the rows are assembled in memory."""
+        if not str(by or "").strip():
+            sh = self._mshared(); sc = os.path.exists(self._msidecar())
+            leg = self._mlegacy() if os.path.exists(self._mlegacy()) else (sh if os.path.exists(sh) and not sc else None)
+            m = pd.DataFrame(self._mrows(leg) if leg or self._mrev_files() else [], columns=self.DCOLS).astype(str)
+        else:
+            with RIO.study_lock(B, self.sid):
+                self._mpreserve(by)
+                for p in self._mrev_files():
+                    RIO.ensure_table(B, self.sid, os.path.basename(p)[len(f"{self.sid}_missed_by_"):-4], "missed_by", p, need=("missed_id",))
+                self._mrebuild()
+            m = pd.read_csv(self._mshared(), dtype=str, keep_default_na=False)
         for c in self.MCOLS:
             if c not in m.columns: m[c] = ""
-        for c in ("missed_id", "can_i", "can_j", "can_k", "vox_i", "vox_j", "vox_k"): m[c] = m[c].astype(float).astype(int)
-        return m[self.MCOLS]
+        for c in ("missed_id", "can_i", "can_j", "can_k", "vox_i", "vox_j", "vox_k"): m[c] = pd.to_numeric(m[c], errors="coerce")
+        m = m.dropna(subset=["missed_id", "vox_i", "vox_j", "vox_k"])
+        for c in ("missed_id", "can_i", "can_j", "can_k", "vox_i", "vox_j", "vox_k"): m[c] = m[c].fillna(-1).astype(int)
+        return m[self.MCOLS + [c for c in ("context", "source") if c in m.columns]]
 
     def fate(self, pts):
         """what the detector did with the marked voxels (+/- 1 voxel): shown / excluded (rule) / below a gate / not generated"""
@@ -559,65 +674,62 @@ class Study:
         if self._dl is not None and (self._dl[m] > 0).any(): out.append("below a generation gate (size / slices / shape)")
         return "; ".join(out) if out else "not generated by the detector (outside the search zone, not dark enough, or no ridge)"
 
-    def missed_edit(self, reviewer, action, d=None, own_only=False, **info):
+    def missed_edit(self, reviewer, action, d=None, own_only=True, **info):
         with RIO.study_lock(B, self.sid):                                    # Phase 3A.1: one writer per study across processes
-            return self._missed_edit(reviewer, action, d, own_only, **info)
+            return self._missed_edit(reviewer, action, d, **info)
 
-    def _missed_edit(self, reviewer, action, d=None, own_only=False, **info):
-        d = d or {}; m = self.missed(reviewer); before = {int(x): r for x, r in zip(m.missed_id, m.to_dict("records"))}
-        if own_only and action in ("delete", "comment"):                    # Phase 3A.2: in the blind read only your own marks exist for you
-            tgt = before.get(int(d.get("id", -1)))
-            if tgt is None or str(tgt.get("reviewer", "")).strip() != str(reviewer).strip(): raise RB.BlindError("no such missed-cSS mark of yours", 400)
+    def _mpoint(self, q):
+        if not isinstance(q, (list, tuple)) or len(q) != 3: raise RB.BlindError("invalid point", 400)
+        try: v = [float(x) for x in q]
+        except (TypeError, ValueError): raise RB.BlindError("invalid point", 400)
+        if not all(np.isfinite(v)) or any(x < -0.5 or x > s_ - 0.5 for x, s_ in zip(v, self.shape)): raise RB.BlindError("point outside the image", 400)
+        return v
+
+    def _missed_edit(self, reviewer, action, d=None, **info):
+        """Phase 3A.3: validated; the reviewer's OWN file only; delete = tombstone; ids never reused; journaled; derived shared file rebuilt"""
+        d = d or {}
+        if action not in ("add", "delete", "comment"): raise RB.BlindError("unknown action", 400)
+        self.missed(reviewer)                                                # preserve / repair sources first
+        p = self.mpath(reviewer); own = self._mread(p)
         if action == "add":
-            strokes = d.get("strokes") or [[d["ijk"]]]
-            pts = np.array([q for st in strokes for q in st], float)
-            if d.get("shape") == "rect" and len(pts) == 2:                       # fill the rectangle for the fate lookup
+            strokes = d.get("strokes") or [[d.get("ijk")]]
+            if not isinstance(strokes, list) or not strokes or any(not isinstance(st, list) or not st for st in strokes): raise RB.BlindError("invalid outline", 400)
+            pts = np.array([self._mpoint(q) for st in strokes for q in st], float)
+            if len(pts) > 20000: raise RB.BlindError("outline too large", 400)
+            shape = str(d.get("shape", "point")); plane = str(d.get("plane", ""))
+            if shape not in ("point", "rect", "pen") or plane not in ("", "axial", "coronal", "sagittal"): raise RB.BlindError("invalid shape or plane", 400)
+            sl = str(d.get("slice", ""))
+            if sl and not sl.lstrip("-").isdigit(): raise RB.BlindError("invalid slice", 400)
+            if shape == "rect" and len(pts) == 2:                            # fill the rectangle for the fate lookup
                 lo, hi = np.floor(pts.min(0)).astype(int), np.ceil(pts.max(0)).astype(int)
                 g = np.mgrid[lo[0]:hi[0] + 1, lo[1]:hi[1] + 1, lo[2]:hi[2] + 1].reshape(3, -1).T; fp = g[:: max(1, len(g) // 4000)]
             else: fp = pts
-            ijk = pts.mean(0) if len(pts) > 1 else np.array(d["ijk"], float)
-            n = (self.c2n @ np.r_[ijk, 1.0])[:3]; w = (self.can.affine @ np.r_[ijk, 1.0])[:3]
-            new_id = int(m.missed_id.max()) + 1 if len(m) else 1
-            detector_fate_text = self.fate(fp)
-            pts_json = json.dumps([[[round(float(c), 1) for c in q] for q in st] for st in strokes])
-            m.loc[len(m)] = [new_id, reviewer, now(), *[int(round(v)) for v in n],
-                             *[str(round(float(v), 1)) for v in w], *[int(round(v)) for v in ijk], str(d.get("comment", ""))[:300],
-                             str(d.get("plane", "")), str(d.get("slice", "")), str(d.get("shape", "point")),
-                             pts_json, detector_fate_text]
-
-            # v5.25 Synchronize expert-discovered missed cSS lesion into PENSIEVE memory
-            try:
-                from uengine.pensieve import get_pensieve
-                get_pensieve().record_missed_lesion(
-                    study_id=self.sid,
-                    missed_id=str(new_id),
-                    reviewer_id=reviewer,
-                    coords_vox=(int(round(n[0])), int(round(n[1])), int(round(n[2]))),
-                    coords_mm=(float(round(w[0], 1)), float(round(w[1], 1)), float(round(w[2], 1))),
-                    slice_idx=int(d.get("slice", 0) or 0),
-                    plane=str(d.get("plane", "")),
-                    shape=str(d.get("shape", "point")),
-                    points_json=pts_json,
-                    comment=str(d.get("comment", ""))[:300],
-                    detector_fate=detector_fate_text
-                )
-            except Exception as e_pm:
-                sys.stderr.write(f"[PensieveSync] Missed lesion recording notice: {e_pm}\n")
-
-        elif action == "delete":
-            m = m[m.missed_id != int(d["id"])]
-            try:
-                from uengine.pensieve import get_pensieve
-                get_pensieve().delete_missed_lesion(self.sid, str(d["id"]))
-            except Exception:
-                pass
-        elif action == "comment":
-            m.loc[m.missed_id == int(d["id"]), "comment"] = str(d.get("comment", ""))[:300]
-        after = {int(x): r for x, r in zip(m.missed_id, m.to_dict("records"))}
-        changed = [after[k] for k in after if before.get(k) != after[k]] + [dict(before[k], deleted=True) for k in before if k not in after]
-        RIO.write_missed(B, self.sid, reviewer, f"{B}/review/{self.sid}_missed.csv", m, f"missed_{action}",
-                         missed_ids=sorted({int(r["missed_id"]) for r in changed}), rows=changed, **info)
-        return m.to_dict("records")
+            ijk = pts.mean(0); n = (self.c2n @ np.r_[ijk, 1.0])[:3]; w = (self.can.affine @ np.r_[ijk, 1.0])[:3]
+            new_id = max(self._mall_ids(), default=0) + 1
+            row = dict(missed_id=str(new_id), reviewer=reviewer, time=now(), vox_i=str(int(round(n[0]))), vox_j=str(int(round(n[1]))), vox_k=str(int(round(n[2]))),
+                       x_mm=str(round(float(w[0]), 1)), y_mm=str(round(float(w[1]), 1)), z_mm=str(round(float(w[2]), 1)),
+                       can_i=str(int(round(ijk[0]))), can_j=str(int(round(ijk[1]))), can_k=str(int(round(ijk[2]))),
+                       comment=re.sub(r"[\x00-\x1f]", " ", str(d.get("comment", "")))[:300], plane=plane, slice=sl, shape=shape,
+                       points=json.dumps([[[round(float(c), 1) for c in q] for q in st] for st in strokes]), detector_fate=self.fate(fp), status="active",
+                       deleted_at="", deleted_by="", context=info.pop("context", "candidate_review"), read_phase=str(info.get("read_phase", "")),
+                       ai_visible=str(info.get("ai_visible", "")))
+            own = pd.concat([own, pd.DataFrame([row])], ignore_index=True); changed = [row]
+        else:
+            try: mid = int(d.get("id"))
+            except (TypeError, ValueError): raise RB.BlindError("invalid mark id", 400)
+            hit = own.index[(own.missed_id.astype(str) == str(mid)) & (own.status == "active")]
+            if not len(hit):
+                if any(int(float(r["missed_id"])) == mid for r in self._mlegacy_rows()[0]): raise RB.BlindError("a mark recorded before Phase 3A is kept as recorded", 400)
+                raise RB.BlindError("no such missed-cSS mark of yours", 400)
+            i = hit[0]
+            if action == "delete": own.loc[i, ["status", "deleted_at", "deleted_by"]] = ["deleted", now(), reviewer]
+            else: own.loc[i, "comment"] = re.sub(r"[\x00-\x1f]", " ", str(d.get("comment", "")))[:300]
+            changed = [own.loc[i].to_dict()]
+        RIO.ensure_table(B, self.sid, reviewer, "missed_by", p, need=("missed_id",))
+        RIO.write_table(B, self.sid, reviewer, "missed_by", p, own[self.RCOLS], ["missed_id"], f"missed_{action}",
+                        missed_ids=[int(float(r["missed_id"])) for r in changed], rows=changed, **info)
+        self._mrebuild()
+        return self.missed(reviewer).to_dict("records")
 
 
 SCORE_KEYS = ("L_score", "R_score", "multifocality_0_4", "category", "n_sulci_total", "L_sulci", "R_sulci", "L_lines", "R_lines",
@@ -726,12 +838,23 @@ def uscore_report(study, cid):
 def meta(sid, reviewer, mode=""):
     """Phase 3A.2: the full payload only in the second look; during the blind initial read every AI field is replaced / removed, other
     reviewers' data are left out and candidates carry blinded ids (review_blind)."""
+    if mode == "wholestudy": return _meta_wholestudy(sid, reviewer)
     s = study(sid); ctx = s.ctx(reviewer); d = _meta_full(sid, reviewer, mode, s, blind=ctx.blind)
     d.update(blind=ctx.blind, read_phase=dict(ctx.ph))
     if not ctx.blind: return d
     d["cands"] = sorted((RB.redact_cand(c, ctx) for c in d["cands"]), key=lambda c: c["id"])
     d.update(calls=RB.redact_calls(d["calls"], ctx), percival=None, ai_score=None, calls_rule="", import_sources=[],
              missed=RB.redact_missed(d["missed"], ctx), reader_score=RB.redact_score(d["reader_score"]), final=RB.redact_final(d["final"]))
+    return d
+
+
+def _meta_wholestudy(sid, reviewer):
+    """Phase 3A.3: the independent whole-study search - images only: no candidate, outline, call, score or AI content"""
+    s = study(sid); st = s.ws_start(reviewer) if str(reviewer or "").strip() else s.ws_state(reviewer)
+    d = _meta_full(sid, reviewer, "", s, blind=True)
+    own = [r for r in d["missed"] if str(r.get("reviewer", "")).strip() == str(reviewer or "").strip()]
+    d.update(cands=[], calls={}, percival=None, ai_score=None, calls_rule="", import_sources=[], reader_score=None, final=None, note="",
+             missed=[{k: r.get(k, "") for k in RB.MISSED_KEEP} for r in own], blind=True, whole_study=st, read_phase=dict(phase="whole_study"))
     return d
 
 
@@ -769,8 +892,9 @@ ROUTES = {("GET", "/"): "static", ("GET", "/morph3d.js"): "static", ("GET", "/ap
           ("POST", "/api/reviewer"): "settings", ("GET", "/api/vol"): "image", ("GET", "/api/seqmeta"): "image",
           ("GET", "/api/meta"): "redacted", ("GET", "/api/labels"): "redacted", ("GET", "/api/struct3d"): "refused", ("GET", "/api/uscore"): "refused",
           ("GET", "/api/morph3d"): "refused", ("POST", "/api/import"): "refused", ("POST", "/api/screencap"): "settings",
-          ("POST", "/api/snapshot"): "redacted", ("POST", "/api/openfolder"): "settings", ("POST", "/api/primary"): "write",
-          ("POST", "/api/call"): "write", ("POST", "/api/missed"): "write", ("POST", "/api/finish"): "write", ("POST", "/api/unblind"): "write"}
+          ("POST", "/api/snapshot"): "redacted", ("POST", "/api/openfolder"): "settings", ("POST", "/api/primary"): "removed",
+          ("POST", "/api/call"): "write", ("POST", "/api/missed"): "write", ("POST", "/api/finish"): "write", ("POST", "/api/unblind"): "write",
+          ("POST", "/api/wholestudy"): "write"}
 SAFE_ERRORS = (RIO.RecoveryError, RIO.LockTimeout)
 
 
@@ -797,6 +921,10 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path); q = {k: v[0] for k, v in parse_qs(u.query).items()}; blind = ROUTES.get(("GET", u.path)) in ("redacted", "refused")
         try:
             if ("GET", u.path) not in ROUTES: return self._send(dict(error="not found"), code=404)
+            if q.get("mode") == "wholestudy" and u.path in ("/api/meta", "/api/labels"):   # Phase 3A.3: no detector output at all
+                q["study"] = q.get("study") or START[0]; blind = True
+                if u.path == "/api/meta": return self._send(meta(q["study"], q.get("reviewer", ""), "wholestudy"))
+                return self._send(np.zeros(study(q["study"]).lab.shape, "<u2").tobytes(order="F"), "application/octet-stream")
             if ROUTES[("GET", u.path)] in ("redacted", "refused"):                    # Phase 3A.2: the server decides the read phase
                 q["study"] = q.get("study") or START[0]; st = study(q["study"]); ctx = st.ctx(q.get("reviewer", "")); blind = ctx.blind
                 if blind and ROUTES[("GET", u.path)] == "refused": raise RB.BlindError(RB.HIDDEN_MSG)
@@ -834,12 +962,17 @@ class H(BaseHTTPRequestHandler):
                 return self._send(dict(ok=True))
             s = study(d["study"]); rev = (d.get("reviewer") or "").strip()
             if not rev: return self._send(dict(error="Enter the reviewer name first (upper right)."), code=400)
+            if ROUTES[("POST", u.path)] == "removed":                          # Phase 3A.3: no reviewer-window primary / reference choice
+                raise RB.BlindError("the reference expert / call policy is set by the administrator in the app (Reviewer calls), not from a reviewer window")
             ctx = s.ctx(rev); blind = ctx.blind                                # Phase 3A.2: the read phase comes from the server's journal
             if blind and ROUTES[("POST", u.path)] == "refused": raise RB.BlindError(RB.HIDDEN_MSG)
             jinfo = dict(read_phase=ctx.ph["phase"], ai_visible=not blind,       # recorded with every journaled change of this request
                          ai_released_in_app=ctx.released)                        # the app showed this study's AI results before a blind read
             if u.path == "/api/unblind":
                 return self._send(dict(ok=True, read_phase=RB.unblind(B, s.sid, rev)))
+            if u.path == "/api/wholestudy":
+                if d.get("action") != "complete": raise RB.BlindError("unknown action", 400)
+                return self._send(dict(ok=True, whole_study=s.ws_complete(rev)))
             if u.path == "/api/screencap":            # macOS screencapture: the reviewer window (-R) or an area chosen with the mouse (-i)
                 if sys.platform != "darwin": return self._send(dict(error="screen capture needs macOS - use Snapshot (image only)"), code=400)
                 folder = os.path.abspath(os.path.expanduser(str(d.get("folder") or f"{B}/review/snapshots/{s.sid}").replace("{study}", s.sid))); os.makedirs(folder, exist_ok=True)
@@ -923,8 +1056,9 @@ class H(BaseHTTPRequestHandler):
                     if d.get("mode") == "validation" or SHOW_EXCL: calls.update(s.load_audit(rev))
                 return self._send(dict(ok=True, calls=RB.redact_calls(calls, ctx) if blind else calls, saved=now()))
             if u.path == "/api/missed":
-                with LOCK: m = s.missed_edit(rev, d["action"], d, own_only=blind, **jinfo)
-                return self._send(dict(ok=True, missed=RB.redact_missed(m, ctx) if blind else m, saved=now()))
+                wst = s.ws_state(rev); ws = d.get("mode") == "wholestudy" and wst["started"] and not wst["completed"]
+                with LOCK: m = s.missed_edit(rev, str(d.get("action", "")), d, context="whole_study" if ws else "candidate_review", **jinfo)
+                return self._send(dict(ok=True, missed=RB.redact_missed(m, ctx) if (blind or ws) else m, saved=now()))
             if u.path == "/api/finish":
                 with LOCK, RIO.study_lock(B, s.sid):                     # Phase 3A.1
                     calls, _ = s.load_calls(rev); s.save(rev, calls, action="finish", **jinfo)

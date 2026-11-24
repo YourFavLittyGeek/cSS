@@ -11,9 +11,11 @@ Components and what each needs (besides a usable expert label):
   shadow  Shadow evaluation of a candidate model   the label alone; locked-test patients INCLUDED (shadow only evaluates, never learns) (v1.1)
 Dataset membership: 'development' (used to learn) or 'locked test' (patients set aside permanently; used only to evaluate)."""
 
-RULES_VERSION = "percival-eligibility/1.3"     # 1.1 (v5.24): + predictor, shadow components; missing requirements in words
+RULES_VERSION = "percival-eligibility/1.4"     # 1.1 (v5.24): + predictor, shadow components; missing requirements in words
                                                # 1.2 (v5.25): patient identity must be verified (no study-code substitution)
                                                # 1.3 (v5.25): task-specific detection & segmentation learning with missed cSS support
+                                               # 1.4 (Phase 3A): expert ground truth only - consensus of designated experts / adjudication,
+                                               #     provenance class (blind post-3A, verified or adjudicated historical); missed cSS too
 COMPONENTS = ("char", "image", "fusion", "meta", "predictor", "shadow", "detection", "segmentation")
 LEARNING = ("char", "image", "fusion", "meta", "detection", "segmentation")   # the components trained by the Percival training cycle
 NAMES = dict(char="Imaging Features (Charact. ML)", image="MRI Patch (Image ML)", fusion="Integrated Model Evidence",
@@ -40,6 +42,12 @@ REASONS = {
     "PATIENT_ID_UNVERIFIED": "patient identity not verified (study registered as one patient per study without confirmation) - confirm it in Training Center › Patient identity",
     "PATIENT_ID_CONFLICT": "possible identity conflict: the same examination fingerprint / DICOM study belongs to another patient record",
     "NO_MASK": "no 2D contour or 3D segmentation mask available for segmentation learning",
+    "NO_EXPERT": "no call by a designated expert (trainee / other / unknown reviewers never decide)",
+    "ABSTAINED": "the expert calls are all Unsure (abstention) - unresolved",
+    "INSUFFICIENT_QUORUM": "fewer definite expert calls than the consensus rule requires - unresolved",
+    "NOT_PRIMARY_GROUND_TRUTH": "label not eligible as primary ground truth (blinding unknown, AI visible, or not an independent review) - verify or adjudicate",
+    "REVIEWER_NOT_EXPERT": "missed cSS marked by a reviewer who is not a designated expert",
+    "REVIEW_NEEDS_REPAIR": "a reviewer file of this study does not match its journal - labels withheld until repaired",
 }
 REQUIREMENTS = dict(NOT_REVIEWED="an expert call (cSS or not cSS)", UNCERTAIN="a definite call (cSS or not cSS)", OUT_OF_SCOPE="a definite call",
                     CONFLICT="agreement between reviewers or an adjudicated call", NO_IMAGE="the MRI patch (SWI + candidate mask)",
@@ -47,7 +55,10 @@ REQUIREMENTS = dict(NOT_REVIEWED="an expert call (cSS or not cSS)", UNCERTAIN="a
                     NOT_AUTHORIZED="local learning switched on", UNRECOGNISED_CALL="a call this version recognises",
                     PATIENT_ID_MISSING="a patient identity record", PATIENT_ID_UNVERIFIED="a verified patient identity (import grouping or your confirmation)",
                     PATIENT_ID_CONFLICT="a resolved patient identity conflict",
-                    NO_MASK="a valid 2D contour or 3D segmentation mask")
+                    NO_MASK="a valid 2D contour or 3D segmentation mask", NO_EXPERT="a call by a designated expert",
+                    ABSTAINED="a definite expert call or an adjudication", INSUFFICIENT_QUORUM="more definite expert calls or an adjudication",
+                    NOT_PRIMARY_GROUND_TRUTH="a blind expert read, a documented verification or an adjudication",
+                    REVIEWER_NOT_EXPERT="an expert's mark", REVIEW_NEEDS_REPAIR="the reviewer file repaired from its journal")
 
 
 def evaluate(c):
@@ -60,6 +71,7 @@ def evaluate(c):
     elif kind == "out_of_scope": block = "OUT_OF_SCOPE"
     elif kind == "unrecognised": block = "UNRECOGNISED_CALL"
     elif c.get("conflict"): block = "CONFLICT"
+    if block is None and c.get("gt_block"): block = c["gt_block"]           # 1.4: expert ground truth (call_ledger status / provenance)
     for flag, code in (("study_excluded", "STUDY_EXCLUDED"), ("study_archived", "STUDY_ARCHIVED"), ("duplicate", "DUPLICATE_STUDY")):
         if c.get(flag) and block is None: block = code
     if not c.get("authorized", True) and block is None: block = "NOT_AUTHORIZED"
