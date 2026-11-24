@@ -3,6 +3,7 @@
 # v5.23: every check runs (a failure no longer hides the checks after it); exit non-zero if ANY check failed.
 # A check that cannot run on this computer is reported as SKIPPED with its reason - never counted as passed.
 cd "$(dirname "$0")/.."
+export PERCIVAL_FS_SEARCH="${PERCIVAL_FS_SEARCH-}"   # empty: the app's FreeSurfer search finds nothing in tests (stub FreeSurfer stays in use)
 mkdir -p unified_score/output
 FAILED=(); SKIPPED=(); PASSED=0
 run() { echo "=== $*"; python3 "$@"; rc=$?; if [ $rc -eq 0 ]; then PASSED=$((PASSED+1)); elif [ $rc -eq 77 ]; then SKIPPED+=("$1 (browser checks: no usable headless browser - see its log)"); else FAILED+=("$1"); fi; }   # Stage 7: rc 77 = SKIPPED

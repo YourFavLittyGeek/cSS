@@ -4,6 +4,7 @@
 # Shell flow of run_css.sh / prep_anat.sh with stubbed FreeSurfer: bash tests/test_shell.sh
 set -e
 set -o pipefail      # v5.14-gui: a check that exits non-zero fails the suite even when its output is piped (was lost before)
+export PERCIVAL_FS_SEARCH="${PERCIVAL_FS_SEARCH-}"   # empty: the app's FreeSurfer search finds nothing in tests (stub FreeSurfer stays in use)
 first(){ awk -v n="$1" 'NR<=n'; }   # like head -n but reads all input, so pipefail never sees SIGPIPE in the writer
 # piped 'grep -q' is written 'grep ... >/dev/null' for the same reason (grep -q stops reading -> writer exit 141)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)

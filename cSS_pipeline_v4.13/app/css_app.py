@@ -403,10 +403,32 @@ def notif_post(op, d):
         jsave("settings.json", SET); return dict(ok=True, settings=SET["notif"])
     return dict(ok=False, error="unknown")
 WATCH = dict(jobs={}, autotrain_last=0)
+def storage_autofix():
+    """no Terminal needed: (1) FreeSurfer folder searched + validated when the setting is empty (an app opened from Finder has
+    no FREESURFER_HOME); (2) the chosen vault = <drive>/PERCIVAL_VAULT, created as soon as that drive is connected (setup_gui.ensure_vault:
+    never on an unplugged drive, an existing vault is never changed). Called at start-up and every 30 s by the watcher. -> True if changed"""
+    import setup_gui as SG
+    ch = False
+    if not SET.get("freesurfer_home"):                         # only an EMPTY setting is filled in: a folder somebody chose is never replaced
+        f = SG.find_freesurfer(os.environ.get("FREESURFER_HOME", ""))
+        if f: SET["freesurfer_home"] = f; ch = True
+    vm = SET.get("vault_mount")
+    if vm:
+        vp = SG.resolve_vault_path(vm)
+        ev = dict(ok=True, path=vp) if os.path.exists(os.path.join(vp, "manifest", "vault_manifest.json")) else SG.ensure_vault(vm)
+        if ev["ok"] and ev["path"] != vm: SET["vault_mount"] = ev["path"]; ch = True
+        if ev.get("created"): print(f"Data Vault created automatically: {ev['path']}", flush=True)
+    if ch:
+        with LOCK: jsave("settings.json", SET)
+    return ch
+
+
 def watcher():
     """every 30 s: calls-changed / same-patient conditions -> urgent notifications (resolved when they stop holding); unified job ends ->
     notifications; auto-train when switched on, the gate is open and enough train studies have new / changed reads."""
     while True:
+        try: storage_autofix()
+        except Exception as e: print(f"storage check: {e}", flush=True)
         try:
             st = SS.status(B, sel_studies()); live = set()
             for r in st["rows"]:
@@ -2213,6 +2235,9 @@ def setup_post(op, d):
             return SG.test_fs(d.get("home") or SET.get("freesurfer_home", ""), d.get("license") or find_license(SET.get("freesurfer_home", ""), fs_env()))
 
         if op in ("save", "save_config"):
+            d = dict(d)                                    # the setup wizard sends freesurfer_home / fs_license; Settings sends home / license (both accepted)
+            if not d.get("home") and d.get("freesurfer_home"): d["home"] = d["freesurfer_home"]
+            if not d.get("license") and d.get("fs_license"): d["license"] = d["fs_license"]
             v_fs = validate_freesurfer(d.get("home")) if d.get("home") else dict(ok=True)
             v_lic = validate_license(d.get("license")) if d.get("license") else dict(ok=True)
             if not v_fs.get("ok"): return dict(ok=False, error=v_fs.get("error"))
@@ -2259,15 +2284,19 @@ def setup_post(op, d):
                     cfg_updates["workspace_valid"] = True
 
                 if "vault_mount" in d and d["vault_mount"].strip():
-                    vdir = os.path.abspath(os.path.expanduser(d["vault_mount"].strip()))
+                    import setup_gui as SG
+                    ev = SG.ensure_vault(d["vault_mount"])      # a chosen drive means <drive>/PERCIVAL_VAULT, created automatically when the drive is connected
+                    vdir = ev["path"]; cfg_updates["vault_created"] = ev["created"]; cfg_updates["vault_error"] = ev["error"]
                     SET["vault_mount"] = vdir
                     cfg_updates["vault_mount"] = vdir
                     v_res = validate_vault(vdir)
                     cfg_updates["vault_valid"] = v_res.get("ok", False)
                     cfg_updates["vault_connected"] = v_res.get("connected", False)
                     try:
-                        with open(os.path.expanduser("~/.percival_vault_config.json"), "w") as vf:
-                            json.dump({"vault_path": vdir, "updated_at": datetime.datetime.now().isoformat()}, vf, indent=2)
+                        vcp = os.path.expanduser("~/.percival_vault_config.json")      # merge: uengine.vault reads active_vault_path / volume_uuid from this file
+                        vc = json.load(open(vcp)) if os.path.exists(vcp) else {}
+                        vc.update(vault_path=vdir, active_vault_path=vdir, updated_at=datetime.datetime.now().isoformat())
+                        with open(vcp, "w") as vf: json.dump(vc, vf, indent=2)
                     except Exception: pass
 
                 if "candidate_redetection" in d:
@@ -2319,6 +2348,11 @@ def setup_post(op, d):
             if "license_valid" not in cfg:
                 v_l = validate_license(SET.get("fs_license", "") or find_license(SET.get("freesurfer_home", ""), fs_env()))
                 cfg["license_valid"] = v_l.get("ok", False)
+            if SET.get("vault_mount"):                     # setup finished: make sure the chosen vault exists (created when its drive is connected)
+                import setup_gui as SG
+                ev = SG.ensure_vault(SET["vault_mount"])
+                if ev["path"] != SET["vault_mount"]: SET["vault_mount"] = ev["path"]; jsave("settings.json", SET)
+                cfg["vault_mount"] = SET["vault_mount"]; cfg.pop("vault_valid", None)
             if "vault_valid" not in cfg:
                 v_v = validate_vault(SET.get("vault_mount", "/Volumes/Percival/PERCIVAL_VAULT"))
                 cfg["vault_valid"] = v_v.get("ok", False)
@@ -3023,6 +3057,8 @@ if __name__ == "__main__":
             if "--no-window" not in a: open_window(f"http://127.0.0.1:{port}/")
             sys.exit(0)
     reread_failures()
+    try: storage_autofix()                                   # FreeSurfer found + vault created without Terminal (see storage_autofix)
+    except Exception as _e: print(f"storage check: {_e}", flush=True)
     try: transfer_pool()                                     # Phase 1d: background transfers + interrupted-job detection
     except Exception as _e: print(f"transfer workers not started: {_e}", flush=True)
     threading.Thread(target=ai_backfill, daemon=True).start()

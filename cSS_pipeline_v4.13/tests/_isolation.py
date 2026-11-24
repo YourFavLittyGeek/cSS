@@ -197,6 +197,7 @@ def activate():
     tmp = os.path.join(root, "tmp")
     for d in (home, base, vols, tmp):
         os.makedirs(d, exist_ok=True)
+    os.environ.setdefault("PERCIVAL_FS_SEARCH", "")   # tests never pick up this Mac's real FreeSurfer (app start-up search, setup_gui.find_freesurfer)
     os.environ.update(HOME=home, CSS_BASE=base, PERCIVAL_VOLUMES_ROOT=vols, PERCIVAL_TEST_ISOLATION="1",
                       PERCIVAL_TEST_ROOT=root, PYTHONDONTWRITEBYTECODE="1", TMPDIR=tmp, MPLCONFIGDIR=os.path.join(home, ".mpl"))
     tempfile.tempdir = tmp

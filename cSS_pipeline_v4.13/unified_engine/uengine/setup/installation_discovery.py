@@ -301,7 +301,7 @@ class InstallationDiscoveryService:
 
         # 2. External Volumes & Vault discovery
         vault_candidates: List[InstallationCandidate] = []
-        vol_root = "/Volumes"
+        vol_root = os.environ.get("PERCIVAL_VOLUMES_ROOT") or "/Volumes"      # tests: a temporary folder (real drives never scanned)
         if os.path.isdir(vol_root):
             for v in sorted(os.listdir(vol_root)):
                 if v.startswith(".") or v == "Macintosh HD":

@@ -24,7 +24,7 @@ SEEN = []
 def free_port():
     s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close(); return p
 def start():
-    port = free_port(); env = {k: v for k, v in os.environ.items() if k not in ("FREESURFER_HOME", "FS_LICENSE", "SUBJECTS_DIR")}
+    port = free_port(); env = {k: v for k, v in os.environ.items() if k not in ("FREESURFER_HOME", "FS_LICENSE", "SUBJECTS_DIR")}; env["PERCIVAL_FS_SEARCH"] = ""   # no FreeSurfer search folders: the "not found" path is tested (the real Mac has one in /Applications)
     env.update(HOME=HOME, CSS_BASE=B, CSS_EXPERIMENTAL="1", PYTHONPATH=os.path.join(ROOT, "app", "guard"), PATH="/usr/bin:/bin:" + os.path.dirname(PY),
                CSS_PROTECTED_PATHS=":".join([os.path.expanduser("~/css_project"), os.path.expanduser("~/cSS_experimental")]))
     p = subprocess.Popen([PY, os.path.join(ROOT, "app", "css_app.py"), "--port", str(port), "--no-window"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)

@@ -255,7 +255,8 @@ class SetupWizard:
     # STEP 3: External Volume Detection & Setup
     # -------------------------------------------------------------------------
     def step3_detect_volumes(self) -> Dict[str, Any]:
-        volumes_root = "/Volumes"
+        from .safety import volumes_root as _vr
+        volumes_root = _vr()      # PERCIVAL_VOLUMES_ROOT in tests: the real drives are never probed or written (the scan writes a probe file)
         detected_volumes: List[Dict[str, Any]] = []
 
         if os.path.exists(volumes_root):
