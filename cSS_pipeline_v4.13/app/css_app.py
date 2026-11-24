@@ -126,7 +126,8 @@ def save_pat(): jsave("patients.json", PAT)
 import processing_manager as PM                       # v5.14-gui Previous Processing Manager
 import identity_gui as IDG                            # v5.16 patient / examination identification (Standard / Incognito, encrypted vault)
 IDG.init(B, PAT, SET)
-SET.setdefault("percival_autocycle", False)   # Stage 6: automatic training cycles OFF by default (pilot); SET.setdefault("percival_cycle_n", 5); SET.setdefault("percival_test_fraction", 0.2); SET.setdefault("percival_learn_from", "labelled")
+SET.setdefault("percival_autocycle", False)   # Stage 6: automatic training cycles OFF by default (pilot)
+SET.setdefault("percival_cycle_n", 5); SET.setdefault("percival_test_fraction", 0.2); SET.setdefault("percival_learn_from", "labelled")
 import percival_gui as PG                             # v5.22 Percival Score (local)
 import blind_gate as BG                               # Phase 3A.2: per-study AI outputs withheld until the study's blind review is complete
 try: import openpyxl, openpyxl.workbook, openpyxl.styles, openpyxl.comments   # v5.24: imported once at start-up - a first import from two
