@@ -9,7 +9,7 @@ for f in ("PH3_calls.csv", "PH3_calls_Reader_A.csv", "PH3_calls_Reader_B.csv", "
           "call_policy.json", "PH3_effective.json", "PH3_lineage.json", "PH3_lineage_decisions.json"):            # v5.15+: ledger files, so the test can be re-run
     if os.path.exists(f"{B}/review/{f}"): os.remove(f"{B}/review/{f}")
 import shutil as _sh, glob as _gl; _sh.rmtree(f"{B}/review/call_history/PH3", ignore_errors=True)
-for f in _gl.glob(f"{B}/review/PH3_final*.json") + _gl.glob(f"{B}/review/PH3_score_rev_*.json") + _gl.glob(f"{B}/review/PH3_excluded_audit_*.csv") + _gl.glob(f"{B}/review/PH3_calls_*.csv"):
+for f in _gl.glob(f"{B}/review/PH3_final*.json") + _gl.glob(f"{B}/review/PH3_score_rev_*.json") + _gl.glob(f"{B}/review/PH3_excluded_audit_*.csv") + _gl.glob(f"{B}/review/PH3_calls_*.csv") + _gl.glob(f"{B}/review/PH3_events_*.jsonl"):
     os.remove(f)                                                     # reviewer-made files of an earlier run of this test (detector outputs are kept)
 srv = subprocess.Popen([sys.executable, f"{S}/review_web.py", "PH3", "--no-browser", "--port", "8931", "--audit"], stdout=subprocess.PIPE, text=True)
 U = srv.stdout.readline().split("http://")[1].split()[0]; U = "http://" + U.rstrip("/")
@@ -23,7 +23,30 @@ def post(p, d):
     r = urllib.request.Request(U + p, json.dumps(d).encode(), {"Content-Type": "application/json", "X-CSS": "1"})
     try: return json.load(urllib.request.urlopen(r, timeout=120))
     except urllib.error.HTTPError as e: return json.load(e)
-m = get("/api/meta?study=PH3&reviewer="); n = len(m["cands"])
+# Phase 3A.2: every reviewer's FIRST read of a study is blind (server-enforced). A new reviewer and the anonymous view get no AI content and
+# blinded ids; refused routes answer 403. Fixture: the readers used below completed an earlier blind read and chose the second look (the
+# same journal events the server writes), so the rest of this check exercises the second-look behaviour as before.
+mb0 = get("/api/meta?study=PH3&reviewer=Reader%20New"); ma0 = get("/api/meta?study=PH3&reviewer=")
+for m0 in (mb0, ma0):
+    if not m0.get("blind") or any(c_["ai"]["band"] != "hidden" or c_.get("conf") is not None for c_ in m0["cands"]) or m0.get("percival") or m0.get("ai_score"):
+        fail("a first read must be blind: no AI content")
+_nx0 = len(pd.read_csv(f"{B}/review/PH3_excluded.csv")) if os.path.exists(f"{B}/review/PH3_excluded.csv") else 0
+_b0 = [c_["id"] for c_ in mb0["cands"]]          # candidates and audit objects share one shuffled id space (audit objects stay unrecognisable)
+if len(set(_b0)) != len(_b0) or min(_b0) < 1 or max(_b0) > len(_b0) + _nx0: fail(f"blinded ids must be distinct numbers in 1..N+M: {_b0}")
+sys.path.insert(0, S); import review_blind as _RB0
+_cd0 = pd.read_csv(f"{B}/review/PH3_candidates.csv"); _mp0 = _RB0.stored_mapping(B, "PH3", "Reader New")
+_pairs0 = [(int(r_.cand_id), _mp0[_RB0.cand_key(r_)]) for _, r_ in _cd0.iterrows()]
+if len(_pairs0) > 2 and all(t_ == b_ for t_, b_ in _pairs0): fail("blinded ids must not repeat the detector-rank ids")
+if "error" not in post("/api/import", dict(study="PH3", reviewer="Reader New", source="legacy")): fail("import must be refused during a blind read")
+try: urllib.request.urlopen(U + "/api/struct3d?study=PH3&cand=1&reviewer=Reader%20New", timeout=60); fail("shape reading must be refused during a blind read")
+except urllib.error.HTTPError as e_:
+    if e_.code != 403: fail(f"shape reading during a blind read -> {e_.code}")
+sys.path.insert(0, S); import review_blind as _RB, review_io as _RIO
+for _r in ("Reader A", "Reader B", "Reader C", "Reader D", "Reader X", "Reader Z", "Reader Q"):
+    with _RIO.study_lock(B, "PH3"): _RIO.journal_append(B, "PH3", _r, "initial_completed", n_candidates=0, n_called=0, note="test fixture: earlier blind read")
+    _RB.unblind(B, "PH3", _r)
+m = get("/api/meta?study=PH3&reviewer=Reader%20A"); n = len(m["cands"])
+if m.get("blind") or m["read_phase"]["phase"] != "second_look": fail("after a completed read + unblind the second look is open")
 if not n or any(not (0 <= c["ai"]["score"] <= 1) or c["ai"]["band"] not in ("green", "yellow", "red") or not c["ai"]["suspect"] for c in m["cands"]):
     fail("meter values / bands")
 if "error" not in post("/api/call", dict(study="PH3", reviewer="", cand_id=1, call="cSS")): fail("a call without a reviewer name must be refused")
@@ -93,7 +116,7 @@ if open(f"{B}/review/PH3_calls.csv").read() != shared_before: fail("choosing Rea
 if json.load(open(f"{B}/review/PH3_score.json"))["multifocality_0_4"] != json.loads(score_before)["multifocality_0_4"]: fail("score must follow Reader A again")
 if not os.path.exists(f"{B}/review/PH3_score_rev_Reader_B.json") or gb["reader_score"]["multifocality_0_4"] != 0: fail(f"Reader B own score: {gb.get('reader_score')}")
 fb = json.load(open(f"{B}/review/PH3_final_Reader_B.json"))
-if fb["primary"] or fb["n_microbleed"] != 1 or fb["read_mode"] != "validation": fail(f"Reader B final: {fb}")
+if fb["primary"] or fb["n_microbleed"] != 1 or fb["read_mode"] != "second look" or fb["read_phase"] != "second_look": fail(f"Reader B final (read mode from the server, not the page): {fb}")
 rep = pd.read_csv(f"{B}/review/css_report.csv")
 if sorted(rep.Reviewer) != ["Reader A", "Reader B"] or "Microbleeds called" not in rep.columns: fail(f"report rows per reviewer: {rep[['Study', 'Reviewer']]}")
 if get("/api/meta?study=PH3&reviewer=Reader%20A")["final"]["reviewer"] != "Reader A": fail("final record must be per reviewer")
@@ -156,6 +179,10 @@ _m2 = get("/api/meta?study=PH3&reviewer=Reader%20Z&mode=validation")
 srv2.kill()
 if any(c_.get("audit") or c_["id"] >= 10000 for c_ in _m2["cands"]): fail("without --audit no excluded object may be shown")
 if _m2.get("open_read") is not True: fail("--open must be passed to the page (open_read)")
+srv2 = subprocess.Popen([sys.executable, f"{S}/review_web.py", "PH3", "--no-browser", "--port", "8932", "--open"], stdout=subprocess.PIPE, text=True)
+_m2b = get("/api/meta?study=PH3&reviewer=Reader%20Never&mode=")
+srv2.kill()
+if not _m2b.get("blind") or any(c_["ai"]["band"] != "hidden" for c_ in _m2b["cands"]): fail("--open must not skip the blind first read")
 if len(_m2["cands"]) != n: fail(f"without --audit the list must be exactly the shown candidates: {len(_m2['cands'])} vs {n}")
 # v5.8.3 --show-excluded: every excluded object listed with its rule; a call on one goes to the audit file, never into the calls / score
 srv3 = subprocess.Popen([sys.executable, f"{S}/review_web.py", "PH3", "--no-browser", "--port", "8933", "--open", "--show-excluded"], stdout=subprocess.PIPE, text=True)

@@ -70,9 +70,14 @@ def post(p, d):
 for _ in range(60):
     try: urllib.request.urlopen(U + "/api/meta?study=PH3&reviewer=Tester", timeout=60); break
     except OSError: time.sleep(0.5)
-tgt = int(inh.cand_id.iloc[1]); res = post("/api/call", dict(study="PH3", reviewer="Tester", cand_id=tgt, call="cSS", action="call"))
+# Phase 3A.2: this is Tester's first (blind) read: the server shows blinded ids; the candidate's blinded id comes from the internal mapping
+sys.path.insert(0, S); import review_blind as RB
+tgt = int(inh.cand_id.iloc[1]); _cr = pd.read_csv(f"{T}/review/PH3_candidates.csv").set_index("cand_id").loc[tgt]
+bid = RB.stored_mapping(T, "PH3", "Tester")[RB.cand_key(dict(_cr, cand_id=tgt))]
+res = post("/api/call", dict(study="PH3", reviewer="Tester", cand_id=bid, call="cSS", action="call"))
 srv.kill()
-got = res["calls"][str(tgt)]
+got = res["calls"][str(bid)]
+if pd.read_csv(f"{T}/review/PH3_calls_Tester.csv").set_index("cand_id").call.get(tgt) != "cSS": fail("the call must be stored under the original candidate")
 if got["call"] != "cSS" or got["comment"].startswith("[inherited"): fail(f"confirmation did not remove the marker: {got}")
 print("reviewer: pressing the call on an inherited candidate removes the marker and keeps the call")
 shutil.rmtree(T); print("RESULT inherit OK")

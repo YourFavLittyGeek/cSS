@@ -95,8 +95,16 @@ try:
     # reviewer endpoint (read-only), started the way the app starts it
     rv = post("/api/review", {"codes": ["SYN01"], "reviewer": "Test"})
     if rv.get("ok"):
-        rr = json.load(urllib.request.urlopen(rv["url"] + "api/uscore?study=SYN01&cand=1", timeout=60))
-        check("reviewer serves the unified report read-only", rr.get("category") in ("css_compatible", "uncertain", "alternative_high_confidence"))
+        # Phase 3A.2: during a reviewer's blind first read the unified report is refused (403); fixture: a reviewer whose earlier blind read
+        # is complete (the journal events the server writes) gets it in the second look
+        try: urllib.request.urlopen(rv["url"] + "api/uscore?study=SYN01&cand=1&reviewer=Test", timeout=60); _st = 200
+        except urllib.error.HTTPError as e_: _st = e_.code
+        check("Phase 3A.2: reviewer refuses the unified report during the blind first read", _st == 403, str(_st))
+        sys.path.insert(0, os.path.join(ROOT, "scripts")); import review_blind as _RB, review_io as _RIO
+        with _RIO.study_lock(B, "SYN01"): _RIO.journal_append(B, "SYN01", "Second Look", "initial_completed", n_candidates=0, n_called=0, note="test fixture: earlier blind read")
+        _RB.unblind(B, "SYN01", "Second Look")
+        rr = json.load(urllib.request.urlopen(rv["url"] + "api/uscore?study=SYN01&cand=1&reviewer=Second%20Look", timeout=60))
+        check("reviewer serves the unified report read-only (second look)", rr.get("category") in ("css_compatible", "uncertain", "alternative_high_confidence"))
         html = urllib.request.urlopen(rv["url"], timeout=60).read().decode()
         check("reviewer: unified card is hidden in a validation read (code path present)", "hidden in a validation read 🔒 (shown after your final save)" in html)
     else: check("reviewer started by the app", False, str(rv))

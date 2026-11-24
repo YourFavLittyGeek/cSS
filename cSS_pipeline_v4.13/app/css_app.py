@@ -2633,7 +2633,7 @@ def launch_child(kind, args, port0):
     old = CHILD.get(kind)
     if old and old.poll() is None: old.terminate()
     port = free_port(port0); env = fs_env()
-    if kind == "review": cmd = [sys.executable, f"{SC}/review_web.py", ",".join(args["codes"]), "--open", "--no-browser", "--port", str(port)]
+    if kind == "review": cmd = [sys.executable, f"{SC}/review_web.py", ",".join(args["codes"]), "--no-browser", "--port", str(port)]   # Phase 3A.2: no --open (the reviewer's server decides the blind phase)
     else: cmd = [sys.executable, f"{B}/reference_audit/blind_read/blind_read.py", args["packet"], args["reader"], "--port", str(port), "--no-browser"]
     if kind == "review" and args.get("reviewer"): cmd += ["--reviewer", args["reviewer"]]
     if kind == "review": cmd += ["--groups", f"{AD}/review_groups.json", "--start", args.get("start", args["codes"][0])]
