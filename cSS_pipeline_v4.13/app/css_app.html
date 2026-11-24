@@ -430,6 +430,10 @@ async function review(codes,cohort){const w=window.open("about:blank","cssreview
   toast("starting the reviewer…");const r=await api("/api/review",{codes,cohort,reviewer:localStorage.getItem("cssapp_reviewer")||""});
   if(!r.ok){if(w)w.close();return toast(esc(r.error),1)}if(r.opened){if(w)w.close();return}if(w)w.location=r.url;else toast(`pop-up blocked - open <a href="${r.url}" target="_blank">${r.url}</a>`,1)}
 // ---------------- results
+async function releaseAI(code){   // Phase 3A.2: explicit, recorded release of a study's AI results without a blind read
+  const why=prompt("Release the AI results of "+code+" WITHOUT a blind read?\nLater reads of this study will be recorded as not independent of them.\n\nReason:");if(!why)return;
+  const c=prompt('Type exactly: RELEASE AI RESULTS');if(c===null)return;const by=localStorage.getItem("cssapp_reviewer")||"app user";
+  const r=await api("/api/blind/release",{code,by,reason:why,confirm:c});if(r.ok){toast("AI results released for "+code);if(typeof loadStudies==="function")loadStudies()}else toast(esc(r.error||"refused"),1)}
 async function resView(v){const all=await api("/api/results");const hide=!!v._hide,coh=["all"].concat(S.cohorts);v._c=v._c||"all";const R=all.filter(r=>v._c==="all"||r.cohort===v._c);
   v.innerHTML=`<div class="card"><div class="row"><b>Results</b><select id="rc">${coh.map(c=>`<option ${c===v._c?"selected":""}>${esc(c)}</option>`).join("")}</select><label><input type="checkbox" id="hn" ${hide?"checked":""}> Hide names</label><span class="sp"></span>
     <button class="b pri" id="revc" title="Open the reviewer with every finished patient of this cohort (◂ ▸ to move between them)">▶ Review cohort</button>
@@ -441,7 +445,7 @@ async function resView(v){const all=await api("/api/results");const hide=!!v._hi
    <table class="fix"><colgroup><col style="width:70px"><col style="width:120px"><col style="width:70px"><col style="width:52px"><col style="width:80px"><col style="width:110px"><col style="width:130px"><col><col style="width:120px"><col style="width:120px"></colgroup>
    <tr><th>Code</th><th>Name</th><th>Cohort</th><th>QC</th><th>Candidates</th><th>Reviewed / cSS</th><th>Reader L / R = total</th><th>AI L / R = total</th><th>Radiologist R / L</th><th>Version</th></tr>
    ${R.map(r=>`<tr><td><b>${sidH(r.code)}</b></td><td>${hide?"•••":esc(r.name||"—")}</td><td>${esc(r.cohort)}</td><td>${grade(r.qc_grade,r.qc_tip)}</td><td>${r.candidates??"—"}</td><td>${r.reviewed!=null?`${r.reviewed} / ${r.css_called}`:"not read"}</td>
-     <td>${r.score_total!=null?`${r.score_L} / ${r.score_R} = <b>${r.score_total}</b>`:"—"}</td><td>${r.ai_total!=null?`${r.ai_L} / ${r.ai_R} = ${r.ai_total} <span class="tag ai">AI only, not validated</span>`:(r.candidates!=null?(r.ai_err?`<span class="mut" title="${esc(r.ai_err)}">not available ⓘ</span>`:'<span class="mut">computing…</span>'):"—")}</td>
+     <td>${r.score_total!=null?`${r.score_L} / ${r.score_R} = <b>${r.score_total}</b>`:"—"}</td><td>${r.ai_hidden?`<span class="mut" title="${esc(r.ai_hidden)}">hidden until blind review 🔒</span>`:r.ai_total!=null?`${r.ai_L} / ${r.ai_R} = ${r.ai_total} <span class="tag ai">AI only, not validated</span>`:(r.candidates!=null?(r.ai_err?`<span class="mut" title="${esc(r.ai_err)}">not available ⓘ</span>`:'<span class="mut">computing…</span>'):"—")}</td>
      <td>${r.rad_R!==""?`${r.rad_R} / ${r.rad_L}`:"—"}${r.radiologist?` <span class="note">${esc(r.radiologist)}</span>`:""}</td><td class="note">${esc(r.version)}</td></tr>`).join("")}</table>
    <div class="note" style="margin-top:6px">${agreement(R)} · The Excel workbook in the results folder is updated automatically after every patient; AI scores are computed automatically too.</div></div>`;
   $("#rc").onchange=e=>{v._c=e.target.value;resView(v)};$("#hn").onchange=e=>{v._hide=e.target.checked;resView(v)};
@@ -679,7 +683,7 @@ async function studiesView(v){const D=await loadStudies();if(V!=="studies")retur
          :`<td>${typeof INCOG_ICON!=="undefined"?INCOG_ICON:""}</td>`}
     <td class="mut">${esc(x.cohort||"—")}</td><td><span class="st ${x.st.k}"><i></i>${esc(x.st.l)}</span>${x.st.s?`<span class="sub2">${esc(x.st.s)}</span>`:""}</td>
     <td>${r.candidates??'<span class="mut">—</span>'}</td><td>${r.reviewed!=null?`${r.reviewed}${r.css_called!=null?` <span class="mut">· ${r.css_called} cSS</span>`:""}`:'<span class="mut">—</span>'}</td>
-    <td>${r.score_total!=null?`<b>${r.score_total}</b>`:'<span class="mut">—</span>'} <span class="mut">·</span> ${r.ai_total!=null?`<span title="AI only, not validated">${r.ai_total}</span>`:'<span class="mut">—</span>'}</td></tr>`};
+    <td>${r.score_total!=null?`<b>${r.score_total}</b>`:'<span class="mut">—</span>'} <span class="mut">·</span> ${r.ai_hidden?'<span class="mut" title="hidden until the study\'s blind review is complete">🔒</span>':r.ai_total!=null?`<span title="AI only, not validated">${r.ai_total}</span>`:'<span class="mut">—</span>'}</td></tr>`};
   let body="";
   if(std&&W.grp!=="none"){const g=new Map();vis.forEach(x=>{const i=sIdent(x),k=W.grp==="mrn"?(i.mrn||"(no MRN)"):(i.name||"(no name)");if(!g.has(k))g.set(k,[]);g.get(k).push(x)});
     body=[...g.entries()].map(([k,L])=>{const i=sIdent(L[0]),open=!W.closed.has(k);
@@ -760,7 +764,7 @@ function sheetSummary(b,x){const p=x.p||{},r=x.r||{};const warn=[];if(p.error)wa
    <div class="row" style="margin-bottom:8px"><button class="b sm" onclick="typeof openStudyEdit==='function'&&openStudyEdit('${esc(x.code)}')" data-id="edit">Edit identifiers</button> <button class="b sm" onclick="typeof openLineage==='function'&&openLineage('${esc(x.code)}')" data-ln="open">Compare runs</button></div>
    <div class="kv"><div>Candidates</div><div>${r.candidates??"—"}</div><div>Reviewed</div><div>${r.reviewed!=null?`${r.reviewed} calls${r.css_called!=null?` · ${r.css_called} cSS`:""}`:"not read yet"}</div>
     <div>Reader score</div><div>${r.score_total!=null?`<b>${r.score_total}</b> <span class="mut">(L ${r.score_L} / R ${r.score_R})</span>`:"—"}</div>
-    <div>AI score</div><div>${r.ai_total!=null?`${r.ai_total} <span class="mut">(L ${r.ai_L} / R ${r.ai_R})</span> <span class="tag ai">not validated</span>`:(r.ai_err?`<span class="mut" title="${esc(r.ai_err)}">not available</span>`:"—")}</div>
+    <div>AI score</div><div>${r.ai_hidden?`<span class="mut" title="${esc(r.ai_hidden)}">hidden until blind review 🔒</span> <button class="b sm" onclick="releaseAI('${esc(r.code)}')" title="show this study's AI results without a blind read (recorded; later reads of this study are then not independent)">Release…</button>`:r.ai_total!=null?`${r.ai_total} <span class="mut">(L ${r.ai_L} / R ${r.ai_R})</span> <span class="tag ai">not validated</span>`:(r.ai_err?`<span class="mut" title="${esc(r.ai_err)}">not available</span>`:"—")}</div>
     <div>Radiologist</div><div>${r.rad_R!==undefined&&r.rad_R!==""?`R ${r.rad_R} / L ${r.rad_L}${r.radiologist?` · ${esc(r.radiologist)}`:""}`:"—"}</div>
     <div>Image quality (QC)</div><div>${grade(r.qc_grade||p.qc,r.qc_tip||p.qc_tip)}${p.has_qc?` <button class="b sm" id="shqc" style="margin-left:8px">QC image</button>`:""} <button class="b sm" style="margin-left:4px" onclick="QCV.code='${esc(x.code)}';go('qc')" title="FreeSurfer / SynthSeg outputs, registration and QC metrics">Anatomy QC</button></div>
     <div>Anatomy method</div><div>${esc(PW()[p.pathway]||(x.d&&x.d.has_fs?"FreeSurfer (recon-all)":"—"))}</div>

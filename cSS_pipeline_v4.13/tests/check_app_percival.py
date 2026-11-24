@@ -138,7 +138,6 @@ try:
             except urllib.error.HTTPError as e: last = f"HTTP {e.code}: {e.read()[:300]!r}"; time.sleep(1)
             except Exception as e: last = f"{type(e).__name__}: {e}"; time.sleep(1)
         if not meta: print("viewer meta not received:", last)
-        Dv = dom(r["url"], 15000)
     # Phase 3A.2: the first read is blind (server-enforced) - no Percival assessment; after a completed read + unblind it is shown
     check("Phase 3A.2: the blind first read does not receive the Percival assessment", meta.get("blind") is True and not meta.get("percival"), str(meta.get("read_phase"))[:150])
     sys.path.insert(0, os.path.join(ROOT, "scripts")); import review_blind as _RB, review_io as _RIO
@@ -147,6 +146,10 @@ try:
     if r.get("url"):
         try: meta2 = json.loads(urllib.request.urlopen(r["url"] + f"api/meta?study={studies[2]}&reviewer=Second%20Look", timeout=60).read())
         except Exception as e: print("viewer meta (second look) not received:", e)
+        # the page opens with the last reviewer name: the page checks below render that reviewer's second look
+        urllib.request.urlopen(urllib.request.Request(r["url"] + "api/reviewer", json.dumps(dict(name="Second Look")).encode(),
+                                                      {"Content-Type": "application/json", "X-CSS": "1"}), timeout=60).read()
+        Dv = dom(r["url"], 15000)
     check("viewer receives the Percival assessment in the second look", meta2.get("percival") and meta2["percival"]["model"] == "v001", str(r)[:150])
     # v5.24 older research prototypes: hidden by default, still working, and the old Unified Score model cannot change the Percival Score
     st_ = get("/api/state"); feats = (st_.get("settings") or {}).get("features") or {}

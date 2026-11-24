@@ -303,6 +303,19 @@ class TestBlindRead(unittest.TestCase):
         lines = [l for l in srv.log if "[reviewer] error" in l]
         self.assertTrue(lines); self.assertFalse(re.search(r"\d", lines[0].split(":", 1)[1].replace(lines[0].split()[2], "")))
 
+    def test_a_release_in_the_app_is_recorded_with_the_reviewers_calls(self):
+        srv = Server(self.b)
+        try:
+            bid = srv.get("/api/meta?study=S1&reviewer=Reader%20A")["cands"][0]["id"]
+            srv.post("/api/call", dict(study="S1", reviewer="Reader A", cand_id=bid, call="Normal"))
+            with RIO.study_lock(self.b, "S1"):                               # what app/blind_gate.release() journals
+                RIO.journal_append(self.b, "S1", RB.APP_RELEASE, "ai_released", by="me", reason="test")
+            srv.post("/api/call", dict(study="S1", reviewer="Reader A", cand_id=bid, call="Vessel"))
+        finally: srv.stop()
+        ev, _ = RIO.read_journal(RIO.journal_path(self.b, "S1", "Reader A"))
+        flags = [e["ai_released_in_app"] for e in ev if e.get("kind") == "call"]
+        self.assertEqual(flags, [False, True])
+
     def test_the_app_no_longer_launches_the_reviewer_with_open(self):
         src = open(os.path.join(ROOT, "app", "css_app.py")).read()
         line = [l for l in src.splitlines() if 'if kind == "review": cmd = [sys.executable, f"{SC}/review_web.py"' in l][0]

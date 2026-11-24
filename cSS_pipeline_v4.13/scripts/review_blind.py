@@ -106,10 +106,19 @@ def stored_mapping(base, sid, reviewer):
     return m
 
 
+APP_RELEASE = "(app release)"                                   # pseudo-reviewer of app/blind_gate.py release events
+
+
+def released_in_app(base, sid):
+    ev, _ = RIO.read_journal(RIO.journal_path(base, sid, APP_RELEASE))
+    return any(e.get("kind") == "ai_released" for e in ev)
+
+
 class Ctx:
     """per request: whether this reviewer is blind for this study, and the id translation both ways"""
     def __init__(self, base, s, reviewer, audit_rows=()):
         self.reviewer = str(reviewer or "").strip(); self.ph = phase(base, s.sid, self.reviewer); self.blind = self.ph["phase"] == INITIAL
+        self.released = released_in_app(base, s.sid)                    # the app showed this study's AI results without a blind read
         self.t2b, self.b2t = {}, {}
         if not self.blind: return
         keys, true = [], []

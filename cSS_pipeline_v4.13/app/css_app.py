@@ -128,6 +128,7 @@ import identity_gui as IDG                            # v5.16 patient / examinat
 IDG.init(B, PAT, SET)
 SET.setdefault("percival_autocycle", True); SET.setdefault("percival_cycle_n", 5); SET.setdefault("percival_test_fraction", 0.2); SET.setdefault("percival_learn_from", "labelled")
 import percival_gui as PG                             # v5.22 Percival Score (local)
+import blind_gate as BG                               # Phase 3A.2: per-study AI outputs withheld until the study's blind review is complete
 try: import openpyxl, openpyxl.workbook, openpyxl.styles, openpyxl.comments   # v5.24: imported once at start-up - a first import from two
 except Exception: pass                                                       # server threads at once raised "partially initialized module"
 def pname(code): return IDG.ident(code, SET).get("patient_name", "")       # only in Standard mode with the vault unlocked
@@ -1204,6 +1205,9 @@ def pg_init():
             save_settings=lambda: jsave("settings.json", SET), notify=lambda t, x: notify_c("done", "training", t, x), other_projects=other_projects)
 def pg_get(op, q):
     if op == "state": return PG.state()
+    if op in ("score", "history"):                                                            # Phase 3A.2: not before the blind review
+        bs = BG.state(B, q.get("code", ""))
+        if bs["pending"]: return dict(none=True, hidden=True, reason=bs["reason"]) if op == "score" else dict(ledger=[], hidden=True, reason=bs["reason"])
     if op == "score":
         p = PG.P("scores", f"{q.get('code', '')}.json"); return json.load(open(p)) if os.path.exists(p) else dict(none=True)
     if op == "model":
@@ -1254,6 +1258,9 @@ def pg_post(op, d):
             if "percival_conflicts" in d: SET["percival_conflicts"] = "effective" if d["percival_conflicts"] == "effective" else "exclude"
             if "percival_use_historical" in d: SET["percival_use_historical"] = bool(d["percival_use_historical"])
             jsave("settings.json", SET); return dict(ok=True)
+        if op in ("score", "score_unified"):                                                  # Phase 3A.2: not before the blind review
+            bs = BG.state(B, str(d.get("code") or d.get("study_id") or ""))
+            if bs["pending"]: return dict(ok=False, hidden=True, error=BG.HIDDEN + ": " + bs["reason"])
         if op == "score": return PG.score_study(str(d.get("code", ""))) or dict(ok=False, error="no active model or no candidates")
         if op == "confirm_identity":                                                              # v5.25 patient identity (audited, reversible)
             I = IDG.ID(); codes = [str(c) for c in d.get("codes", [])]; us = [I.by_file_key(c) for c in codes]
@@ -2489,6 +2496,8 @@ def results():
         elif u: r["unified_note"] = u.get("error", "")[:200]
         r["label"] = ("reviewed" if r.get("review_state", "reviewed" if r.get("score_total") is not None else "") == "reviewed" else
                       ("AI only, not validated" if r.get("ai_total") is not None else (r.get("review_label") or "").lower()))
+        bs = BG.state(B, c); r["blind_review"] = bs["status"]                     # Phase 3A.2: AI fields withheld until the blind review
+        if bs["pending"]: BG.mask_result(r, bs)
         rows.append(r)
     return rows
 def _xlsx_sheets(writer, df, cohort=""):
@@ -2754,6 +2763,7 @@ class H(BaseHTTPRequestHandler):
                 import manifest as MF
                 return self.send(MF.template_bytes(), ctype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fname="Percival_Import_Template.xlsx")
             if u.path == "/api/results": return self.send(results())
+            if u.path == "/api/blind/state": return self.send(BG.state(B, q.get("code", "")))
             if u.path == "/api/export.xlsx" and [p["code"] for p in PAT if IDG.requires_accession(p["code"], SET)]:
                 return self.send(dict(error="export refused in Standard mode: some studies have no accession number yet - enter them (Studies › Edit identifiers) or switch to Incognito"), code=409)
             if u.path == "/api/export.xlsx": return self.send(export_xlsx(), ctype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fname="cSS_results.xlsx")
@@ -2932,6 +2942,8 @@ class H(BaseHTTPRequestHandler):
                 f = write_results_file()
                 if mac(): subprocess.run(["open", f])
                 return self.send(dict(ok=True, path=f))
+            if u.path == "/api/blind/release":                                          # Phase 3A.2: explicit, journaled release without a blind read
+                return self.send(BG.release(B, str(d.get("code", "")), d.get("by", ""), d.get("reason", ""), d.get("confirm", "")))
             if u.path == "/api/ai_scores":
                 threading.Thread(target=ai_backfill, daemon=True).start(); return self.send(dict(ok=True))
             if u.path == "/api/quit":

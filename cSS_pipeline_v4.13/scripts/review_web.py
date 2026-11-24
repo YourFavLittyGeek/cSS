@@ -836,7 +836,8 @@ class H(BaseHTTPRequestHandler):
             if not rev: return self._send(dict(error="Enter the reviewer name first (upper right)."), code=400)
             ctx = s.ctx(rev); blind = ctx.blind                                # Phase 3A.2: the read phase comes from the server's journal
             if blind and ROUTES[("POST", u.path)] == "refused": raise RB.BlindError(RB.HIDDEN_MSG)
-            jinfo = dict(read_phase=ctx.ph["phase"], ai_visible=not blind)       # recorded with every journaled change of this request
+            jinfo = dict(read_phase=ctx.ph["phase"], ai_visible=not blind,       # recorded with every journaled change of this request
+                         ai_released_in_app=ctx.released)                        # the app showed this study's AI results before a blind read
             if u.path == "/api/unblind":
                 return self._send(dict(ok=True, read_phase=RB.unblind(B, s.sid, rev)))
             if u.path == "/api/screencap":            # macOS screencapture: the reviewer window (-R) or an area chosen with the mouse (-i)

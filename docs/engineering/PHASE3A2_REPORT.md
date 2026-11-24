@@ -50,9 +50,52 @@ Results:
 - Mutations: **22/22 caught** (B1-B22: full payload in blind read; AI opinion kept; `--open` bypass; page mode decides; original ids sent; ids in rank order; label volume not remapped; refused routes served; import allowed; browser meter recorded; read mode from the page; unblind without completion; partial save completes; others' marks shown; detector fate shown; error detail returned; others' marks deletable; app launches with `--open`; route missing from the table; snapshot meter kept; finish reply not redacted; calls reply keyed by original ids).
 
 ## Limitations / residual risks
-- **Main app not masked yet**: the Studies sheet / results columns / Percival Center still show per-study AI outputs (`/api/ai_scores`, `unified_*`, Percival views); a reviewer who looks there before reading is not detected by the reviewer server. Proposed next step (part of the approved plan item 6).
 - Local files are not confidential: the journal (mapping), review log and calls files hold original ids by design (provenance); a reviewer opening them on disk can see the rank.
 - The candidate list itself is detector output; the independent whole-study review (safeguard B) is a separate milestone.
 - Pre-filled calls from `inherit_calls.py` or earlier imports are visible during a blind read (they are the reviewer's own file); their provenance treatment is 3A.4.
 - 3-D shape views are refused (not redacted) during the blind read; a geometry-only variant could be added later.
 - Earlier reviews (before 3A.2) have no read phase: "blinding unknown" (3A.6).
+
+## Part 3 — Main application (completes 3A.2)
+
+New `app/blind_gate.py`; wired in `app/css_app.py`; display in `app/css_app.html`, `app/percival_view.js`; provenance in `scripts/review_blind.py` /
+`scripts/review_web.py`.
+
+**Rule (per study, server-side, from the reviewers' journals).** The app has no trustworthy user identity (the reviewer name lives in the
+browser), so a study's AI outputs are withheld while it is *pending*: no completed blind initial read, or a blind read in progress (blinded ids
+issued / calls made, not completed). *Complete* = at least one completed blind read and none open; a review finished before Phase 3A
+(final record without a journal) counts as complete. *Released* = the user released the study's AI results without a blind read
+(typed confirmation `RELEASE AI RESULTS` + reason; journaled under the pseudo-reviewer "(app release)"); every later reviewer action on that
+study records `ai_released_in_app=true`. Fail-closed: unreadable journal modules or an invalid study key → pending.
+
+**Access paths gated.**
+- `GET /api/results` (Studies sheet, study detail, Results view; also the results workbook and `/api/open_results`, both built from it):
+  `ai_L/R/total`, `ai_err`, `unified_*` counts removed, `unified_status` → "hidden", the "AI only, not validated" label → "blind review
+  pending", plus `ai_hidden` (reason) and `blind_review` (status).
+- PERCIVAL Center: `GET /api/percival/score` and `/history` → `hidden` with the reason; `POST /api/percival/score` and `/score_unified` →
+  refused (`hidden`).
+- New: `GET /api/blind/state?code=`, `POST /api/blind/release`.
+- GUI: "hidden until blind review 🔒" in the three places the AI score was shown, a "Release…" control in the study detail (prompt for the
+  reason and the typed confirmation), a note in the PERCIVAL explorer.
+
+**Tests.** `tests/test_phase3a2_app_gate.py` (9, in-process app on the isolated project, sentinel AI values): before any blind read every
+path withheld (results JSON, Percival score / history, on-demand scoring); workbook masked; normal display after a completed blind read; a
+second blind read in progress withholds again; pre-3A finished review = complete; release needs typed confirmation and a reason and is
+journaled; release recorded; fail-closed; GUI markers. Plus `test_phase3a2_blind.py::test_a_release_in_the_app_is_recorded_with_the_reviewers_calls`
+(end to end through the reviewer server). `check_app_unified.py` adapted (counts withheld before / shown after a fixture blind read; fixture
+removed afterwards) - re-run on a copy: identical to the baseline (only the pre-existing T4 failure). `check_app_percival.py` unaffected (its
+studies have pre-3A finished reviews); its viewer-page checks now render a fixture second look (not verifiable here: headless Chrome does not
+render on this Mac, baseline too).
+Mutations G1-G11 all caught (results not masked; Percival score/history not gated; on-demand scoring not gated; blind read in progress
+ignored; pre-3A reviews not counted; release without confirmation; without reason; fail-open; release not recorded for the reviewer — also
+caught end to end; unified counts left; GUI shows the score anyway). Focused runs: `test_phase0*` 32, `test_phase1e*` 24, `test_phase3a*` 48
+— all pass, isolation PASS; GUI JavaScript syntax check passes. The full suite was not re-run (changes confined to the gated paths).
+
+**Remaining limitations (main app).**
+- Per study, not per person: after one reader completes, a second reader who has not opened the study yet can see its AI results in the
+  app (an opened-but-incomplete read does withhold). Per-reader gating needs reviewer identity / roles (3A.4).
+- Not gated: the hidden prototype screens (`/api/u/*` unified candidates, `/api/se/*`, `/api/im/*`, `/api/train/*`; off unless
+  `show_prototypes`), the unified "score all" prototype op, Shadow Lab and shadow-run summaries (aggregate agreement only), study file export
+  (`/api/xs`, copies result files such as `ID_score_ai.json` / unified reports), and files on disk.
+- AI scores are still computed in the background for every study (needed for the later display); only their display is withheld.
+- The release control uses browser prompts; GUI rendering is not machine-tested here.

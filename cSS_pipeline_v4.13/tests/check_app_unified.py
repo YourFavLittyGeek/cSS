@@ -72,7 +72,14 @@ try:
         time.sleep(1)
     check("per-patient background step: status completed, patient still done", p["unified"] == "completed" and p["status"] == "done", p.get("error", ""))
     res = get("/api/results"); r2 = next(x for x in res if x["code"] == "SYN02")
+    # Phase 3A.2: before the study's blind review the app withholds the unified counts; after a completed blind read (fixture: the journal
+    # events the reviewer server writes) the results table shows them
+    check("Phase 3A.2: unified counts withheld before the study's blind review", r2.get("unified_status") == "hidden" and "unified_uncertain" not in r2 and r2.get("ai_hidden"))
+    sys.path.insert(0, os.path.join(ROOT, "scripts")); import review_io as _RIO0
+    with _RIO0.study_lock(B, "SYN02"): _RIO0.journal_append(B, "SYN02", "Fixture Reader", "initial_completed", n_candidates=0, n_called=0, note="test fixture: completed blind read")
+    res = get("/api/results"); r2 = next(x for x in res if x["code"] == "SYN02")
     check("results table shows unified status and counts", r2.get("unified_status") == "completed" and r2.get("unified_uncertain") is not None)
+    os.remove(_RIO0.journal_path(B, "SYN02", "Fixture Reader"))                      # the fixture leaves the review folder as it was
     e = post("/api/u/export", {}); check("unified Excel export written", e.get("ok") and os.path.exists(e["path"]) and e["n_candidates"] == 24, e.get("error", ""))
     pr = post("/api/u/protocol_run", {})
     auto = {i["id"]: i["result"] for i in pr["items"] if i["kind"] == "auto"}
