@@ -127,6 +127,7 @@ prep, fit_lr, auc = CM.prep, CM.fit_lr, CM.auc          # v5.2: shared with clas
 
 
 if __name__ == "__main__":
+    import label_guard as LG; LG.require("train_ranker.py")                   # Phase 3D: labels/ are not Phase 3A ground truth
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--split", default="dev", choices=["dev", "all"])   # test is refused: reporting only
     ap.add_argument("--source", default="consensus"); ap.add_argument("--l2", type=float, default=1.0)
@@ -211,7 +212,7 @@ if __name__ == "__main__":
                                               .get("environment", {}) or {}).get("build", "unknown"))
                                          if os.path.exists(f"{B}/review/{s}_manifest.json") else "unknown"
                                          for s in T.study_id.unique()}),
-                 label_file=lab_path, label_sha256=sha256(lab_path), build=build_id(), research_only=True,
+                 label_file=lab_path, label_sha256=sha256(lab_path), build=build_id(), research_only=True, **__import__("label_guard").STAMP,
                  note="research software; pooled LOPO AUC over few patients is noisy - read the intervals")
     model["model_hash"] = CM.model_hash({k: v for k, v in model.items() if k != "fitted_at"})
     os.makedirs(os.path.dirname(out), exist_ok=True)

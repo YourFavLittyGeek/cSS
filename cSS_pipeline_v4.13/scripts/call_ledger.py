@@ -22,7 +22,7 @@ review_state() derives Not started / In progress / Reviewed / Needs re-review fr
 import datetime, glob, hashlib, json, os, re, shutil, subprocess, sys
 import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from css_common import FP, match_calls, norm_call
+from css_common import FP, match_calls, match_one_to_one, norm_call
 import review_io as RIO       # Phase 3A.1: crash-safe writes, cross-process study locks, append-only reviewer event journals
 import review_roles as RR     # Phase 3A.3: roles, adjudication permission, documented historical verification
 
@@ -54,9 +54,9 @@ def match_one(cand, row):
     fingerprint (centroid within 2 voxels, volume within 15 %) - never by number. -> cand_id or None. The single place outside this module's
     own readers where calls are matched (Percival's earlier-version reviews use it)."""
     if not len(cand) or not all(c in row for c in FP): return None
-    try: m, _ = match_calls(cand, pd.DataFrame([row]))
+    try: d = match_one_to_one(cand, [row])[0]
     except Exception: return None
-    return int(next(iter(m))) if m else None
+    return d["cand_id"] if d["status"] == "matched" else None
 
 
 def sources(base, sid):
@@ -83,7 +83,9 @@ def ledger(base, sid, cand=None):
     hist, stale, names = {}, [], []
     for s in sources(base, sid):
         names.append(s["reviewer"]); fmt = _mtime_str(os.path.join(base, s["file"]))
-        for _, r in s["rows"].iterrows():
+        has_fp = all(c in s["rows"].columns for c in FP)
+        mdec = match_one_to_one(cand, s["rows"]) if has_fp and len(cand) else None           # Phase 3B: whole file, one-to-one
+        for ri, (_, r) in enumerate(s["rows"].iterrows()):
             call = norm_call(r.get("call")); call = call if isinstance(call, str) and call.strip() else ""
             if not call: continue
             t = str(r.get("time")) if isinstance(r.get("time"), str) and str(r.get("time")).strip() else fmt
@@ -93,9 +95,9 @@ def ledger(base, sid, cand=None):
                 ent["file_slug"] = os.path.basename(s["file"])[len(f"{sid}_calls_"):-4]
                 if all(c in s["rows"].columns for c in ["cand_id"] + FP): ent["row_key"] = "|".join(str(r[c]) for c in ["cand_id"] + FP)
             cid = None
-            if all(c in s["rows"].columns for c in FP) and len(cand):
-                m, _ = match_calls(cand, pd.DataFrame([r]))
-                if m: cid = next(iter(m))
+            if mdec is not None:
+                dx = mdec[ri]; ent["match"] = {k: v for k, v in dx.items() if k != "row"}
+                if dx["status"] == "matched": cid = dx["cand_id"]
             elif len(cand) and "cand_id" in s["rows"].columns:                   # file without fingerprint: trust only if not re-detected
                 nii = os.path.join(base, "review", f"{sid}_candidates.nii.gz"); fpath = os.path.join(base, s["file"])
                 if not (os.path.exists(nii) and os.path.getmtime(nii) > os.path.getmtime(fpath)) and int(r["cand_id"]) in set(cand.cand_id.astype(int)):
@@ -263,9 +265,9 @@ def describe_rule(rule):
 
 
 # ---------------------------------------------------------------- provenance (Phase 3A.3 / 3A.6)
-CLASSES = ("verified_blind_post_3A", "historical_blinding_verified", "historical_blinding_unknown", "historical_adjudicated", "not_blind_post_3A")
-PRIMARY_ELIGIBLE = ("verified_blind_post_3A", "historical_blinding_verified", "historical_adjudicated")
-_RANK = {"verified_blind_post_3A": 3, "historical_blinding_verified": 2, "historical_adjudicated": 2, "historical_blinding_unknown": 1, "not_blind_post_3A": 0}
+CLASSES = ("verified_blind_post_3A", "historical_blinding_verified", "historical_blinding_unknown", "historical_adjudicated", "adjudicated_post_3A", "not_blind_post_3A")
+PRIMARY_ELIGIBLE = ("verified_blind_post_3A", "historical_blinding_verified")   # 3B policy: an adjudicated label is NOT automatically eligible
+_RANK = {"verified_blind_post_3A": 3, "historical_blinding_verified": 2, "adjudicated_post_3A": 1, "historical_adjudicated": 1, "historical_blinding_unknown": 1, "not_blind_post_3A": 0}
 PREFILL = ("[imported", "[inherited", "[old calls", "[confirmed carry-over")
 NOT_INDEPENDENT_KINDS = ("import", "inherit", "carry_confirm", "consolidate", "restore")
 
@@ -309,6 +311,21 @@ def _klass(ent, verified):
               norm_call(v["records"].get(ent.get("row_key", ""), "")) == ent.get("call")):      # only the calls that were verified
         return "historical_blinding_verified"
     return "historical_blinding_unknown"
+
+
+def completed_reviewers(base, sid):
+    """slugs of reviewers who COMPLETED their review of the study: a blind initial read completed (journal 'initial_completed'), a final
+    record (reviews before Phase 3A), or a documented historical verification. Only completed EXPERT reviews take part in consensus."""
+    out = set(RR.verified_reviewers(base, sid))
+    for p in glob.glob(os.path.join(base, "review", f"{sid}_final_*.json")):
+        try:
+            with open(p) as f: j = json.load(f)
+        except Exception: j = {}
+        out.add(slug(j.get("reviewer") or os.path.basename(p)[len(sid) + 7:-5]))
+    for p in glob.glob(os.path.join(base, "review", f"{sid}_events_*.jsonl")):
+        ev, _ = RIO.read_journal(p)
+        if any(e.get("kind") in ("initial_completed", "review_completed") for e in ev): out.add(slug(ev[0].get("reviewer", "")))
+    return out
 
 
 # ---------------------------------------------------------------- integrity (Phase 3A.5: reads verify the journals; unsafe rebuilds refused)
@@ -365,7 +382,7 @@ def withdraw_adjudication(base, sid, cand_id, by, reason):
 
 
 # ---------------------------------------------------------------- effective calls
-STATUSES = ("resolved", "adjudicated", "disagreement", "abstained", "unrecognised", "insufficient", "no_expert", "missing")
+STATUSES = ("resolved", "adjudicated", "disagreement", "abstained", "unrecognised", "insufficient", "incomplete", "pending_review", "no_expert", "missing")
 
 
 def effective(base, sid, cohort="", policy=None, cand=None):
@@ -388,22 +405,27 @@ def effective(base, sid, cohort="", policy=None, cand=None):
                 if fs not in ev_cache: ev_cache[fs] = evidence(base, sid, fs)
                 e["evidence"] = ev_cache[fs].get(e.get("row_key", ""))
             e["class"] = _klass(e, verified)
-    adj = adjudications(base, sid, cand); known_experts = sorted({e["reviewer"] for H in hist.values() for e in H if e["role"] == "expert"})
+    adj = adjudications(base, sid, cand); done = completed_reviewers(base, sid)
+    participants = sorted({e["reviewer"] for H in hist.values() for e in H if e["role"] == "expert" and slug(e["reviewer"]) in done})
     rows = []
     for cid in [int(x) for x in cand.cand_id] if len(cand) else []:
         H = hist.get(cid, []); latest = {}
         for e in H: latest[e["reviewer"]] = e                                  # oldest first -> each reviewer's latest call
-        experts = [e for e in latest.values() if e["role"] == "expert" and not e["prefilled"]]
+        all_experts = [e for e in latest.values() if e["role"] == "expert" and not e["prefilled"]]
+        experts = [e for e in all_experts if slug(e["reviewer"]) in done]             # 3B: completed expert reviews only
+        missing_resp = [x for x in participants if x not in latest]                     # a completed expert without a call here
         votes = [e for e in experts if call_class(e["call"]) in ("positive", "negative", "out_of_scope")]
         pick, status, how = [], "missing", ""
         if rule["mode"] == "reference":
             ref = [e for e in experts if slug(e["reviewer"]) == slug(rule["reviewer"]) and call_class(e["call"]) != "abstain"]
-            if ref: pick, status, how = ref, "resolved", "reference expert"
+            if ref and slug(rule["reviewer"]) not in done: status = "pending_review"
+            elif ref: pick, status, how = ref, "resolved", "reference expert"
             elif rule.get("fallback") != "consensus": status = "missing" if not H else ("abstained" if any(slug(e["reviewer"]) == slug(rule["reviewer"]) for e in experts) else "no_expert")
         if not pick and status == "missing" and (rule["mode"] == "consensus" or rule.get("fallback") == "consensus"):
             q = int(rule.get("quorum", 1)) if rule["mode"] == "consensus" else 1
             if not H: status = "missing"
-            elif not experts: status = "no_expert"
+            elif not experts: status = "pending_review" if all_experts else "no_expert"
+            elif missing_resp: status = "incomplete"                                      # never resolved by the experts who happened to call
             elif not votes: status = "unrecognised" if any(call_class(e["call"]) == "unrecognised" for e in experts) else "abstained"
             elif len({call_class(e["call"]) for e in votes}) > 1: status = "disagreement"
             elif len(votes) < q: status = "insufficient"
@@ -411,7 +433,7 @@ def effective(base, sid, cohort="", policy=None, cand=None):
         a = adj.get(cid); call = ""
         if a:
             status, how, call = "adjudicated", f"adjudicated by {a.get('by')}", a["call"]
-            klass = "verified_blind_post_3A" if votes and all(e["class"] == "verified_blind_post_3A" for e in votes) else "historical_adjudicated"
+            klass = "historical_adjudicated" if not votes or any(e["class"] != "verified_blind_post_3A" for e in votes) else "adjudicated_post_3A"
         elif status == "resolved":
             if any(e.get("carried") for e in pick): how += " · carried over from the earlier run (confident match)"
             elif any(e.get("matched") for e in pick): how += " · re-attached after re-detection (fingerprint)"
@@ -425,12 +447,15 @@ def effective(base, sid, cohort="", policy=None, cand=None):
                          source_reviewer=", ".join(sorted(e["reviewer"] for e in pick)) if pick else (a.get("by", "") if a else ""),
                          source_time=max((e["time"] for e in pick), default=a.get("time", "") if a else ""), source_rule=how,
                          n_reviewers=len(latest), n_expert_calls=len(experts), n_abstentions=sum(1 for e in experts if call_class(e["call"]) == "abstain"),
-                         experts_missing=[x for x in known_experts if x not in latest],
+                         experts_missing=missing_resp, experts_pending=sorted(e["reviewer"] for e in all_experts if slug(e["reviewer"]) not in done),
                          subtype_mixed=status == "resolved" and len({norm_call(e["call"]) for e in pick}) > 1,
                          disagreement=status == "disagreement" or len({call_class(e["call"]) for e in latest.values() if call_class(e["call"]) not in ("abstain", "")}) > 1,
                          adjudication=a, history=H))
+    matching = {}
+    for H in list(hist.values()) + [[e] for e in stale]:
+        for e in H: st_ = (e.get("match") or {}).get("status", "by_number" if e in stale else "matched"); matching[st_] = matching.get(st_, 0) + 1
     return dict(rule=rule, scope=scope, rule_text=describe_rule(rule), rows=rows, stale=stale, reviewers=sorted(set(names)), ledger_version=LEDGER_VERSION,
-                problems=integrity(base, sid), roles={k: v["role"] for k, v in roles.items()})
+                problems=integrity(base, sid), roles={k: v["role"] for k, v in roles.items()}, matching=matching, participants=participants)
 
 
 def completions(base, sid):
@@ -524,6 +549,10 @@ def _materialize(base, sid, cohort="", by="", scripts=HERE, rescore=True):
         if r.returncode == 0: rec["scored_calls_sha256"] = cur_sha
     rec["calls_sha256"] = _sha(p); rec["score_current"] = rec["scored_calls_sha256"] == cur_sha
     RIO.atomic_write_json(ep, rec)
+    RIO.atomic_write_json(os.path.join(base, "review", f"{sid}_matching.json"), dict(       # Phase 3B: audit of every matching decision (derived)
+        study=sid, time=_now(), matcher="css_common.match_one_to_one (centroid <= 2 voxels, volume within 15 %, same hemisphere, ambiguity margin 0.5 voxel, contested -> unresolved)",
+        summary=E["matching"], unresolved=[dict(reviewer=e["reviewer"], call=e["call"], time=e["time"], row_uid=e.get("row_uid"), match=e.get("match"),
+                                                carry=e.get("possible") and "possible lineage match - needs confirmation") for e in E["stale"]]))
     return rec
 
 

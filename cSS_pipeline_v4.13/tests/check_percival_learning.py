@@ -53,7 +53,7 @@ calls(B, "SYNRED", [(1, "cSS", *fp(1)), (2, "Artifact", *fp(2))]); time.sleep(0.
 cands(B, "SYNRED", [(1, *fp(2), 1.0, 2.0), (2, *fp(1), 1.0, 2.0)])                # re-detected: numbers swapped
 cands(B, "SYNMIX", C6)                                                           # two reviewers, all kinds of calls
 calls(B, "SYNMIX", [(1, "cSS", *fp(1)), (2, "Vessel", *fp(2)), (3, "Unsure", *fp(3)), (4, "Near ICH", *fp(4)), (5, "cSS", *fp(5))], name="calls_Reader_A", reviewer="Reader A")
-calls(B, "SYNMIX", [(5, "Artifact", *fp(5))], name="calls_Reader_B", reviewer="Reader B")
+calls(B, "SYNMIX", [(1, "cSS", *fp(1)), (2, "Vessel", *fp(2)), (3, "Unsure", *fp(3)), (4, "Near ICH", *fp(4)), (5, "Artifact", *fp(5))], name="calls_Reader_B", reviewer="Reader B")   # 3B: a complete review
 cands(B, "SYNHIST", C6)                                                          # processed here, reviewed only in the earlier project
 cands(B, "SYNORPH", C6[:1]); calls(B, "SYNORPH", [(1, "cSS", *fp(1))])         # on disk, not in the study list
 # earlier project (temp) with a review of SYNHIST's examination under another code
@@ -137,7 +137,7 @@ C = {c["cand_id"]: c for c in PG.candidates_of("SYNMIX")["candidates"]}
 check(C[3]["status"] == "eligible" and C[3]["y"] == 1, "D1 revised call (Unsure -> cSS) becomes an eligible positive", str(C[3]))
 calls(B, "SYNMIX", [(1, "cSS", *fp(1)), (3, "cSS", *fp(3)), (4, "Near ICH", *fp(4)), (5, "cSS", *fp(5))], name="calls_Reader_A", reviewer="Reader A")
 C = {c["cand_id"]: c for c in PG.candidates_of("SYNMIX")["candidates"]}
-check(2 not in C, "D2 withdrawn call: the candidate is no longer a label", str(sorted(C)))
+check(2 in C and C[2]["y"] is None and "INCOMPLETE_REVIEW" in C[2]["reasons"], "D2 withdrawn call: no longer a label (3B: Reader B's call alone does not resolve a candidate both experts completed)", str(C.get(2)))
 
 # ------------------------------------------------------------------ E historical reviews from an earlier project
 R = PG.recoverable_reviews()
@@ -153,7 +153,7 @@ check(H.get(1, {}).get("label_source") == "historical" and H[1]["y"] is None and
       "E3 Phase 3A: earlier-version labels kept, matched by fingerprint, marked - not primary ground truth (blinding unknown)", str(H))
 calls(B, "SYNHIST", [(1, "Artifact", *fp(1))], name="calls_Reader_A", reviewer="Reader A")
 H = {c["cand_id"]: c for c in PG.candidates_of("SYNHIST")["candidates"]}
-check(H[1]["label_source"] == "review" and H[1]["call"] == "Artifact" and H[6]["label_source"] == "historical", "E4 a current call always wins over an earlier-version call", str(H[1]))
+check(H[1]["label_source"] == "review" and H[1].get("gt_status") == "pending_review" and H[6]["label_source"] == "historical", "E4 a current call always wins over an earlier-version call (3B: its review not completed yet -> not a label)", str(H[1]))
 check(PG.recoverable_reviews() == [], "E5 nothing recovered twice")
 
 # ------------------------------------------------------------------ F orphan
@@ -175,14 +175,14 @@ check(all(k in m3 for k in ("rules_version", "feature_schema", "patch_spec", "la
 # ------------------------------------------------------------------ I training message / J label table
 PG._train("test")
 err = PG.JOB.get("error", "")
-check(PG.JOB["state"] == "failed" and "not enough expert labels" in err and "locked test cohort" in err and "Dataset ds" in err, "I1 too few labels -> clear message with counts and dataset id", err)
+check(PG.JOB["state"] == "insufficient_data" and "Insufficient expert labels" in err and "locked test cohort" in err and "Dataset ds" in err, "I1 too few labels -> clear message with counts and dataset id (3D: a valid end state, no crash)", err)
 d = LS.build(B); old = d[d.study_id == "SYNOLD"]
 check(len(old) == 4 and (old.primary_class == "definite_css").sum() == 2 and "vein_unspecified" in set(old.mimic_subtype), "J1 label table reads the legacy shared file and 'Vein'")
 
 # ------------------------------------------------------------------ K learning engine
 from uengine.percival import eligibility as EL2
 R = PG.runs()
-check(R and R[-1]["state"] == "failed" and "not enough expert labels" in R[-1].get("error", "") and R[-1].get("dataset", "").startswith("ds"),
+check(R and R[-1]["state"] == "insufficient_data" and "Insufficient expert labels" in R[-1].get("error", "") and R[-1].get("dataset", "").startswith("ds"),
       "K1 every training run recorded, a failed one with its error and dataset", json.dumps(R[-1:])[:300])
 json.dump(dict(id="run999", state="running", started="2026-11-21 09:00:00"), open(PG.P("runs", "run999.json"), "w"))
 init(B, PAT)
@@ -240,7 +240,7 @@ PG._train("K20 dataset snapshot")                                  # too few lab
 dsl = DS.listing(PG.P())[-1]["id"]; RP = PG.reproduce_dataset(dsl)
 calls(B, "SYNOLD", [(1, "Vessel", *fp(1)), (2, "Vein", *fp(2)), (3, "cSS", *fp(3)), (5, "Normal", *fp(5)), (6, "Calcification?", *fp(6))])
 RP2 = PG.reproduce_dataset(dsl)
-check(RP["ok"] and RP["identical"] is True and not RP2["identical"] and RP2["changes"].get("expert label changed") and any(d["study"] == "SYNOLD" and d["cand_id"] == 1 for d in RP2["differences"]),
+check(RP["ok"] and RP["identical"] is True and not RP2["identical"] and RP2["changes"].get("expert label changed") and any(d["study"] == "SYNOLD" and str(d["cand_id"]) == "1" for d in RP2["differences"]),
       "K20 dataset reproducibility check: a revised review is reported as the difference", json.dumps(RP2)[:300])
 init(B, PAT)
 check(PG.active_version() == "v001" and PG.status_all()["v002"]["status"] == "retired" and len(PG.runs()) >= 2 and os.path.exists(PG.P("eligibility", "current.json"))

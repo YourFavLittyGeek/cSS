@@ -113,9 +113,11 @@ class ShadowMLLaboratory:
                 })
                 labels.append(1 if r.get("call") in ("definite_css", "cSS", "1") else 0)
             n_patients = len(set(r.get("patient_pseudo_id") for r in dev_rows))
+            self.last_cohort = "pensieve (unverified labels: any non-cSS call counted as 0)"
             return features, np.array(labels, dtype=int), max(1, n_patients)
 
         # Reproducible synthetic neuroimaging benchmark cohort
+        self.last_cohort = "SYNTHETIC (random benchmark cohort - not real data)"          # Phase 3D: always labelled as synthetic
         rng = np.random.default_rng(seed)
         N = 120
         labels = (rng.uniform(0, 1, N) < 0.35).astype(int) # 35% true cSS candidates
@@ -209,12 +211,16 @@ class ShadowMLLaboratory:
             experiment_id=exp.experiment_id,
             target_component=exp.target_component,
             hypothesis=exp.hypothesis,
-            rationale=f"Evaluated on development partition. Baseline AUC: {exp.metrics_baseline.get('auc', 0):.3f}, Exp AUC: {exp.metrics_experimental.get('auc', 0):.3f}",
+            rationale=f"Evaluated on development partition. Baseline AUC: {exp.metrics_baseline.get('auc', 0):.3f}, Exp AUC: {exp.metrics_experimental.get('auc', 0):.3f}"
+                      " | EXPERIMENTAL: no leakage audit is implemented for Shadow Lab, and its experimental score uses the true label "
+                      "(depth_signal); the benchmark cohort may be SYNTHETIC - these metrics are not evidence",
             validation_results={
                 "baseline": exp.metrics_baseline,
-                "experimental": exp.metrics_experimental
+                "experimental": exp.metrics_experimental,
+                "cohort": getattr(self, "last_cohort", "unknown"),
+                "leakage_audit": "not run (not implemented for Shadow Lab)"
             },
-            leakage_audit_passed=True,
+            leakage_audit_passed=False,                                         # Phase 3D: no audit ran -> never reported as passed
             sensitivity_loss=sens_loss,
             false_positive_reduction=fp_red,
             verdict="pending"

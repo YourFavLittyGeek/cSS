@@ -92,10 +92,12 @@ class TestAdversarialScientificAcceptance(unittest.TestCase):
         ok, proposal = self.shadow.run_experiment(exp)
         self.assertTrue(ok)
         eval_report = self.governance.evaluate_proposal(proposal)
-        self.assertTrue(eval_report["all_passed"])
+        self.assertFalse(eval_report["all_passed"])                           # Phase 3D: no leakage audit ran -> never auto-approved
+        refused, _ = self.governance.promote_proposal(proposal, "Chief_Scientist", "no override")
+        self.assertFalse(refused)
 
-        # Promote
-        promoted, msg = self.governance.promote_proposal(proposal, "Chief_Scientist", "Validated gain in cSS recovery")
+        # Promote (explicit, recorded override - exercises persistence and rollback)
+        promoted, msg = self.governance.promote_proposal(proposal, "Chief_Scientist", "Validated gain in cSS recovery", override=True)
         self.assertTrue(promoted)
         active_cfg = self.vault.path("models", "ALBUS", "promoted_active.json")
         self.assertTrue(os.path.exists(active_cfg))

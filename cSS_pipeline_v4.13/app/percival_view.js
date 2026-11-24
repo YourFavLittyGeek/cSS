@@ -94,7 +94,7 @@ async function intelView(v){{const hq=location.hash.match(/^#intel\?tab=(\w+)/);
        <p class="note">Component columns: each source alone, in % (not the final score). AI predictions - never a human review.</p>`:'<p class="note">No Percival assessment for this study yet (no active model, or not processed).</p>'}
       ${(hi.ledger||[]).length>1?`<p class="note">Earlier assessments of this study are kept unchanged: ${hi.ledger.map(l=>`${esc(l.model)} (${esc(l.created)})`).join(" · ")}</p>`:""}</div>`;
     $("#pv-st")&&($("#pv-st").onchange=e=>{PV.study=e.target.value;intelView(v)})}
-  if(PV.tab==="center"){await pvCenter(el,s,v)}
+  if(PV.tab==="center"){await pvCenter(el,s,v);await pvReadiness(el)}
   if(PV.tab==="integrity"){await pvIntegrity(el,s,v)}
   if(PV.tab==="models")el.innerHTML=`<div class="card"><h3 style="margin:0 0 4px">Model Center</h3><p class="note" style="margin-top:0">Every model is kept with its data version, configuration, metrics and acceptance result. <b>No model becomes active by itself</b>: a new version is <i>experimental</i> (did not pass the acceptance criteria) or a <i>candidate</i> (passed, waiting for your approval). You make a version active; the one it replaces becomes <i>retired</i>; roll back returns to it. A <i>rejected</i> version cannot be made active until restored.</p>
     <div class="row"><button class="b" id="pv-rb">Roll back to the previous model</button></div>
@@ -842,3 +842,10 @@ async function pvIntegrity(el,s,v){const R=await api("/api/percival/compat"),S=R
     if(!it.length){f.textContent="nothing to bring in";return}
     f.innerHTML=`${it.length} studies: ${it.map(x=>`${esc(x.label)} (${x.files} files, ${esc(x.kind)})`).join(" · ")} <button class="b pri" id="pv-rec">Bring them in</button>`;
     $("#pv-rec").onclick=async()=>{const q=await api("/api/percival/recover",{});toast(`${(q.recovered||[]).length} studies: earlier reviews brought in`);intelView(v)}}}
+
+// Phase 3D: training readiness, computed by the server (expert roles, eligible labels, patient identities, locked split, last leakage audit).
+// Display only: training itself re-checks the dataset and refuses on a failed leakage audit or a non-eligible label.
+async function pvReadiness(el){let R;try{R=await api("/api/percival/readiness")}catch(e){return}
+  const rows=(R.checks||[]).map(c=>`<tr><td>${c.ok?'<span class="ok">✓</span>':'<span class="bad">✗</span>'}</td><td>${esc(c.name)}</td><td class="note">${esc(c.detail||"")}</td></tr>`).join("");
+  el.insertAdjacentHTML("afterbegin",`<div class="card" data-pv="readiness"><h3 style="margin:0 0 4px">Ready for a scientifically defensible training run? ${R.ready?'<span class="ok">yes</span>':'<span class="warn">not yet</span>'}</h3>
+   <table>${rows}</table><p class="note">${esc(R.policy||"")}. Synthetic test data never counts as real-data performance.</p></div>`)}

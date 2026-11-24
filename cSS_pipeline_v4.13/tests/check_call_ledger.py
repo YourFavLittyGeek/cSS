@@ -35,11 +35,16 @@ def eff(sid): return {r["cand_id"]: (r["effective_call"], r["source_reviewer"]) 
 setup("SYN1"); setup("SYN2"); setup("SYN3", cohort="C2")
 import review_roles as RR                                                     # Phase 3A.3: only designated experts decide
 for n_ in ("Dr A", "Dr B"): RR.set_role(B, n_, "expert", "test admin", "fixture", RR.CONFIRM_ROLE)
+import review_io as RIO                                                       # 3B: both experts completed their (blind) review of each study
+for s_ in ("SYN1", "SYN2", "SYN3"):
+    for n_ in ("Dr A", "Dr B"):
+        with RIO.study_lock(B, s_): RIO.journal_append(B, s_, n_, "initial_completed", n_candidates=3, n_called=0, note="test fixture")
 check("no calls -> Not started", CL.review_state(B, "SYN1")["state"] == "not_started")
-pa = calls("SYN1", "Dr A", [(1, "cSS", "2026-01-01 10:00:00"), (2, "Vessel", "2026-01-01 10:01:00")])
+pa = calls("SYN1", "Dr A", [(1, "cSS", "2026-01-01 10:00:00"), (2, "Vessel", "2026-01-01 10:01:00"), (3, "Unsure", "2026-01-01 10:02:00")])
 check("some calls -> In progress", CL.review_state(B, "SYN1")["state"] == "in_progress")
-pb = calls("SYN1", "Dr B", [(1, "Artifact", "2026-02-01 09:00:00"), (3, "Normal", "2026-02-01 09:01:00")])
-check("default = expert consensus; cSS vs Artifact stays unresolved (no newest-wins)", eff("SYN1") == {1: ("", ""), 2: ("Vessel", "Dr A"), 3: ("Normal", "Dr B")}, str(eff("SYN1")))
+pb = calls("SYN1", "Dr B", [(1, "Artifact", "2026-02-01 09:00:00"), (2, "Vessel", "2026-02-01 09:00:30"), (3, "Normal", "2026-02-01 09:01:00")])
+check("default = expert consensus of the completed reviews; cSS vs Artifact stays unresolved (no newest-wins); an abstention does not block",
+      eff("SYN1") == {1: ("", ""), 2: ("Vessel", "Dr A, Dr B"), 3: ("Normal", "Dr B")}, str(eff("SYN1")))
 E = CL.effective(B, "SYN1"); r1 = next(r for r in E["rows"] if r["cand_id"] == 1)
 check("history keeps every call with reviewer and time; disagreement status", [(h["reviewer"], h["call"], h["time"]) for h in r1["history"]] ==
       [("Dr A", "cSS", "2026-01-01 10:00:00"), ("Dr B", "Artifact", "2026-02-01 09:00:00")] and r1["disagreement"] and r1["status"] == "disagreement")
@@ -49,9 +54,9 @@ st = CL.review_state(B, "SYN1")
 check("all called + final save -> Reviewed (review progress), unresolved counted separately", st["state"] == "reviewed" and "Dr B" in st["reason"] and st["n_unresolved"] == 1, st["reason"])
 before = {p: sha(p) for p in (pa, pb)}
 CL.set_policy(B, "study", "SYN1", dict(mode="reference", reviewer="Dr A", fallback="consensus"), by="test")
-check("study rule: reference expert, expert consensus where they did not call", eff("SYN1") == {1: ("cSS", "Dr A"), 2: ("Vessel", "Dr A"), 3: ("Normal", "Dr B")})
+check("study rule: reference expert, expert consensus where they abstained", eff("SYN1") == {1: ("cSS", "Dr A"), 2: ("Vessel", "Dr A"), 3: ("Normal", "Dr B")}, str(eff("SYN1")))
 CL.set_policy(B, "study", "SYN1", dict(mode="reference", reviewer="Dr A", fallback="none"))
-check("fallback none: candidates the expert did not call stay unresolved", eff("SYN1")[3] == ("", ""))
+check("fallback none: candidates the reference expert abstained on stay unresolved", eff("SYN1")[3] == ("", ""))
 check("policy never changes reviewer files", {p: sha(p) for p in (pa, pb)} == before)
 calls("SYN2", "Dr A", [(1, "cSS", "2026-01-01 10:00:00")]); calls("SYN2", "Dr B", [(1, "Vessel", "2026-03-01 10:00:00")])
 calls("SYN3", "Dr A", [(1, "cSS", "2026-01-01 10:00:00")]); calls("SYN3", "Dr B", [(1, "Vessel", "2026-03-01 10:00:00")])
@@ -83,7 +88,7 @@ check("reviewer files unchanged by materialize", {p: sha(p) for p in (pa, pb)} =
 time.sleep(1.1); moved = CAND.copy(); moved.loc[moved.cand_id == 3, ["vox_i", "vox_j"]] = [90, 90]
 moved.to_csv(os.path.join(R, "SYN1_candidates.csv"), index=False); touch(os.path.join(R, "SYN1_candidates.nii.gz"))
 st = CL.review_state(B, "SYN1")
-check("candidates changed after the review -> Needs re-review", st["state"] == "needs_rereview" and st["n_stale"] == 1, st["reason"])
+check("candidates changed after the review -> Needs re-review", st["state"] == "needs_rereview" and st["n_stale"] == 2, st["reason"])   # both experts called #3
 CAND.to_csv(os.path.join(R, "SYN1_candidates.csv"), index=False)
 # legacy shared file only
 setup("SYN4"); pd.DataFrame(dict(cand_id=[1], call=["cSS"], vox_i=[10], vox_j=[10], vox_k=[5], volume_mm3=[30.0])).to_csv(os.path.join(R, "SYN4_calls.csv"), index=False)

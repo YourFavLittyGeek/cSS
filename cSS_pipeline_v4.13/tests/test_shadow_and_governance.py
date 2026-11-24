@@ -43,14 +43,14 @@ class TestShadowAndGovernance(unittest.TestCase):
 
         # 3. Governance Evaluation
         evaluation = self.governance.evaluate_proposal(proposal)
-        self.assertTrue(evaluation["all_passed"])
-        self.assertIn("Approved", evaluation["recommendation"])
+        self.assertFalse(evaluation["all_passed"])                            # Phase 3D: no leakage audit ran -> never auto-approved
+        self.assertNotIn("Approved", evaluation["recommendation"])
 
         # 4. Governance Promotion
         promoted, msg = self.governance.promote_proposal(
             proposal=proposal,
             approver_id="Chief_Scientist",
-            reason="Verified improvement in sensitivity (+0.02) and false positive reduction (-0.8/scan)."
+            reason="Verified improvement in sensitivity (+0.02) and false positive reduction (-0.8/scan).", override=True   # explicit override
         )
         self.assertTrue(promoted)
         self.assertEqual(proposal.verdict, "approved")

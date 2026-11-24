@@ -36,7 +36,7 @@ pd.DataFrame([dict(study_id="S1", reader_id="A", vox_i=100, vox_j=100, vox_k=5, 
 pd.DataFrame([dict(study_id="S1", css_status="pos", split="test", slice_mm="1.2"),
               dict(study_id="S2", css_status="neg", split="test", slice_mm="2.0"),
               dict(study_id="S3", css_status="pos", split="dev", slice_mm="1.2")]).to_csv(f"{B}/labels/study_meta.csv", index=False)
-r = subprocess.run([sys.executable, f"{S}/evaluate.py", "--k", "1,2", "--boot", "200", "--by", "slice_group"],
+r = subprocess.run([sys.executable, f"{S}/evaluate.py", "--research-unverified", "--k", "1,2", "--boot", "200", "--by", "slice_group"],
                    capture_output=True, text=True, env=dict(os.environ, CSS_BASE=B))
 if r.returncode: print(r.stdout, r.stderr); fail("evaluate.py failed")
 o = json.load(open(f"{B}/review/evaluation_test_consensus.json"))["overall"]

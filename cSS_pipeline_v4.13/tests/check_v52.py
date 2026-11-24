@@ -152,9 +152,9 @@ for p in range(7):
     meta.append(dict(study_id=s, split="test" if p == 6 else "dev"))
     lab += [dict(study_id=s, cand_uid=u, consensus_class="cSS" if t else "surface_vein", method="agree") for u, t in zip(d.cand_uid, yy)]
 pd.DataFrame(meta).to_csv(f"{B}/labels/study_meta.csv", index=False); pd.DataFrame(lab).to_csv(f"{B}/labels/consensus.csv", index=False)
-if run(f"{S}/classify_surface_patches.py", "train", "--split", "test", ok=False).returncode == 0: fail("--split test accepted")
-if run(f"{S}/classify_surface_patches.py", "train", "--min-studies", "10", ok=False).returncode == 0: fail("too few studies accepted")
-out = run(f"{S}/classify_surface_patches.py", "train", "--no-nested").stdout
+if run(f"{S}/classify_surface_patches.py", "train", "--research-unverified", "--split", "test", ok=False).returncode == 0: fail("--split test accepted")
+if run(f"{S}/classify_surface_patches.py", "train", "--research-unverified", "--min-studies", "10", ok=False).returncode == 0: fail("too few studies accepted")
+out = run(f"{S}/classify_surface_patches.py", "train", "--research-unverified", "--no-nested").stdout
 Mo = json.load(open(f"{B}/review/surface_patch_model.json"))
 if "Q06" in Mo["training_studies"] or len(Mo["training_studies"]) != 6: fail(f"training studies {Mo['training_studies']}")
 if set(Mo["ablations"]) != set(CSP.ABLATIONS): fail("ablations missing")

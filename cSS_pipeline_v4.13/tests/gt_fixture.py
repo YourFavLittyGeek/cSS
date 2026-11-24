@@ -27,5 +27,6 @@ def ground_truth(base, reviewers=None, studies=None):
         studies = sorted({os.path.basename(p).split("_calls_")[0] for p in glob.glob(os.path.join(base, "review", "*_calls_*.csv"))})
     for sid in studies:
         for r in reviewers:
+            if not os.path.exists(os.path.join(base, "review", f"{sid}_calls_{RR.slug(r)}.csv")): continue      # only reviews that exist
             RR.verify_historical(base, sid, r, "test fixture", "synthetic labels of a test", "synthetic blind labels written by the test", RR.CONFIRM_VERIFY)
     return studies

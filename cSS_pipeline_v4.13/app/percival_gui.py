@@ -74,11 +74,12 @@ def log(msg, prog=None):
 # ------------------------------------------------------------------ v5.25 Training Center job monitor
 class Cancelled(Exception): pass
 ACTIVE_STATES = ("preparing", "running")
-TERMINAL_STATES = ("finished", "failed", "cancelled", "interrupted")
-TRANSITIONS = dict(idle={"preparing"}, preparing={"running", "failed", "cancelled"}, running={"finished", "failed", "cancelled"},
-                   finished={"preparing"}, failed={"preparing"}, cancelled={"preparing"}, interrupted={"preparing"})
+TERMINAL_STATES = ("finished", "failed", "cancelled", "interrupted", "insufficient_data")
+TRANSITIONS = dict(idle={"preparing"}, preparing={"running", "failed", "cancelled", "insufficient_data"}, running={"finished", "failed", "cancelled"},
+                   finished={"preparing"}, failed={"preparing"}, cancelled={"preparing"}, interrupted={"preparing"},
+                   insufficient_data={"preparing"})                       # 3D fix: 'not enough expert labels' is a valid end state (was a crash)
 STATE_LABEL = dict(idle="Idle", preparing="Preparing dataset", running="Training", finished="Completed", failed="Failed", cancelled="Cancelled",
-                   interrupted="Interrupted")
+                   interrupted="Interrupted", insufficient_data="Paused: expert labels needed")
 # stage-aware stall limits (seconds without any reported work): dataset gathering reads MRI patches study by study; a training stage
 # reports at least once per fold (nested cross-fitting: once per inner step). Overridable for tests: CSS_PERCIVAL_STALL_S
 STALL_S = dict(preparing=300, components=600, nested=900, discovery=600, final=600, evaluation=300, registering=120)
@@ -203,6 +204,58 @@ def may_read(sid): return authorized() or synthetic(sid)
 
 # ------------------------------------------------------------------ one study's candidates
 _LCACHE = {}
+def readiness():
+    """3D: is the project ready for a scientifically defensible training run? Every check is computed from the stored records (read only)."""
+    from uengine.percival import split as SP, datasets as DS
+    L = _ledger_mod(); roles = L.RR.current(B()); experts = sorted(v["name"] for v in roles.values() if v.get("role") == "expert")
+    SL = selection(); n_css = sum(s["n_css"] for s in SL if s["included"]); n_mim = sum(s["n_mimic"] for s in SL if s["included"])
+    dev_css = sum(s["css_dev"] for s in SL if s["included"]); dev_mim = sum(s["mimic_dev"] for s in SL if s["included"])
+    SPV = SP.current(P()); ds = DS.listing(P()); last = DS.load(P(), ds[-1]["id"]) if ds else None
+    ids = [identity(s["code"])["status"] for s in SL if s["included"]]
+    checks = [dict(name="designated experts", ok=bool(experts), detail=", ".join(experts) or "none - assign roles (Reviewer calls)"),
+              dict(name="local learning switched on", ok=bool(authorized()), detail=""),
+              dict(name="eligible expert labels (development: >= 3 cSS, >= 3 not-cSS, >= 10 in all)", ok=dev_css >= 3 and dev_mim >= 3 and dev_css + dev_mim >= 10,
+                   detail=f"development {dev_css} cSS / {dev_mim} not-cSS; all {n_css} / {n_mim}"),
+              dict(name="patient identities verified for every included study", ok=bool(ids) and all(x in ("verified", "declared") for x in ids),
+                   detail=f"{sum(1 for x in ids if x in ('verified', 'declared'))} of {len(ids)}"),
+              dict(name="locked patient-level split", ok=bool(SPV and SPV.get("locked")), detail=(f"{SPV['version']} test fraction {SPV['test_fraction']}, "
+                   f"{sum(1 for v in SPV['assignment'].values() if v == 'test')} test patients" if SPV else "not created yet (created at first use)")),
+              dict(name="last dataset: leakage audit passed and only eligible expert labels", ok=bool(last) and (last.get("leakage_audit") or {}).get("passed") is True
+                   and not last.get("readiness_problems"), detail=(f"{last['id']} {last['content_hash']}" if last else "no dataset built yet"))]
+    return dict(ready=all(c["ok"] for c in checks), checks=checks, policy="expert consensus of completed reviews; eligible provenance: "
+                "verified_blind_post_3A, historical_blinding_verified; patient-level locked split; leakage audit before training")
+
+
+def split_state(): from uengine.percival import split as SP; return dict(split=SP.current(P()), audits=sorted(os.path.basename(f) for f in glob.glob(P("split", "audit_*.json"))))
+
+
+def split_new_version(fraction, by, reason, confirm): from uengine.percival import split as SP; return dict(ok=True, split=SP.new_version(P(), fraction, by, reason, confirm))
+
+
+def export_dataset(did): from uengine.percival import datasets as DS; return DS.export(P(), did, P("exports", f"{did}_{time.strftime('%Y%m%d_%H%M%S')}"))
+
+
+def _sources(sid):
+    """3C: the exact inputs a study contributes to a dataset: sha256 of the candidate list, the detector manifest (+ its build), every
+    reviewer calls file, the head of every review journal, and the derived missed-cSS file"""
+    rd = os.path.join(B(), "review"); out = {}
+    for n in (f"{sid}_candidates.csv", f"{sid}_manifest.json", f"{sid}_missed.csv"):
+        if os.path.exists(os.path.join(rd, n)): out[n] = _sha(os.path.join(rd, n))
+    m = _jl(os.path.join(rd, f"{sid}_manifest.json"), {}) or {}
+    if m.get("build"): out["detector_build"] = str(m.get("build"))
+    for f in sorted(glob.glob(os.path.join(rd, f"{sid}_calls_*.csv"))): out[os.path.basename(f)] = _sha(f)
+    for f in sorted(glob.glob(os.path.join(rd, f"{sid}_events_*.jsonl"))):
+        lines = [x for x in open(f, "rb").read().split(b"\n") if x.strip()]
+        out[os.path.basename(f) + "#head"] = hashlib.sha256(lines[-1]).hexdigest()[:16] if lines else ""
+    return out
+
+
+def _partition(patient):
+    """3D: the ONE patient-level split (uengine/percival/split.py); created on first use with the configured fraction, then locked"""
+    from uengine.percival import split as SP
+    return SP.partition_of(P(), patient, float(CTX["SET"].get("percival_test_fraction", 0.2)))
+
+
 def _ledger_mod():
     import review_calls_gui as RCG
     return RCG._ledger(B())
@@ -270,7 +323,8 @@ def label_summary(sid):
         cand = L.candidates(B(), sid); E = L.effective(B(), sid, "", pol, cand)
         if E.get("problems"):                                                  # Phase 3A.5: a reviewer file does not match its journal
             raise RuntimeError("review files need repair: " + "; ".join(E["problems"])[:300])
-        GT = {"no_expert": "NO_EXPERT", "abstained": None, "unrecognised": None, "insufficient": "INSUFFICIENT_QUORUM", "disagreement": None}
+        GT = {"no_expert": "NO_EXPERT", "abstained": None, "unrecognised": None, "insufficient": "INSUFFICIENT_QUORUM", "disagreement": None,
+              "incomplete": "INCOMPLETE_REVIEW", "pending_review": "REVIEW_NOT_COMPLETED"}
         for r in E["rows"]:                                                    # Phase 3A.3: expert ground truth only
             H = r.get("history") or []
             if not H: continue
@@ -281,7 +335,7 @@ def label_summary(sid):
                 k = _kind(call); ok = bool(r.get("primary_eligible"))
                 det[int(r["cand_id"])] = dict(kind=k, y=(1 if k == "css" else 0 if k == "mimic" else None) if ok else None, call=call, source="review",
                                               reviewer=r.get("source_reviewer", ""), conflict=False, calls=last, gt_status=st, gt_class=r.get("provenance_class", ""),
-                                              gt_block=None if ok or k not in ("css", "mimic") else "NOT_PRIMARY_GROUND_TRUTH")
+                                              gt_block=None if ok or k not in ("css", "mimic") else ("ADJUDICATED_NOT_CONSENSUS" if st == "adjudicated" else "NOT_PRIMARY_GROUND_TRUTH"))
             else:
                 lc = H[-1]["call"]; k = "uncertain" if st == "abstained" else ("disputed" if st == "disagreement" else "unrecognised" if st == "unrecognised" else _kind(lc))
                 det[int(r["cand_id"])] = dict(kind=k, y=None, call=lc if st == "unrecognised" else "", source="review", reviewer="", conflict=st == "disagreement", calls=last,
@@ -414,7 +468,7 @@ def _gather(sid, labelled=True):
         C = dict(key=key, v=3, rows=rows); _js(cj, C)
     with np.load(cz) as Zf: Z = {k: Zf[k] for k in Zf.files}
     rows = []; pat = CTX["patient_of"](sid) or None
-    test = bool(pat) and test_assignment(pat, CTX["SET"].get("percival_test_fraction", 0.2))   # no patient: never trained on (eligibility)
+    test = bool(pat) and _partition(pat) == "test"                           # no patient: never trained on (eligibility); 3D split authority
     for r in C["rows"]:
         rows.append(dict(r, patient=pat, test=test, maps=Z.get(str(r["cand_id"]))))
     if labelled:
@@ -450,7 +504,7 @@ def _examples(sid, meta, rows=None):
     from uengine.percival import eligibility as EL
     from uengine.percival.meta import test_assignment
     S = CTX["SET"]; lab = label_summary(sid); det = lab.get("detail", {}); idn = identity(sid); pat = idn.get("patient") or None
-    test = bool(pat) and test_assignment(pat, S.get("percival_test_fraction", 0.2)); cache = rows if rows is not None else (_cached_rows(sid) or {})
+    test = bool(pat) and _partition(pat) == "test"; cache = rows if rows is not None else (_cached_rows(sid) or {})   # 3D split authority
     out = []
     for cid, d in sorted(det.items()):
         r = cache.get(cid)
@@ -462,6 +516,7 @@ def _examples(sid, meta, rows=None):
                               duplicate=meta.get("duplicate"), authorized=may_read(sid), has_image=has_img is not False, n_char=n_char is None or n_char > 0,
                               has_predictors=has_pred is not False, test=test, qc=meta.get("qc"), identity=idn["status"]))
         out.append(dict(study=sid, cand_id=cid, patient=pat, identity=idn["status"], y=d["y"], call=d["call"], label_source=d["source"], reviewer=d.get("reviewer", ""),
+                        gt_class=d.get("gt_class", ""), gt_status=d.get("gt_status", ""),
                         partition=ev["partition"], status=ev["status"], reasons=ev["reasons"], components={k: v["ok"] for k, v in ev["components"].items()},
                         component_reasons={k: v["reasons"] for k, v in ev["components"].items() if v["reasons"]},
                         missing=sorted({m for v in ev["components"].values() for m in v.get("missing", [])}),
@@ -471,7 +526,7 @@ def _examples(sid, meta, rows=None):
         ev = EL.evaluate(dict(label_kind="css", gt_block=md.get("gt_block"), study_excluded=meta.get("excluded"), study_archived=meta.get("archived_out"),
                               duplicate=meta.get("duplicate"), authorized=may_read(sid), has_image=True, n_char=True, test=test, identity=idn["status"]))
         out.append(dict(study=sid, cand_id=mid, patient=pat, identity=idn["status"], y=md.get("y"), call="cSS", label_source="expert_missed_lesion",
-                        reviewer=md.get("reviewer", ""), partition=ev["partition"], status=ev["status"], gt_class=md.get("gt_class", ""),
+                        reviewer=md.get("reviewer", ""), partition=ev["partition"], status=ev["status"], gt_class=md.get("gt_class", ""), gt_status="expert_mark",
                         reasons=ev["reasons"],
                         components=dict(char=False, image=True, fusion=False, meta=True, predictor=False, shadow=True,
                                         detection=True, segmentation=md.get("shape") in ("pen", "rect", "polygon")),
@@ -515,7 +570,7 @@ def selection():
                         not_in_study_list=p["_orphan"], archived=bool(p.get("archived")), retired=bool(p.get("retired")),
                         included=bool(el) and not why, excluded_why=why, why=reason,
                         identity=identity(c)["status"],
-                        partition=None if not CTX["patient_of"](c) else "test" if test_assignment(CTX["patient_of"](c), S.get("percival_test_fraction", 0.2)) else "development"))
+                        partition=None if not CTX["patient_of"](c) else _partition(CTX["patient_of"](c))))
     return out
 
 
@@ -566,7 +621,9 @@ def reproduce_dataset(did):
         if s_["n_labelled"]:
             exs += _examples(s_["code"], dict(excluded=s_["code"] in ex or bool(s_["excluded_why"]), archived_out="archived" in s_["excluded_why"]),
                              rows={r["cand_id"]: r for r in gather(s_["code"], labelled=False)} if s_["included"] else None)
-    R = DS.reproduce(P(), did, exs, EL.RULES_VERSION); R["ok"] = True; return R
+    src = {c: _sources(c) for c in (m.get("sources") or {})}                 # 3C: today's input files, compared with the stored hashes
+    R = DS.reproduce(P(), did, exs, EL.RULES_VERSION, sources=src); R["ok"] = True
+    R["source_files_changed"] = sorted(c for c in src if src[c] != (m.get("sources") or {}).get(c)); return R
 
 
 def set_selection(codes, include):
@@ -785,9 +842,20 @@ def _train(reason):
         for s_ in SL:                                   # labelled studies that are left out: recorded in the manifest with their reasons
             if s_["code"] not in sel and (s_["n_labelled"] or s_.get("n_missed")):
                 exs += _examples(s_["code"], dict(excluded=s_["code"] in ex or bool(s_["excluded_why"]), archived_out="archived" in s_["excluded_why"]))
-        man = DS.build(exs, EL.RULES_VERSION, P(), extra=dict(settings=dict(learn_from=S.get("percival_learn_from", "labelled"),
-                       conflicts=S.get("percival_conflicts", "exclude"), use_historical=S.get("percival_use_historical", True),
-                       test_fraction=S.get("percival_test_fraction", 0.2))))
+        from uengine.percival import split as SP                                # 3C/3D: sources, split, leakage audit, readiness
+        SPV = SP.current(P()) or {}
+        audit = SP.leakage_audit(exs, fingerprint_of=CTX.get("fingerprint_of"), held_out=SP.held_out_elsewhere(B()))
+        man = DS.build(exs, EL.RULES_VERSION, P(), sources={c: _sources(c) for c in sorted({e["study"] for e in exs})},
+                       split=dict(version=SPV.get("version"), assignment_sha256=SPV.get("assignment_sha256"), test_fraction=SPV.get("test_fraction")),
+                       extra=dict(leakage_audit=audit, settings=dict(learn_from=S.get("percival_learn_from", "labelled"),
+                       use_historical=S.get("percival_use_historical", True), split_version=SPV.get("version"))))
+        _js(P("split", f"audit_{man['id']}.json"), dict(dataset=man["id"], content_hash=man["content_hash"], split=man.get("split"), audit=audit,
+                                                         readiness_problems=man.get("readiness_problems")))
+        if not audit["passed"] or man.get("readiness_problems"):
+            msg = ("training refused before it started: " + "; ".join(audit["errors"] + (man.get("readiness_problems") or [])[:5])
+                   + f" (dataset {man['id']}, see percival/split/audit_{man['id']}.json)")
+            log(msg, 0.075); _transition("failed", stage="refused", error=msg); _run_end("failed", error=msg, dataset=man["id"])
+            return dict(ok=False, error=msg, stage="refused")
         log(f"dataset {man['id']} (content {man['content_hash']}): {man['n_examples']} called candidates, meta-model development "
             f"{man['components']['meta']['development']['n']} / locked test {man['components']['meta']['test']['n']}", 0.075)
         dv = [r for r in rows if not r.get("test")]; tv = [r for r in rows if r.get("test")]
@@ -807,6 +875,7 @@ def _train(reason):
         v = f"v{len(versions()) + 1:03d}"
         M = MT.train_cycle(rows, v, cnn_epochs=int(os.environ.get("CSS_PERCIVAL_EPOCHS", "30")), progress=lambda m, p: log(m, p), mins=_env_min())
         M["data"].update(dataset=man["id"], dataset_hash_manifest=man["content_hash"], eligibility_rules=EL.RULES_VERSION,
+                         split=man.get("split"), leakage_audit=dict(passed=audit["passed"], checks=audit["checks"]),
                          feature_schema=DS.FEATURE_SCHEMA, patch_spec=DS.PATCH_SPEC, code_version=_code_version())
         M["data"]["identity"] = dict(idc, policy="only verified / declared patient identities are used (v5.25)")
         log("registering", 0.9)                                    # last cancellation point: nothing has been written to the registry yet

@@ -31,20 +31,45 @@ def _jl(p, d=None):
         with open(p) as f: return json.load(f)
     except Exception: return d
 
-_cid_sort = lambda e: (e["study"], int(e["cand_id"]) if str(e["cand_id"]).isdigit() else 100000 + abs(hash(str(e["cand_id"]))) % 10000)
+_cid_sort = lambda e: (str(e["study"]), 0, int(e["cand_id"]), "") if str(e["cand_id"]).isdigit() else (str(e["study"]), 1, 0, str(e["cand_id"]))   # 3C: deterministic (no hash())
 _cid_val = lambda cid: int(cid) if str(cid).isdigit() else str(cid)
 
 
-def build(examples, rules_version, store, extra=None):
-    """examples: [dict(study, cand_id, patient, y, label_source, reviewer, partition, components {k: ok}, reasons)] (labelled candidates,
-    eligible or not). -> manifest (stored as datasets/dsNNN.json unless an identical one exists)"""
+ELIGIBLE_CLASSES = ("verified_blind_post_3A", "historical_blinding_verified")   # = call_ledger.PRIMARY_ELIGIBLE (Phase 3A/3B policy)
+EXPERT_SOURCES = ("review", "expert_missed_lesion")
+
+
+def _core(e):
+    return (e["study"], _cid_val(e["cand_id"]), e.get("patient"), e.get("y"), e.get("label_source"), e.get("partition"),
+            sorted(k for k, v in (e.get("components") or {}).items() if v), sorted(e.get("reasons") or []), e.get("gt_class"), e.get("gt_status"))
+
+
+def content_hash(ex, rules_version, sources=None, split=None):
+    """3C: identical examples + rules + schemas + source-file hashes + split version -> identical hash (timestamps excluded)"""
+    return hashlib.sha256(json.dumps([[_core(e) for e in ex], rules_version, FEATURE_SCHEMA, PATCH_SPEC, sources or {}, split or {}],
+                                     default=str, sort_keys=True).encode()).hexdigest()[:16]
+
+
+def readiness(ex):
+    """3C/3D: every example used for training must be eligible EXPERT ground truth -> [problem] (empty = ready)"""
+    out = []
+    for e in ex:
+        if e.get("partition") not in ("development", "test"): continue
+        if e.get("label_source") not in EXPERT_SOURCES: out.append(f"{e['study']}#{e['cand_id']}: label source {e.get('label_source')} is not expert review")
+        if e.get("gt_class") not in ELIGIBLE_CLASSES: out.append(f"{e['study']}#{e['cand_id']}: provenance {e.get('gt_class')} not eligible")
+        if e.get("y") not in (0, 1): out.append(f"{e['study']}#{e['cand_id']}: no binary expert label")
+    return out
+
+
+def build(examples, rules_version, store, extra=None, sources=None, split=None):
+    """examples: [dict(study, cand_id, patient, y, label_source, reviewer, partition, components {k: ok}, reasons, gt_class, gt_status)]
+    (labelled candidates, eligible or not). sources: {study: file hashes}; split: dict(version, assignment_sha256).
+    -> manifest (stored as datasets/dsNNN.json unless an identical one exists)"""
     ex = sorted(examples, key=_cid_sort)
     check = verify(ex)
     if check["errors"]: raise DatasetError("dataset integrity: " + "; ".join(check["errors"]))
     folds = assign_folds(ex)
-    core = [(e["study"], _cid_val(e["cand_id"]), e.get("patient"), e.get("y"), e.get("label_source"), e.get("partition"),
-             sorted(k for k, v in (e.get("components") or {}).items() if v), sorted(e.get("reasons") or [])) for e in ex]
-    h = hashlib.sha256(json.dumps([core, rules_version, FEATURE_SCHEMA, PATCH_SPEC], default=str).encode()).hexdigest()[:16]
+    h = content_hash(ex, rules_version, sources, split)
     d = os.path.join(store, "datasets"); os.makedirs(d, exist_ok=True)
     for p in sorted(glob.glob(os.path.join(d, "ds*.json"))):
         m = _jl(p, {})
@@ -61,7 +86,9 @@ def build(examples, rules_version, store, extra=None):
         if e.get("partition") is None:
             for r in e.get("reasons") or ["?"]: excl[r] = excl.get(r, 0) + 1
     did = f"ds{len(glob.glob(os.path.join(d, 'ds*.json'))) + 1:03d}"
-    M = dict(schema="percival-dataset/1.1", id=did, created=time.strftime("%Y-%m-%d %H:%M:%S"), content_hash=h, rules_version=rules_version,
+    M = dict(schema="percival-dataset/1.2", id=did, created=time.strftime("%Y-%m-%d %H:%M:%S"), content_hash=h, rules_version=rules_version,
+             sources=sources or {}, split=split or {}, readiness_problems=readiness(ex),
+             provenance={c: sum(1 for e in ex if e.get("gt_class") == c and e.get("partition")) for c in sorted({str(e.get("gt_class")) for e in ex})},
              feature_schema=FEATURE_SCHEMA, patch_spec=PATCH_SPEC, image_preprocessing=PATCH_SPEC, n_examples=len(ex), components=comp, excluded_by_reason=excl,
              integrity=check, splits=dict(method=f"patient-level: locked test by patient hash (meta.test_assignment); development patients in "
                                                  f"{K_FOLDS} patient-grouped validation folds (meta.folds, seed {FOLD_SEED})",
@@ -70,7 +97,7 @@ def build(examples, rules_version, store, extra=None):
                                           folds={str(f): len(v) for f, v in sorted(_inv(folds).items())}),
              label_sources={s: sum(1 for e in ex if e.get("label_source") == s) for s in sorted({e.get("label_source") for e in ex})},
              examples=[dict(study=e["study"], cand_id=_cid_val(e["cand_id"]), patient=e.get("patient"), y=e.get("y"), label_source=e.get("label_source"),
-                            reviewer=e.get("reviewer", ""), call=e.get("call"), partition=e.get("partition"),
+                            reviewer=e.get("reviewer", ""), call=e.get("call"), partition=e.get("partition"), gt_class=e.get("gt_class"), gt_status=e.get("gt_status"),
                             split="test" if e.get("partition") == "test" else "train" if e.get("partition") == "development" else None,
                             validation_fold=folds.get(e.get("patient")) if e.get("partition") == "development" else None,
                             components=e.get("components"), reasons=e.get("reasons"))
@@ -118,14 +145,14 @@ def verify(ex):
     return dict(errors=errors, patients_in_both=len(dev & tst), duplicate_candidates=len(dup), patients_development=len(dev), patients_test=len(tst))
 
 
-def reproduce(store, did, examples, rules_version):
-    """does today's evaluation of the reviews give the same dataset? -> dict(identical, id, stored_hash, rebuilt_hash, differences)"""
+def reproduce(store, did, examples, rules_version, sources=None):
+    """does today's evaluation of the reviews give the same dataset? -> dict(identical, id, stored_hash, rebuilt_hash, differences)
+    sources: TODAY's source-file hashes (3C) - a changed input file makes the rebuilt hash differ (reported as 'source files changed')"""
     m = load(store, did)
     if not m: return dict(identical=False, error="unknown dataset")
     ex = sorted(examples, key=_cid_sort)
-    core = [(e["study"], _cid_val(e["cand_id"]), e.get("patient"), e.get("y"), e.get("label_source"), e.get("partition"),
-             sorted(k for k, v in (e.get("components") or {}).items() if v), sorted(e.get("reasons") or [])) for e in ex]
-    h = hashlib.sha256(json.dumps([core, rules_version, FEATURE_SCHEMA, PATCH_SPEC], default=str).encode()).hexdigest()[:16]
+    cur_src = m.get("sources") if sources is None else {k: v for k, v in sources.items() if k in (m.get("sources") or sources)}
+    h = content_hash(ex, rules_version, cur_src, m.get("split"))
     key = lambda e: (e.get("y"), e.get("partition"), e.get("label_source"), sorted(k for k, v in (e.get("components") or {}).items() if v), sorted(e.get("reasons") or []))
     old = {(e["study"], str(e["cand_id"])): key(e) for e in m["examples"]}
     new = {(e["study"], str(e["cand_id"])): key(e) for e in ex}
@@ -141,3 +168,24 @@ def reproduce(store, did, examples, rules_version):
         d["change"] = k; kinds[k] = kinds.get(k, 0) + 1
     return dict(identical=h == m["content_hash"], id=did, changes=kinds, stored_hash=m["content_hash"], rebuilt_hash=h, rules_version=rules_version,
                 stored_rules=m.get("rules_version"), differences=diff[:50], n_differences=len(diff))
+
+
+def export(store, did, out_dir):
+    """3C: a plain export of one dataset version for the training pipeline and for review: examples.csv (one row per labelled candidate:
+    study, candidate, protected patient id, label, partition, validation fold, label source, provenance class, consensus status, reviewer),
+    manifest.json (the stored manifest, unchanged), split.json (the split version it used) and SHA256SUMS. Nothing else is written."""
+    import csv, shutil
+    m = load(store, did)
+    if not m: raise DatasetError(f"unknown dataset {did}")
+    os.makedirs(out_dir, exist_ok=False)
+    cols = ["study", "cand_id", "patient", "y", "partition", "split", "validation_fold", "label_source", "gt_class", "gt_status", "reviewer", "call"]
+    with open(os.path.join(out_dir, "examples.csv"), "w", newline="") as f:
+        w = csv.writer(f); w.writerow(cols)
+        for e in m["examples"]: w.writerow([e.get(c, "") if e.get(c) is not None else "" for c in cols])
+    shutil.copy2(os.path.join(store, "datasets", f"{did}.json"), os.path.join(out_dir, "manifest.json"))
+    sv = (m.get("split") or {}).get("version")
+    if sv and os.path.exists(os.path.join(store, "split", f"{sv}.json")): shutil.copy2(os.path.join(store, "split", f"{sv}.json"), os.path.join(out_dir, "split.json"))
+    with open(os.path.join(out_dir, "SHA256SUMS"), "w") as f:
+        for n in sorted(os.listdir(out_dir)):
+            if n != "SHA256SUMS": f.write(hashlib.sha256(open(os.path.join(out_dir, n), "rb").read()).hexdigest() + "  " + n + "\n")
+    return dict(ok=True, out=out_dir, files=sorted(os.listdir(out_dir)), dataset=did, content_hash=m["content_hash"])

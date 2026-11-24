@@ -53,6 +53,12 @@ def expert(b, *names):
     for n in names: RR.set_role(b, n, "expert", "admin", "fixture", RR.CONFIRM_ROLE)
 
 
+def complete(b, *names, sid="S1"):
+    """the reviewers completed their (blind) review of the study - what the reviewer server journals on a complete final save"""
+    for n in names:
+        with RIO.study_lock(b, sid): RIO.journal_append(b, sid, n, "initial_completed", n_candidates=0, n_called=0)
+
+
 def st(b): return {r["cand_id"]: r for r in CL.effective(b, "S1")["rows"]}
 
 
@@ -77,19 +83,28 @@ class TestConsensus(unittest.TestCase):
         write(b, c, "Dr A", {1: "cSS", 2: "Vessel", 3: "Unsure", 4: "cSS", 6: "Normal"})
         write(b, c, "Dr B", {1: "cSS", 2: "Normal", 3: "Unsure", 4: "Vessel"})
         write(b, c, "Trainee T", {5: "cSS", 4: "cSS"}); write(b, c, "Dr C", {6: "Artifact"}, comment="[imported from Dr_A] ")
-        expert(b, "Dr A", "Dr B", "Dr C"); RR.set_role(b, "Trainee T", "trainee", "admin", "fixture", RR.CONFIRM_ROLE)
+        expert(b, "Dr A", "Dr B", "Dr C"); RR.set_role(b, "Trainee T", "trainee", "admin", "fixture", RR.CONFIRM_ROLE); complete(b, "Dr A", "Dr B")
 
     def test_statuses(self):
         s = st(self.b)
         self.assertEqual({k: v["status"] for k, v in s.items()},
-                         {1: "resolved", 2: "resolved", 3: "abstained", 4: "disagreement", 5: "no_expert", 6: "resolved"})
+                         {1: "resolved", 2: "resolved", 3: "abstained", 4: "disagreement", 5: "no_expert", 6: "incomplete"})
         self.assertTrue(s[2]["subtype_mixed"]); self.assertEqual(s[2]["effective_call"], "Normal")
+        self.assertEqual(s[6]["experts_missing"], ["Dr B"])                    # Dr B completed the review but has no call on #6: not resolved by Dr A
         self.assertEqual(s[6]["n_expert_calls"], 1)                           # the imported call of Dr C is not an independent review
-        self.assertEqual(s[1]["experts_missing"], ["Dr C"])
+
+    def test_only_completed_expert_reviews_take_part(self):
+        b, c = self.b, self.cand
+        write(b, c, "Dr D", {1: "Vessel"}); expert(b, "Dr D")                 # an expert whose review is not completed
+        s = st(b); self.assertEqual((s[1]["status"], s[1]["experts_pending"]), ("resolved", ["Dr D"]))
+        complete(b, "Dr D"); self.assertEqual(st(b)[1]["status"], "disagreement")         # once completed, the disagreement counts
+        b2, c2 = proj(); write(b2, c2, "Dr E", {1: "cSS"}); expert(b2, "Dr E")
+        self.assertEqual(st(b2)[1]["status"], "pending_review")
 
     def test_quorum_reference_and_removed_modes(self):
-        CL.set_policy(self.b, "all", "", dict(mode="consensus", quorum=2))
-        s = st(self.b); self.assertEqual((s[1]["status"], s[6]["status"]), ("resolved", "insufficient"))
+        CL.set_policy(self.b, "all", "", dict(mode="consensus", quorum=3))
+        s = st(self.b); self.assertEqual((s[1]["status"], s[6]["status"]), ("insufficient", "incomplete"))
+        CL.set_policy(self.b, "all", "", dict(mode="consensus", quorum=2)); self.assertEqual(st(self.b)[1]["status"], "resolved")
         CL.set_policy(self.b, "all", "", dict(mode="reference", reviewer="Dr B", fallback="none"))
         s = st(self.b); self.assertEqual((s[4]["status"], s[4]["effective_call"], s[6]["status"]), ("resolved", "Vessel", "no_expert"))
         for bad in (dict(mode="newest"), dict(mode="reviewer", reviewer="Dr A", fallback="newest")):
@@ -101,7 +116,7 @@ class TestConsensus(unittest.TestCase):
     def test_shared_file_holds_only_resolved_and_disagreements_survive(self):
         CL.materialize(self.b, "S1", rescore=False)
         sh = pd.read_csv(os.path.join(self.b, "review", "S1_calls.csv"))
-        self.assertEqual(sorted(sh.cand_id), [1, 2, 6])
+        self.assertEqual(sorted(sh.cand_id), [1, 2])
         self.assertIn("cSS", open(os.path.join(self.b, "review", "S1_calls_Dr_A.csv")).read())
         self.assertIn("Vessel", open(os.path.join(self.b, "review", "S1_calls_Dr_B.csv")).read())
 
@@ -113,6 +128,7 @@ class TestConsensus(unittest.TestCase):
         with self.assertRaises(ValueError): CL.adjudicate(b, "S1", 4, "cSS", "Dr A", "")
         CL.adjudicate(b, "S1", 4, "cSS", "Dr A", "consensus meeting")
         s = st(b)[4]; self.assertEqual((s["status"], s["effective_call"], s["adjudication"]["by"]), ("adjudicated", "cSS", "Dr A"))
+        self.assertEqual((s["provenance_class"], s["primary_eligible"]), ("adjudicated_post_3A", False))   # 3B policy: never automatically eligible
         self.assertEqual({p: open(p, "rb").read() for p in before}, before)   # reviewers' calls untouched
         CL.withdraw_adjudication(b, "S1", 4, "Dr A", "re-read"); self.assertEqual(st(b)[4]["status"], "disagreement")
         ev, probs = RIO.read_journal(RIO.journal_path(b, "S1", RR.ADJUDICATION))
@@ -125,20 +141,25 @@ class TestConsensus(unittest.TestCase):
 
 class TestProvenance(unittest.TestCase):
     def test_classes_and_primary_eligibility(self):
-        b, cand = proj(); expert(b, "Dr A", "Dr B", "Dr H")
-        write(b, cand, "Dr A", {1: "cSS", 2: "cSS", 3: "Vessel"}, phase="initial", vis=False)
+        b, cand = proj(); expert(b, "Dr A", "Dr H")
+        write(b, cand, "Dr A", {1: "cSS", 2: "cSS"}, phase="initial", vis=False)
         write(b, cand, "Dr A", {2: "Normal"}, phase="second_look", vis=True)    # changed in the second look
-        write(b, cand, "Dr B", {3: "Vessel"}, phase="initial", vis=False, released=True)
-        pd.DataFrame([dict(cand_id=4, call="cSS", comment="", reviewer="Dr H", time="2025-01-01 10:00:00", **cand.set_index("cand_id").loc[4, FP].to_dict(), fine_code="")],
-                     columns=COLS).to_csv(os.path.join(b, "review", "S1_calls_Dr_H.csv"), index=False)        # a pre-3A file, no journal
+        write(b, cand, "Dr A", {3: "Vessel"}, phase="initial", vis=False, released=True)
+        complete(b, "Dr A")
         s = st(b)
-        self.assertEqual({k: (s[k]["provenance_class"], s[k]["primary_eligible"]) for k in (1, 2, 3, 4)},
-                         {1: ("verified_blind_post_3A", True), 2: ("not_blind_post_3A", False), 3: ("not_blind_post_3A", False),
-                          4: ("historical_blinding_unknown", False)})
-        with self.assertRaises(PermissionError): RR.verify_historical(b, "S1", "Dr H", "admin", "r", "e", "ok")
-        with self.assertRaises(ValueError): RR.verify_historical(b, "S1", "Dr H", "admin", "r", "", RR.CONFIRM_VERIFY)
-        RR.verify_historical(b, "S1", "Dr H", "admin", "audit of the 2025 read", "validation read, meter hidden (final record)", RR.CONFIRM_VERIFY)
-        self.assertEqual((st(b)[4]["provenance_class"], st(b)[4]["primary_eligible"]), ("historical_blinding_verified", True))
+        self.assertEqual({k: (s[k]["provenance_class"], s[k]["primary_eligible"]) for k in (1, 2, 3)},
+                         {1: ("verified_blind_post_3A", True), 2: ("not_blind_post_3A", False), 3: ("not_blind_post_3A", False)})
+        cand.to_csv(os.path.join(b, "review", "S2_candidates.csv"), index=False)        # a pre-3A read (no journal) with a final record
+        pd.DataFrame([dict(cand_id=4, call="cSS", comment="", reviewer="Dr H", time="2025-01-01 10:00:00", **cand.set_index("cand_id").loc[4, FP].to_dict(), fine_code="")],
+                     columns=COLS).to_csv(os.path.join(b, "review", "S2_calls_Dr_H.csv"), index=False)
+        json.dump(dict(reviewer="Dr H", saved="2025-01-01"), open(os.path.join(b, "review", "S2_final_Dr_H.json"), "w"))
+        r4 = lambda: {r["cand_id"]: r for r in CL.effective(b, "S2")["rows"]}[4]
+        self.assertEqual((r4()["provenance_class"], r4()["primary_eligible"]), ("historical_blinding_unknown", False))
+        with self.assertRaises(PermissionError): RR.verify_historical(b, "S2", "Dr H", "admin", "r", "e", "ok")
+        with self.assertRaises(ValueError): RR.verify_historical(b, "S2", "Dr H", "admin", "r", "", RR.CONFIRM_VERIFY)
+        with self.assertRaises(ValueError): RR.verify_historical(b, "S2", "Nobody", "admin", "r", "e", RR.CONFIRM_VERIFY)   # no review to verify
+        RR.verify_historical(b, "S2", "Dr H", "admin", "audit of the 2025 read", "validation read, meter hidden (final record)", RR.CONFIRM_VERIFY)
+        self.assertEqual((r4()["provenance_class"], r4()["primary_eligible"]), ("historical_blinding_verified", True))
 
     def test_verification_covers_only_the_calls_that_were_verified(self):
         b, cand = proj(); expert(b, "Dr H")
@@ -152,14 +173,14 @@ class TestProvenance(unittest.TestCase):
         self.assertEqual([s[k]["provenance_class"] for k in (1, 2, 3)], ["historical_blinding_unknown", "historical_blinding_verified", "historical_blinding_unknown"])
 
     def test_adjudicated_historical_label_and_snapshot_rows_stay_historical(self):
-        b, cand = proj(); expert(b, "Dr H", "Dr K"); RR.set_adjudicator(b, "Dr K", True, "admin", "r", RR.CONFIRM_ADJUDICATOR)
+        b, cand = proj(); expert(b, "Dr H", "Dr K"); RR.set_adjudicator(b, "Dr K", True, "admin", "r", RR.CONFIRM_ADJUDICATOR); complete(b, "Dr H")
         pd.DataFrame([dict(cand_id=c, call=v, comment="", reviewer="Dr H", time="2025-01-01 10:00:00", **cand.set_index("cand_id").loc[c, FP].to_dict(), fine_code="")
                       for c, v in ((1, "cSS"), (2, "Vessel"))], columns=COLS).to_csv(os.path.join(b, "review", "S1_calls_Dr_H.csv"), index=False)
         write(b, cand, "Dr H", {3: "Normal"})                                  # first journaled change re-keys the old rows
         s = st(b)
         self.assertEqual([s[k]["provenance_class"] for k in (1, 2, 3)], ["historical_blinding_unknown", "historical_blinding_unknown", "verified_blind_post_3A"])
         CL.adjudicate(b, "S1", 1, "cSS", "Dr K", "reviewed the historical read")
-        self.assertEqual((st(b)[1]["provenance_class"], st(b)[1]["primary_eligible"]), ("historical_adjudicated", True))
+        self.assertEqual((st(b)[1]["provenance_class"], st(b)[1]["primary_eligible"]), ("historical_adjudicated", False))   # 3B: kept, not eligible
 
 
 class TestIntegrity(unittest.TestCase):
@@ -270,7 +291,7 @@ class TestPercivalGating(unittest.TestCase):
         w("Exp One", {1: "cSS", 2: "Vessel", 3: "cSS"}, read_phase="initial", ai_visible=False)
         w("Exp Two", {1: "cSS", 2: "Vessel", 3: "Normal"}, read_phase="initial", ai_visible=False)
         w("Novice", {4: "cSS"}, read_phase="initial", ai_visible=False)
-        for n in ("Exp One", "Exp Two"): RR.set_role(B, n, "expert", "admin", "fixture", RR.CONFIRM_ROLE)
+        for n in ("Exp One", "Exp Two"): RR.set_role(B, n, "expert", "admin", "fixture", RR.CONFIRM_ROLE); complete(B, n, sid="GT1")
         pd.DataFrame([dict(missed_id=1, reviewer="Novice", time="t", vox_i=1, vox_j=1, vox_k=1, x_mm=1, y_mm=1, z_mm=1, can_i=1, can_j=1, can_k=1, comment="",
                            plane="axial", slice=1, shape="point", points="[]", detector_fate="", context="", read_phase="initial", ai_visible="False", source="reviewer")]
                      ).to_csv(os.path.join(B, "review", "GT1_missed.csv"), index=False)

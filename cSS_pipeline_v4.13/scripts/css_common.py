@@ -25,58 +25,55 @@ def norm_call(c):
     return "Vessel" if isinstance(c, str) and c.strip() == "Vein" else c
 
 
+def match_one_to_one(cand, rows, tol_vox=2.0, tol_vol=0.15, margin_vox=0.5):
+    """Phase 3B: the ONE matcher that re-attaches recorded annotations (calls, adjudications, verified records) to the CURRENT candidates.
+    A record matches a candidate only if its centroid is within tol_vox voxels, its volume within tol_vol, and - when both carry one - the
+    hemisphere is the same. It stays UNRESOLVED (never silently moved) when:
+      no_candidate  nothing within tolerance (the lesion is gone, shrank / grew beyond tolerance, split or merged)
+      ambiguous     a second candidate is almost as close (within margin_vox of the best) - proximity is not proof of identity
+      contested     two or more records choose the same candidate (a merge, or duplicates): none of them is attached
+    -> [dict(row, cand_id or None, status, distance_vox, candidates_in_tolerance)] in row order. Rows are DataFrame rows or dicts."""
+    import pandas as _pd
+    R = rows.to_dict("records") if isinstance(rows, _pd.DataFrame) else list(rows)
+    out = []
+    if not len(cand): return [dict(row=i, cand_id=None, status="no_candidate", distance_vox=None, candidates_in_tolerance=0) for i in range(len(R))]
+    C = cand[["cand_id"] + FP].to_numpy(float)
+    ch = cand["hemi"].astype(str).to_numpy() if "hemi" in cand.columns else None
+    for i, r in enumerate(R):
+        try: p = np.array([float(r[f]) for f in FP])
+        except (KeyError, TypeError, ValueError):
+            out.append(dict(row=i, cand_id=None, status="no_fingerprint", distance_vox=None, candidates_in_tolerance=0)); continue
+        d = np.sqrt(((C[:, 1:4] - p[:3]) ** 2).sum(1)); dv = np.abs(C[:, 4] - p[3]) / max(p[3], 1.0)
+        ok = (d <= tol_vox) & (dv <= tol_vol)
+        h = r.get("hemi")
+        if ch is not None and isinstance(h, str) and h.strip(): ok &= (ch == h)
+        idx = np.where(ok)[0]
+        if not len(idx): out.append(dict(row=i, cand_id=None, status="no_candidate", distance_vox=None, candidates_in_tolerance=0)); continue
+        o = idx[np.argsort(d[idx])]
+        if len(o) > 1 and d[o[1]] - d[o[0]] < margin_vox:
+            out.append(dict(row=i, cand_id=None, status="ambiguous", distance_vox=round(float(d[o[0]]), 3), candidates_in_tolerance=int(len(o)))); continue
+        out.append(dict(row=i, cand_id=int(C[o[0], 0]), status="matched", distance_vox=round(float(d[o[0]]), 3), candidates_in_tolerance=int(len(o))))
+    by = {}
+    for x in out:
+        if x["status"] == "matched": by.setdefault(x["cand_id"], []).append(x)
+    for cid, xs in by.items():
+        if len(xs) > 1:
+            for x in xs: x.update(status="contested", contested_cand_id=cid, cand_id=None)
+    return out
+
+
 def match_calls(cand, calls, tol_vox=2.0, tol_vol=0.15, ambiguity_margin_vox=0.5):
-    """Re-attach reader calls to the CURRENT candidate list by fingerprint (centroid within
-    tol_vox voxels, volume within tol_vol), so re-running the detector can never move a call
-    onto a different lesion. Returns ({cand_id: call}, n_dropped), or (None, n) for a legacy
-    calls file that has no fingerprint columns.
-    Enhanced safety (v5.25):
-      - Enforces anatomical hemisphere matching when 'hemi' is available.
-      - Detects spatial ambiguity: drops match if two candidates are within ambiguity_margin_vox.
-      - Enforces one-to-one constraint: prevents silent overwrites if multiple calls contend for one candidate."""
+    """Re-attach reader calls to the CURRENT candidate list by fingerprint (match_one_to_one: one-to-one, hemisphere, ambiguity and
+    contest checks), so re-running the detector can never move a call onto a different lesion. Returns ({cand_id: call}, n_dropped), or
+    (None, n) for a legacy calls file that has no fingerprint columns. Phase 3B: replaces both the production rule (nearest within
+    tolerance - two calls could land on one candidate) and the v5.25 rule (row-by-row; identical calls merged silently)."""
     if not all(c in calls.columns for c in FP):
         return None, len(calls)
     out, dropped = {}, 0
-    C = cand[["cand_id"] + FP].to_numpy(float)
-    has_hemi = "hemi" in cand.columns and "hemi" in calls.columns
-    cand_hemi = cand["hemi"].astype(str).to_numpy() if has_hemi else None
-
-    matched_cand_to_calls = {}
-
-    for _, r in calls.iterrows():
-        d = np.sqrt(((C[:, 1:4] - r[FP[:3]].to_numpy(float)) ** 2).sum(1))
-        dv = np.abs(C[:, 4] - float(r.volume_mm3)) / max(float(r.volume_mm3), 1.0)
-        valid_mask = (d <= tol_vox) & (dv <= tol_vol)
-        if has_hemi and pd.notna(r.get("hemi")):
-            valid_mask &= (cand_hemi == str(r["hemi"]))
-        ok = np.where(valid_mask)[0]
-        if len(ok) == 0:
-            dropped += 1
-            continue
-
-        sorted_order = np.argsort(d[ok])
-        best_idx = ok[sorted_order[0]]
-        best_dist = d[best_idx]
-
-        # Check for ambiguity: multiple candidates equally close
-        if len(ok) > 1:
-            second_best_dist = d[ok[sorted_order[1]]]
-            if (second_best_dist - best_dist) < ambiguity_margin_vox:
-                # Ambiguous: cannot reliably determine which candidate owns the call
-                dropped += 1
-                continue
-
-        cid = int(C[best_idx, 0])
-        call_val = norm_call(r.call)
-        matched_cand_to_calls.setdefault(cid, []).append(call_val)
-
-    for cid, call_list in matched_cand_to_calls.items():
-        if len(set(call_list)) == 1:
-            out[cid] = call_list[0]
-        else:
-            # Conflicting calls matched to same candidate -> drop for manual review
-            dropped += len(call_list)
-
+    rows = calls.to_dict("records")
+    for x in match_one_to_one(cand, calls, tol_vox, tol_vol, ambiguity_margin_vox):
+        if x["status"] == "matched": out[x["cand_id"]] = norm_call(rows[x["row"]].get("call"))
+        else: dropped += 1
     return out, dropped
 
 

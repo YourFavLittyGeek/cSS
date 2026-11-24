@@ -101,6 +101,8 @@ def verify_historical(base, sid, reviewer, by, reason, evidence, confirm):
     if not reviewer: raise ValueError("refused: the reviewer whose read is verified is required")
     _need(confirm, CONFIRM_VERIFY, by, reason)
     if not _clean(evidence, 1000): raise ValueError("refused: describe the evidence (how the read was blind)")
+    if not os.path.exists(os.path.join(base, "review", f"{sid}_calls_{slug(reviewer)}.csv")):
+        raise ValueError(f"refused: {reviewer} has no review of {sid} to verify")       # 3B: a verification needs an existing review
     with RIO.study_lock(base, sid):
         recs = {}                                                            # exactly the calls that are verified (a later outside edit is not)
         p = os.path.join(base, "review", f"{sid}_calls_{slug(reviewer)}.csv")

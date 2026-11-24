@@ -93,9 +93,9 @@ try:
     for n_ in ("Dr A", "Dr B"): J(U, "/api/calls/role", dict(name=n_, role="expert", by="admin", reason="designated expert", confirm=pol["confirm"]["role"]))
     rl = J(U, "/api/calls/roles"); check("Phase 3A: roles recorded with history", {v["name"]: v["role"] for v in rl["roles"].values()} == {"Dr A": "expert", "Dr B": "expert"} and len(rl["history"]) == 2)
     r = J(U, "/api/calls/policy", dict(scope="study", target="SYNQ1", rule=dict(mode="newest"), by="tester")); check("Phase 3A: newest-wins refused", r.get("ok") is False)
-    r = J(U, "/api/calls/policy", dict(scope="study", target="SYNQ1", rule=dict(mode="reference", reviewer="Dr A", fallback="consensus"), by="tester"))
+    r = J(U, "/api/calls/policy", dict(scope="study", target="SYNQ1", rule=dict(mode="reference", reviewer="Dr B", fallback="none"), by="tester"))
     sh = pd.read_csv(os.path.join(B, "review", "SYNQ1_calls.csv")).set_index("cand_id").call
-    check("study rule: reference expert Dr A, expert consensus elsewhere", r.get("ok") and sh[ids[0]] == "cSS" and sh[ids[-1]] == "Vessel")
+    check("study rule: reference expert Dr B (completed review)", r.get("ok") and sh[ids[0]] == "Artifact" and sh[ids[-1]] == "Vessel")
     check("rule change archived the previous effective file", os.path.isdir(os.path.join(B, "review", "call_history", "SYNQ1")))
     before = {f: open(f, "rb").read() for f in glob.glob(os.path.join(B, "review", "SYNQ1_calls_*.csv"))}
     r = J(U, "/api/calls/consolidate", dict(scope="study", target="SYNQ1")); check("consolidation without phrase: hard stop", r.get("needs_confirm") is True)

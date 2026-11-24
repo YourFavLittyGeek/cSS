@@ -80,6 +80,7 @@ def run2(sl):
     d = pd.DataFrame([dict(cand_id=1, vox_i=int(c[0]), vox_j=int(c[1]), vox_k=int(c[2]), volume_mm3=round(float(len(ijk) * 0.768), 3))]); d.to_csv(os.path.join(B, "review", f"{SID2}_candidates.csv"), index=False); return d
 o2 = run2(blk(10, 10, 5, 6, 4)); pd.DataFrame([dict(cand_id=1, call="cSS", comment="", reviewer="Dr A", time="2026-01-01 10:00:00", **o2.iloc[0][FPC].to_dict())]).to_csv(
     os.path.join(B, "review", f"{SID2}_calls_Dr_A.csv"), index=False)
+with open(os.path.join(B, "review", f"{SID2}_final_Dr_A.json"), "w") as f: json.dump(dict(reviewer="Dr A", saved="2026-01-01 10:05:00"), f)   # 3B: a completed review
 s2 = PM.Study(B, SID2); s2.adopt_existing("first"); time.sleep(1.1); m2 = s2.start_run(dict(run=["detect"], reuse=[]), "re-processing")
 run2(blk(10, 10, 5, 6, 5)); time.sleep(1.1); s2.finish_run(m2["run_id"], True); L2 = CLN.after_run(B, SID2, m2["run_id"])
 r2 = CL.effective(B, SID2)["rows"][0]

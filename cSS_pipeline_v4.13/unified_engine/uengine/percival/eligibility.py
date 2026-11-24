@@ -48,6 +48,9 @@ REASONS = {
     "NOT_PRIMARY_GROUND_TRUTH": "label not eligible as primary ground truth (blinding unknown, AI visible, or not an independent review) - verify or adjudicate",
     "REVIEWER_NOT_EXPERT": "missed cSS marked by a reviewer who is not a designated expert",
     "REVIEW_NEEDS_REPAIR": "a reviewer file of this study does not match its journal - labels withheld until repaired",
+    "INCOMPLETE_REVIEW": "a designated expert who completed the review has no call on this candidate - unresolved",
+    "REVIEW_NOT_COMPLETED": "the expert call(s) come from reviews that are not completed yet",
+    "ADJUDICATED_NOT_CONSENSUS": "adjudicated label: kept with its provenance, not primary ground truth (no expert consensus)",
 }
 REQUIREMENTS = dict(NOT_REVIEWED="an expert call (cSS or not cSS)", UNCERTAIN="a definite call (cSS or not cSS)", OUT_OF_SCOPE="a definite call",
                     CONFLICT="agreement between reviewers or an adjudicated call", NO_IMAGE="the MRI patch (SWI + candidate mask)",
@@ -58,7 +61,9 @@ REQUIREMENTS = dict(NOT_REVIEWED="an expert call (cSS or not cSS)", UNCERTAIN="a
                     NO_MASK="a valid 2D contour or 3D segmentation mask", NO_EXPERT="a call by a designated expert",
                     ABSTAINED="a definite expert call or an adjudication", INSUFFICIENT_QUORUM="more definite expert calls or an adjudication",
                     NOT_PRIMARY_GROUND_TRUTH="a blind expert read, a documented verification or an adjudication",
-                    REVIEWER_NOT_EXPERT="an expert's mark", REVIEW_NEEDS_REPAIR="the reviewer file repaired from its journal")
+                    REVIEWER_NOT_EXPERT="an expert's mark", REVIEW_NEEDS_REPAIR="the reviewer file repaired from its journal",
+                    INCOMPLETE_REVIEW="a call from every expert who completed the review", REVIEW_NOT_COMPLETED="a completed expert review",
+                    ADJUDICATED_NOT_CONSENSUS="expert consensus (an adjudication is not primary ground truth)")
 
 
 def evaluate(c):

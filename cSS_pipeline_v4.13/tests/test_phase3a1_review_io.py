@@ -322,6 +322,7 @@ class TestReviewerServer(unittest.TestCase):
     def test_concurrent_windows_lose_no_call_or_missed_mark(self):
         import review_roles as RR                                              # Phase 3A.3: the shared file holds EXPERT consensus only
         RR.set_role(self.b, "Reader A", "expert", "test admin", "fixture", RR.CONFIRM_ROLE)
+        with RIO.study_lock(self.b, "S1"): RIO.journal_append(self.b, "S1", "Reader A", "initial_completed", n_candidates=0, n_called=0)
         slow = dict(PERCIVAL_TEST_SLOW_AT="review_io.table_write=0.08")             # widens any read-modify-write race
         A, B2 = Server(self.b, env=slow), Server(self.b, env=slow)
         try:

@@ -1233,6 +1233,8 @@ def pg_get(op, q):
     if op == "identity": return PG.identity_report()                                         # v5.25 patient identity per study
     if op == "job": return PG.job_state()                                                    # v5.25 live training job (heartbeat, ETA, resources)
     if op == "eligibility": return PG._jl(PG.P("eligibility", "current.json"), dict(error="not evaluated yet"))
+    if op == "readiness": return PG.readiness()                                              # 3D
+    if op == "split": return PG.split_state()
     if op == "shadow": return PG.shadow_summaries()                                          # v5.24 Percival shadow mode                        # only on request: reads other projects' patients.json
     if op == "pensieve": return PG.pensieve_state()                                          # v5.25 PENSIEVE Core Memory
     if op == "pensieve_query": return PG.pensieve_query(q.get("component", "albus"))
@@ -1262,7 +1264,14 @@ def pg_post(op, d):
         if op == "shadow": return PG.shadow_async(str(d.get("version", "")))
         if op == "select": return PG.set_selection(d.get("codes", []), bool(d.get("include", True)))
         if op == "settings":
-            for k in ("percival_autocycle", "percival_cycle_n", "percival_test_fraction"):
+            if "percival_test_fraction" in d:                                   # 3D: the split is locked once it exists
+                from uengine.percival import split as _SP
+                if _SP.current(PG.P()): return dict(ok=False, error="the patient-level split is locked: changing the test fraction needs a new split version (Training Center)")
+                try: f_ = float(d["percival_test_fraction"])
+                except (TypeError, ValueError): return dict(ok=False, error="invalid test fraction")
+                if not 0.05 <= f_ <= 0.5: return dict(ok=False, error="test fraction must be between 0.05 and 0.5")
+                SET["percival_test_fraction"] = f_
+            for k in ("percival_autocycle", "percival_cycle_n"):
                 if k in d: SET[k] = d[k]
             if "percival_learn_from" in d: SET["percival_learn_from"] = "finished" if d["percival_learn_from"] == "finished" else "labelled"
             if "percival_conflicts" in d: SET["percival_conflicts"] = "effective" if d["percival_conflicts"] == "effective" else "exclude"
@@ -1290,6 +1299,8 @@ def pg_post(op, d):
             return dict(ok=False, error="disabled: missed-cSS marks are recorded in the reviewer (validated, one journaled file per reviewer)")
         if op == "shadow_run": return PG.shadow_run_trial(str(d.get("target", "ALBUS")), str(d.get("hypothesis", "")), d.get("config", {}))
         if op == "score_unified": return PG.score_study_unified(str(d.get("study_id", "")))
+        if op == "split_new_version": return PG.split_new_version(float(d.get("fraction", 0)), d.get("by", ""), d.get("reason", ""), d.get("confirm", ""))   # 3D
+        if op == "dataset_export": return PG.export_dataset(str(d.get("id", "")))
         return dict(ok=False, error=f"unknown {op}")
     except Exception as e: return dict(ok=False, error=f"{type(e).__name__}: {e}"[:400])
 # ------------------------------------------------------------------ v5.25 Storage, Health, Wizard, Recovery & Migration APIs

@@ -25,13 +25,12 @@ def existing(sid, rev, new):
     if not os.path.exists(p): return {}
     c = pd.read_csv(p)
     if not len(c) or not all(k in c.columns for k in FP): return {}
-    C = new[["cand_id"] + FP].to_numpy(float); out = {}
-    for _, r in c.iterrows():
-        d = np.sqrt(((C[:, 1:4] - r[FP[:3]].to_numpy(float)) ** 2).sum(1)); dv = np.abs(C[:, 4] - float(r.volume_mm3)) / max(float(r.volume_mm3), 1.0)
-        ok = np.where((d <= 2.0) & (dv <= 0.15))[0]
-        if len(ok):
-            cm = r.get("comment", ""); cl = r.get("call", "")
-            out[int(C[ok[d[ok].argmin()], 0])] = (cl if isinstance(cl, str) else "", cm if isinstance(cm, str) else "")
+    from css_common import match_one_to_one                                   # Phase 3B: the one authoritative matcher
+    out = {}; R = c.to_dict("records")
+    for dx in match_one_to_one(new, c):
+        if dx["status"] != "matched": continue
+        r = R[dx["row"]]; cm = r.get("comment", ""); cl = r.get("call", "")
+        out[dx["cand_id"]] = (cl if isinstance(cl, str) else "", cm if isinstance(cm, str) else "")
     return out
 
 

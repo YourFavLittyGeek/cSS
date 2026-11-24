@@ -133,6 +133,37 @@ if M:
           json.dumps(dict(n1=n1, n2=n2, model=(R[0].get("percival_at_review") or {}).get("model") if R else None)))
     check("rollback to the previous version", PG.rollback().get("version") == vs[0] and PG.active_version() == vs[0])
     check("controlled cycles: no new cycle without N newly finished studies", PG.maybe_cycle() is False)
+    # ---------------------------------------------------------------- Phase 3B-3D: synthetic end-to-end readiness (SYNTHETIC data - not real performance)
+    from uengine.percival import datasets as DS3, split as SP3
+    man = DS3.load(PG.P(), M["data"]["dataset"]); used = [e for e in man["examples"] if e.get("partition")]
+    check("3D: the training dataset holds only eligible expert labels (provenance + expert source)", used and not man["readiness_problems"]
+          and all(e["gt_class"] in DS3.ELIGIBLE_CLASSES and e["label_source"] in DS3.EXPERT_SOURCES and e["y"] in (0, 1) for e in used), json.dumps(man.get("provenance")))
+    check("3D: the leakage audit ran and passed before training, and was saved", man["leakage_audit"]["passed"] and os.path.exists(PG.P("split", f"audit_{man['id']}.json")),
+          json.dumps(man["leakage_audit"]["checks"]))
+    SPV = SP3.current(PG.P())
+    check("3D: one locked patient-level split, recorded in the dataset", SPV["locked"] and man["split"]["version"] == SPV["version"]
+          and man["split"]["assignment_sha256"] == SPV["assignment_sha256"] and all(len({SPV["assignment"][PATIENT[s]] for s in studies if PATIENT[s] == p}) == 1 for p in set(PATIENT.values())))
+    check("3D: the model traces to dataset id + content hash + split + audit + code version", M["data"]["dataset"] == man["id"] and M["data"]["dataset_hash_manifest"] == man["content_hash"]
+          and M["data"]["split"] == man["split"] and M["data"]["leakage_audit"]["passed"] and M["data"].get("code_version"))
+    check("3C: source file hashes recorded per study (candidates, reviewer files, journals)", all("candidates.csv" in "".join(v) and any(k.endswith(".csv") and "_calls_" in k for k in v)
+          for v in man["sources"].values()), str(list(man["sources"].values())[0])[:200])
+    last_ds = DS3.listing(PG.P())[-1]["id"]                                   # the dataset of the current selection (cycle 2)
+    rp = PG.reproduce_dataset(last_ds); check("3C: the dataset reproduces identically from the same inputs", rp.get("identical") is True and not rp.get("source_files_changed"), json.dumps(rp)[:200])
+    ex_ = DS3.export(PG.P(), man["id"], os.path.join(T, "base", "export_check")); import hashlib as _h
+    check("3C: dataset export (examples.csv, manifest.json, split.json, SHA256SUMS) verifies", {"examples.csv", "manifest.json", "split.json", "SHA256SUMS"} <= set(ex_["files"])
+          and all(_h.sha256(open(os.path.join(ex_["out"], l.split()[1]), "rb").read()).hexdigest() == l.split()[0] for l in open(os.path.join(ex_["out"], "SHA256SUMS"))))
+    lex = DS3.load(PG.P(), last_ds)["examples"]; nv = len(PG.versions())
+    dev_s = next(e["study"] for e in lex if e.get("partition") == "development"); tst_s = next(e["study"] for e in lex if e.get("partition") == "test")
+    PG.CTX["fingerprint_of"] = lambda c: "same-exam" if c in (dev_s, tst_s) else ""                  # one examination under two study codes
+    check("3D: the same examination twice -> flagged as a duplicate study by the training integrity check (contributes once)",
+          len(PG.integrity([dev_s, tst_s])["duplicates"]) == 1)
+    PG.CTX["fingerprint_of"] = lambda c: ""
+    os.makedirs(os.path.join(B, "labels"), exist_ok=True)                      # inject: another split tool holds a development study out as TEST
+    pd.DataFrame([dict(study_id=dev_s, split="test")]).to_csv(os.path.join(B, "labels", "study_meta.csv"), index=False)
+    r_ = PG._train("leakage injection") or {}
+    check("3D: training REFUSES to start when the leakage audit fails (nothing registered)", r_.get("ok") is False and "held out by another split tool" in str(r_.get("error"))
+          and len(PG.versions()) == nv and PG.JOB["state"] == "failed", f"{r_} job={PG.JOB.get('state')} versions {nv}->{len(PG.versions())}")
+    os.remove(os.path.join(B, "labels", "study_meta.csv"))
 check("nothing written outside the project", not [p for p in glob.glob(os.path.join(T, "*")) if os.path.basename(p) != "base"])
 shutil.rmtree(T, ignore_errors=True)
 print(("ALL PASS" if not F else f"{len(F)} FAILED: {F}") + f" ({__file__})"); sys.exit(1 if F else 0)

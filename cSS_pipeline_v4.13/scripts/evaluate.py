@@ -20,6 +20,7 @@ import sys, os, json, argparse, numpy as np, pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from css_common import base as _base, cand_uid, label_class
 
+import label_guard as LG; LG.require("evaluate.py")                          # Phase 3D: labels/ are not Phase 3A ground truth
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument("--split", default="test", choices=["test", "dev", "all"])
 ap.add_argument("--source", default="consensus"); ap.add_argument("--k", default="5,10,20")
@@ -153,9 +154,9 @@ for col in [c_ for c_ in a.by.split(",") if c_]:
     strata[col] = {str(g): dict(metrics(d), ci=boot(d, rng)) for g, d in P.groupby(P[col].astype(str))}
 
 os.makedirs(f"{B}/review", exist_ok=True)
-P.to_csv(f"{B}/review/evaluation_{tag}_patients.csv", index=False)
+P.assign(label_provenance=LG.STAMP["label_provenance"]).to_csv(f"{B}/review/evaluation_{tag}_patients.csv", index=False)
 pd.DataFrame(froc).to_csv(f"{B}/review/evaluation_{tag}_froc.csv", index=False)
-json.dump(dict(split=a.split, source=a.source, overall=overall, ci95=ci, strata=strata, warnings=warn,
+json.dump(dict(**LG.STAMP, split=a.split, source=a.source, overall=overall, ci95=ci, strata=strata, warnings=warn,
                pending_adjudication=int(len(pend)), boot=a.boot, seed=a.seed,
                note="patient-grouped; research software; dev-split numbers are optimistic (rules were tuned on them)"),
           open(f"{B}/review/evaluation_{tag}.json", "w"), indent=2, default=float)

@@ -261,6 +261,10 @@ if not_rev:
 if not REVIEWER:
     print("decisions NOT saved: give --reviewer NAME (Phase 3A: every saved call needs a reviewer and provenance)"); sys.exit(0)
 import call_ledger as CL                                                     # shared calls + score = DERIVED from the ledger (expert consensus)
+import review_io as _RIO
+if ids and all(c in calls for c in ids):                                     # 3B: every listed candidate called -> the review is complete
+    with _RIO.study_lock(base, subj):
+        _RIO.journal_append(base, subj, REVIEWER, "review_completed", read_phase="unblinded_legacy", n_candidates=len(ids), n_called=len(calls), tool="review_css.py")
 _rec = CL.materialize(base, subj, by=REVIEWER, scripts=os.path.dirname(os.path.abspath(__file__)), rescore=True)
 if _rec.get("refused"): print("shared calls NOT rebuilt:", "; ".join(_rec.get("problems", [])))
 _sp = f"{base}/review/{subj}_score.json"

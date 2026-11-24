@@ -39,7 +39,7 @@ def make(signal, seed, n_pat=6, n_cand=30, test_pat=1):
 
 # 1. perfect signal
 make(True, 1)
-out = run(f"{S}/train_ranker.py", "--boot", "200").stdout
+out = run(f"{S}/train_ranker.py", "--research-unverified", "--boot", "200").stdout
 M = json.load(open(f"{B}/review/ranker_model.json"))
 w = dict(zip(M["features"], M["weights"]))
 if M["lopo_auc"] != 1.0: fail(f"perfect feature: LOPO AUC {M['lopo_auc']}")
@@ -48,7 +48,7 @@ if any(s.startswith("Q06") for s in M["training_studies"]): fail("trained on a t
 if "vein_tree_mm" in M["features"] or "mirror_dark_frac" in M["features"]: fail("deprecated column used as a feature")
 print(f"perfect feature: LOPO AUC {M['lopo_auc']} {M['lopo_auc_ci95']}, darkness_z weight {w['darkness_z']:+.2f} (largest); "
       f"score_v4 baseline {M['baseline_auc']}; trained on {len(M['training_studies'])} dev studies, test study left out")
-r = run(f"{S}/train_ranker.py", "--split", "test", ok=False)
+r = run(f"{S}/train_ranker.py", "--research-unverified", "--split", "test", ok=False)
 if r.returncode == 0: fail("--split test was accepted")
 # 3. rank_candidates
 before = pd.read_csv(f"{B}/review/Q06_candidates.csv")
@@ -67,14 +67,14 @@ print("rank_candidates: columns appended at the end, others unchanged; held-out 
       "missing feature filled and named; training study refused")
 # 2. no signal
 make(False, 3, n_pat=8)
-run(f"{S}/train_ranker.py", "--boot", "300")
+run(f"{S}/train_ranker.py", "--research-unverified", "--boot", "300")
 M = json.load(open(f"{B}/review/ranker_model.json"))
 lo, hi = M["lopo_auc_ci95"]
 if not (lo <= 0.5 <= hi) or abs(M["lopo_auc"] - 0.5) > 0.15: fail(f"noise labels: LOPO AUC {M['lopo_auc']} {M['lopo_auc_ci95']}")
 print(f"noise labels: LOPO AUC {M['lopo_auc']} {M['lopo_auc_ci95']} (interval includes 0.5)")
 # too few patients
 make(True, 4, n_pat=2, test_pat=0)
-r = run(f"{S}/train_ranker.py", ok=False)
+r = run(f"{S}/train_ranker.py", "--research-unverified", ok=False)
 if r.returncode == 0 or "need >= 3" not in (r.stdout + r.stderr): fail("2 patients were accepted")
 print("2 labelled patients: refused (needs >= 3)")
 print("RESULT ranker OK")

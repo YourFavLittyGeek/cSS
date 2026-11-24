@@ -138,12 +138,12 @@ class TestMasterEndToEndRebuild(unittest.TestCase):
         print("--- STEP 9: PERCIVAL GOVERNANCE Proposal Evaluation & Approval ---")
         governance = PercivalGovernance(pensieve=pensieve, vault=vault)
         eval_report = governance.evaluate_proposal(proposal)
-        self.assertTrue(eval_report["all_passed"])
+        self.assertFalse(eval_report["all_passed"])                           # Phase 3D: no leakage audit ran -> override required
         
         promoted, msg = governance.promote_proposal(
             proposal=proposal,
             approver_id="Chief_Neuroimaging_Scientist",
-            reason="Validated gain in sensitivity without false positive inflation."
+            reason="Validated gain in sensitivity without false positive inflation.", override=True     # explicit, recorded override
         )
         self.assertTrue(promoted)
         self.assertEqual(proposal.verdict, "approved")

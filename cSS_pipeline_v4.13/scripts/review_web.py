@@ -33,7 +33,7 @@ HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 ROOT = os.path.dirname(HERE)
 for p in (ROOT, os.path.join(ROOT, "unified_engine")):
     if p not in sys.path: sys.path.insert(0, p)
-from css_common import base as _base, save_calls, FP, norm_call, LABELS
+from css_common import base as _base, save_calls, FP, norm_call, LABELS, match_one_to_one
 import call_ledger as CL      # v5.15: every reviewer kept; shared ID_calls.csv / ID_score.json = EFFECTIVE calls (policy, default newest)
 import review_io as RIO       # Phase 3A.1: crash-safe writes, cross-process study locks, append-only reviewer event journals, recovery
 import review_blind as RB     # Phase 3A.2: server-enforced blinded initial read (phase from the journal, blinded candidate ids, redaction)
@@ -486,14 +486,11 @@ class Study:
     def _read_calls(self, p, note):
         c = pd.read_csv(p)
         if not len(c) or not all(k in c.columns for k in FP): return {}, note
-        C = self.df[["cand_id"] + FP].to_numpy(float); out = {}; lost = 0
-        for _, r in c.iterrows():
-            d = np.sqrt(((C[:, 1:4] - r[FP[:3]].to_numpy(float)) ** 2).sum(1))
-            dv = np.abs(C[:, 4] - float(r.volume_mm3)) / max(float(r.volume_mm3), 1.0)
-            ok = np.where((d <= 2.0) & (dv <= 0.15))[0]
-            if not len(ok): lost += 1; continue
-            cm = r.get("comment", ""); call = r.get("call", "")
-            out[int(C[ok[d[ok].argmin()], 0])] = dict(call=norm_call(call) if isinstance(call, str) else "",
+        out = {}; lost = 0; R = c.to_dict("records")
+        for dx in match_one_to_one(self.df, c):                              # Phase 3B: the one authoritative matcher (one-to-one)
+            if dx["status"] != "matched": lost += 1; continue
+            r = R[dx["row"]]; cm = r.get("comment", ""); call = r.get("call", "")
+            out[dx["cand_id"]] = dict(call=norm_call(call) if isinstance(call, str) else "",
                                                      comment=cm if isinstance(cm, str) else "",
                                                      time=r.get("time") if isinstance(r.get("time"), str) else "",
                                                      fine=r.get("fine_code") if isinstance(r.get("fine_code"), str) else "")
@@ -512,12 +509,9 @@ class Study:
         # v5.17: calls made on candidates of an EARLIER run (no current candidate matches them) are kept unchanged - they are the human
         # history that candidate lineage carries forward or asks you to confirm; before v5.17 the next save dropped them
         old = pd.read_csv(self.rpath(reviewer)) if os.path.exists(self.rpath(reviewer)) else pd.DataFrame()
-        if len(old) and all(k in old.columns for k in FP):
-            C = self.df[FP].to_numpy(float); keep = []
-            for _, r in old.iterrows():
-                dd = np.sqrt(((C[:, :3] - r[FP[:3]].to_numpy(float)) ** 2).sum(1)); dv = np.abs(C[:, 3] - float(r.volume_mm3)) / max(float(r.volume_mm3), 1.0)
-                if not ((dd <= 2.0) & (dv <= 0.15)).any(): keep.append(r.to_dict())
-            rows += keep
+        if len(old) and all(k in old.columns for k in FP):                    # rows that match no current candidate are kept unchanged
+            R = old.to_dict("records")
+            rows += [R[dx["row"]] for dx in match_one_to_one(self.df, old) if dx["status"] != "matched"]
         v = calls.get(cand_id, {}) if cand_id is not None else {}
         RIO.write_table(B, self.sid, reviewer, "calls", self.rpath(reviewer),
                         pd.DataFrame(rows, columns=["cand_id", "call", "comment", "reviewer", "time"] + FP + ["fine_code"]), ["cand_id"] + FP, action,

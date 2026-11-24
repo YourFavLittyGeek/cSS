@@ -226,7 +226,7 @@ def cmd_train(a, B):
                  lopo_fold_status=oof["G_all"][1] if "G_all" in oof else [],
                  lopo_predictions=[dict(study_id=s_, cand_uid=u_, y=int(y_), score=None if not np.isfinite(p_) else round(float(p_), 4))
                                    for s_, u_, y_, p_ in zip(T.study_id, T.cand_uid, T.y, oof["G_all"][0])] if "G_all" in oof else [],
-                 build=build_id(), research_only=True,
+                 build=build_id(), research_only=True, **__import__("label_guard").STAMP,
                  note="ranks candidates for expert review; not calibrated, not clinically validated")
     model["model_hash"] = CM.model_hash(model)
     out = a.out or f"{B}/review/surface_patch_model.json"; json.dump(model, open(out, "w"), indent=2, default=float)
@@ -275,6 +275,8 @@ def cmd_lopo_manifest(a):
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] in ("train", "lopo-manifest"):        # Phase 3D: labels/ are not Phase 3A ground truth
+        import label_guard as LG; LG.require(f"classify_surface_patches.py {sys.argv[1]}")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     f = sub.add_parser("features"); f.add_argument("subjects", nargs="+")
