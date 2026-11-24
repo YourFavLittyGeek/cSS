@@ -60,7 +60,8 @@ check(a["components"]["image"] != b["components"]["image"] and a["components"]["
       and (a["percival_score"] != b["percival_score"] or M["discovery"]["chosen"] in ("math_only",)),
       f"3 patch consumed: image {a['components']['image']} -> {b['components']['image']}, fusion {a['components']['fusion']} -> {b['components']['fusion']}, "
       f"Percival {a['percival_score']} -> {b['percival_score']} (meta-model {M['discovery']['chosen']}); MATH / Unified / Characteristic unchanged")
-check(b["status"] == "uncertain" and any("image out-of-distribution" in x for x in b["reasons"]) and a["image_ood_distance"] is not None
+# Stage 3 abstention policy: two or more triggers (here OOD + component disagreement) escalate "uncertain" to "review"
+check(b["status"] in ("uncertain", "review") and any("image out-of-distribution" in x for x in b["reasons"]) and a["image_ood_distance"] is not None
       and a["image_ood_distance"] <= a["image_ood_limit"] and not any("image out-of-distribution" in x for x in a["reasons"]),
       f"3b a patch unlike the training patches is flagged (status {b['status']}, distance {b.get('image_ood_distance')} > limit {b.get('image_ood_limit')}); "
       f"the real patch is not (distance {a.get('image_ood_distance')})", json.dumps(b.get("reasons")))

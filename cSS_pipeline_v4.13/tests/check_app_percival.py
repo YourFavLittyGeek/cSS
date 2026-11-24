@@ -107,8 +107,8 @@ try:
     sc = get(f"/api/percival/score?code={studies[2]}")
     check("every study assessed: Percival Score 0-100, band, status, components", sc.get("candidates") and all((c["percival_score"] is None or 0 <= c["percival_score"] <= 100) for c in sc["candidates"]) and set(sc["candidates"][0]["components"]) == {"math", "unified", "char", "image", "fusion"})
     check("prediction ledger written", bool(get(f"/api/percival/history?code={studies[2]}")["ledger"]))
-    for tab, mark in (("overview", 'class="lv-svg"'), ):
-        D = dom("#intel"); check("Intelligence screen: tiles, learning curve, locked-test table", 'data-pv="tiles"' in D and mark in D and 'data-pv="test"' in D)
+    for tab, mark in (("overview", 'class="lv-svg"'), ):      # markers follow the current views: System is the default tab (81d9bd4); the 14-section Training Center (26568a1); detection / segmentation eligibility (26568a1)
+        D = dom("#intel?tab=overview"); check("Intelligence screen: tiles, learning curve, locked-test table", 'data-pv="tiles"' in D and mark in D and 'data-pv="test"' in D)
     shot("v522_intelligence_overview", "#intel")
     De = dom("#intel?tab=evidence", 15000)
     check("v5.23 Evidence & reliability tab: model families, fusion benefit, shared inputs, incremental value, disagreement, calibration, review snapshots",
@@ -116,7 +116,7 @@ try:
     shot("v523_intelligence_evidence", "#intel?tab=evidence", 2600)
     Dc = dom("#intel?tab=center", 15000)
     check("v5.24 Training Center: separate states (studies / processed / candidates / called / eligible), datasets per component, study table",
-          all(f'data-pv="{k}"' in Dc for k in ("center", "center-tiles", "datasets", "selection")) and "Decision Engine" in Dc and "LUMOS image network" in Dc)      # Stage 8: architecture names (the old "Percival meta-model" text no longer existed in the view - the check never ran while headless Chrome timed out)
+          all(f'data-pv="{k}"' in Dc for k in ("section-overview", "section-studies", "section-dataset-builder", "selection")) and "Decision Engine" in Dc and "LUMOS image network" in Dc)      # Stage 8: architecture names (the old "Percival meta-model" text no longer existed in the view - the check never ran while headless Chrome timed out)
     shot("v524_training_center", "#intel?tab=center", 2600)
     Di = dom("#intel?tab=integrity", 15000)
     check("v5.24 Data integrity: store schema, migration history, studies compatibility table", 'data-pv="integrity"' in Di and 'data-pv="compat"' in Di and "schema" in Di)
@@ -127,14 +127,14 @@ try:
           and "No model becomes active by itself" in Dm)
     shot("v524_model_center", "#intel?tab=models", 2600)
     post("/api/percival/eligibility", {}); Dc = dom("#intel?tab=center", 15000); R = get("/api/percival/runs")["runs"]
-    check("v5.24 Training Center: training runs, persisted eligibility record, reproducibility check", 'data-pv="runs"' in Dc and 'data-pv="eligibility-record"' in Dc
-          and "is reproducible" in Dc and R and R[0]["state"] == "finished" and R[0]["version"] == "v001", json.dumps(R)[:300])
+    check("v5.24 Training Center: training runs, persisted eligibility record, reproducibility check", 'data-pv="section-history"' in Dc and "run001" in Dc and 'data-pv="section-eligibility"' in Dc
+          and 'id="pv-repro"' in Dc and R and R[0]["state"] == "finished" and R[0]["version"] == "v001", json.dumps(R)[:300])
     rp = post("/api/percival/reproduce", dict(id=get("/api/percival/state")["datasets"][-1]["id"]))
     check("v5.24 dataset reproducibility check: identical, or every difference explained (here the Unified step re-extracts predictors after switch-on)",
           rp.get("ok") and (rp.get("identical") is True or (rp["n_differences"] > 0 and set(rp["changes"]) <= {"input availability changed (predictor)"})), json.dumps(rp)[:1500])
     shot("v524_training_runs", "#intel?tab=center", 2600)
     cc = get(f"/api/percival/candidates?code={studies[0]}")
-    check("v5.24 candidate drill-down: eligibility per component with reasons in words", cc.get("candidates") and all(set(c["components"]) == {"char", "image", "fusion", "meta", "predictor", "shadow"} and "reasons_text" in c and "missing" in c for c in cc["candidates"]), str(cc)[:300])
+    check("v5.24 candidate drill-down: eligibility per component with reasons in words", cc.get("candidates") and all(set(c["components"]) == {"char", "image", "fusion", "meta", "predictor", "shadow", "detection", "segmentation"} and "reasons_text" in c and "missing" in c for c in cc["candidates"]), str(cc)[:300])
     Dx = dom("#intel?tab=explore", 15000)
     check("v5.23 candidate explorer lists why a candidate is uncertain", "why uncertain" in Dx)
     # the ordinary viewer: ONE primary score
