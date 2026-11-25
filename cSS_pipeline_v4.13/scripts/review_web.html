@@ -296,6 +296,8 @@ let nx,ny,nz,vox, cur=[0,0,0], ctr=[0,0,0], zoom=1;
 let layout=LS("layout","1"), panes=[], act=0;
 let ci=0, calls={}, undo=[], tool=LS("tool","pan"), ruler=null, probe=null, missed=[], draft=null, shape="rect", onlyDiffer=false;
 let autoPt=LS("autopt",true),autoSec=LS("autosec",10),nxTimer=null;   // after the final save: next patient of the cohort
+const clampSec=v=>Math.max(0,Math.min(600,Math.round(Number(v)||0)));   // seconds before the next patient; 0 = immediately
+const afMode=()=>!autoPt?"manual":clampSec(autoSec)===0?"now":"after";
 let compareOn=LS("compare",true), revoteMode=false, readerScore=null, finalRec=null;
 let showMark=LS("mark",true), showOther=LS("other",true), autoNext=LS("auto",true), showAI=LS("ai",true), showText=LS("text",true), showCross=LS("cross2",false), mag=false, mouse=null;
 let mir=false, showRL=LS("rl",true), ltah=LS("ltah",false), ltopen=false, sideChk=null;
@@ -616,7 +618,7 @@ function nextCard(r,nxt,i,n){clearInterval(nxTimer);const go2=()=>{clearInterval
     <button class="btn" id="ncStay">${autoPt?"Stay":"Close"}</button><button class="btn pri" id="ncNext">Next ▸</button></div>`;
     $("#ncSw").onclick=()=>{autoPt=!autoPt;LSS("autopt",autoPt);start()};$("#ncNext").onclick=go2;
     $("#ncStay").onclick=()=>{clearInterval(nxTimer);$("#nextcard").classList.remove("show")};$("#ncFull").onclick=()=>{clearInterval(nxTimer);$("#nextcard").classList.remove("show");$("#summary").classList.add("show")}};
-  const start=()=>{clearInterval(nxTimer);let left=autoSec||10;paint(left);if(!autoPt)return;nxTimer=setInterval(()=>{left--;if(left<=0)go2();else paint(left)},1000)};
+  const start=()=>{clearInterval(nxTimer);let left=clampSec(autoSec);if(autoPt&&left<=0){go2();return}paint(left);if(!autoPt)return;nxTimer=setInterval(()=>{left--;if(left<=0)go2();else paint(left)},1000)};
   $("#nextcard").classList.add("show");start()}
 function reReview(){$("#compare").classList.remove("show");const dx=differIdx();if(!dx.length){status("No disagreements to re-review.");return}onlyDiffer=true;setTab("calls");go(dx[0]);status("Re-reviewing "+dx.length+" disagreement(s). Press Q when done.")}
 function setCompare(v){compareOn=v;LSS("compare",v);$("#cNo").checked=!v}
@@ -813,7 +815,10 @@ const MENUS_OLD={file:()=>[],edit:()=>["undo","clear","comment"],
  view:()=>[{sub:"Layout",ic:"l4",k:"\\",items:()=>["lay1","lay2","lay4"]},{sub:"Plane",ic:"cube",k:"Tab",items:planeItems},{sub:"Sequence",ic:"seq",items:seqItems},"-","mark","other","mag","mip","text","cross","ai","-","mirror","rl","side","-","zin","zout","fit","actual","reset","centre","-","tviewer","tcands","tcalls","hidepanel","autohide","-",{sub:"Theme",ic:"moon",items:themeItems}],
  cand:()=>["prev","next","unread","audit","-","call_y","call_v","call_n","call_a","call_u","call_h","-","auto"],
  tools:()=>["pan","zoomtool","wl","scroll","-","mag","dark","ruler","miss","-","snap","snapas","snapfolder"],
- settings:()=>["vmode","primary","-","autohide","text","rl","mirror","compare","ai","auto","-","autopt",{sub:"Close the summary after",ic:"next",items:()=>[[0,"Immediately (no summary)"],[3,"3 s"],[5,"5 s"],[10,"10 s (default)"],[20,"20 s"],[30,"30 s"]].map(([v,l])=>({l,ic:"next",f:()=>{autoSec=v;LSS("autosec",v)},on:()=>autoSec===v}))},"-",{sub:"Theme",ic:"moon",items:themeItems},"-","snapset"],help:()=>["help"]};
+ settings:()=>["vmode","primary","-","autohide","text","rl","mirror","compare","ai","auto","-",{sub:"Next patient after the final save",ic:"next",items:()=>[{l:"Immediately",ic:"next",f:()=>setAfter("now"),on:()=>afMode()==="now"},
+   ...[5,10,20,30].map(v=>({l:`After ${v} s`,ic:"next",f:()=>setAfter("after",v),on:()=>afMode()==="after"&&clampSec(autoSec)===v})),
+   {l:`Other number of seconds…${afMode()==="after"&&![5,10,20,30].includes(clampSec(autoSec))?` (now ${clampSec(autoSec)} s)`:""}`,ic:"next",f:()=>openSet()},
+   {l:"Stay (manual)",ic:"next",f:()=>setAfter("manual"),on:()=>afMode()==="manual"}]},"-",{sub:"Theme",ic:"moon",items:themeItems},"-","snapset"],help:()=>["help"]};
 // ---------- Save final, screenshot, settings window ----------
 function unreadN(){return M?M.cands.filter(c=>!c.audit&&!callOf(c)).length:0}
 setInterval(()=>{const b=$("#bSaveFinal");if(!b||!M)return;const n=unreadN();b.textContent=n?`💾 Save final · ${n} unread`:"💾 Save final";b.style.background=n?"":"#2e8b46";b.style.color=n?"":"#fff"},800);
@@ -827,19 +832,24 @@ function openSet(){closeMenus();const sw=(id,on,lab,dis)=>`<div class="it"><span
   $("#setbody").innerHTML=`<div class="sgrid">
    <div class="sbox"><h4>Reading</h4>${sw("auto",autoNext,"Auto-next candidate after a decision")}${sw("blind",LS("blind",false),"Blind read (no AI meter / score, audit objects)")}
      <div class="it"><span>Primary reviewer</span><span style="flex:1"></span><button class="btn" id="setPrim">${esc((M&&M.primary)||"choose…")}</button></div>${sw("compare",compareOn,"AI comparison before the final save")}</div>
-   <div class="sbox"><h4>After the final save</h4>${sw("autopt",autoPt,"Next patient automatically")}${sel("autosec",autoSec,[[0,"Immediately (no summary)"],[3,"3 s"],[5,"5 s"],[10,"10 s"],[20,"20 s"],[30,"30 s"]],"Close the summary after")}</div>
+   <div class="sbox"><h4>After the final save</h4>${sel("afmode",afMode(),[["now","Go to the next patient immediately"],["after","Go to the next patient after…"],["manual","Stay - I go on myself (manual)"]],"Next patient")}
+     <div class="it" id="afSecRow" style="${afMode()==="after"?"":"display:none"}"><span>Seconds before the next patient</span><span style="flex:1"></span><input type="number" id="afSec" min="1" max="600" step="1" value="${Math.max(1,clampSec(autoSec)||10)}" style="width:64px"></div></div>
    <div class="sbox"><h4>AI support</h4>${sw("ai",showAI,"AI meter (K)",vmode)}${sw("s3",showS3,"3-D shape card (3)")}</div>
    <div class="sbox"><h4>Image</h4>${sw("text",showText,"Corner text and scale bar")}${sw("rl",showRL,"R badge")}${sw("cross",showCross,"Crosshair")}${sw("mirror",mir,"Mirror left–right")}${sw("other",showOther,"Other candidates' markings")}
      ${sel("layout",layout,[["1","1 × 1"],["2","1 × 2"],["4","2 × 2"]],"Layout")}</div>
    <div class="sbox"><h4>Panel</h4>${sw("autohide",ah,"Auto-hide right panel")}${sw("ltah",ltah,"Fold the left tool strip")}</div>
    <div class="sbox"><h4>Screenshots &amp; snapshots</h4>${sel("scap",LS("scap","window"),[["window","Whole reviewer window"],["area","Choose an area with the mouse"]],"Screenshot button")}
      <div class="it"><span class="mut">Folder</span><span style="flex:1"></span><span class="mut sm">${esc(snap.folder||"review/snapshots/<study>")}</span></div><div class="it"><button class="btn" id="setSnap">Snapshot settings…</button></div></div></div>`;
-  const F={auto:()=>A.auto.f(),blind:()=>A.blind.f(),compare:()=>setCompare(!compareOn),autopt:()=>{autoPt=!autoPt;LSS("autopt",autoPt)},ai:()=>A.ai.f(),s3:()=>s3Toggle(),
+  const F={auto:()=>A.auto.f(),blind:()=>A.blind.f(),compare:()=>setCompare(!compareOn),ai:()=>A.ai.f(),s3:()=>s3Toggle(),
     text:()=>A.text.f(),rl:()=>A.rl.f(),cross:()=>A.cross.f(),mirror:()=>A.mirror.f(),other:()=>A.other.f(),autohide:()=>A.autohide.f(),ltah:()=>{ltah=!ltah;LSS("ltah",ltah);applyPalette()}};
   $$("#setbody [data-sw]").forEach(e=>e.onclick=()=>{const f=F[e.dataset.sw];if(f)f();setTimeout(openSet,60)});
-  $$("#setbody [data-sel]").forEach(e=>e.onchange=()=>{const k=e.dataset.sel,v=e.value;if(k==="autosec"){autoSec=+v;LSS("autosec",+v)}else if(k==="scap")LSS("scap",v);else if(k==="layout")A["lay"+v].f()});
+  $$("#setbody [data-sel]").forEach(e=>e.onchange=()=>{const k=e.dataset.sel,v=e.value;if(k==="afmode")setAfter(v,$("#afSec").value);else if(k==="scap")LSS("scap",v);else if(k==="layout")A["lay"+v].f()});
+  $("#afSec").onchange=()=>{const e=$("#afSec");e.value=Math.max(1,clampSec(e.value)||1);setAfter("after",e.value)};
   $("#setPrim").onclick=()=>{$("#setdlg").classList.remove("show");showPrimary()};$("#setSnap").onclick=()=>{$("#setdlg").classList.remove("show");openSnapSettings()};
   $("#setdlg").classList.add("show")}
+// "After the final save": now (autosec 0) / after N s (autosec N) / manual (autopt off) - the same two stored keys as before
+function setAfter(mode,sec){autoPt=mode!=="manual";if(mode==="now")autoSec=0;else if(mode==="after")autoSec=Math.max(1,clampSec(sec)||10);
+  LSS("autopt",autoPt);LSS("autosec",autoSec);const r=$("#afSecRow");if(r)r.style.display=mode==="after"?"":"none"}
 function resetSet(){if(!confirm("Reset every reviewer setting to its default?"))return;for(const k of Object.keys(localStorage))if(k.startsWith("css_")&&!k.startsWith("css_vmode_"))localStorage.removeItem(k);
   fetch("/api/vset",{method:"POST",headers:{"Content-Type":"application/json","X-CSS":"1"},body:JSON.stringify({auto:true,ai:true,compare:true,autopt:true,autosec:10,text:true,rl:true,cross2:false,other:true,mark:true,ah:false,ltah:false,layout:"1",s3:true,blind:false,scap:"window"})}).then(()=>location.reload())}
 // ---------- v5.12 3-D morphology analysis (css_morph3d.py; read-only, never changes the candidate or the score) ----------

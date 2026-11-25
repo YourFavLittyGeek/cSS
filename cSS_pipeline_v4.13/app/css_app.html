@@ -481,15 +481,19 @@ async function vsetDlg(){const V=await api("/api/vset"),g=(k,d)=>V[k]===undefine
   const sel=(k,d,opts,l)=>`<div class="row" style="margin:5px 0"><span style="width:200px">${l}</span><select data-vs="${k}">${opts.map(([v,t])=>`<option value="${v}" ${String(g(k,d))===String(v)?"selected":""}>${t}</option>`).join("")}</select></div>`;
   $("#dlg").innerHTML=`<h2>Reviewer settings</h2><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 24px">
    <div><b class="note">READING</b>${sw("auto",true,"Auto-next candidate after a decision")}${sw("blind",false,"Blind read (no AI meter / score, audit objects)")}${sw("compare",true,"AI comparison before the final save")}</div>
-   <div><b class="note">AFTER THE FINAL SAVE</b>${sw("autopt",true,"Next patient automatically")}${sel("autosec",10,[[0,"Immediately"],[3,"3 s"],[5,"5 s"],[10,"10 s"],[20,"20 s"],[30,"30 s"]],"Close the summary after")}</div>
+   <div><b class="note">AFTER THE FINAL SAVE</b>${(()=>{const ap=g("autopt",true),as=Math.max(0,Math.min(600,Math.round(+g("autosec",10)||0))),m=!ap?"manual":as===0?"now":"after";
+     return `<div class="row" style="margin:5px 0"><span style="width:200px">Next patient</span><select id="vsAf"><option value="now" ${m==="now"?"selected":""}>Immediately</option><option value="after" ${m==="after"?"selected":""}>After…</option><option value="manual" ${m==="manual"?"selected":""}>Stay (manual)</option></select></div>
+     <div class="row" id="vsAfRow" style="margin:5px 0;${m==="after"?"":"display:none"}"><span style="width:200px">Seconds</span><input type="number" id="vsAfSec" min="1" max="600" step="1" value="${Math.max(1,as||10)}" style="width:70px"></div>`})()}</div>
    <div><b class="note">AI SUPPORT</b>${sw("ai",true,"AI meter")}${sw("s3",true,"3-D shape card")}</div>
    <div><b class="note">IMAGE</b>${sw("text",true,"Corner text and scale bar")}${sw("rl",true,"R badge")}${sw("cross2",false,"Crosshair")}${sw("other",true,"Other candidates' markings")}${sel("layout","1",[["1","1 × 1"],["2","1 × 2"],["4","2 × 2"]],"Layout")}</div>
    <div><b class="note">PANEL</b>${sw("ah",false,"Auto-hide right panel")}${sw("ltah",false,"Fold the left tool strip")}</div>
    <div><b class="note">SCREENSHOTS</b>${sel("scap","window",[["window","Whole reviewer window"],["area","Choose an area with the mouse"]],"Screenshot button")}</div></div>
    <p class="note">Applies to reviewer windows opened from now on (an open reviewer: reload it). Primary reviewer and snapshot naming are set in the reviewer.</p>
    <div class="acts"><button class="b" data-v="x">Cancel</button><button class="b pri" data-v="ok">Save</button></div>`;
-  $("#shade").style.display="flex";$("#dlg").querySelectorAll("button[data-v]").forEach(x=>x.onclick=async()=>{$("#shade").style.display="none";if(x.dataset.v!=="ok")return;const o={};
-    $("#dlg").querySelectorAll("[data-vk]").forEach(e=>o[e.dataset.vk]=e.checked);$("#dlg").querySelectorAll("[data-vs]").forEach(e=>o[e.dataset.vs]=e.dataset.vs==="autosec"?+e.value:e.value);
+  $("#shade").style.display="flex";$("#vsAf").onchange=()=>{$("#vsAfRow").style.display=$("#vsAf").value==="after"?"":"none"};
+  $("#dlg").querySelectorAll("button[data-v]").forEach(x=>x.onclick=async()=>{$("#shade").style.display="none";if(x.dataset.v!=="ok")return;const o={};
+    $("#dlg").querySelectorAll("[data-vk]").forEach(e=>o[e.dataset.vk]=e.checked);$("#dlg").querySelectorAll("[data-vs]").forEach(e=>o[e.dataset.vs]=e.value);
+    {const m=$("#vsAf").value;o.autopt=m!=="manual";o.autosec=m==="now"?0:Math.max(1,Math.min(600,Math.round(+$("#vsAfSec").value||10)))}
     await api("/api/vset",o);toast("reviewer settings saved")})}
 
 // export / share: explicit warning + verified local folder (never the Desktop)

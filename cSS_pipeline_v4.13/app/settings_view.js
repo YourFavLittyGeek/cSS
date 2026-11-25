@@ -1331,7 +1331,13 @@ async function renderSectionPipeline(el) {
       <div class="row"><label><input type="checkbox" data-pf="qc_snapshot" ${F.qc_snapshot?'checked':''}> Generate QC slice snapshot per study</label></div>
       <div class="row"><label><input type="checkbox" data-pf="version_stamp" ${F.version_stamp?'checked':''}> Embed cryptographic version stamp on outputs</label></div>
     </div>
+    <div class="card" style="padding:18px;margin-top:10px">
+      <b>Reviewer</b>
+      <div class="note" style="margin:6px 0">After the final save: next patient immediately, after a number of seconds you choose, or stay (manual). Also reading, AI support and image options.</div>
+      <button class="b" id="pf-vset">Reviewer settings…</button>
+    </div>
   `;
+  { const vb = el.querySelector("#pf-vset"); if (vb) vb.onclick = () => { if (typeof vsetDlg === "function") vsetDlg(); }; }
   el.querySelectorAll("[data-pf]").forEach(chk => {
     chk.onchange = async () => {
       F[chk.dataset.pf] = chk.checked;
