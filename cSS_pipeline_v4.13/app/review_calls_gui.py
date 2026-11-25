@@ -5,7 +5,7 @@ confirmed consolidation. Research software.
 Nothing here edits a reviewer's own file. Changing the policy re-writes only the EFFECTIVE files (review/ID_calls.csv, ID_score.json,
 ID_effective.json) and copies their previous versions to review/call_history/ID/ first. consolidate() is the only destructive operation:
 it requires the exact confirmation phrase, archives every affected file first and can be undone with restore()."""
-import importlib, os, sys
+import glob, importlib, os, sys, threading, time
 
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 
@@ -90,7 +90,61 @@ def policy(B, PAT):
 
 # ---------------------------------------------------------------- Phase 3A.3/3A.4 administration (local administrator; typed confirmations)
 def roles(B): L = _ledger(B); return dict(roles=L.RR.current(B), history=L.RR.history(B)["events"], role_names=list(L.RR.ROLES))
-def set_role(B, name, role, by, reason, confirm): return _ledger(B).RR.set_role(B, name, role, by, reason, confirm)
+def set_role(B, name, role, by, reason, confirm, PAT=None, background=True):
+    """set the role, then re-write the EFFECTIVE calls of every study this reviewer called (2026-11-25: before, a role change left
+    review/ID_calls.csv as it was - e.g. empty for every study read before the reviewer became an expert)"""
+    r = _ledger(B).RR.set_role(B, name, role, by, reason, confirm)
+    if PAT is not None:
+        sl = _ledger(B).RR.slug(name)
+        codes = [c for c, _ in _studies(B, PAT) if os.path.exists(os.path.join(B, "review", f"{c}_calls_{sl}.csv"))]
+        r["rebuilding"] = codes
+        if background: threading.Thread(target=refresh_effective, args=(B, PAT, codes, by or "role change"), daemon=True, name="calls-refresh").start()
+        else: r["rebuilt"] = refresh_effective(B, PAT, codes, by or "role change")
+    return r
+
+
+REFRESH = {"running": False, "done": [], "time": ""}
+
+
+def _away(B, code):
+    try:
+        import pensieve_move as PMV
+        return PMV.in_pensieve(B, code)
+    except Exception:
+        return False
+
+
+def refresh_effective(B, PAT, codes=None, by="role change"):
+    """re-write the effective calls (review/ID_calls.csv + ID_effective.json) of the given studies (None = all with candidates). Re-scored only
+    while the study's images are on this Mac: score_css on a study moved to Pensieve would fall back to the Euclidean approximation; it is
+    re-scored at its next save in the reviewer (the record says score_current = false until then). Reviewers' own files are never touched."""
+    L = _ledger(B); out = []
+    REFRESH.update(running=True, done=[], time=time.strftime("%Y-%m-%d %H:%M:%S"))
+    try:
+        for code, coh in _studies(B, PAT):
+            if codes is not None and code not in codes: continue
+            try:
+                r = L.materialize(B, code, coh, by=by, rescore=not _away(B, code))
+                out.append(dict(code=code, n_effective=r.get("n_effective"), changed=r.get("changed"), refused=r.get("refused", False),
+                                score_current=r.get("score_current")))
+            except Exception as e:
+                out.append(dict(code=code, error=f"{type(e).__name__}: {e}"[-300:]))
+            REFRESH["done"] = list(out)
+    finally:
+        REFRESH["running"] = False
+    return out
+
+
+def stale_effective(B, PAT):
+    """studies whose effective calls were written BEFORE the newest role change (they must be rebuilt)"""
+    try: rt = os.path.getmtime(_ledger(B).RR.roles_journal(B))
+    except OSError: return []
+    st = []
+    for code, _ in _studies(B, PAT):
+        if not glob.glob(os.path.join(B, "review", f"{code}_calls_*.csv")): continue
+        ep = os.path.join(B, "review", f"{code}_effective.json")
+        if not os.path.exists(ep) or os.path.getmtime(ep) < rt: st.append(code)
+    return st
 def set_adjudicator(B, name, allowed, by, reason, confirm): return _ledger(B).RR.set_adjudicator(B, name, allowed, by, reason, confirm)
 def verify_historical(B, code, reviewer, by, reason, evidence, confirm): return _ledger(B).RR.verify_historical(B, code, reviewer, by, reason, evidence, confirm)
 

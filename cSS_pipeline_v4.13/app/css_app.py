@@ -1241,7 +1241,7 @@ def calls_post(op, d):
             return RCG.consolidate(B, PAT, d.get("scope", "study"), d.get("target", ""), str(d.get("confirm")), by=by)
         if op == "restore": return RCG.restore(B, d["code"], d["archive"])
         # Phase 3A.3/3A.4 administration (local administrator; typed confirmation + reason; every change journaled)
-        if op == "role": return RCG.set_role(B, d.get("name", ""), d.get("role", ""), by, d.get("reason", ""), d.get("confirm", ""))
+        if op == "role": return RCG.set_role(B, d.get("name", ""), d.get("role", ""), by, d.get("reason", ""), d.get("confirm", ""), PAT=PAT)
         if op == "adjudicator": return RCG.set_adjudicator(B, d.get("name", ""), bool(d.get("allowed")), by, d.get("reason", ""), d.get("confirm", ""))
         if op == "verify_historical": return RCG.verify_historical(B, str(d.get("code", "")), d.get("reviewer", ""), by, d.get("reason", ""), d.get("evidence", ""), d.get("confirm", ""))
         if op in ("adjudicate", "withdraw_adjudication"):
@@ -2694,6 +2694,18 @@ def queue_unified(p, force=False):
             try: write_results_file()
             except Exception: pass
     threading.Thread(target=run, daemon=True).start()
+def calls_refresh_stale():
+    """2026-11-25: a role change before this fix left review/ID_calls.csv as it was (empty for every study read before the reviewer
+    became an expert) - rebuild every study whose effective calls are older than the roles journal"""
+    try:
+        import review_calls_gui as RCG
+        st = RCG.stale_effective(B, PAT)
+        if st:
+            r = RCG.refresh_effective(B, PAT, st, by="role change (startup)")
+            print(f"effective calls rebuilt after a role change: {len(r)} studies", flush=True)
+    except Exception as e: print(f"effective calls not rebuilt: {e}", flush=True)
+
+
 def ai_backfill():
     """finished patients without an AI score get one (in the background, at start and after each finished patient)"""
     for p in list(PAT):
@@ -3418,6 +3430,7 @@ if __name__ == "__main__":
     except Exception as _e: print(f"transfer workers not started: {_e}", flush=True)
     threading.Thread(target=ai_backfill, daemon=True).start()
     threading.Thread(target=worker, daemon=True).start()
+    threading.Thread(target=calls_refresh_stale, daemon=True, name="calls-refresh").start()   # effective calls older than the last role change
     pg_init()
     threading.Thread(target=watcher, daemon=True).start()          # v5.14.2-rc4: notifications + auto-train
     def _caff_watch():
