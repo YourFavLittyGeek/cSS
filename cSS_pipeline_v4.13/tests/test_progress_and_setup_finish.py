@@ -178,5 +178,37 @@ class TestTemporaryCopyCleanup(unittest.TestCase):
             A.stage(dict(code="RR2", series=dict(SWI=os.path.join(A.AD, "import_src", "RR2", "SWI"))))   # never converted: clear error
 
 
+class TestFreshProjectRunsTheWizard(unittest.TestCase):
+    def _mgr(self, vault):
+        from uengine.setup.setup_state_manager import SetupStateManager
+        ws = tempfile.mkdtemp(dir=os.environ["CSS_BASE"]); os.makedirs(os.path.join(ws, "app_data"))
+        import sqlite3
+        con = sqlite3.connect(os.path.join(ws, "app_data", "pensieve.db"))
+        con.execute("CREATE TABLE studies_memory (id TEXT, pad BLOB)"); con.execute("CREATE TABLE expert_annotations (id TEXT)")
+        con.execute("PRAGMA user_version=1"); [con.execute(f"CREATE TABLE t{i} (x TEXT)") for i in range(30)]; con.commit(); con.close()   # empty schema, > 4 KB
+        return ws, (lambda: SetupStateManager(ws, vault_root=vault))
+
+    def test_empty_vault_and_empty_pensieve_are_not_an_installation(self):
+        vault = tempfile.mkdtemp(dir=os.environ["CSS_BASE"])
+        for d in ("studies", "PENSIEVE/Manifests", "manifest"): os.makedirs(os.path.join(vault, d))
+        ws, M = self._mgr(vault)
+        self.assertFalse(M().get_state()["completed"])                                       # wizard runs
+        os.makedirs(os.path.join(vault, "studies", "S001"))
+        ws2, M2 = self._mgr(vault)
+        self.assertTrue(M2().get_state()["completed"])                                       # a vault with studies still counts
+
+    def test_wrong_auto_completion_is_reverted(self):
+        import json
+        vault = tempfile.mkdtemp(dir=os.environ["CSS_BASE"]); os.makedirs(os.path.join(vault, "studies"))
+        ws, M = self._mgr(vault)
+        json.dump(dict(state="SETUP_COMPLETED", completed=True, is_first_launch=False, current_step=7, validated_config={},
+                       history=[dict(event="legacy_installation_detected_and_migrated")]), open(os.path.join(ws, "app_data", "setup_state.json"), "w"))
+        st = M().get_state()
+        self.assertFalse(st["completed"]); self.assertEqual(st["history"][-1]["event"], "auto_completion_reverted_empty_project")
+        json.dump(dict(state="SETUP_COMPLETED", completed=True, validated_config=dict(workspace_valid=True),
+                       history=[dict(event="setup_completed")]), open(os.path.join(ws, "app_data", "setup_state.json"), "w"))
+        self.assertTrue(M().get_state()["completed"])                                        # a real completed setup is never reverted
+
+
 if __name__ == "__main__":
     unittest.main()

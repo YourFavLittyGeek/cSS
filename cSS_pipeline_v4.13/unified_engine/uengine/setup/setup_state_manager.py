@@ -57,6 +57,12 @@ class SetupStateManager:
                     for k, v in self._default_state().items():
                         if k not in state:
                             state[k] = v
+                    if self._wrongly_auto_completed(state):      # v5.25 fix: an EMPTY vault skeleton was taken for an existing installation
+                        fresh = self._default_state()
+                        fresh["history"] = list(state.get("history", [])) + [{"timestamp": time.time(), "event": "auto_completion_reverted_empty_project",
+                                                                              "version": CURRENT_APP_VERSION}]
+                        self._save(fresh)
+                        return fresh
                     return state
             except Exception:
                 pass
@@ -89,7 +95,7 @@ class SetupStateManager:
         # Check for existing studies or active database
         db_path = os.path.join(self.app_data, "pensieve.db")
         pat_file = os.path.join(self.app_data, "patients.json")
-        if os.path.isfile(db_path) and os.path.getsize(db_path) > 4096:
+        if os.path.isfile(db_path) and os.path.getsize(db_path) > 4096 and self._db_has_rows(db_path):   # an empty schema is ~100 KB: count rows
             return True
         if os.path.isfile(pat_file):
             try:
@@ -100,12 +106,49 @@ class SetupStateManager:
             except Exception:
                 pass
 
-        # Check if external vault already has studies (associated with standard project)
+        # Check if external vault already has studies (associated with standard project). The vault is created with EMPTY studies/ and
+        # PENSIEVE/ folders (setup_gui.ensure_vault), so only real content counts - an empty vault used to skip the setup wizard of a new project.
         vault_root = self.vault_root or (os.path.join(volumes_root(), "Percival", "PERCIVAL_VAULT") if self.workspace_root == os.path.abspath(os.path.expanduser("~/Percival_project")) else None)
-        if vault_root and (os.path.isdir(os.path.join(vault_root, "studies")) or os.path.isdir(os.path.join(vault_root, "PENSIEVE"))):
+        if vault_root and self._vault_has_content(vault_root):
             return True
 
         return False
+
+    @staticmethod
+    def _db_has_rows(db_path: str) -> bool:
+        """True when any table of the SQLite database holds a row (read-only open; unreadable -> treated as data, never as empty)"""
+        try:
+            import sqlite3
+            con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=2)
+            try:
+                for (t,) in con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").fetchall():
+                    if con.execute(f'SELECT 1 FROM "{t}" LIMIT 1').fetchone(): return True
+                return False
+            finally:
+                con.close()
+        except Exception:
+            return True
+
+    @staticmethod
+    def _vault_has_content(vault_root: str) -> bool:
+        try:
+            st = os.path.join(vault_root, "studies")
+            if os.path.isdir(st) and any(not n.startswith(".") for n in os.listdir(st)): return True
+            for root, _, files in os.walk(os.path.join(vault_root, "PENSIEVE")):
+                for f in files:
+                    fp = os.path.join(root, f)
+                    if f.endswith(".db") and not f.startswith("._") and os.path.getsize(fp) > 4096 and SetupStateManager._db_has_rows(fp): return True
+        except OSError:
+            pass
+        return False
+
+    def _wrongly_auto_completed(self, state: Dict[str, Any]) -> bool:
+        """completed ONLY by the legacy-installation shortcut, the wizard never ran, and the project has no data -> run the wizard"""
+        h = state.get("history") or []
+        if not state.get("completed") or not h: return False
+        if any(e.get("event") not in ("legacy_installation_detected_and_migrated",) for e in h): return False
+        if state.get("validated_config"): return False
+        return not self._has_existing_installation()
 
     def _save(self, state: Optional[Dict[str, Any]] = None) -> None:
         if state is not None:
