@@ -588,6 +588,8 @@ class TestEndpoints(unittest.TestCase):
             self.assertEqual(post("jobs/cancel", dict(job_id=j1))["error"]["code"], "refused")   # running: pause + discard
             self.assertTrue(post("jobs/pause", dict(job_id=j1))["ok"])
             wait(lambda: get("job", {"id": j1})["job"]["state"] == "paused", what="j1 paused")
+            # the pause is journaled just before the worker thread returns: under load the thread can still be alive here
+            wait(lambda: not get("job", {"id": j1})["job"]["running"], what="j1 worker stopped")
             s = get("job", {"id": j1})["job"]
             self.assertFalse(s["running"])
             self.assertLess(s["progress"]["bytes_committed"], s["progress"]["bytes_total"])

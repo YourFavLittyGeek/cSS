@@ -411,6 +411,32 @@ def notif_post(op, d):
         jsave("settings.json", SET); return dict(ok=True, settings=SET["notif"])
     return dict(ok=False, error="unknown")
 WATCH = dict(jobs={}, autotrain_last=0)
+DRIVE = {"ejected": False, "last_try": 0.0, "msg": ""}     # Eject pressed in this app session -> no automatic remount until Reconnect
+
+def drive_reconnect(force=False):
+    """the Pensieve drive is plugged in but not mounted (after Eject or a macOS unmount): mount it again (diskutil mount).
+    Automatic at start-up and every 30 s, except after the user pressed Eject in this session (then only the Reconnect button)."""
+    import drive_mount as DM, setup_gui as SG
+    vm = SET.get("vault_mount")
+    if not vm: return dict(ok=False, error="no Pensieve drive is configured (Setup)")
+    vp = SG.resolve_vault_path(vm)
+    if os.path.isdir(vp): return dict(ok=True, already=True, message="the Pensieve drive is connected")
+    if not force and (DRIVE["ejected"] or time.time() - DRIVE["last_try"] < 60): return dict(ok=False, skipped=True)
+    name = DM.volume_name(vp)
+    dev = DM.find_unmounted(name)
+    if not dev: return dict(ok=False, not_plugged=True, error=f"the drive '{name or '?'}' is not plugged in - connect its cable")
+    DRIVE["last_try"] = time.time()
+    ok, msg = DM.mount(dev)
+    DRIVE["msg"] = msg
+    try:
+        import progress_jobs as PJ
+        PJ.note("drive", "Pensieve drive reconnected" if ok else "Pensieve drive could not be mounted", msg[-200:], state="done" if ok else "failed")
+        NC.add(B, "done" if ok else "warn", "storage", "Pensieve drive reconnected" if ok else "Pensieve drive could not be mounted", msg[-300:])
+    except Exception: pass
+    print(f"Pensieve drive {'mounted' if ok else 'NOT mounted'} ({dev}): {msg}", flush=True)
+    if ok: DRIVE["ejected"] = False
+    return dict(ok=ok, device=dev, message=msg if ok else "", error="" if ok else msg)
+
 def storage_autofix():
     """no Terminal needed: (1) FreeSurfer folder searched + validated when the setting is empty (an app opened from Finder has
     no FREESURFER_HOME); (2) the chosen vault = <drive>/PERCIVAL_VAULT, created as soon as that drive is connected (setup_gui.ensure_vault:
@@ -421,6 +447,8 @@ def storage_autofix():
         f = SG.find_freesurfer(os.environ.get("FREESURFER_HOME", ""))
         if f: SET["freesurfer_home"] = f; ch = True
     vm = SET.get("vault_mount")
+    try: drive_reconnect()                                       # plugged in but unmounted -> mount it (not after an Eject in this session)
+    except Exception as e: print(f"drive reconnect: {e}", flush=True)
     if vm:
         vp = SG.resolve_vault_path(vm)
         ev = dict(ok=True, path=vp) if os.path.exists(os.path.join(vp, "manifest", "vault_manifest.json")) else SG.ensure_vault(vm)
@@ -1537,7 +1565,14 @@ def storage_get(op, q):
         if op == "eject_check":
             from uengine.storage import StoragePathsService, EjectManager
             em = EjectManager(StoragePathsService(B, vault_root))
-            return em.check_ejection_safety().to_dict()
+            out = em.check_ejection_safety().to_dict()
+            if vault_root and not os.path.isdir(vault_root):           # plugged in but not mounted -> the sidebar offers Reconnect
+                try:
+                    import drive_mount as DM
+                    out["attached_unmounted"] = bool(DM.find_unmounted(DM.volume_name(vault_root), cache_s=10))
+                except Exception: out["attached_unmounted"] = False
+                out["ejected_by_you"] = DRIVE["ejected"]
+            return out
         if op == "sync_overview":
             from uengine.storage import StoragePathsService, SyncManager
             sm = SyncManager(StoragePathsService(B, vault_root))
@@ -1602,8 +1637,15 @@ def storage_post(op, d):
             from uengine.storage import StoragePathsService, EjectManager
             em = EjectManager(StoragePathsService(B, vault_root))
             # Phase 0: force is honoured only with the server-issued token AND the volume name the user typed
-            return em.eject_vault(emergency=bool(d.get("emergency", False)), force=d.get("force") is True,
-                                  force_token=str(d.get("force_token", "") or ""), confirm_volume_name=str(d.get("confirm_volume_name", "") or ""))
+            r_ = em.eject_vault(emergency=bool(d.get("emergency", False)), force=d.get("force") is True,
+                                force_token=str(d.get("force_token", "") or ""), confirm_volume_name=str(d.get("confirm_volume_name", "") or ""))
+            if r_.get("ok"): DRIVE["ejected"] = True                  # stay unmounted (the user may unplug) until Reconnect / next start
+            return r_
+        if op == "reconnect":
+            DRIVE["ejected"] = False
+            r_ = drive_reconnect(force=True)
+            if r_.get("ok"): storage_autofix()
+            return r_
         if op == "sync_execute":
             from uengine.storage import StoragePathsService, SyncManager
             sm = SyncManager(StoragePathsService(B, vault_root))
