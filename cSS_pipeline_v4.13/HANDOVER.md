@@ -42,7 +42,7 @@ Read this first, then CLAUDE.md (project science + history). Do not trust older 
 
 ## 4. Build / release
 - App zip: `bash tools/build_percival_dev_app.sh ~/PERCIVAL_releases` (committed files only) ->
-  `Percival_v5.25-dev_<sha>.zip` + `_BUILD_INFO.txt`. Current: `Percival_v5.25-dev_0cb269d.zip`
+  `Percival_v5.25-dev_<sha>.zip` + `_BUILD_INFO.txt`. Current: `Percival_v5.25-dev_9d4b3c4.zip`
   (sha256 d3ba09edbb66fd10520bd809c779832c5044bd06cb060696b910290348236e6c).
   NEWER: `Percival_v5.25-dev_1a0bbcc.zip` (sha256 4418b70780927a230cafb0242f87efcb753ba3deb8bffd3f88ede0e58e24f13a; incl. audit items 1-8) -
   not yet installed by the user at the time of writing.
