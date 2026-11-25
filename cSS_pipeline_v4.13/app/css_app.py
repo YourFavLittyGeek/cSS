@@ -378,6 +378,10 @@ def UG_job(name):
     except Exception: return dict(status="idle")
 def notif_running():
     out = []
+    try:
+        import progress_jobs as PJ
+        for j in PJ.running(): out.append(dict(title=j["title"], text=f"{j['label']} ({min(j['done'], j['total'])}/{j['total']})", progress=j["pct"] / 100.0, job=j["id"]))
+    except Exception: pass
     for c, j in list(PM_JOBS.items()): out.append(dict(title=f"Processing run · {c}", text=f"stage {j.get('stage') or 'starting'}", progress=None))
     for p in PAT:
         if p.get("status") == "running": out.append(dict(title=f"Pipeline · {p['code']}", text=f"step {p.get('step', '')}", progress=None))
@@ -1211,15 +1215,30 @@ def id_post(op, d):
             return dict(ok=True, path=out)
         if op == "import/plan": return IDG.plan(d, SET, [p["code"] for p in PAT], verify_dest=verify_local_dest, hooks=dict(pathway=check_pathway, looks_like_name=(looks_like_name if SET["features"].get("name_warning") else None), describe=describe_study, known_match=known_match))
         if op == "import/update": return IDG.plan_update(d, [p["code"] for p in PAT], verify_dest=verify_local_dest)
-        if op == "import/commit":
+        if op in ("import/commit", "import/commit_start"):
             pl = IDG.IW.PLANS.get(str(d.get("plan", ""))); lib = dict(pl["library"]) if pl else {}
-            r = IDG.plan_commit(d, add_to_queue, dict(cohort=d.get("cohort", ""), mode="semi", _resolve=resolve_duplicate, _reuse=reuse_processed, _replace_confirm=str(d.get("replace_confirm", "")).strip()),
-                                by, import_src=f"{AD}/import_src")
-            if r.get("ok") and lib.get("enabled") and lib.get("root"):              # remember the library place for the next import
-                SET["library_dir"] = lib["root"]; SET["library_whole_exam"] = bool(lib.get("whole_exam")); jsave("settings.json", SET)
-            if r.get("ok"): notify_c("done", "imports", f"{len(r.get('imported', []))} examination(s) added", "queued for processing" + (" · library copy running" if r.get("library_job") else ""))
-            if r.get("ok") and IDG.mode(SET) == "incognito" and pl and pl["mode"] == "incognito": IDG.ID().lock()      # the key was stored; Incognito keeps the vault locked
-            return r
+            def _do_commit(rep=None):
+                try:
+                    r = IDG.plan_commit(d, add_to_queue, dict(cohort=d.get("cohort", ""), mode="semi", _resolve=resolve_duplicate, _reuse=reuse_processed,
+                                                             _replace_confirm=str(d.get("replace_confirm", "")).strip(), _progress=rep), by, import_src=f"{AD}/import_src")
+                except Exception as e:
+                    r = dict(ok=False, error=IDG.redact_text(f"{e}", SET, B)[-400:], kind=type(e).__name__)
+                if r.get("ok") and lib.get("enabled") and lib.get("root"):              # remember the library place for the next import
+                    SET["library_dir"] = lib["root"]; SET["library_whole_exam"] = bool(lib.get("whole_exam")); jsave("settings.json", SET)
+                if r.get("ok"):
+                    n = len(r.get("imported", [])); r["summary"] = f"{n} examination(s) imported and queued for processing"
+                    notify_c("done", "imports", f"Import finished: {n} examination(s) added", "queued for processing" + (" · library copy running" if r.get("library_job") else ""),
+                             actions=["open_activity"])
+                elif rep is not None:                                                    # background import: the result must not be lost if the window was put away
+                    notify_c("action", "imports", "Import needs your attention - nothing was imported", (r.get("error") or "")[:300], actions=["open_add"])
+                if r.get("ok") and IDG.mode(SET) == "incognito" and pl and pl["mode"] == "incognito": IDG.ID().lock()      # the key was stored; Incognito keeps the vault locked
+                return r
+            if op == "import/commit": return _do_commit()
+            if d.get("confirm") is not True: return dict(ok=False, needs_confirm=True, error="confirm the validated preview to import")
+            import progress_jobs as PJ
+            if PJ.running("import"): return dict(ok=False, error="an import is already running - wait for it to finish (see the progress pill, bottom right)")
+            n_inc = sum(1 for e in (pl or {}).get("exams", []) if e.get("include"))
+            return dict(ok=True, job=PJ.start("import", n_inc + 1, _do_commit, title=f"Importing {n_inc} examination(s)"), n=n_inc)
         return dict(ok=False, error=f"unknown {op}")
     except Exception as e: return dict(ok=False, error=IDG.redact_text(f"{e}", SET, B)[-400:], kind=type(e).__name__)
 # ------------------------------------------------------------------ v5.22 PERCIVAL SCORE - app/percival_gui.py, unified_engine/uengine/percival/
@@ -2153,8 +2172,7 @@ def setup_get(op, q):
         if op == "readiness":
             st = sm.get_state()
             disc_data = st.get("discovery_cache") or disc.run_full_discovery()
-            cfg = dict(SET)
-            cfg.update(st.get("validated_config", {}))
+            cfg = _setup_fill_checks(dict(SET, **st.get("validated_config", {})))   # checks the user did not click through are run now, not reported as missing
             readiness = SystemReadinessService.evaluate_capabilities(cfg, disc_data)
             return dict(ok=True, readiness=readiness, dependencies=SystemReadinessService.get_dependency_map())
 
@@ -2326,51 +2344,93 @@ def setup_post(op, d):
             return dict(ok=True, message="Reset to first launch.")
 
         if op == "finish":
-            disc_data = sm.get_state().get("discovery_cache") or disc.run_full_discovery()
-            cfg = dict(SET)
-            cfg.update(sm.get_state().get("validated_config", {}))
+            return _setup_finish(sm, disc)
 
-            if "workspace_valid" not in cfg:
-                v_ws = validate_workspace(B)
-                cfg["workspace_valid"] = v_ws.get("ok", False)
-                cfg["workspace_free_gb"] = v_ws.get("free_gb", 0.0)
-            if "python_valid" not in cfg:
-                cfg["python_valid"] = True
-            if "pipeline_valid" not in cfg:
-                v_p = validate_pipeline(B)
-                cfg["pipeline_valid"] = v_p.get("ok", False)
-            if "dcm2niix_valid" not in cfg:
-                v_d = validate_mri_tool("dcm2niix")
-                cfg["dcm2niix_valid"] = v_d.get("ok", False)
-            if "freesurfer_valid" not in cfg:
-                v_f = validate_freesurfer(SET.get("freesurfer_home", ""))
-                cfg["freesurfer_valid"] = v_f.get("ok", False)
-            if "license_valid" not in cfg:
-                v_l = validate_license(SET.get("fs_license", "") or find_license(SET.get("freesurfer_home", ""), fs_env()))
-                cfg["license_valid"] = v_l.get("ok", False)
-            if SET.get("vault_mount"):                     # setup finished: make sure the chosen vault exists (created when its drive is connected)
-                import setup_gui as SG
-                ev = SG.ensure_vault(SET["vault_mount"])
-                if ev["path"] != SET["vault_mount"]: SET["vault_mount"] = ev["path"]; jsave("settings.json", SET)
-                cfg["vault_mount"] = SET["vault_mount"]; cfg.pop("vault_valid", None)
-            if "vault_valid" not in cfg:
-                v_v = validate_vault(SET.get("vault_mount", "/Volumes/Percival/PERCIVAL_VAULT"))
-                cfg["vault_valid"] = v_v.get("ok", False)
-                cfg["vault_connected"] = v_v.get("connected", False)
+        if op == "finish_start":                   # same work in the background; the wizard shows the progress window (GET /api/job?id=)
+            import progress_jobs as PJ
+            run = [j for j in PJ.running("setup_finish")]
+            if run: return dict(ok=True, job=run[0]["id"])
+            return dict(ok=True, job=PJ.start("setup_finish", SETUP_FINISH_STEPS, lambda rep: _setup_finish(sm, disc, rep), title="Finishing setup"))
 
-            sm.update_validated_config(cfg)
-            readiness = SystemReadinessService.evaluate_capabilities(cfg, disc_data)
-            sm.mark_completed(readiness)
-
-            import setup_gui as SG
-            items = SG.checks(B, AD, SET, fs_env, find_license, which, os.path.join(os.path.dirname(HERE), "unified_engine"), _image_model_ok)
-            SG.report(items, AD, done=True)
-
-            return dict(ok=True, readiness=readiness, state=sm.get_state())
+        if op == "restart":
+            return _restart_app()
 
         return dict(ok=False, error=f"unknown {op}")
     except Exception as e:
         return dict(ok=False, error=f"{type(e).__name__}: {e}"[-300:])
+def _setup_fill_checks(cfg, rep=None, k0=0):
+    """Setup readiness (Step 6) and Finish: every check the user did not explicitly click through in the wizard is run here, live, instead of
+    counting as failed - a missing flag used to show "BLOCKED" for DICOM import / ALBUS / pipeline although dcm2niix was installed.
+    rep(k, label) (optional) reports each check as one progress step (6 steps, numbered from k0+1)."""
+    from uengine.setup import validate_workspace, validate_pipeline, validate_mri_tool, validate_freesurfer, validate_license, validate_vault
+    r = rep or (lambda *a, **k: None)
+    r(k0 + 1, "Checking the project folder (write access, free space)")
+    if "workspace_valid" not in cfg or not cfg.get("workspace_free_gb"):
+        v = validate_workspace(B); cfg.setdefault("workspace_valid", v.get("ok", False)); cfg["workspace_free_gb"] = v.get("free_gb", 0.0)
+    cfg.setdefault("python_valid", True)                                   # this process is the Python environment
+    r(k0 + 2, "Checking the PERCIVAL pipeline scripts")
+    if "pipeline_valid" not in cfg: cfg["pipeline_valid"] = validate_pipeline(B).get("ok", False)
+    r(k0 + 3, "Checking the DICOM converter (dcm2niix)")
+    if not cfg.get("dcm2niix_valid"): cfg["dcm2niix_valid"] = validate_mri_tool("dcm2niix", cfg.get("dcm2niix_path", "")).get("ok", False)
+    r(k0 + 4, "Checking FreeSurfer")
+    if not cfg.get("freesurfer_valid"): cfg["freesurfer_valid"] = validate_freesurfer(cfg.get("freesurfer_home") or SET.get("freesurfer_home", "")).get("ok", False)
+    r(k0 + 5, "Checking the FreeSurfer licence")
+    if not cfg.get("license_valid"):
+        cfg["license_valid"] = validate_license(cfg.get("fs_license") or SET.get("fs_license", "") or find_license(SET.get("freesurfer_home", ""), fs_env())).get("ok", False)
+    r(k0 + 6, "Checking the external Data Vault")
+    if not cfg.get("vault_valid") and (cfg.get("vault_mount") or SET.get("vault_mount")):
+        v = validate_vault(cfg.get("vault_mount") or SET.get("vault_mount")); cfg["vault_valid"] = v.get("ok", False); cfg["vault_connected"] = v.get("connected", False)
+    return cfg
+
+
+SETUP_FINISH_STEPS = 13
+
+
+def _setup_finish(sm, disc, rep=None):
+    """the setup wizard's Finish, as numbered steps (rep(k, label)); returns the same dict the synchronous route always returned plus
+    restart_required (a different project folder was chosen: the running app is bound to its folder at start-up)"""
+    from uengine.setup import SystemReadinessService, validate_vault
+    import setup_gui as SG
+    r = rep or (lambda *a, **k: None)
+    r(0, "Reading the installation scan")
+    disc_data = sm.get_state().get("discovery_cache") or disc.run_full_discovery()
+    r(1, "Installation scan ready")
+    cfg = _setup_fill_checks(dict(SET, **sm.get_state().get("validated_config", {})), r, 1)           # steps 2-7
+    r(8, "Creating / opening the Data Vault on the external drive")
+    if SET.get("vault_mount"):                     # setup finished: make sure the chosen vault exists (created when its drive is connected)
+        ev = SG.ensure_vault(SET["vault_mount"])
+        if ev["path"] != SET["vault_mount"]: SET["vault_mount"] = ev["path"]; jsave("settings.json", SET)
+        cfg["vault_mount"] = SET["vault_mount"]; cfg.pop("vault_valid", None)
+    if "vault_valid" not in cfg:
+        v_v = validate_vault(SET.get("vault_mount", "/Volumes/Percival/PERCIVAL_VAULT"))
+        cfg["vault_valid"] = v_v.get("ok", False)
+        cfg["vault_connected"] = v_v.get("connected", False)
+    r(9, "Saving the configuration")
+    sm.update_validated_config(cfg)
+    r(10, "Evaluating readiness")
+    readiness = SystemReadinessService.evaluate_capabilities(cfg, disc_data)
+    sm.mark_completed(readiness)
+    r(11, "Running the final system checks")
+    items = SG.checks(B, AD, SET, fs_env, find_license, which, os.path.join(os.path.dirname(HERE), "unified_engine"), _image_model_ok)
+    r(12, "Writing the setup report")
+    SG.report(items, AD, done=True)
+    wd = SET.get("workspace_dir") or ""
+    restart = bool(wd) and os.path.realpath(os.path.expanduser(wd)) != os.path.realpath(B)
+    return dict(ok=True, readiness=readiness, state=sm.get_state(), restart_required=restart, project=B, new_project=wd if restart else "",
+                summary="Setup complete - Percival is ready" if not restart else "Setup complete - Percival restarts in the new project folder")
+
+
+def _restart_app():
+    """quit this server and open the app again (a new project folder is only picked up at start-up). The launcher is started a moment after
+    this process has exited, so its "already running" check does not see us. Needs the app bundle (PERCIVAL_APP_BUNDLE, set by the launcher)."""
+    bundle = os.environ.get("PERCIVAL_APP_BUNDLE", "")
+    if not bundle or not os.path.isdir(bundle): return dict(ok=False, error="automatic restart is only available in the installed app - quit and open Percival again")
+    subprocess.Popen(["/bin/sh", "-c", f'sleep 3; /usr/bin/open -n "{bundle}"'], start_new_session=True,
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    threading.Thread(target=lambda: (time.sleep(0.8), _perform_safe_shutdown(True)), daemon=True).start()
+    return dict(ok=True, restarting=True)
+
+
 def last_activity(code):
     m = [os.path.getmtime(f) for f in (f"{AD}/logs/{code}.log", f"{B}/logs/{code}_run.log") if os.path.exists(f)]
     return max(m) if m else 0
@@ -2755,6 +2815,9 @@ class H(BaseHTTPRequestHandler):
         try:
             if u.path == "/": return self.send(open(f"{HERE}/css_app.html", "rb").read(), ctype="text/html; charset=utf-8")
             if u.path == "/api/state": return self.send(state())
+            if u.path == "/api/job":                                     # background job progress (setup Finish, study import)
+                import progress_jobs as PJ; q_ = {k: v[0] for k, v in parse_qs(u.query).items()}
+                return self.send(PJ.get(q_["id"]) if q_.get("id") else dict(running=PJ.running()))
             if u.path == "/api/vset":
                 f = f"{B}/review/viewer_settings.json"; return self.send(json.load(open(f)) if os.path.exists(f) else {})
             if u.path in ("/icon_dark.png", "/icon_light.png"): return self.send(open(f"{HERE}{u.path}", "rb").read(), ctype="image/png")

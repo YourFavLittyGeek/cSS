@@ -537,7 +537,7 @@ def view(plan):
                 library=dict(enabled=L["enabled"], root=L["root"], whole_exam=L["whole_exam"], root_ok=L.get("root_ok", False), root_why=L.get("root_why", "")))
 
 
-def _neutral_copy(chosen, fk, root):
+def _neutral_copy(chosen, fk, root, tick=None):
     """copy the chosen series into the project under NEUTRAL names (fast copy or APFS clone when on same device: no extra disk space)
     so that no source path - which can hold an MRN or a patient name - is stored by the app: root/<file key>/<TYPE>_series.<ext> (+ sidecar) or
     root/<file key>/<TYPE>/ for a DICOM series"""
@@ -563,8 +563,10 @@ def _neutral_copy(chosen, fk, root):
     for k, src in chosen.items():
         if os.path.isdir(src):
             t = os.path.join(d, k); os.makedirs(t, exist_ok=True)
-            for i, f in enumerate(sorted(x for x in os.listdir(src) if not x.startswith(".") and os.path.isfile(os.path.join(src, x)))):
+            fl = sorted(x for x in os.listdir(src) if not x.startswith(".") and os.path.isfile(os.path.join(src, x)))
+            for i, f in enumerate(fl):
                 cp(os.path.join(src, f), os.path.join(t, f"{k}_{i:05d}.dcm"))
+                if tick and (i % 25 == 0 or i == len(fl) - 1): tick(f"{k} {i + 1}/{len(fl)} files")
             out[k] = t
         else:
             ext = ".nii.gz" if src.endswith(".nii.gz") else ".nii"; t = os.path.join(d, f"{k}_series{ext}"); cp(src, t)
@@ -584,11 +586,20 @@ def commit(plan_id, ID, add_to_queue, settings, by=""):
     revalidate(p, ID)
     if not p["ok"]: raise ValueError("the preview still has errors - nothing was imported")
     mode = p["mode"]; inc = [e for e in p["exams"] if e["include"]]; patients = {}; items = []; out = []
+    made = settings.setdefault("_copies_made", [])
     try: return _commit(p, ID, add_to_queue, settings, by, mode, inc, patients, items, out)
     except Exception:
         ID.R = ID._load_registry()                        # any failure before the queue: no half-made identity records
         if ID.unlocked(): ID.unlock_reload()
+        _drop_copies(made)                                # ... and no orphan image copies (they used to stay in app_data/import_src)
         raise
+
+
+def _drop_copies(paths):
+    """remove the neutral copies made by a failed import attempt (the app's own copies under import_src - originals are never touched)"""
+    import shutil
+    for d in paths:
+        if os.path.basename(os.path.dirname(d)) == "import_src" and os.path.isdir(d): shutil.rmtree(d, ignore_errors=True)
 
 
 def _commit(p, ID, add_to_queue, settings, by, mode, inc, patients, items, out):
@@ -604,7 +615,8 @@ def _commit(p, ID, add_to_queue, settings, by, mode, inc, patients, items, out):
             if fk: rs(e["dup_choice"], fk)
         ID.R = ID._load_registry()                                            # the resolution committed its own changes
         if ID.unlocked(): ID.unlock_reload()
-    for e in inc:
+    rep = settings.get("_progress") or (lambda *a, **k: None); n_inc = len(inc)
+    for n_e, e in enumerate(inc):
         i = ids(p, e)
         code = i["code"]; generated = False
         if not code: code = ID.unique_code(); e["generated_code"] = code; generated = True
@@ -622,7 +634,10 @@ def _commit(p, ID, add_to_queue, settings, by, mode, inc, patients, items, out):
                           institution=e.get("dicom_institution", "") if ID.unlocked() else "", dicom_study_uid=e.get("dicom_study_uid", "") if ID.unlocked() else "",
                           fingerprint=e.get("fingerprint", ""), source="add studies", by=by,
                           identity_basis="import:" + pkey.split(":", 1)[0])            # v5.25: mrn | pid | folder (the grouping you chose)
-        (reuse_items if reuse else items).append(dict(folder_name=fk, folder="", code=fk, name="", chosen=_neutral_copy(e["chosen"], fk, settings.get("_import_src")),
+        rep(n_e, f"Copying examination {n_e + 1} of {n_inc} ({fk}) into the project")
+        if settings.get("_import_src") and not os.path.isdir(os.path.join(settings["_import_src"], fk)): settings.setdefault("_copies_made", []).append(os.path.join(settings["_import_src"], fk))
+        chosen_copy = _neutral_copy(e["chosen"], fk, settings.get("_import_src"), tick=lambda t, _n=n_e, _fk=fk: rep(_n, f"Copying examination {_n + 1} of {n_inc} ({_fk}): {t}", log=False))
+        (reuse_items if reuse else items).append(dict(folder_name=fk, folder="", code=fk, name="", chosen=chosen_copy,
                           fingerprint=e.get("fingerprint", ""), fingerprint_v1="", radiologist=i["radiologist"], grade_R=i["grade_R"], grade_L=i["grade_L"],
                           pathway=e.get("pathway") or e.get("pathway_rec") or "", pathway_rec=e.get("pathway_rec", ""), pathway_reason=e.get("pathway_reason", ""),
                           check=e.get("check", ""), decided=True))
@@ -640,6 +655,7 @@ def _commit(p, ID, add_to_queue, settings, by, mode, inc, patients, items, out):
         ID.R = ID._load_registry()
         if ID.unlocked(): ID.unlock_reload()
     qs = dict(settings, cohort=P["cohort"] or settings.get("cohort", ""), anatomy=P["anatomy"], mode=P["run_mode"], results_dir=P["results_dir"])
+    rep(n_inc, "Registering the studies and adding them to the processing queue")
     try: q = add_to_queue(items, qs)
     except Exception: rollback(); raise
     if not q.get("ok"): rollback(); raise ValueError("queue refused: " + "; ".join(q.get("errors", [])))

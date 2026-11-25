@@ -629,9 +629,9 @@ async function renderStep6_Readiness(el) {
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <div>
         <h3 style="font-size:15px;margin:0">Scientific Capability Matrix</h3>
-        <span class="note">${PSC.readiness.ready ? "All mandatory launch requirements are met." : "Certain required components require your attention."}</span>
+        <span class="note">${PSC.readiness.ready ? "All mandatory launch requirements are met." : "Some features are locked until a required tool is found - see 'Why locked' below."}</span>
       </div>
-      <span class="pill ${PSC.readiness.ready ? 'ok' : 'bad'}">${PSC.readiness.ready ? 'WORKSTATION READY' : 'ACTION REQUIRED'}</span>
+      <span style="display:flex;gap:8px;align-items:center"><button class="b" onclick="renderStep6_Readiness(this.closest('.card').parentElement)">Re-check</button><span class="pill ${PSC.readiness.ready ? 'ok' : 'bad'}">${PSC.readiness.ready ? 'WORKSTATION READY' : '🔒 ACTION REQUIRED'}</span></span>
     </div>
 
     <div style="display:flex;flex-direction:column;gap:8px">
@@ -639,13 +639,15 @@ async function renderStep6_Readiness(el) {
       <div style="background:var(--panel2);border:1px solid var(--bd);border-radius:6px;padding:10px 14px">
         <div style="display:flex;justify-content:space-between;align-items:center">
           <div style="font-weight:600;font-size:13px;color:var(--txt)">${esc(c.label)}</div>
-          <span class="pill ${c.ready ? 'ok' : (c.blockers && c.blockers.length ? 'bad' : 'warn')}">
-            ${c.ready ? 'READY' : (c.blockers && c.blockers.length ? 'BLOCKED' : 'OPTIONAL WARNING')}
+          <span class="pill ${c.ready ? 'ok' : (c.blockers && c.blockers.length ? 'bad' : 'warn')}" title="${c.blockers && c.blockers.length ? 'Locked: this feature stays switched off until the item(s) listed below are available. Nothing is broken and no data is affected.' : ''}">
+            ${c.ready ? '✓ READY' : (c.blockers && c.blockers.length ? '🔒 LOCKED' : 'OPTIONAL')}
           </span>
         </div>
         ${c.blockers && c.blockers.length ? `
-        <div style="margin-top:6px;font-size:11px;color:var(--bad)">
-          ${c.blockers.map(b => `<div>❌ ${esc(b)}</div>`).join("")}
+        <div style="margin-top:6px;font-size:11px;color:var(--bad)" data-setup="locked-reason">
+          <div style="color:var(--mut);margin-bottom:2px">Why locked: this feature is switched off (for safety) until the following is available - nothing is broken and no data is affected:</div>
+          ${c.blockers.map(b => `<div>🔒 ${esc(b)}</div>`).join("")}
+          <div style="color:var(--mut);margin-top:2px">Fix it in the earlier step for that tool (Back), or press <b>Re-check</b>; the lock opens automatically once the tool is found.</div>
         </div>` : ''}
         ${c.warnings && c.warnings.length ? `
         <div style="margin-top:4px;font-size:11px;color:var(--warn)">
@@ -782,16 +784,37 @@ async function triggerRescan() {
 }
 
 async function finishAndLaunch() {
+  // Finish runs in the background with a progress window covering the app (nothing is safe to click until the configuration is written).
+  // Before: one blocking request, then nav("studies") was refused by the setup gate (window.SETUP_LIFECYCLE was never refreshed) and every
+  // button sent the user back to setup - the app looked frozen until it was reopened.
   await collectCurrentStepInputs();
-  toast("Finalizing PERCIVAL setup and committing state…");
-  const r = await api("/api/setup/finish", PSC.config);
-  if (r.ok) {
-    toast("Setup completed successfully! Opening Studies workspace…");
-    if (PSC.lifecycle) PSC.lifecycle.allow_dashboard = true;
-    setTimeout(() => { nav("studies"); }, 600);
-  } else {
-    toast(r.error || "Setup finalization failed.", true);
-  }
+  const s = await api("/api/setup/finish_start", PSC.config);
+  if (!s.ok || !s.job) return toast(esc(s.error || "Setup could not be finished."), true);
+  await PROGRESS.open({ job: s.job, title: "Finishing PERCIVAL setup", blocking: true,
+    subtitle: "Checking tools, creating the Data Vault and saving the configuration. The app opens by itself when this is done.",
+    onDone: async (j, o) => {
+      if (j.state !== "done") {
+        PROGRESS.finish(o, `<span class="res-bad">✕ Setup could not be finished: ${esc(j.error || (j.result || {}).error || "unknown error")}</span><br><span class="note">Nothing was lost - go back, fix the item and press Launch again.</span>`,
+          [{ label: "Back to setup", cls: "pri", fn: () => setupView($("#view")) }]);
+        return;
+      }
+      const r = j.result || {};
+      if (r.restart_required) {
+        PROGRESS.finish(o, `<span class="res-ok">✓ Setup complete.</span><br>Percival now <b>restarts by itself</b> in the new project folder<br><span class="mono">${esc(r.new_project)}</span><br><span class="note">The window closes and reopens in a few seconds - nothing to do.</span>`, []);
+        const rr = await api("/api/setup/restart", {});
+        if (!rr.ok) PROGRESS.finish(o, `<span class="res-ok">✓ Setup complete.</span><br>${esc(rr.error)}`, [{ label: "OK", cls: "pri" }]);
+        return;
+      }
+      PROGRESS.finish(o, `<span class="res-ok">✓ Setup complete - opening the workspace…</span>`, []);
+      try { window.SETUP_LIFECYCLE = await api("/api/setup/lifecycle"); } catch (e) { window.SETUP_LIFECYCLE = { allow_dashboard: true }; }
+      if (window.SETUP_LIFECYCLE) window.SETUP_LIFECYCLE.allow_dashboard = true;
+      if (PSC.lifecycle) PSC.lifecycle.allow_dashboard = true;
+      document.querySelectorAll("nav button").forEach(b => { b.style.opacity = ""; if (b.title === "Complete Guided Setup first") b.title = ""; });
+      try { await api("/api/state"); } catch (e) {}
+      PROGRESS.close();
+      toast("Setup complete - Percival is ready. Add your first studies with <b>Add studies</b>.");
+      nav("studies");
+    } });
 }
 
 async function exportDiagnostics() {

@@ -75,7 +75,7 @@ if [ "$MODE" = demo ]; then
 fi
 
 # ------------------------------------------------------------------ install the bundled pipeline into the project
-export CSS_BASE="$BASE_C" CSS_EXPERIMENTAL=1 CSS_PROTECTED_PATHS="$PROT"
+export CSS_BASE="$BASE_C" CSS_EXPERIMENTAL=1 CSS_PROTECTED_PATHS="$PROT" PERCIVAL_APP_BUNDLE="$(cd "$RES/../.." && pwd)"   # bundle path: the app can restart itself (new project folder chosen in setup)
 mkdir -p "$CSS_BASE/app" "$CSS_BASE/app_data/logs" "$CSS_BASE/scripts" "$CSS_BASE/data" "$CSS_BASE/work" "$CSS_BASE/review" "$CSS_BASE/results" "$CSS_BASE/unified_engine"
 LOG="$CSS_BASE/app_data/logs/launcher.log"; echo "=== $(date) build $(cat "$RES/pipeline/scripts/BUILD" 2>/dev/null) env $ENVOK" >> "$LOG"
 if ! cmp -s "$RES/pipeline/scripts/BUILD" "$CSS_BASE/scripts/BUILD"; then

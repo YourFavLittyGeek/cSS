@@ -135,19 +135,32 @@ function iwPreview(){const P=IW.plan,el=$("#iw-prev");if(!el||!P)return;const st
     const nr=P.exams.filter(e=>e.include&&e.dup_choice==="replace").length,nk=P.exams.filter(e=>e.include&&e.dup_choice==="keep_ml").length;let rc="";
     if(nr){rc=prompt(`${nr} existing studies will be PURGED (every file to the Trash) and replaced${P.exams.some(e=>e.include&&e.dup_choice==="replace"&&e.dup_other&&e.dup_other.has_calls)?" - some have reviewer calls (expert labels), which are deleted too":""}.${nk?` ${nk} existing studies keep their results for ML under a new identifier.`:""}\n\nType REPLACE to confirm.`)||"";if(rc.trim()!=="REPLACE")return toast("not imported: REPLACE was not typed",1)}
     else if(nk&&!confirm(`${nk} existing studies will be removed - their results are kept for machine learning under a new identifier (RET-…) and their images go to the Trash. Continue?`))return;
-    const btn=$("#iw-imp");if(btn){btn.disabled=true;btn.textContent="Registering & starting import…";}
-    try{
-      const r=await api("/api/id/import/commit",{plan:P.id,confirm:true,cohort:P.processing.cohort,replace_confirm:rc});
-      if(!r.ok){if(btn){btn.disabled=false;btn.textContent=`Import ${P.n_include} examination(s) and start ▶`;}return toast(esc(r.error),1);}
-      toast(`Successfully imported ${r.imported?r.imported.length:P.n_include} examination(s). Starting processing…`);
-      IW.folder="";IW.plan=null;IW.done=null;IW.tab="series";
-      const fIn=$("#iw-f");if(fIn)fIn.value="";
-      const prev=$("#iw-prev");if(prev)prev.innerHTML="";
-      go("act");
-    }catch(err){
-      if(btn){btn.disabled=false;btn.textContent=`Import ${P.n_include} examination(s) and start ▶`;}
-      toast(`Import failed: ${esc(err.message)}`,1);
-    }
+    const btn=$("#iw-imp");if(btn){btn.disabled=true;btn.textContent="Import started - see the progress window";}
+    const reset=()=>{const b=$("#iw-imp");if(b){b.disabled=false;b.textContent=`Import ${P.n_include} examination(s) and start ▶`;}};
+    // the copy into the project runs in the background (it used to run inside this click: the window looked frozen for minutes, and an
+    // app quit in the middle left image copies with no study). Progress window -> "Continue in background" -> notification at the end.
+    let s;try{s=await api("/api/id/import/commit_start",{plan:P.id,confirm:true,cohort:P.processing.cohort,replace_confirm:rc})}catch(err){reset();return toast(`Import could not start: ${esc(err.message)}`,1)}
+    if(!s.ok||!s.job){reset();return toast(esc(s.error||"Import could not start"),1)}
+    PROGRESS.open({job:s.job,title:`Importing ${s.n||P.n_include} examination(s)`,background:true,
+      subtitle:"The images are copied into the project, then the studies are registered and queued. You can keep working - choose 'Continue in background'.",
+      onDone:async(j,o)=>{
+        const r=j.result||{};
+        if(j.state==="done"&&r.ok){
+          const n=(r.imported||[]).length,reused=(r.imported||[]).filter(x=>x.reused).length;
+          IW.folder="";IW.plan=null;IW.done=null;IW.tab="series";const fIn=$("#iw-f");if(fIn)fIn.value="";const prev=$("#iw-prev");if(prev)prev.innerHTML="";
+          if(o.mini){toast(`✓ Import finished: ${n} examination(s) added and queued for processing. Details in the notification centre.`);if(typeof nLoad==="function")nLoad();return}
+          PROGRESS.finish(o,`<span class="res-ok">✓ Import finished</span><br><b>${n}</b> examination(s) added${reused?` · ${reused} reused earlier processing`:""} · <b>${(r.queued||[]).length}</b> queued for processing${r.library_n?` · library copy of ${r.library_n} running`:""}.<br><span class="note">Processing starts automatically; follow it in Activity.</span>`,
+            [{label:"Stay here"},{label:"Open Activity ▸",cls:"pri",fn:()=>go("act")}]);
+          if(typeof nLoad==="function")nLoad();
+        }else{
+          reset();const err=(r.error||j.error||"unknown error");
+          const msg=`<span class="res-bad">✕ Nothing was imported</span><br>${esc(err)}<br><span class="note">No study was registered and the partial image copies were removed. Fix the rows marked in the preview and press Import again.</span>`;
+          if(o.mini){toast(`Import needs attention - nothing was imported: ${esc(err)}`,1);if(typeof nLoad==="function")nLoad()}
+          else PROGRESS.finish(o,msg,[{label:"Show the preview",cls:"pri",fn:()=>iwPreview()}]);
+          try{if(typeof iwUpdate==="function")iwUpdate([])}catch(e){}            // re-validate: the conflicting rows are shown again
+          if(typeof nLoad==="function")nLoad();
+        }
+      }});
   });}
 function iwMeasure(){const c=$('[data-iw="preview"]'),t=$('[data-iw="exams"]')||$('[data-iw="series-review"]');if(!c||!t)return;      // layout self-check (tests read these)
   c.dataset.overflow=t.scrollWidth>c.clientWidth+2?"yes":"no";const bad=[];
