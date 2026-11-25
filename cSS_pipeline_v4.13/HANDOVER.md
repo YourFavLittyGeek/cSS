@@ -44,7 +44,7 @@ Read this first, then CLAUDE.md (project science + history). Do not trust older 
 - App zip: `bash tools/build_percival_dev_app.sh ~/PERCIVAL_releases` (committed files only) ->
   `Percival_v5.25-dev_<sha>.zip` + `_BUILD_INFO.txt`. Current: `Percival_v5.25-dev_0cb269d.zip`
   (sha256 d3ba09edbb66fd10520bd809c779832c5044bd06cb060696b910290348236e6c).
-  NEWER: `Percival_v5.25-dev_8273d1c.zip` (sha256 328435461e78d88ae5662b0004edf960f3032dc46e8c2f7a139e853d37229245; drive remount, Mount button, fast reviewer, crash-safe move) -
+  NEWER: `Percival_v5.25-dev_1a0bbcc.zip` (sha256 4418b70780927a230cafb0242f87efcb753ba3deb8bffd3f88ede0e58e24f13a; incl. audit items 1-8) -
   not yet installed by the user at the time of writing.
 - Install for the user: quit app, unzip, drag "Percival Dev.app" to Applications (Replace), open, "Use Percival_project".
 - Launcher: app/mac_percival/launcher.sh (project path in ~/Library/Application Support/Percival Dev/project_path,
@@ -87,7 +87,8 @@ Read this first, then CLAUDE.md (project science + history). Do not trust older 
 
 - Evening: reviewer 6x faster + next study preloaded; Pensieve move crash-safe (marker 'deleting' before deletes), never
   moves a study in use; drive auto-mount + Mount button (drive_mount.py). Full audit + plan of the remaining file-management
-  problems: docs/engineering/FILE_MANAGEMENT_AUDIT_2026-11-25.md (items 1-10 wait for the user's go).
+  problems: docs/engineering/FILE_MANAGEMENT_AUDIT_2026-11-25.md (items 1-8 DONE on the user's go; 9-10 open). Since ~12:06 the live app has moved
+  Study-039..046 to Pensieve after their final reviews (verified, as designed).
 
 ## 6. Open items / next steps (ask the user before starting)
 1. User reported the app WINDOW froze after "Use Percival_project" (server answered, page idle, no JS error in
