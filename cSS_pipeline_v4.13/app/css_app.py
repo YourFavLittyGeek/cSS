@@ -126,6 +126,7 @@ def save_pat(): jsave("patients.json", PAT)
 import processing_manager as PM                       # v5.14-gui Previous Processing Manager
 import identity_gui as IDG                            # v5.16 patient / examination identification (Standard / Incognito, encrypted vault)
 IDG.init(B, PAT, SET)
+SET.setdefault("source_cleanup", "after_processing"); SET.setdefault("source_keep_days", 7)   # temporary DICOM copies: deleted once a study is completely processed (app/source_cleanup.py)
 SET.setdefault("percival_autocycle", False)   # Stage 6: automatic training cycles OFF by default (pilot)
 SET.setdefault("percival_cycle_n", 5); SET.setdefault("percival_test_fraction", 0.2); SET.setdefault("percival_learn_from", "labelled")
 import percival_gui as PG                             # v5.22 Percival Score (local)
@@ -433,6 +434,12 @@ def watcher():
     while True:
         try: storage_autofix()
         except Exception as e: print(f"storage check: {e}", flush=True)
+        try:                                                 # keep-N-days expiry + studies finished before the policy existed
+            import source_cleanup as SRC
+            with LOCK:
+                k_, n_ = SRC.sweep(B, AD, PAT, SET.get("source_cleanup", "after_processing"), SET.get("source_keep_days", 7), running=set(RUNNING))
+                if k_: save_pat(); print(f"temporary DICOM copies deleted for {k_} completed studies ({n_ / 1e6:.0f} MB)", flush=True)
+        except Exception as e: print(f"temporary copy cleanup: {e}", flush=True)
         try:
             st = SS.status(B, sel_studies()); live = set()
             for r in st["rows"]:
@@ -886,6 +893,10 @@ def stage(p):
         for k in keys:
             src = p["series"].get(k)
             if not src: continue
+            if not os.path.exists(src):
+                if glob.glob(f"{B}/raw/{p['code']}/{mod}/*.nii*"):                 # temporary copy deleted after processing: cohort.py finds the (empty)
+                    os.makedirs(f"{d}/{mod}", exist_ok=True); continue               # modality folder and reuses the conversion already in raw/
+                raise FileNotFoundError(f"the {k} series is no longer available and was never converted - import the study again")
             os.makedirs(f"{d}/{mod}", exist_ok=True)
             files = [src] if os.path.isfile(src) else [os.path.join(src, f) for f in os.listdir(src) if not f.startswith(".")]
             if os.path.isfile(src) and src.endswith((".nii", ".nii.gz")):
@@ -902,7 +913,7 @@ def stage(p):
                     if not os.path.exists(dst): os.symlink(f, dst)
     return d
 
-CUR = dict(caff=None, hold="", mem_wait=False)      # hold: queue paused because of a setup problem (licence, FreeSurfer, disk)
+CUR = dict(caff=None, hold="", mem_wait=False, disk_wait="")      # hold: queue paused because of a setup problem (licence, FreeSurfer, disk)
 PROCS = {}            # code -> running subprocess (several patients can run at the same time)
 RUNNING = {}          # code -> worker thread
 IMPORT_LOCK = threading.Lock()   # cohort.py import rewrites review/cohort_import.csv: one import (and one run start) at a time
@@ -997,6 +1008,12 @@ def process(p):
     copy_results(p); step_end(p, "qc")
     pm_end_full(p, True)
     p.update(status="done", finished=time.time(), step=""); save_pat(); notify("Percival", f"{os_label(code)} finished")
+    if SET.get("source_cleanup", "after_processing") == "after_processing":       # completely processed: its temporary DICOM copies are not needed any more
+        try:
+            import source_cleanup as SRC
+            n = SRC.clean(B, AD, p)
+            if n: save_pat(); open(logf, "a").write(f"\ntemporary DICOM copies deleted ({n / 1e6:.0f} MB): re-runs use raw/{code}/*.nii.gz\n")
+        except Exception as e: open(logf, "a").write(f"\ntemporary copies not deleted: {e}\n")
     try: NC.add(B, "done", "processing", f"Patient {code} finished", "pipeline complete")
     except Exception: pass
     try: write_results_file()
@@ -1238,7 +1255,9 @@ def id_post(op, d):
             import progress_jobs as PJ
             if PJ.running("import"): return dict(ok=False, error="an import is already running - wait for it to finish (see the progress pill, bottom right)")
             n_inc = sum(1 for e in (pl or {}).get("exams", []) if e.get("include"))
-            return dict(ok=True, job=PJ.start("import", n_inc + 1, _do_commit, title=f"Importing {n_inc} examination(s)"), n=n_inc)
+            sp = import_space_check(pl)
+            if not sp["ok"]: return dict(ok=False, error=sp["error"], space=sp)
+            return dict(ok=True, space=sp, job=PJ.start("import", n_inc + 1, _do_commit, title=f"Importing {n_inc} examination(s)"), n=n_inc)
         return dict(ok=False, error=f"unknown {op}")
     except Exception as e: return dict(ok=False, error=IDG.redact_text(f"{e}", SET, B)[-400:], kind=type(e).__name__)
 # ------------------------------------------------------------------ v5.22 PERCIVAL SCORE - app/percival_gui.py, unified_engine/uengine/percival/
@@ -1460,6 +1479,9 @@ def files_post(op, d):
         return dict(ok=False, error=f"file operation error: {type(e).__name__}: {e}")
 
 def storage_get(op, q):
+    if op == "temp_summary":                                 # temporary DICOM copies on the Mac and why each is still there
+        import source_cleanup as SRC
+        return dict(ok=True, **SRC.summary(B, AD, PAT, SET.get("source_cleanup"), SET.get("source_keep_days", 7)), free_gb=round(_free_gb(), 1))
     try:
         from uengine.file_manager import FileManager
         from uengine.storage_advisor import StorageAdvisor
@@ -1520,6 +1542,22 @@ def storage_get(op, q):
     except Exception as e: return dict(error=f"{type(e).__name__}: {e}")
 
 def storage_post(op, d):
+    if op == "clean_temp":                                   # delete now the temporary DICOM copies of completely processed studies (never failed / running)
+        import source_cleanup as SRC
+        codes = set(d.get("codes") or []); k = freed = 0
+        with LOCK:
+            for p in PAT:
+                if (codes and p["code"] not in codes) or p["code"] in RUNNING: continue
+                n = SRC.clean(B, AD, p)
+                if n: k += 1; freed += n
+            if k: save_pat()
+        return dict(ok=True, cleaned=k, freed_bytes=freed, free_gb=round(_free_gb(), 1))
+    if op == "source_policy":
+        import source_cleanup as SRC
+        pol = d.get("policy", SET.get("source_cleanup"))
+        if pol not in SRC.POLICIES: return dict(ok=False, error=f"policy must be one of {', '.join(SRC.POLICIES)}")
+        SET["source_cleanup"] = pol; SET["source_keep_days"] = max(1, min(365, int(d.get("keep_days", SET.get("source_keep_days", 7)) or 7)))
+        jsave("settings.json", SET); return dict(ok=True, policy=pol, keep_days=SET["source_keep_days"])
     _g = _transfer_guard("storage", op, d)                   # Phase 1e.2
     if _g is not None:
         return _g
@@ -2531,12 +2569,54 @@ def run_one(p):
         if p.get("pm_run"): pm_end_full(p, False, f"stopped ({p.get('status')}) before the pipeline finished")   # stop / pause-stop: recorded, outputs restored
         RUNNING.pop(p["code"], None)
 def solo(p): return p.get("pathway") in SOLO
+DISK_MIN_START_GB = 20.0      # free space on the project disk below which no new patient starts (a full run can write several GB)
+DISK_IMPORT_RESERVE_GB = 15.0  # free space that must remain after an import copy
+
+
+def _free_gb(path=None):
+    try: return shutil.disk_usage(path or B).free / 1024**3
+    except Exception: return 1e9
+
+
+def _disk_gate():
+    """'' when there is room to start the next patient; otherwise the reason (shown in Activity + one urgent notification, resolved
+    automatically when space is back). Nothing is moved or deleted automatically."""
+    fg = _free_gb()
+    if fg >= DISK_MIN_START_GB:
+        if CUR.get("disk_wait"): CUR["disk_wait"] = ""; NC.resolve(B, "disk_low")
+        return ""
+    msg = f"only {fg:.1f} GB free on the Mac disk (at least {DISK_MIN_START_GB:.0f} GB needed to start a study) - processing paused, running studies finish"
+    if not CUR.get("disk_wait"):
+        notify_c("urgent", "processing", "Mac disk nearly full - processing paused", msg + ". Free space (Files: archive processed studies to the Data Vault, or empty the Trash); it resumes by itself.", key="disk_low")
+    CUR["disk_wait"] = msg
+    return msg
+
+
+def import_space_check(plan):
+    """before an import copy: size of the CHOSEN series only (the files that are copied) vs free space on the project disk"""
+    need = 0
+    for e in (plan or {}).get("exams", []):
+        if not e.get("include"): continue
+        for src in (e.get("chosen") or {}).values():
+            try:
+                if os.path.isdir(src):
+                    with os.scandir(src) as it: need += sum(x.stat().st_size for x in it if x.is_file() and not x.name.startswith("."))
+                elif os.path.isfile(src): need += os.path.getsize(src)
+            except OSError: pass
+    need_gb = need / 1024**3; free = _free_gb()
+    ok = free - need_gb >= DISK_IMPORT_RESERVE_GB
+    return dict(ok=ok, need_gb=round(need_gb, 2), free_gb=round(free, 1), reserve_gb=DISK_IMPORT_RESERVE_GB,
+                error="" if ok else f"not enough space on the Mac: the chosen series need {need_gb:.1f} GB, {free:.1f} GB is free and "
+                                    f"{DISK_IMPORT_RESERVE_GB:.0f} GB must stay free for processing - free space first (nothing was copied)")
+
+
 def next_to_start():
     """the next waiting patient that may start now, or None. Rules: at most SET['parallel'] at once; SWI-only / SynthMorph run alone
     (and wait until the normal patients are done); no new start while memory is in the yellow / red zone"""
     if CUR["hold"]: return None
     wait = [p for p in PAT if p["status"] == "waiting" and not p.get("archived")]       # v5.20: archived studies wait until restored
     if not wait: return None
+    if not FAKE and _disk_gate(): return None                     # Mac disk nearly full: no new patient starts (running ones finish)
     run = [pget(c) for c in list(RUNNING)]; run = [p for p in run if p]
     if any(solo(p) for p in run): return None
     if len(run) >= max(1, int(SET.get("parallel", 1))): return None
@@ -2797,7 +2877,7 @@ def state():
     si = sysinfo(); rec, rec_why, _ = recommend(si)
     par = max(1, int(SET.get("parallel", 1)))
     rem = sum(x["remaining"] for x in q) / min(par, max(1, len([x for x in q if not x["solo"]]) or 1))
-    return dict(patients=out, queue=dict(n=len(q), remaining=rem, running=",".join(RUNNING), hold=CUR["hold"], mem_wait=CUR["mem_wait"]),
+    return dict(patients=out, queue=dict(n=len(q), remaining=rem, running=",".join(RUNNING), hold=CUR["hold"], mem_wait=CUR["mem_wait"], disk_wait=CUR.get("disk_wait", "")),
                 sys=si, rec=rec, rec_why=rec_why, pw_time=PW_TIME, pw_mem=PW_MEM, pathways=PATHWAYS, mem_zones=[MEM_YELLOW, MEM_RED],
                 settings=SET, version=version(), project=dict(name=os.path.basename(os.path.normpath(B)), path=B), cohorts=sorted(set(jload("cohorts.json", [])) | {p.get("cohort", "") for p in PAT} - {""}), steps=STEPS)
 

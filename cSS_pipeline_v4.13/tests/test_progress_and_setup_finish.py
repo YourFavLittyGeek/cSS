@@ -103,5 +103,80 @@ class TestImportCleanup(unittest.TestCase):
         self.assertFalse(r["ok"]); self.assertTrue(r.get("needs_confirm"))
 
 
+class TestDiskGuards(unittest.TestCase):
+    def test_import_counts_only_the_chosen_series_and_refuses_when_full(self):
+        import css_app as A
+        ex = tempfile.mkdtemp(dir=os.environ["CSS_BASE"])
+        for name, n in (("SWI", 3), ("T1", 2), ("LOCALIZER", 50), ("DWI", 40)):          # 15-series exams: only the chosen ones are copied
+            os.makedirs(os.path.join(ex, name))
+            for i in range(n): open(os.path.join(ex, name, f"{i}.dcm"), "wb").write(b"x" * 1000)
+        plan = dict(exams=[dict(include=True, chosen=dict(SWI=os.path.join(ex, "SWI"), T1=os.path.join(ex, "T1"))),
+                           dict(include=False, chosen=dict(SWI=os.path.join(ex, "DWI")))])
+        r = A.import_space_check(plan); self.assertTrue(r["ok"], r); self.assertAlmostEqual(r["need_gb"], 5000 / 1024**3, places=2)
+        with mock.patch.object(A, "_free_gb", return_value=10.0):
+            r = A.import_space_check(plan)
+        self.assertFalse(r["ok"]); self.assertIn("nothing was copied", r["error"])
+
+    def test_no_new_study_starts_when_the_disk_is_nearly_full(self):
+        import css_app as A
+        with mock.patch.object(A, "_free_gb", return_value=5.0), mock.patch.object(A, "notify_c") as n:
+            self.assertIn("processing paused", A._disk_gate()); A._disk_gate()
+        self.assertEqual(n.call_count, 1)                                              # one notification, not one per second
+        with mock.patch.object(A, "_free_gb", return_value=500.0): self.assertEqual(A._disk_gate(), "")
+        self.assertEqual(A.CUR["disk_wait"], "")
+
+
+class TestTemporaryCopyCleanup(unittest.TestCase):
+    def _study(self, code, status="done"):
+        import source_cleanup as SRC
+        B = tempfile.mkdtemp(dir=os.environ["CSS_BASE"]); AD = os.path.join(B, "app_data")
+        for d in (f"{AD}/import_src/{code}/SWI", f"{B}/raw/{code}/SWI/_dicom", f"{B}/review", f"{AD}/staging/{code}/SWI"):
+            os.makedirs(d, exist_ok=True)
+        open(f"{AD}/import_src/{code}/SWI/SWI_00000.dcm", "wb").write(b"d" * 4000)
+        open(f"{B}/raw/{code}/SWI/_dicom/00000_a.dcm", "wb").write(b"d" * 4000)
+        open(f"{B}/raw/{code}/SWI/{code}_swi.nii.gz", "wb").write(b"n" * 100)
+        t0 = time.time() - 60
+        p = dict(code=code, status=status, started=t0, finished=time.time())
+        for f in (f"{B}/review/{code}_candidates.csv", f"{B}/review/{code}_manifest.json"): open(f, "w").write("x")
+        return SRC, B, AD, p
+
+    def test_only_completely_processed_studies_lose_their_dicom_copies(self):
+        SRC, B, AD, p = self._study("S1")
+        self.assertEqual(SRC.verified(B, p), "")
+        self.assertGreaterEqual(SRC.clean(B, AD, p), 8000)
+        self.assertFalse(os.path.exists(f"{AD}/import_src/S1")); self.assertFalse(os.path.exists(f"{B}/raw/S1/SWI/_dicom"))
+        self.assertTrue(os.path.exists(f"{B}/raw/S1/SWI/S1_swi.nii.gz"))                      # the conversion re-runs use is kept
+        self.assertTrue(os.path.exists(f"{B}/review/S1_candidates.csv"))                       # results kept
+        for status in ("failed", "stopped", "running", "waiting"):
+            SRC2, B2, AD2, p2 = self._study("S2", status)
+            self.assertIn("status", SRC2.verified(B2, p2)); self.assertEqual(SRC2.clean(B2, AD2, p2), 0); self.assertTrue(os.path.exists(f"{AD2}/import_src/S2"))
+
+    def test_done_label_without_real_results_is_not_trusted(self):
+        SRC, B, AD, p = self._study("S3"); os.remove(f"{B}/review/S3_manifest.json")
+        self.assertIn("manifest", SRC.verified(B, p))
+        SRC, B, AD, p = self._study("S4"); p["started"] = time.time() + 100; p["finished"] = time.time() + 200
+        self.assertIn("older than the last run", SRC.verified(B, p))
+        SRC, B, AD, p = self._study("S5"); os.remove(f"{B}/raw/S5/SWI/S5_swi.nii.gz")
+        self.assertIn("no converted SWI", SRC.verified(B, p)); self.assertEqual(SRC.clean(B, AD, p), 0)
+
+    def test_policies_keep_days_and_never(self):
+        SRC, B, AD, p = self._study("S6")
+        self.assertEqual(SRC.sweep(B, AD, [p], "keep", 7), (0, 0))
+        self.assertEqual(SRC.sweep(B, AD, [p], "keep_days", 7)[0], 0)                          # finished just now: kept for 7 days
+        self.assertEqual(SRC.sweep(B, AD, [p], "after_processing", 7, running={"S6"})[0], 0)   # never while running
+        p["finished"] = time.time() - 8 * 86400; p["started"] = p["finished"] - 60
+        for f in (f"{B}/review/S6_candidates.csv", f"{B}/review/S6_manifest.json"): os.utime(f, (p["started"] + 10, p["started"] + 10))
+        self.assertEqual(SRC.sweep(B, AD, [p], "keep_days", 7)[0], 1); self.assertFalse(os.path.exists(f"{AD}/import_src/S6"))
+        sm = SRC.summary(B, AD, [p], "keep_days", 7); self.assertEqual(sm["studies"], [])
+
+    def test_rerun_after_cleanup_uses_the_conversion(self):
+        import css_app as A
+        code = "RR1"; raw = os.path.join(A.B, "raw", code, "SWI"); os.makedirs(raw, exist_ok=True); open(os.path.join(raw, "x.nii.gz"), "wb").write(b"n")
+        d = A.stage(dict(code=code, series=dict(SWI=os.path.join(A.AD, "import_src", code, "SWI"))))
+        self.assertTrue(os.path.isdir(os.path.join(d, "SWI")))                                  # cohort.py finds the modality and reuses raw/
+        with self.assertRaises(FileNotFoundError):
+            A.stage(dict(code="RR2", series=dict(SWI=os.path.join(A.AD, "import_src", "RR2", "SWI"))))   # never converted: clear error
+
+
 if __name__ == "__main__":
     unittest.main()
