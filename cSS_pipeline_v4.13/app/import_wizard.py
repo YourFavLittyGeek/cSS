@@ -541,7 +541,7 @@ def _neutral_copy(chosen, fk, root, tick=None):
     """copy the chosen series into the project under NEUTRAL names (fast copy or APFS clone when on same device: no extra disk space)
     so that no source path - which can hold an MRN or a patient name - is stored by the app: root/<file key>/<TYPE>_series.<ext> (+ sidecar) or
     root/<file key>/<TYPE>/ for a DICOM series"""
-    import shutil, subprocess
+    from uengine.transfer import checked_copy as CCP
     if not root: return dict(chosen)
     out = {}; d = os.path.join(root, fk); os.makedirs(d, exist_ok=True)
     try:
@@ -550,15 +550,9 @@ def _neutral_copy(chosen, fk, root, tick=None):
         dest_dev = None
 
     def cp(a, b):
-        try:
-            # Check if same filesystem device before attempting clone
-            if dest_dev is not None and os.stat(a).st_dev == dest_dev:
-                if subprocess.run(["cp", "-c", a, b], capture_output=True).returncode == 0:
-                    return
-        except Exception:
-            pass
-        # High performance copy across filesystems (e.g. ExFAT USB to internal APFS)
-        shutil.copyfile(a, b)
+        # 2026-11-25 (audit item 9): verified copy - temporary name, read back, SHA-256 compared with the source, then renamed
+        # (APFS clone when on the same volume: no extra space). A failed check raises: the import attempt stops and its copies are dropped.
+        CCP.copy_file(a, b, replace=True)
 
     for k, src in chosen.items():
         if os.path.isdir(src):

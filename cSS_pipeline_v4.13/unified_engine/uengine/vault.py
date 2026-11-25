@@ -528,37 +528,42 @@ class PercivalDataVault:
         return True, f"Successfully migrated to {new_vault_path}. Original data preserved."
 
     def create_backup(self, backup_destination: str) -> Tuple[bool, str]:
-        """Create an independent verified backup archive of PENSIEVE, models, and manifests."""
+        """Create an independent VERIFIED backup of PENSIEVE, models, manifests and reports (2026-11-25, audit item 9): every file is
+        copied to a temporary name, read back and compared by SHA-256 before it is renamed (uengine/transfer/checked_copy.py); the
+        whole backup is built under <name>.partial and gets its final name only when every file matched. backup_manifest.json lists
+        every file with its size and SHA-256."""
         if not self.is_connected():
             return False, "Vault is disconnected."
-
-        os.makedirs(backup_destination, exist_ok=True)
+        from .transfer import checked_copy as CC
+        dest = os.path.abspath(backup_destination or "")
+        if not backup_destination: return False, "choose a folder for the backup"
+        vr = os.path.abspath(self.root_path)
+        if dest == vr or dest.startswith(vr + os.sep): return False, "the backup must be outside the Vault folder"
+        os.makedirs(dest, exist_ok=True)
         ts = time.strftime("%Y%m%d_%H%M%S")
-        backup_name = f"percival_vault_backup_{ts}"
-        stage_dir = os.path.join(backup_destination, backup_name)
-        os.makedirs(stage_dir, exist_ok=True)
-
-        # Copy manifests, PENSIEVE db, models, and reports
-        for item in ("manifest", "PENSIEVE", "models", "reports"):
-            src = os.path.join(self.root_path, item)
-            dst = os.path.join(stage_dir, item)
-            if os.path.exists(src):
-                if os.path.isdir(src):
-                    shutil.copytree(src, dst)
-                else:
-                    shutil.copy2(src, dst)
-
-        # Write backup manifest
-        bmanifest = {
-            "source_vault_id": self._manifest.get("vault_id"),
-            "timestamp": time.time(),
-            "datetime": ts,
-            "backup_type": "scientific_core_backup"
-        }
-        with open(os.path.join(stage_dir, "backup_manifest.json"), "w") as f:
-            json.dump(bmanifest, f, indent=2)
-
-        return True, f"Backup created successfully at {stage_dir}"
+        stage_dir = os.path.join(dest, f"percival_vault_backup_{ts}")
+        part = stage_dir + ".partial"
+        try:
+            if os.path.lexists(part): shutil.rmtree(part)
+            os.makedirs(part)
+            files = []
+            for item in ("manifest", "PENSIEVE", "models", "reports"):
+                src = os.path.join(self.root_path, item)
+                if os.path.isdir(src) and not os.path.islink(src):
+                    r = CC.copy_tree(src, os.path.join(part, item))
+                    files += [dict(f, rel=os.path.join(item, f["rel"])) for f in r["files"]]
+                elif os.path.isfile(src) and not os.path.islink(src):
+                    r = CC.copy_file(src, os.path.join(part, item)); files.append(dict(rel=item, size=r["size"], sha256=r["sha256"]))
+            bmanifest = {"source_vault_id": self._manifest.get("vault_id"), "timestamp": time.time(), "datetime": ts,
+                         "backup_type": "scientific_core_backup", "verified": "every file read back and compared by SHA-256",
+                         "n_files": len(files), "bytes": sum(f["size"] for f in files), "files": files}
+            with open(os.path.join(part, "backup_manifest.json"), "w") as f:
+                json.dump(bmanifest, f, indent=2); f.flush(); os.fsync(f.fileno())
+            os.rename(part, stage_dir)
+        except Exception as e:
+            shutil.rmtree(part, ignore_errors=True)
+            return False, f"Backup failed, nothing kept: {e}"
+        return True, f"Backup created and verified ({len(files)} files) at {stage_dir}"
 
     def open_in_finder(self) -> Tuple[bool, str]:
         """Reveal Data Vault root folder in macOS Finder."""

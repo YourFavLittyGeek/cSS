@@ -622,7 +622,7 @@ function procHistory(el,c,a){const R=(a.runs||[]).slice().reverse();
 
 // ---------------- notification centre (v5.14.2-rc4): bell + side curtain; hover = preview, click = keep open
 const NS={open:false,pinned:false,data:null,hoverT:null};
-const NACT={open_selection:["Open study selection",()=>{U.step="selection";go("uni")}],open_train:["Review results",()=>{U.step="train";go("uni")}],open_processing:["Open processing",()=>go("proc")],open_unified:["Open Unified",()=>go("uni")],open_activity:["Open Activity",()=>go("act")],open_add:["Open Add studies",()=>go("add")]};
+const NACT={open_selection:["Open study selection",()=>{U.step="selection";go("uni")}],open_train:["Review results",()=>{U.step="train";go("uni")}],open_processing:["Open processing",()=>go("proc")],open_unified:["Open Unified",()=>go("uni")],open_activity:["Open Activity",()=>go("act")],open_add:["Open Add studies",()=>go("add")],open_settings:["Open Settings",()=>go("set")]};
 async function nLoad(){try{const r=await api("/api/notif/list");NS.data=r;$("#bb").textContent=r.badge?String(r.badge):"";$("#bell").classList.toggle("urg",!!r.urgent);if(NS.open)nRender()}catch(e){}}
 function nLbl(i,t){return i.study?esc(t).split(esc(i.study)).join(sidH(i.study)):esc(t)}   // stored with the internal key; shown with the mode's identifier
 function nRender(){const r=NS.data;if(!r)return;const snz=r.settings.snooze_min||5;
@@ -1053,6 +1053,8 @@ function setView(v){const s=S.settings,F=s.features;const L={duplicate_check:"Du
    <div class="row"><span class="lab">After the final review</span><select id="pv-pol"><option value="move" ${(s.pensieve_after_review||"move")==="move"?"selected":""}>move to Pensieve (recommended)</option><option value="copy" ${s.pensieve_after_review==="copy"?"selected":""}>copy to Pensieve, keep on the Mac</option><option value="off" ${s.pensieve_after_review==="off"?"selected":""}>do nothing</option></select>
      <span class="note">wait</span><input id="pv-grace" type="number" min="0" max="1440" value="${esc(s.pensieve_grace_min??5)}" style="width:60px"><span class="note">min after the final save</span></div>
    <div class="row"><span class="note" id="pv-sum">checking…</span><span class="sp"></span><button class="b" id="pv-earlier" style="display:none">Move earlier reviewed studies now</button></div>
+   <div class="row"><span class="note">when the Mac has less than</span><input id="pv-lowgb" type="number" min="0" max="2000" value="${esc(s.pensieve_low_gb??50)}" style="width:60px"><span class="note">GB free, offer to move reviewed studies (0 = never)</span></div>
+   <div class="row" id="pv-low" style="display:none"><span class="warn" id="pv-lowtxt"></span><span class="sp"></span><button class="b pri" id="pv-free">Free Mac space</button></div>
    <div class="note">Studies reviewed before this update stay on the Mac until you press that button.</div></div>
   <div class="card"><h2>Application Security &amp; Optional App Lock</h2>
    <div class="row"><label style="display:flex;gap:7px;align-items:center;cursor:pointer"><input type="checkbox" id="app-lock" ${s.app_lock_enabled?"checked":""}> Enable Application Passphrase Lock (DEFAULT: DISABLED)</label></div>
@@ -1104,7 +1106,10 @@ function setView(v){const s=S.settings,F=s.features;const L={duplicate_check:"Du
   if($("#pv-pol")){const lab={on_mac:"on the Mac",in_pensieve:"in Pensieve",copied:"copied (also on the Mac)",moving:"moving now",restoring:"coming back now",failed:"failed"};
     const sum=async()=>{const r=await api("/api/pensieve/summary");const el=$("#pv-sum");if(!el)return;if(!r.ok){el.textContent=r.error||"";return}
       const c=Object.entries(r.counts||{}).map(([k,n])=>`${n} ${lab[k]||k}`).join(" · ");el.innerHTML=`${esc(c||"no studies")} · drive: ${r.drive_ready?'<span class="ok">ready</span>':`<span class="warn">${esc(r.drive_reason||"not ready")}</span>`}`;
-      const eb=$("#pv-earlier");if(eb){eb.style.display=r.earlier?"":"none";eb.textContent=`Move ${r.earlier} earlier reviewed ${r.earlier===1?"study":"studies"} now`}};
+      const eb=$("#pv-earlier");if(eb){eb.style.display=r.earlier?"":"none";eb.textContent=`Move ${r.earlier} earlier reviewed ${r.earlier===1?"study":"studies"} now`}
+      const lw=$("#pv-low"),L=r.low_space;if(lw){lw.style.display=L?"":"none";if(L){$("#pv-lowtxt").textContent=`Only ${L.free_gb} GB free on the Mac: ${L.n} reviewed ${L.n===1?"study":"studies"} (${L.gb} GB) can move to Pensieve`;$("#pv-free").disabled=!!r.freeing||!r.drive_ready;$("#pv-free").textContent=r.freeing?"moving…":"Free Mac space"}}};
+    $("#pv-free").onclick=async()=>{if(!confirm("Move every reviewed study that is still on this Mac to Pensieve? Each is copied and checked first; it comes back automatically when you open it."))return;const r=await api("/api/pensieve/free_space",{});toast(r.ok?"moving them one by one (Transfer Center)":esc(r.error),!r.ok);sum()};
+    $("#pv-lowgb").onchange=async()=>{const r=await api("/api/pensieve/low_gb",{gb:+$("#pv-lowgb").value});toast(r.ok?"Pensieve setting saved":esc(r.error),!r.ok);sum()};
     $("#pv-earlier").onclick=async()=>{if(!confirm("Move the studies reviewed before this update to Pensieve? Each is copied and checked first; it comes back automatically when you open it."))return;const r=await api("/api/pensieve/move_earlier",{});toast(r.ok?"moving them one by one (Transfer Center)":esc(r.error),!r.ok);sum()};
     const save=async()=>{const r=await api("/api/pensieve/policy",{policy:$("#pv-pol").value,grace_min:+$("#pv-grace").value});toast(r.ok?"Pensieve setting saved":esc(r.error),!r.ok);sum()};
     $("#pv-pol").onchange=save;$("#pv-grace").onchange=save;sum()}

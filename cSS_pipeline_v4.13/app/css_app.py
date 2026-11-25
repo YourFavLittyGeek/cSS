@@ -340,6 +340,18 @@ def study_label(code):
         i = IDG.ident(code, SET)
         return (i.get("accession") if IDG.mode(SET) == "standard" and not i.get("locked") and i.get("accession") else "") or i.get("deid_code") or code
     except Exception: return code
+def viewer_ident(code):
+    """2026-11-25: the identity the reviewer shows on the image (bottom right, under the reviewer name). Standard mode with the vault
+    readable: patient name, MRN, accession number; Incognito or vault locked: the de-identified study code only. Asked live by the
+    reviewer for every study it shows (a mode switch applies at once); never written to a file or a log."""
+    try:
+        i = IDG.ident(code, SET)
+        dc = i.get("deid_code") or code
+        if IDG.mode(SET) == "standard" and not i.get("locked") and any(i.get(k) for k in ("patient_name", "mrn", "accession")):
+            return dict(mode="standard", code=dc, name=i.get("patient_name", ""), mrn=i.get("mrn", ""), accession=i.get("accession", ""))
+        return dict(mode="locked" if i.get("locked") else "incognito", code=dc)
+    except Exception:
+        return dict(mode="incognito", code=code)
 def os_label(code):
     """macOS banners are stored by macOS outside the app: Incognito shows the code, Standard no identifier at all (open the app to see it)"""
     try: return "A study" if IDG.mode(SET) == "standard" else (IDG.ident(code, SET).get("deid_code") or code)
@@ -485,6 +497,8 @@ def watcher():
         except Exception as e: print(f"temporary copy cleanup: {e}", flush=True)
         try: pensieve_tick()
         except Exception as e: print(f"Pensieve move: {e}", flush=True)
+        try: pensieve_low_space()
+        except Exception as e: print(f"low-space check: {e}", flush=True)
         try:
             st = SS.status(B, sel_studies()); live = set()
             for r in st["rows"]:
@@ -1880,6 +1894,7 @@ def pv_state(code):
 def pensieve_tick():
     """every 30 s: move ONE reviewed study (final review older than the grace time) to the Pensieve drive in the background"""
     pol = SET.get("pensieve_after_review", "move")
+    if PENSIEVE_RUN.get("free"): pol = "move"                             # the user asked to free Mac space: move every reviewed study
     if pol not in ("move", "copy"): return
     t = PENSIEVE_RUN["thread"]
     if t is not None and t.is_alive(): return
@@ -1888,15 +1903,61 @@ def pensieve_tick():
     if not PMV.drive_ready(vault)[0]: return
     grace = max(0, int(SET.get("pensieve_grace_min", 5) or 0)) * 60
     since = float(SET.get("pensieve_since") or 0)
-    if PENSIEVE_RUN.get("earlier"): since = 0.0                          # the user asked to move the earlier reviewed studies too
+    if PENSIEVE_RUN.get("earlier") or PENSIEVE_RUN.get("free"): since = 0.0   # the user asked to move the earlier reviewed studies too
     busy = set(RUNNING) | set(PM_JOBS) | {p.get("code") for p in PAT if p.get("uscore_status") in ("pending", "running")}   # in use: never moved
     with LOCK: cands = [p for p in PAT if p.get("code") not in busy and not p.get("retired") and PMV.due(B, p, grace, since=since)]
-    if not cands: PENSIEVE_RUN["earlier"] = False
+    if not cands: PENSIEVE_RUN["earlier"] = False; PENSIEVE_RUN["free"] = False
     if not cands: return
     p = cands[0]
     if pol == "copy" and (PMV.read_marker(B, p["code"]) or {}).get("final_mtime") == PMV.newest_final(B, p["code"]): return
     PENSIEVE_RUN["thread"] = threading.Thread(target=pensieve_move_one, args=(p, pol == "move"), daemon=True, name="pensieve-move")
     PENSIEVE_RUN["thread"].start()
+
+LOWSPACE = {"t": 0.0, "info": None, "sizes": {}}
+
+
+def pensieve_low_space(force=False):
+    """audit item 10 (2026-11-25): when the Mac has less than SET pensieve_low_gb (default 50) GB free, offer to move the reviewed studies
+    that are still on the Mac (those the automatic move does not take: reviewed before the update, or the setting is copy / off).
+    Checked at most every 10 min; sizes counted with lstat (links not followed). Returns the offer (or None) and keeps a notification."""
+    now = time.time()
+    if not force and now - LOWSPACE["t"] < 600: return LOWSPACE["info"]
+    LOWSPACE["t"] = now
+    import pensieve_move as PMV
+    limit = float(SET.get("pensieve_low_gb", 50) or 0)
+    try: free = shutil.disk_usage(B).free / 1e9
+    except OSError: return None
+    info = None
+    if limit and free < limit:
+        pol = SET.get("pensieve_after_review", "move"); since = float(SET.get("pensieve_since") or 0)
+        busy = set(RUNNING) | set(PM_JOBS)
+        with LOCK: offer = [p["code"] for p in PAT if p.get("code") not in busy and not p.get("retired") and PMV.due(B, p, 0)
+                            and not (pol == "move" and PMV.due(B, p, 0, since=since))]
+        tot = 0
+        for c in offer:
+            if c not in LOWSPACE["sizes"]:
+                n = 0
+                for t in PMV.moved_tops(B, c):
+                    a = os.path.join(B, t)
+                    if os.path.isfile(a) and not os.path.islink(a): n += os.lstat(a).st_size
+                    for r, _, fs in os.walk(a):
+                        for f in fs:
+                            try: n += os.lstat(os.path.join(r, f)).st_size
+                            except OSError: pass
+                LOWSPACE["sizes"][c] = n
+            tot += LOWSPACE["sizes"][c]
+        if offer: info = dict(free_gb=round(free, 1), limit_gb=limit, n=len(offer), gb=round(tot / 1e9, 1))
+    LOWSPACE["info"] = info
+    if info:
+        ok, why = PMV.drive_ready(SET.get("vault_mount"))
+        notify_c("action", "storage", f"Mac space low: {info['free_gb']} GB free",
+                 f"{info['n']} reviewed {'study' if info['n'] == 1 else 'studies'} ({info['gb']} GB) can move to Pensieve - Settings › Pensieve › "
+                 f"Free Mac space" + ("" if ok else f" (connect the Pensieve drive first: {why})"), actions=["open_settings"], key="lowspace")
+    else:
+        try: NC.resolve(B, "lowspace")
+        except Exception: pass
+    return info
+
 
 def pensieve_move_one(p, delete_local=True):
     import pensieve_move as PMV, progress_jobs as PJ
@@ -1927,6 +1988,7 @@ def pensieve_api(op, d):
         since = float(SET.get("pensieve_since") or 0)
         earlier = [p["code"] for p in PAT if PMV.due(B, p, 0) and not PMV.due(B, p, 0, since=since)]
         return dict(ok=True, policy=SET.get("pensieve_after_review", "move"), grace_min=SET.get("pensieve_grace_min", 5), earlier=len(earlier),
+                    low_space=LOWSPACE["info"], low_gb=SET.get("pensieve_low_gb", 50), freeing=bool(PENSIEVE_RUN.get("free")),
                     drive_ready=ok, drive_reason=why, counts=PMV.summary(B, codes),
                     studies={c: PMV.state(B, c) for c in codes})
     if op == "status": return dict(ok=True, **PMV.status(B, str(d.get("code", ""))))
@@ -1940,6 +2002,14 @@ def pensieve_api(op, d):
         return dict(ok=True, policy=pol, grace_min=SET["pensieve_grace_min"])
     if op == "move_earlier":                                            # studies reviewed before the update: only on request
         PENSIEVE_RUN["earlier"] = True; return dict(ok=True, started=True)
+    if op == "free_space":                                              # low Mac space: move every reviewed study still on the Mac
+        ok, why = PMV.drive_ready(SET.get("vault_mount"))
+        if not ok: return dict(ok=False, error=f"connect the Pensieve drive first: {why}")
+        PENSIEVE_RUN["free"] = True; LOWSPACE["t"] = 0.0; return dict(ok=True, started=True)
+    if op == "low_gb":
+        with LOCK:
+            SET["pensieve_low_gb"] = max(0, min(2000, int(d.get("gb", 50) or 0))); jsave("settings.json", SET)
+        LOWSPACE["t"] = 0.0; return dict(ok=True, low_gb=SET["pensieve_low_gb"], low_space=pensieve_low_space(force=True))
     code = str(d.get("code", ""))
     p = next((x for x in PAT if x.get("code") == code), None)
     if not p: return dict(ok=False, error="unknown study")
@@ -3072,6 +3142,7 @@ def launch_child(kind, args, port0):
     if kind == "review" and args.get("reviewer"): cmd += ["--reviewer", args["reviewer"]]
     if kind == "review": cmd += ["--groups", f"{AD}/review_groups.json", "--start", args.get("start", args["codes"][0])]
     if kind == "review": env["CSS_STUDY_LABELS"] = json.dumps({c: study_label(c) for c in args["codes"]})      # in memory only
+    if kind == "review": env["CSS_APP_PORT"] = str(WIN.get("port") or "")   # the reviewer asks /api/viewer_ident (identity on the image)
     CHILD[kind] = subprocess.Popen(cmd, stdout=open(f"{AD}/logs/{kind}.log", "w"), stderr=subprocess.STDOUT, env=env)
     for _ in range(100):
         time.sleep(0.2)
@@ -3117,6 +3188,7 @@ class H(BaseHTTPRequestHandler):
         try:
             if u.path == "/": return self.send(open(f"{HERE}/css_app.html", "rb").read(), ctype="text/html; charset=utf-8")
             if u.path == "/api/state": return self.send(state())
+            if u.path == "/api/viewer_ident": return self.send(viewer_ident(q.get("code", "")))
             if u.path == "/api/job":                                     # background job progress (setup Finish, study import)
                 import progress_jobs as PJ; q_ = {k: v[0] for k, v in parse_qs(u.query).items()}
                 return self.send(PJ.get(q_["id"]) if q_.get("id") else dict(running=PJ.running()))

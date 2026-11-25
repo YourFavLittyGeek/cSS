@@ -12,7 +12,7 @@ empty). The wait was the reviewer's own computation (fixed in 8273d1c: 27 s -> 4
 | A study could move while processing (Processing Manager / unified score) or while still being read | skipped; also waits until its review files are unchanged for the grace time |
 | Quit did not wait for a running move | it waits; the quit check counts it |
 
-## Plan - DONE 2026-11-25 (user: "go ahead"): items 1-4 in 4da2b2c, 5-8 in the next commit; 9-10 still open
+## Plan - DONE 2026-11-25 (user: "go ahead"): items 1-4 in 4da2b2c, 5-8 in 1a0bbcc, 9-10 below
 Single owner: app/pensieve_move.py, view: Transfer Center
 ### High
 1. **Protect `<Pensieve>/studies/`** (`safety.py` PROTECTED_VAULT_DIRS lacks it): after a move it holds the ONLY copy of
@@ -50,3 +50,14 @@ Single owner: app/pensieve_move.py, view: Transfer Center
 7. Labelled "not active" / disabled: archival policies, cleaning mode, 13 of 15 cleaning categories, folder settings that
    are never read (now "fixed").
 8. "Change working directory" -> "use Setup"; "Clean Orphan Staging Buffers" wired to the staging prune.
+
+## Status of items 9-10 (implemented, evening 2026-11-25)
+9. `unified_engine/uengine/transfer/checked_copy.py`: copy to `<target>.part-<pid>`, source hashed while read, fsync, read back without
+   the cache, SHA-256 compared, then renamed; existing different files never overwritten (import copy: replaced only after verification).
+   The journaled engine was not used because it only writes inside the project / Pensieve and protects app_data/import_src.
+   Import copy (`import_wizard._neutral_copy`) and Vault backup (`vault.create_backup`: built under `.partial`, renamed only when every
+   file matched, manifest lists every file + SHA-256; refused into the Vault itself) use it.
+10. Low Mac space: below Settings › Pensieve "offer when less than N GB free" (default 50, 0 = never) the app checks every 10 min, offers the
+   reviewed studies still on the Mac that the automatic move will not take (reviewed before the update, or the setting is copy / off),
+   with their size (lstat), as a notification + a "Free Mac space" button; that run moves them (Mac copy deleted after verification) even
+   when the setting is copy / off. Never moves a study being processed.
