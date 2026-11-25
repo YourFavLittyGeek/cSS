@@ -115,12 +115,14 @@ def drive_ready(vault):
     return True, ""
 
 
-def due(B, p, grace_s=300, now=None):
-    """a finished, reviewed study whose newest final review is older than the grace time and newer than its last move"""
+def due(B, p, grace_s=300, now=None, since=0.0):
+    """a finished, reviewed study whose newest final review is older than the grace time and newer than its last move.
+    since: only reviews saved after this time (the moment the feature was first switched on) move automatically - studies
+    reviewed before the update move only when the user asks (Settings > Pensieve > "Move earlier reviewed studies now")."""
     code = p.get("code", "")
     if p.get("status") != "done" or not code: return False
     fin = newest_final(B, code)
-    if not fin or (now or time.time()) - fin < grace_s: return False
+    if not fin or (now or time.time()) - fin < grace_s or fin <= float(since or 0): return False
     m = read_marker(B, code) or {}
     if m.get("state") == "in_pensieve": return False
     return fin > float(m.get("final_mtime") or 0)

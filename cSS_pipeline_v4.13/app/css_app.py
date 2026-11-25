@@ -126,7 +126,8 @@ def save_pat(): jsave("patients.json", PAT)
 import processing_manager as PM                       # v5.14-gui Previous Processing Manager
 import identity_gui as IDG                            # v5.16 patient / examination identification (Standard / Incognito, encrypted vault)
 IDG.init(B, PAT, SET)
-SET.setdefault("pensieve_after_review", "move"); SET.setdefault("pensieve_grace_min", 5)   # 2026-11-25: reviewed studies move to the Pensieve drive (app/pensieve_move.py)
+SET.setdefault("pensieve_after_review", "move"); SET.setdefault("pensieve_grace_min", 5)
+if "pensieve_since" not in SET: SET["pensieve_since"] = time.time(); jsave("settings.json", SET)   # reviews saved before the update never move by themselves   # 2026-11-25: reviewed studies move to the Pensieve drive (app/pensieve_move.py)
 SET.setdefault("source_cleanup", "after_processing"); SET.setdefault("source_keep_days", 7)   # temporary DICOM copies: deleted once a study is completely processed (app/source_cleanup.py)
 SET.setdefault("percival_autocycle", False)   # Stage 6: automatic training cycles OFF by default (pilot)
 SET.setdefault("percival_cycle_n", 5); SET.setdefault("percival_test_fraction", 0.2); SET.setdefault("percival_learn_from", "labelled")
@@ -1814,7 +1815,10 @@ def pensieve_tick():
     vault = SET.get("vault_mount")
     if not PMV.drive_ready(vault)[0]: return
     grace = max(0, int(SET.get("pensieve_grace_min", 5) or 0)) * 60
-    with LOCK: cands = [p for p in PAT if p.get("code") not in RUNNING and not p.get("retired") and PMV.due(B, p, grace)]
+    since = float(SET.get("pensieve_since") or 0)
+    if PENSIEVE_RUN.get("earlier"): since = 0.0                          # the user asked to move the earlier reviewed studies too
+    with LOCK: cands = [p for p in PAT if p.get("code") not in RUNNING and not p.get("retired") and PMV.due(B, p, grace, since=since)]
+    if not cands: PENSIEVE_RUN["earlier"] = False
     if not cands: return
     p = cands[0]
     if pol == "copy" and (PMV.read_marker(B, p["code"]) or {}).get("final_mtime") == PMV.newest_final(B, p["code"]): return
@@ -1842,7 +1846,9 @@ def pensieve_api(op, d):
     if op == "summary":
         codes = [p["code"] for p in PAT if p.get("code")]
         ok, why = PMV.drive_ready(SET.get("vault_mount"))
-        return dict(ok=True, policy=SET.get("pensieve_after_review", "move"), grace_min=SET.get("pensieve_grace_min", 5),
+        since = float(SET.get("pensieve_since") or 0)
+        earlier = [p["code"] for p in PAT if PMV.due(B, p, 0) and not PMV.due(B, p, 0, since=since)]
+        return dict(ok=True, policy=SET.get("pensieve_after_review", "move"), grace_min=SET.get("pensieve_grace_min", 5), earlier=len(earlier),
                     drive_ready=ok, drive_reason=why, counts=PMV.summary(B, codes),
                     studies={c: PMV.state(B, c) for c in codes})
     if op == "status": return dict(ok=True, **PMV.status(B, str(d.get("code", ""))))
@@ -1854,6 +1860,8 @@ def pensieve_api(op, d):
             SET["pensieve_grace_min"] = max(0, min(1440, int(d.get("grace_min", SET.get("pensieve_grace_min", 5)) or 0)))
             jsave("settings.json", SET)
         return dict(ok=True, policy=pol, grace_min=SET["pensieve_grace_min"])
+    if op == "move_earlier":                                            # studies reviewed before the update: only on request
+        PENSIEVE_RUN["earlier"] = True; return dict(ok=True, started=True)
     code = str(d.get("code", ""))
     p = next((x for x in PAT if x.get("code") == code), None)
     if not p: return dict(ok=False, error="unknown study")

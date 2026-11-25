@@ -103,6 +103,13 @@ class TestPensieveMove(_ExfatImage):
         self.assertTrue(PM.due(self.B, p, grace_s=300))
         self.assertFalse(PM.due(self.B, dict(code=CODE, status="running"), grace_s=300))
 
+    def test_reviews_saved_before_the_update_do_not_move_by_themselves(self):
+        fin = os.path.getmtime(self.final(age_s=3600))
+        p = dict(code=CODE, status="done")
+        self.assertFalse(PM.due(self.B, p, grace_s=300, since=fin + 10))         # feature switched on after this review
+        self.assertTrue(PM.due(self.B, p, grace_s=300, since=fin - 10))          # reviewed after the switch-on
+        self.assertTrue(PM.due(self.B, p, grace_s=300, since=0))                 # "Move earlier reviewed studies now"
+
     def test_move_verifies_then_deletes_and_restore_brings_back(self):
         self.final()
         before = {rel: _sha(os.path.join(self.B, rel)) for rel in STUDY_FILES}
