@@ -1,5 +1,7 @@
 # CLAUDE.md — context for Claude Code
 
+> **New session? Read `HANDOVER.md` (this folder) first** - current state, rules, open items (updated 2026-11-25).
+
 ## Project
 Semi-automatic grading of **cortical superficial siderosis (cSS)** on SWI MRI, for cerebral amyloid
 angiopathy research (Mayo Clinic, Jacksonville; cerebrovascular/neuroimaging fellowship project).
