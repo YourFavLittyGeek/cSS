@@ -13,7 +13,7 @@ Policy (Settings > Storage, SET["source_cleanup"]):
 were written by this run AND raw/<key>/SWI holds a converted NIfTI. A failed / stopped / running / waiting study is never cleaned
 automatically (its copy is what Retry needs). The original files (external drive) are never touched. Results, review files, the NIfTI
 conversions in raw/ and the processing outputs stay - they are what review, re-runs and export use."""
-import glob
+import glob, json
 import os
 import shutil
 import time
@@ -46,8 +46,16 @@ def size_of(paths):
 
 
 def has_nifti(B, code, mod="SWI"):
+    """converted NIfTI in raw/<code>/<mod>/ - on the Mac, or recorded in the Pensieve marker of a moved study (2026-11-25)"""
     d = os.path.join(B, "raw", code, mod)
-    return bool(glob.glob(os.path.join(d, "*.nii.gz")) + glob.glob(os.path.join(d, "*.nii")))
+    if glob.glob(os.path.join(d, "*.nii.gz")) + glob.glob(os.path.join(d, "*.nii")): return True
+    try:
+        with open(os.path.join(B, "review", f"{code}_pensieve.json")) as f:
+            m = json.load(f)
+        pre = f"raw/{code}/{mod}/"
+        return m.get("state") in ("in_pensieve", "deleting") and any(x.get("rel", "").startswith(pre) and ".nii" in x["rel"] for x in m.get("files", []))
+    except (OSError, ValueError):
+        return False
 
 
 def verified(B, p):

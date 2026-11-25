@@ -212,7 +212,14 @@ class PathPolicy:
                 raise SafetyError(f"refused: {p} is a structural storage folder and cannot be removed or renamed as a whole")
             if self.contains_protected(p):
                 raise SafetyError(f"refused: {p} contains protected data")
+            if self.in_archive(p):
+                raise SafetyError(f"refused: {p} is an archived study copy on the Pensieve drive - archived copies are write-once "
+                                  f"(after a move they are the only copy of the images); use the study's Pensieve panel")
         return c
+
+    def in_archive(self, c: str) -> bool:
+        """inside <vault>/studies/ (2026-11-25: write-once - new versions may be added, nothing there is deleted / moved / renamed)"""
+        return bool(self.vault) and inside(c, canon(os.path.join(self.vault, "studies")))
 
     check_delete = check_modify
 

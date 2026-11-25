@@ -204,10 +204,20 @@ def proc_get(op, q):
     return dict(ok=False, error="unknown")
 
 PM_STEP = {"align": "align_seg.py", "detect": "detect_css.py"}
+def ensure_local(code):
+    """the study's images must be on the Mac (moved to Pensieve after its review -> brought back, verified)"""
+    try:
+        import pensieve_move as PMV
+        return PMV.ensure_local(B, SET.get("vault_mount"), code)
+    except ImportError:
+        return dict(ok=True, restored=0)
+
 def pm_execute(code, plan, note):
     """runs plan['run'] for an existing study in the background: align / detect (+ surface features) / unified.
     Anatomy and registration are NOT run here: they need the raw series and run_css.sh (Patients -> Re-run, which reuses a
     finished FreeSurfer automatically)."""
+    el = ensure_local(code)
+    if not el.get("ok"): raise ValueError(el["error"])              # shown to the user by the calling endpoint
     st = PM.Study(B, code); env = fs_env(); sw = dict(pipeline=version(), python=platform.python_version())
     man = st.start_run(plan, note, software=sw); rid = man["run_id"]; logf = os.path.join(B, man["log"])
     PM_JOBS[code] = dict(run_id=rid, stage="", started=time.time())
@@ -555,6 +565,8 @@ def proc_post(op, d):
             return dict(ok=False, error="this study is being processed; wait until it finishes")
         if op == "set_active":
             if d.get("confirm") is not True: return dict(ok=False, needs_confirm=True, error="making another run active replaces the current outputs (they stay archived): confirm")
+            el = ensure_local(code)
+            if not el.get("ok"): return dict(ok=False, error=el["error"])
             st.set_active(d["run_id"]); return dict(ok=True)
         if op in ("start", "resume"):
             pl = st.resume_plan(d["run_id"]) if op == "resume" else st.plan(d.get("choice", "selective"), d.get("rerun_from"), bool(d.get("force_anatomy")))
@@ -1255,6 +1267,9 @@ def fsqc_post(op, d):
         code = str(d.get("code", ""))
         if not re.fullmatch(r"[A-Za-z0-9_\-]{1,32}", code): return dict(ok=False, error="bad study code")
         if op == "snapshot": return QG.make_snapshot(B, AD, code, qc_snapshot)
+        if op in ("freeview", "snapshot"):
+            el = ensure_local(code)
+            if not el.get("ok"): return dict(ok=False, error=el["error"])
         if op == "freeview": return QG.freeview(B, code, SET, d.get("what", "swi"), find_license=find_license)
         return dict(ok=False, error=f"unknown {op}")
     except Exception as e: return dict(ok=False, error=f"{type(e).__name__}: {e}"[-400:])
@@ -1877,6 +1892,11 @@ def pensieve_tick():
 def pensieve_move_one(p, delete_local=True):
     import pensieve_move as PMV, progress_jobs as PJ
     code = p["code"]
+    try:                                                     # temporary DICOM copies first: they are never moved to Pensieve
+        import source_cleanup as SRC
+        with LOCK:
+            if SRC.clean(B, AD, p): save_pat()
+    except Exception as e: print(f"temporary copies of {code} not cleaned before the move: {e}", flush=True)
     r = PMV.move(B, SET.get("vault_mount"), code, delete_local=delete_local)
     with LOCK: p["pensieve"] = PMV.status(B, code); save_pat()
     if r.get("ok"):
@@ -2178,7 +2198,7 @@ def sa_ctx():
         with LOCK:
             PAT[:] = [p for p in PAT if p["code"] != c]; save_pat()
     return dict(ID=IDG.ID, B=B, AD=AD, pget=pget, save_pat=save_pat, file_keys=lambda: [p["code"] for p in PAT], reveal=lambda: IDG.reveal(SET),
-                mode=lambda: IDG.mode(SET), drop_pat=drop, after_edit=lambda c: write_grades_file())
+                mode=lambda: IDG.mode(SET), drop_pat=drop, after_edit=lambda c: write_grades_file(), vault=lambda: SET.get("vault_mount") or "")
 def known_match(e):
     import known_projects as KP
     try: return KP.match(e, B, SET, PM.studies_on_disk, SD._v1)
@@ -2246,12 +2266,12 @@ def sa_post(op, d):
             pl = SA.plan_removal(sa_ctx(), codes, d.get("mode", "remove"))
             return dict(ok=True, mode=d.get("mode"), studies=[dict(code=x["code"], label=study_label(x["code"]), refused=x.get("refused", ""), n_trash=x.get("n_trash", 0), n_keep=x.get("n_keep", 0),
                         bytes_trash=x.get("bytes_trash", 0), bytes_keep=x.get("bytes_keep", 0), library=bool(x.get("library")), library_locked=x.get("library_locked", False),
-                        has_calls=x.get("has_calls", False)) for x in pl], vault_needed=d.get("mode") == "remove" and not IDG.ID().unlocked())
+                        has_calls=x.get("has_calls", False), pensieve=x.get("pensieve")) for x in pl], vault_needed=d.get("mode") == "remove" and not IDG.ID().unlocked())
         if op == "remove":
             mode_ = d.get("mode", "remove"); phrase = "PURGE" if mode_ == "purge" else "REMOVE"
             if str(d.get("confirm_phrase", "")).strip() != phrase: return dict(ok=False, needs_confirm=True, error=f"type {phrase} to confirm")
             labels = {c: study_label(c) for c in codes}
-            r = SA.remove(sa_ctx(), codes, mode_, by=by, delete_library=bool(d.get("delete_library", True)))
+            r = SA.remove(sa_ctx(), codes, mode_, by=by, delete_library=bool(d.get("delete_library", True)), pensieve=d.get("pensieve"))
             if r["done"]: notify_c("done", "edits", f"{len(r['done'])} studies {'purged' if mode_ == 'purge' else 'removed (results kept for ML)'}", f"moved to {r['trash'] or 'the Trash'}")
             for x in r["done"]: x["label"] = labels.get(x["code"], x["code"])
             return r
@@ -2279,6 +2299,10 @@ def xs_post(op, d):
         if op == "start":
             if d.get("confirm_clinical") is not True: return dict(ok=False, needs_confirm=True, warning=EXPORT_WARNING, error="confirm the clinical-data warning")
             if not okd: return dict(ok=False, error=f"export folder refused: {why}")
+            if any(parts.get(k) for k in ("processed", "freesurfer", "mri")):     # image parts: moved studies come back first
+                for c_ in codes:
+                    el = ensure_local(c_)
+                    if not el.get("ok"): return dict(ok=False, error=el["error"])
             r = XS.start(B, AD, dest, codes, parts, mode, lambda c: IDG.ident(c, SET), IDG.library_of,
                          results_frame=lambda cs: export_frame([x for x in results() if x["code"] in cs]), redact=lambda t: IDG.redact_text(t, SET, B), version=version())
             if r.get("ok"):
@@ -2649,6 +2673,8 @@ def queue_unified(p, force=False):
         with UQ_LOCK:
             p["uscore_status"] = "running"; p["uscore_started"] = time.time(); save_pat()
             try:
+                el = ensure_local(p["code"])
+                if not el.get("ok"): raise RuntimeError(el["error"])
                 import unified_gui as UG
                 r = UG.score_patient(p["code"])
             except Exception as e:

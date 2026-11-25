@@ -176,6 +176,32 @@ def archive(ctx, codes, on, by="app user"):
 
 
 # ------------------------------------------------------------------ remove / purge / retire
+def pensieve_copy(ctx, code):
+    """the study's copy on the Pensieve drive (2026-11-25): None, or dict(state, path, exists, bytes). state in_pensieve = the
+    images are ONLY there; copied = also on the Mac"""
+    try:
+        with open(os.path.join(ctx["B"], "review", f"{code}_pensieve.json")) as f: m = json.load(f)
+    except (OSError, ValueError):
+        return None
+    vault = (ctx.get("vault") or (lambda: ""))() or ""
+    p = os.path.join(vault, "studies", code) if vault else ""
+    ex = bool(p) and os.path.isdir(p)
+    st = "in_pensieve" if m.get("state") in ("in_pensieve", "deleting") else m.get("state", "")
+    return dict(state=st, path=p, exists=ex, bytes=size_of([p]) if ex else 0, versions=m.get("versions") or [m.get("version")])
+
+
+def drive_trash(path, label):
+    """move a folder on the Pensieve drive to that drive's Trash (Finder; recoverable). CSS_TRASH_DIR overrides (tests)."""
+    if not path or not os.path.isdir(path): return "", 0
+    override = os.environ.get("CSS_TRASH_DIR")
+    if override:
+        os.makedirs(override, exist_ok=True); dest = os.path.join(override, f"Pensieve_{label}_{time.strftime('%Y%m%d_%H%M%S')}")
+        shutil.move(path, dest); return dest, 1
+    r = subprocess.run(["osascript", "-e", f'tell application "Finder" to delete (POSIX file "{path}" as alias)'], capture_output=True, text=True)
+    if r.returncode != 0: raise RuntimeError(f"the Pensieve copy could not be moved to the Trash: {(r.stderr or r.stdout).strip()[:200]}")
+    return "the Pensieve drive's Trash", 1
+
+
 def plan_removal(ctx, codes, mode):
     """-> what Remove / Purge would do, per study: files to the Trash, files kept, sizes; refusals"""
     B, AD = ctx["B"], ctx["AD"]; I = ctx["ID"](); out = []
@@ -191,7 +217,7 @@ def plan_removal(ctx, codes, mode):
         calls = len([x for x in fs if re.search(r"_calls(_[^/]*)?\.csv$", x)])
         out.append(dict(code=c, trash=gone, keep=keep, library=libp if libp and os.path.isdir(libp) else "", library_locked=bool(lib and lib.get("locked")),
                         n_trash=len(gone), n_keep=len(keep), bytes_trash=size_of(gone) + (size_of([libp]) if libp and os.path.isdir(libp) else 0), bytes_keep=size_of(keep),
-                        has_calls=calls > 0))
+                        has_calls=calls > 0, pensieve=pensieve_copy(ctx, c)))
     return out
 
 
@@ -254,21 +280,36 @@ def purge_identity(I, code, by="app user"):
     I.transaction(apply)
 
 
-def remove(ctx, codes, mode, by="app user", delete_library=True):
-    """mode: 'remove' (keep for ML, retire) or 'purge'. -> dict(ok, done=[...], refused=[...], trash)"""
+def remove(ctx, codes, mode, by="app user", delete_library=True, pensieve=None):
+    """mode: 'remove' (keep for ML, retire) or 'purge'. pensieve: what happens to a copy on the Pensieve drive - 'keep' (stays
+    on the drive, marked detached) or 'trash' (the drive's Trash); required when a study has one. -> dict(ok, done, refused, trash)"""
     if mode not in ("remove", "purge"): raise ValueError("mode must be remove or purge")
     I = ctx["ID"](); B = ctx["B"]; plan = plan_removal(ctx, codes, mode); done, refused, where = [], [], ""
     for x in plan:
         if x.get("refused"): refused.append(dict(code=x["code"], why=x["refused"])); continue
-        c = x["code"]
+        c = x["code"]; pv = x.get("pensieve")
+        if pv and pv.get("exists") and pensieve not in ("keep", "trash"):
+            refused.append(dict(code=c, why="this study has a copy on the Pensieve drive: choose to keep it there or move it to the drive's Trash")); continue
         if mode == "remove" and not I.unlocked():
             refused.append(dict(code=c, why="unlock the identity vault (the accession number is released into the encrypted audit)")); continue
         paths = list(x["trash"]) + ([x["library"]] if delete_library and x["library"] else [])
+        if pv and pv.get("exists") and pensieve == "trash":
+            try: drive_trash(pv["path"], c)
+            except RuntimeError as e: refused.append(dict(code=c, why=str(e))); continue
         where, n = to_trash(paths, B, c)
         if mode == "purge":
             purge_identity(I, c, by); ctx["drop_pat"](c); done.append(dict(code=c, purged=True, trashed=n))
         else:
             new = retire(ctx, c, by, reason="removed - results kept for machine learning"); done.append(dict(code=c, retired_as=new, trashed=n, kept=x["n_keep"]))
+            mk = os.path.join(B, "review", f"{new}_pensieve.json")            # the marker moved with the review files: never restore from it
+            if os.path.exists(mk):
+                try:
+                    with open(mk) as f: m = json.load(f)
+                    m.update(state="detached", detached_reason=f"study removed (results kept as {new}); drive copy "
+                             + ("kept under " + os.path.join("studies", c) if pensieve == "keep" else "moved to the drive's Trash"), original_code=c)
+                    with open(mk + ".tmp", "w") as f: json.dump(m, f, indent=1)
+                    os.replace(mk + ".tmp", mk)
+                except (OSError, ValueError): pass
     try: ctx["after_edit"](None)
     except Exception: pass
     return dict(ok=not refused, done=done, refused=refused, trash=where)

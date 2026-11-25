@@ -101,6 +101,12 @@ def status(B, studies, cohort_of=None):
         p = next((q for q in (f"{B}/data/{s}_swi.nii", f"{B}/data/{s}_swi.nii.gz") if os.path.exists(q)), None)
         if p:
             st = os.stat(p); swi[s] = (st.st_size, _sha(p))
+        else:                                       # 2026-11-25: moved to Pensieve -> the SHA-256 recorded at the move
+            try:
+                import pensieve_move as _PMV
+                mf = _PMV.marker_file(B, s, f"data/{s}_swi.nii") or _PMV.marker_file(B, s, f"data/{s}_swi.nii.gz")
+                if mf: swi[s] = (mf["size"], mf["sha256"])
+            except ImportError: pass
     by_sha = {}
     for s, (_, h) in swi.items(): by_sha.setdefault(h, []).append(s)
     rows = []

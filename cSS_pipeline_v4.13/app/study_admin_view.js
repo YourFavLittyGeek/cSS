@@ -69,19 +69,21 @@ async function openRemove(codes){if(!codes.length)return toast("tick the studies
     <label class="rmopt"><input type="radio" name="rmm" value="remove" checked> <b>Remove - keep results for machine learning</b><div class="note">Images and processing files go to the Trash. Candidate tables, every reviewer's calls, labels, scores, features and image patches are kept. The study gets a new identifier (RET-…) and its accession number and code are released, so a later import of the same examination is not a duplicate. The study can no longer be reviewed again.</div></label>
     <label class="rmopt"><input type="radio" name="rmm" value="purge"> <b>Purge - remove everything</b><div class="note">Every file of the study - images, processing, results and reviewer calls - goes to the Trash, and its record is deleted. Its identifiers become free.</div></label>
     <label class="note" style="display:block;margin-top:6px"><input type="checkbox" id="rm-lib" checked> also move the study library copy to the Trash</label>
+    <div id="rm-pv" class="note" style="display:none;margin-top:6px"><b>Copy on the Pensieve drive:</b> <select id="rm-pvsel"><option value="">choose…</option><option value="keep">keep it on the drive</option><option value="trash">move it to the drive's Trash</option></select> <span id="rm-pvtxt"></span></div>
     <div id="rm-sum" class="note" style="margin:8px 0">checking…</div>
     <div class="row"><span class="note">Type <b id="rm-ph">REMOVE</b> to confirm</span><input id="rm-c" style="width:140px" autocomplete="off"><span class="sp"></span><button class="b" id="rm-x">Cancel</button><button class="b danger" id="rm-ok">Remove</button></div><p class="err" id="rm-err"></p></div>`);
   const mode=()=>o.querySelector('input[name="rmm"]:checked').value;
   const sum=async()=>{const r=await api("/api/sa/plan_remove",{codes,mode:mode()});const el=o.querySelector("#rm-sum");if(!r.ok){el.innerHTML=`<span class="bad">${esc(r.error)}</span>`;return}
     const ph=mode()==="purge"?"PURGE":"REMOVE";o.querySelector("#rm-ph").textContent=ph;o.querySelector("#rm-ok").textContent=mode()==="purge"?"Purge":"Remove";
-    const ok=r.studies.filter(x=>!x.refused),calls=ok.filter(x=>x.has_calls).length;
+    const ok=r.studies.filter(x=>!x.refused),calls=ok.filter(x=>x.has_calls).length,pv=ok.filter(x=>x.pensieve&&x.pensieve.exists);
+    {const b=o.querySelector("#rm-pv");b.style.display=pv.length?"":"none";o.querySelector("#rm-pvtxt").textContent=pv.length?`${pv.length} of these studies (${gbx(pv.reduce((a,x)=>a+x.pensieve.bytes,0))})${pv.some(x=>x.pensieve.state==="in_pensieve")?" - for some, the images exist ONLY there":""}`:""}
     el.innerHTML=`${ok.length} studies · ${ok.reduce((a,x)=>a+x.n_trash,0)} items (${gbx(ok.reduce((a,x)=>a+x.bytes_trash,0))}) to the Trash${mode()==="remove"?` · ${ok.reduce((a,x)=>a+x.n_keep,0)} result files kept`:""}
       ${calls&&mode()==="purge"?`<div class="warn">⚠ ${calls} of these studies have reviewer calls (expert labels) - Purge deletes them too.</div>`:""}
       ${r.vault_needed?'<div class="warn">Remove releases the accession number into the encrypted audit: unlock the identity vault first (Standard).</div>':""}
       ${r.studies.filter(x=>x.refused).map(x=>`<div class="bad">${esc(x.label)}: ${esc(x.refused)}</div>`).join("")}
       <details><summary>per study</summary><table>${r.studies.map(x=>`<tr><td>${esc(x.label)}</td><td>${x.refused?esc(x.refused):`${x.n_trash} to the Trash (${gbx(x.bytes_trash)})${mode()==="remove"?` · ${x.n_keep} kept`:""}${x.has_calls?" · has reviewer calls":""}`}</td></tr>`).join("")}</table></details>`};
   o.querySelectorAll('input[name="rmm"]').forEach(x=>x.onchange=sum);o.querySelector("#rm-x").onclick=()=>o.remove();
-  o.querySelector("#rm-ok").onclick=async()=>{const r=await api("/api/sa/remove",{codes,mode:mode(),confirm_phrase:o.querySelector("#rm-c").value,delete_library:o.querySelector("#rm-lib").checked});
+  o.querySelector("#rm-ok").onclick=async()=>{const r=await api("/api/sa/remove",{codes,mode:mode(),confirm_phrase:o.querySelector("#rm-c").value,delete_library:o.querySelector("#rm-lib").checked,pensieve:o.querySelector("#rm-pvsel").value||null});
     if(r.needs_confirm||(!r.ok&&!r.done)){o.querySelector("#rm-err").textContent=r.error||(r.refused||[]).map(x=>x.why).join("; ");return}
     o.remove();toast(`${r.done.length} studies ${mode()==="purge"?"purged":"removed (results kept for ML)"} · moved to ${esc(r.trash||"the Trash")}${r.refused.length?` · ${r.refused.length} refused`:""}`);W.sel.clear();W.data=null;S=await api("/api/state");render()};
   sum()}

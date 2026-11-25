@@ -187,6 +187,22 @@ class TestPensieveMove(_ExfatImage):
             os.utime(os.path.join(self.B, "review", q), (t, t))
         self.assertTrue(PM.due(self.B, dict(code=CODE, status="done"), grace_s=300))
 
+    def test_archive_copies_are_write_once_and_dicom_copies_never_move(self):
+        self.final()
+        dic = _w(os.path.join(self.B, "raw", CODE, "SWI", "_dicom", "IM0001.dcm"), b"DICOM-TEMP")
+        self.assertTrue(PM.move(self.B, self.vault, CODE)["ok"])
+        root = os.path.join(self.vault, PM.read_marker(self.B, CODE)["vault_rel"])
+        self.assertFalse(os.path.exists(os.path.join(root, "raw", CODE, "SWI", "_dicom")))     # not archived
+        self.assertTrue(os.path.exists(dic))                                                 # left for source_cleanup
+        from uengine.safety import PathPolicy, SafetyError
+        pol = PathPolicy(self.B, self.vault)
+        for target in (root, os.path.join(root, f"data/{CODE}_swi.nii"), os.path.join(self.vault, "studies", CODE)):
+            with self.assertRaises(SafetyError, msg=target):
+                pol.check_modify(target)                                                     # File Manager delete / move / rename
+        pol.check_write_target(os.path.join(self.vault, "studies", CODE, "r_new", "x.nii"))  # a new version can still be written
+        import source_cleanup as SRC
+        self.assertTrue(SRC.has_nifti(self.B, CODE, "SWI"))                                  # moved, recorded -> still "converted"
+
     def test_copy_only_keeps_the_mac_files(self):
         self.final()
         r = PM.move(self.B, self.vault, CODE, delete_local=False)

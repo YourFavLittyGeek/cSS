@@ -1288,6 +1288,11 @@ def compat_report():
         legacy = os.path.exists(os.path.join(B(), "review", f"{c}_calls.csv")) and not glob.glob(os.path.join(B(), "review", f"{c}_calls_*.csv"))
         hist = glob.glob(os.path.join(B(), "historical", c, "review", "*_calls*.csv"))
         mri = bool(glob.glob(os.path.join(B(), "data", f"{c}_swi.nii*")))
+        if not mri:                                                   # 2026-11-25: moved to Pensieve after review = MRI available
+            try:
+                import pensieve_move as _PMV
+                mri = _PMV.in_pensieve(B(), c)
+            except ImportError: pass
         cand = os.path.exists(os.path.join(B(), "review", f"{c}_candidates.csv"))
         issues = []
         if p["_orphan"]: issues.append("reviewed study not in the study list (from an older version?) - its calls are used for learning")

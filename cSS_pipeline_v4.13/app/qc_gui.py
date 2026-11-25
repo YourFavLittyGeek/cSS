@@ -83,7 +83,17 @@ def study(B, AD, code, PM=None, subjects_dir=None):
     if not os.path.exists(seg): missing.append(f"work/{code}_seg_swispace.nii.gz")
     if not swi: missing.append(f"data/{code}_swi.nii")
     if not qc: missing.append(f"review/{code}_qc.json")
-    if route == "none" and not swi: verdict, why = "not_processed", "no SWI and no anatomy outputs yet"
+    try:                                                   # 2026-11-25: moved to Pensieve after its review -> not "missing"
+        import pensieve_move as _PMV
+        away = _PMV.in_pensieve(B, code) and not swi
+    except ImportError:
+        away = False
+    if away:
+        work = {k: ("in Pensieve" if v == "missing" else v) for k, v in work.items()}
+        fs = {k: ("in Pensieve" if v == "missing" else v) for k, v in fs.items()}
+        missing = []
+    if away: verdict, why = "in_pensieve", "moved to the Pensieve drive after its review - opening it (Freeview / QC image) brings it back"
+    elif route == "none" and not swi: verdict, why = "not_processed", "no SWI and no anatomy outputs yet"
     elif missing: verdict, why = "missing_outputs", "missing: " + ", ".join(missing)
     elif any("PRESENT" in v for v in fs.values()): verdict, why = "failed", "FreeSurfer reported an error or is still marked as running"
     elif qc.get("status") == "insufficient_quality": verdict, why = "insufficient_quality", "; ".join(qc.get("reasons", [])[:3]) or "detector QC: insufficient quality"

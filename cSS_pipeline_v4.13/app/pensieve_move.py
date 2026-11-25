@@ -76,13 +76,14 @@ def _sha(p):
 
 
 def _files_under(B, top):
-    """every regular file under a project-relative top (file or folder) -> project-relative paths; links are not followed"""
+    """every regular file under a project-relative top (file or folder) -> project-relative paths; links are not followed.
+    raw/<code>/<MOD>/_dicom (temporary DICOM copies, deleted by source_cleanup) is never moved."""
     a = os.path.join(B, top)
     if os.path.islink(a): return []
     if os.path.isfile(a): return [top]
     out = []
     for root, dirs, files in os.walk(a):
-        dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(root, d))]
+        dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(root, d)) and d != "_dicom"]
         for n in files:
             q = os.path.join(root, n)
             if os.path.isfile(q) and not os.path.islink(q): out.append(os.path.relpath(q, B))
@@ -168,7 +169,9 @@ def move(B, vault, code, delete_local=True):
         _set(code, "moving", "copying to Pensieve")
         svc = TransferService(B, vault)
         try:
-            rep = svc.transfer("archive", [(os.path.join(B, t), os.path.join(root, t)) for t in mv + cp], study_id=code)
+            items = [(os.path.join(B, rel), os.path.join(root, rel)) for t in mv for rel in _files_under(B, t)]
+            items += [(os.path.join(B, t), os.path.join(root, t)) for t in cp]
+            rep = svc.transfer("archive", items, study_id=code)
         finally:
             svc.close()
         if not rep.get("ok"):
@@ -290,6 +293,22 @@ def restore(B, vault, code):
         return dict(ok=False, error=STATUS[code]["error"])
     finally:
         LOCK.release()
+
+
+def ensure_local(B, vault, code):
+    """every feature that READS a study's images calls this first: brings a moved study back (verified) or says why not.
+    -> dict(ok, restored=n) ; ok with restored=0 when the study is on the Mac"""
+    if not in_pensieve(B, code): return dict(ok=True, restored=0)
+    r = restore(B, vault, code)
+    if r.get("ok"): return dict(ok=True, restored=r.get("restored", 0))
+    return dict(ok=False, in_pensieve=True, error=f"{code} is in Pensieve and could not be brought back: {r.get('error')}")
+
+
+def marker_file(B, code, rel):
+    """the recorded {rel, size, sha256} of a moved file (None if not moved) - lets checks work without the file on the Mac"""
+    m = read_marker(B, code) or {}
+    if m.get("state") not in AWAY: return None
+    return next((f for f in m.get("files", []) if f.get("rel") == rel), None)
 
 
 def start_restore(B, vault, code):

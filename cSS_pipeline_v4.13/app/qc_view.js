@@ -3,7 +3,7 @@
 // A study shows "QC ok" ONLY when the required files exist and the recorded QC status is ok; missing files are listed, never hidden.
 const QCV={code:(location.hash.match(/^#qc:([\w-]+)/)||[])[1]||"",f:"all"};
 const qcVerdict={ok:["QC ok","ok"],low_confidence:["low confidence","warn"],insufficient_quality:["insufficient quality","bad"],missing_outputs:["outputs missing","bad"],
-  failed:["FreeSurfer error","bad"],not_processed:["not processed",""],unknown:["QC not recorded","warn"]};
+  failed:["FreeSurfer error","bad"],not_processed:["not processed",""],unknown:["QC not recorded","warn"],in_pensieve:["in Pensieve","mut"]};
 const qcPill=v=>{const m=qcVerdict[v]||[v,""];return `<span class="pill ${m[1]}" data-qcv="${esc(v)}">${esc(m[0])}</span>`};
 const qcFile=s=>s==="present"?'<span class="ok">✓ present</span>':s==="missing"?'<span class="bad">✗ missing</span>':`<span class="warn">⚠ ${esc(s)}</span>`;
 async function qcView(v){
