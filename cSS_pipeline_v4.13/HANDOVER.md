@@ -44,7 +44,7 @@ Read this first, then CLAUDE.md (project science + history). Do not trust older 
 - App zip: `bash tools/build_percival_dev_app.sh ~/PERCIVAL_releases` (committed files only) ->
   `Percival_v5.25-dev_<sha>.zip` + `_BUILD_INFO.txt`. Current: `Percival_v5.25-dev_0cb269d.zip`
   (sha256 d3ba09edbb66fd10520bd809c779832c5044bd06cb060696b910290348236e6c).
-  NEWER: `Percival_v5.25-dev_a722e87.zip` (sha256 a7a11d95ac43a448b61031918d10ee37f3136efb3e6772687711cb78151bc812) -
+  NEWER: `Percival_v5.25-dev_f3c7db6.zip` (sha256 e9bf959ff0e5034c768ae7b5590e46d2176c15e72d79fc29a8065445f1912805; adds automatic drive remount + Mount button) -
   not yet installed by the user at the time of writing.
 - Install for the user: quit app, unzip, drag "Percival Dev.app" to Applications (Replace), open, "Use Percival_project".
 - Launcher: app/mac_percival/launcher.sh (project path in ~/Library/Application Support/Percival Dev/project_path,
