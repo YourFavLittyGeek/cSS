@@ -1,6 +1,6 @@
 # HANDOVER - resume here (Percival / cSS pipeline)
 
-Last updated: 2026-11-25 (session ended after release tag `percival-v5.25-dev-20261125`, commit `0cb269d`).
+Last updated: 2026-11-25 afternoon (5 commits after `0cb269d`: a882c10, dc2e9b6, 829126b, 06ad66d + this note).
 Read this first, then CLAUDE.md (project science + history). Do not trust older handover notes over the code
 (docs/handover_claude/ and the Gemini handover overstate features - verify in code).
 
@@ -44,6 +44,8 @@ Read this first, then CLAUDE.md (project science + history). Do not trust older 
 - App zip: `bash tools/build_percival_dev_app.sh ~/PERCIVAL_releases` (committed files only) ->
   `Percival_v5.25-dev_<sha>.zip` + `_BUILD_INFO.txt`. Current: `Percival_v5.25-dev_0cb269d.zip`
   (sha256 d3ba09edbb66fd10520bd809c779832c5044bd06cb060696b910290348236e6c).
+  NEWER: `Percival_v5.25-dev_06ad66d.zip` (sha256 d7110f946a913881b6df7fa136c6ff94d3b1fdbab9427779764f6176dcc09f74) -
+  not yet installed by the user at the time of writing.
 - Install for the user: quit app, unzip, drag "Percival Dev.app" to Applications (Replace), open, "Use Percival_project".
 - Launcher: app/mac_percival/launcher.sh (project path in ~/Library/Application Support/Percival Dev/project_path,
   exports CSS_BASE and PERCIVAL_APP_BUNDLE). Server: app/css_app.py (ThreadingHTTPServer, pywebview window).
@@ -63,6 +65,25 @@ Read this first, then CLAUDE.md (project science + history). Do not trust older 
 - 0cb269d: setup wizard skipped on new projects because the empty vault skeleton / empty pensieve.db counted as an
   existing installation - now only real content counts; wrongly auto-completed empty projects revert once.
 - Tests: tests/test_progress_and_setup_finish.py (19), tests/test_setup_autofix.py (9). Isolated suite 461 / 0 fail.
+
+## 5b. Session 2026-11-25 afternoon (user's requests: Transfer Center, Pensieve, viewer timer, retry / methods)
+- a882c10 Transfer Center: worker pool kept the Vault path of its start (empty) -> "not connected"; set_vault() now follows
+  SET. exFAT (user's drive) archived with a GUARDED commit (locked check-then-rename, never overwrites; CSS_EXFAT_STRICT=1 =
+  old refusal). Live copy progress + "On this Mac" card. Sidebar / Transfer Center label "Pensieve" (LABELS ONLY - the user
+  asked not to rename internals: the existing PENSIEVE memory index keeps its name).
+- dc2e9b6 Reviewer: after the final save -> next patient immediately / after N typed seconds / manual (keys autopt/autosec).
+- 829126b app/pensieve_move.py: after the final review (+5 min) the study's processed files (raw/<code>/, data/, synthseg/,
+  work/, logs/ <code>_*, subjects/<code>/) go to <Pensieve>/studies/<code>/<version>/ (journaled job, SHA-256 read-back,
+  only verified files deleted on the Mac); review/ copied AND kept; marker review/<code>_pensieve.json. Restore on open in
+  the reviewer and before a re-run (missing files only, verified). User-approved narrow exception to the Phase 0 raw/data
+  protection (RestorePolicy). Settings card "Pensieve · after the review" (move default / copy / off, wait N min).
+  NOTE: when the user installs this build, the 14 already-reviewed studies will move one by one (5 min after start).
+  Anything that reads images of a moved study other than the reviewer / a re-run (training feature extraction, exports
+  of images) needs the study brought back first - not yet automatic.
+- 06ad66d app/pathway_rules.py (requirements, ✓/✗/○/🚫 in every method list, Retry with method choice for every failure,
+  T1-mismatch rule -> SWI-only), prep_anat.sh honours a chosen method over an old recon, cohort.py skips 1-slice localizers.
+  Study-026 was processed on a 1-slice localizer (512x512x1) - its results are invalid: re-import / re-run it after install.
+- docs/engineering/PATHWAY_REQUIREMENTS.md (sources). Isolated suite 499 / 0.
 
 ## 6. Open items / next steps (ask the user before starting)
 1. User reported the app WINDOW froze after "Use Percival_project" (server answered, page idle, no JS error in
