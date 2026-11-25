@@ -44,7 +44,7 @@ Read this first, then CLAUDE.md (project science + history). Do not trust older 
 - App zip: `bash tools/build_percival_dev_app.sh ~/PERCIVAL_releases` (committed files only) ->
   `Percival_v5.25-dev_<sha>.zip` + `_BUILD_INFO.txt`. Current: `Percival_v5.25-dev_0cb269d.zip`
   (sha256 d3ba09edbb66fd10520bd809c779832c5044bd06cb060696b910290348236e6c).
-  NEWER: `Percival_v5.25-dev_06ad66d.zip` (sha256 d7110f946a913881b6df7fa136c6ff94d3b1fdbab9427779764f6176dcc09f74) -
+  NEWER: `Percival_v5.25-dev_a722e87.zip` (sha256 a7a11d95ac43a448b61031918d10ee37f3136efb3e6772687711cb78151bc812) -
   not yet installed by the user at the time of writing.
 - Install for the user: quit app, unzip, drag "Percival Dev.app" to Applications (Replace), open, "Use Percival_project".
 - Launcher: app/mac_percival/launcher.sh (project path in ~/Library/Application Support/Percival Dev/project_path,
@@ -77,7 +77,7 @@ Read this first, then CLAUDE.md (project science + history). Do not trust older 
   only verified files deleted on the Mac); review/ copied AND kept; marker review/<code>_pensieve.json. Restore on open in
   the reviewer and before a re-run (missing files only, verified). User-approved narrow exception to the Phase 0 raw/data
   protection (RestorePolicy). Settings card "Pensieve · after the review" (move default / copy / off, wait N min).
-  NOTE: when the user installs this build, the 14 already-reviewed studies will move one by one (5 min after start).
+  Studies reviewed BEFORE the first start of this build never move by themselves (SET pensieve_since; button in Settings).
   Anything that reads images of a moved study other than the reviewer / a re-run (training feature extraction, exports
   of images) needs the study brought back first - not yet automatic.
 - 06ad66d app/pathway_rules.py (requirements, ✓/✗/○/🚫 in every method list, Retry with method choice for every failure,
