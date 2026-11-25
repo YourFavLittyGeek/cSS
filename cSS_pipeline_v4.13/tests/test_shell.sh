@@ -77,6 +77,9 @@ printf '#!/bin/bash\necho "bbregister $*" >> $STUBLOG\necho "0.512 1 2 3" > %s/b
 chmod +x $T/bin/bbregister.new; mv -f $T/bin/bbregister.new $T/bin/bbregister
 : > $T/log; $SH $T/base/scripts/prep_anat.sh P3 --t1 $T/t1.nii > /dev/null; notseen "recon-all"; seen bbregister
 grep -q '"cost": 0.512' $T/base/work/P3_reg.json || fail "bbregister mincost not recorded"
+echo "== 6b. a chosen registration method is honoured although recon-all exists (it was silently ignored)"
+: > $T/log; CSS_REG_METHOD=synthmorph $SH $T/base/scripts/prep_anat.sh P3 --t1 $T/t1.nii > /dev/null
+seen "mri_synthmorph register -m rigid"; notseen bbregister
 echo "== 6a. v4.17.2: a missing --t1 file stops prep_anat and run_css before anything runs"
 : > $T/log; out=$($SH $T/base/scripts/prep_anat.sh P3 --t1 PATH_TO_T1 2>&1) && fail "prep_anat accepted a missing T1"
 echo "$out" | grep -q "T1 file not found" || fail "no clear message for a missing T1"; notseen mri_convert

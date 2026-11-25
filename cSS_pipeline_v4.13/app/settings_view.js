@@ -1279,7 +1279,7 @@ async function renderSectionProcessing(el) {
       </div>
       <div class="row" style="margin-top:10px">
         <span class="lab">T1/SWI Misalignment Retry</span>
-        ${seg("proc-ar", [["1", "Retry automatically (SynthMorph)"], ["0", "Ask first"]], s.auto_retry === false ? "0" : "1")}
+        ${seg("proc-ar", [["1", "Retry automatically (next suitable fast method)"], ["0", "Ask first"]], s.auto_retry === false ? "0" : "1")}
       </div>
     </div>
   `;

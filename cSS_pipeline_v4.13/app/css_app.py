@@ -131,6 +131,7 @@ SET.setdefault("source_cleanup", "after_processing"); SET.setdefault("source_kee
 SET.setdefault("percival_autocycle", False)   # Stage 6: automatic training cycles OFF by default (pilot)
 SET.setdefault("percival_cycle_n", 5); SET.setdefault("percival_test_fraction", 0.2); SET.setdefault("percival_learn_from", "labelled")
 import percival_gui as PG                             # v5.22 Percival Score (local)
+import pathway_rules as PR                            # 2026-11-25: method requirements, tried / not tried, next method
 import blind_gate as BG                               # Phase 3A.2: per-study AI outputs withheld until the study's blind review is complete
 try: import openpyxl, openpyxl.workbook, openpyxl.styles, openpyxl.comments   # v5.24: imported once at start-up - a first import from two
 except Exception: pass                                                       # server threads at once raised "partially initialized module"
@@ -754,11 +755,22 @@ SOLO = ("swi_only", "synthmorph")       # high / unknown memory: always run alon
 PW_TIME = {"synthseg": "~4 min", "coreg_masked": "~4 min", "synthmorph": "~5 min", "recon": "~2-3 h", "swi_only": "~30 min"}
 PW_MEM = {"synthseg": 12, "coreg_masked": 12, "recon": 5}          # GB per patient (estimates; SOLO pathways run alone)
 PW_CORES = {"synthseg": 4, "coreg_masked": 4, "recon": 2}
-RETRY_ORDER = ["coreg_masked", "synthmorph", "recon", "swi_only"]
+RETRY_ORDER = PR.ORDER[1:]
+METH_CACHE = {}
+def methods_of(p):
+    """pathway_rules summary (suitability from the converted headers + installed tools, tried / worked, next method), cached
+    until the study's status, pathway, attempts or converted series change"""
+    code = p.get("code", "")
+    raws = tuple(os.path.getmtime(d) if os.path.isdir(d) else 0 for d in (f"{B}/raw/{code}/T1", f"{B}/raw/{code}/SWI"))
+    key = (p.get("status"), p.get("pathway"), len(p.get("tried") or []), raws, SET.get("freesurfer_home"))
+    hit = METH_CACHE.get(code)
+    if hit and hit[0] == key: return hit[1]
+    try: v = PR.summary(B, p, SET.get("freesurfer_home") or os.environ.get("FREESURFER_HOME", ""))
+    except Exception as e: v = dict(methods=[], next="", next_why=f"method check failed: {e}")
+    METH_CACHE[code] = (key, v); return v
 def next_rec(p):
-    """recommended next pathway after a failed registration: first in RETRY_ORDER not tried yet"""
-    tried = {t["pathway"] for t in p.get("tried", [])} | {p.get("pathway")}
-    return next((x for x in RETRY_ORDER if x not in tried), "recon")
+    """recommended next pathway: first suitable, untried method (pathway_rules.next_method); SWI-only when the T1 clearly mismatches"""
+    return methods_of(p).get("next") or ""
 def check_pathway(r, ser):
     """recommended pathway + check result for one scanned patient (header only, nothing is converted)"""
     pk = r["chosen"]; sw = next((x for x in ser if x["path"] == pk.get("SWI")), {}); t1 = next((x for x in ser if x["path"] == pk.get("T1")), {})
@@ -2610,15 +2622,24 @@ def explain_reg(shift):
             "choose a retry: fast masked registration (minutes), SynthMorph (minutes) or recon-all (most accurate, ~2-3 h)")
 NEXT_REG = {None: "coreg_masked", "": "coreg_masked", "coreg_masked": "synthmorph"}     # automatic order after a failed registration
 SETUP_ERR = ("licence", "FreeSurfer", "disk is full", "dcm2niix")
+def method_failure(p, msg):
+    """True when the failure belongs to the method (not to setup, the disk, the import or the user stopping it)"""
+    return not any(k in msg for k in SETUP_ERR) and "stopped by you" not in msg and p.get("step") != "import" and "Pensieve" not in msg
 def fail(p, msg):
     with LOCK:
+        if "do not line up" not in msg and method_failure(p, msg):     # every method failure is remembered, not only misregistrations
+            p.setdefault("tried", []).append(dict(pathway=p.get("pathway", "synthseg"), shift="", reason=msg.split(" - ")[0][:140],
+                                                  step=p.get("step", ""), at=time.time()))
         if "do not line up" in msg:
             m = re.search(r"shift ([\d.?]+) mm", msg)
-            p.setdefault("tried", []).append(dict(pathway=p.get("pathway", "synthseg"), shift=m.group(1) if m else "?"))
+            p.setdefault("tried", []).append(dict(pathway=p.get("pathway", "synthseg"), shift=m.group(1) if m else "?",
+                                                  reason=f"still misaligned ({m.group(1) if m else '?'} mm)", step="registration", at=time.time()))
             move_bad_registration(p)
             pm_end_full(p, False, msg)                   # bad registration renamed aside first, then the previous outputs are put back
             nxt = next_rec(p)
-            if SET.get("auto_retry", True) and nxt in ("coreg_masked", "synthmorph") and p["series"].get("T1"):
+            if PR.t1_mismatch(p) and nxt == "swi_only":
+                msg = msg + " - two T1 methods missed by more than 2 mm: the T1 is probably from another session or the patient moved; SWI-only is recommended"
+            elif SET.get("auto_retry", True) and nxt in PR.FAST_AUTO and p["series"].get("T1"):
                 apply_pathway(p, nxt)
                 p.update(status="waiting", error="", steps_done={}, path_ack=False,
                          path_note=f"{msg.split(' - ')[0]} -> retrying automatically with {PATHWAYS[nxt]} ({PW_TIME[nxt]})")
@@ -2962,7 +2983,8 @@ def state():
                         status=p["status"], step=p.get("step", ""), steps_done=list(p.get("steps_done", {}).keys()), error=p.get("error", ""),
                         elapsed=el, remaining=rem, reg_method=p.get("reg_method", ""), pathway=p.get("pathway", "synthseg"),
                         path_note=p.get("path_note", ""), path_ack=p.get("path_ack", True), solo=solo(p), started=p.get("started", 0),
-                        tried=p.get("tried", []), next_rec=next_rec(p) if p["status"] == "failed" else "", qc=qc_grade(p)[0], qc_tip=qc_grade(p)[1],
+                        tried=p.get("tried", []), next_rec=next_rec(p) if p["status"] in ("failed", "stopped") else "", qc=qc_grade(p)[0], qc_tip=qc_grade(p)[1],
+                        methods=methods_of(p).get("methods", []), next_why=methods_of(p).get("next_why", "") if p["status"] in ("failed", "stopped") else "",
                         pensieve=pv_state(p["code"]),
                         stalled=round((time.time() - last_activity(p["code"])) / 60) if p["status"] == "running" and last_activity(p["code"]) and time.time() - last_activity(p["code"]) > 1200 else 0, has_qc=os.path.exists(f"{AD}/qc/{p['code']}.png"), version=p.get("version", ""),
                         radiologist=p.get("radiologist", ""), grade_R=p.get("grade_R", ""), grade_L=p.get("grade_L", ""),
@@ -3111,12 +3133,12 @@ class H(BaseHTTPRequestHandler):
                     if pr: os.killpg(pr.pid, signal.SIGCONT); os.killpg(pr.pid, signal.SIGTERM)
                 elif a in ("retry", "rerun") and p.get("linked"):
                     return self.send(dict(ok=False, error="this study was brought in from another project without its raw series: use the Processing tab (new detection run; anatomy is reused)"))
-                elif a in ("retry", "rerun", "swi_only", "recon", "coreg_masked", "synthmorph") and IDG.requires_accession(p["code"], SET):
+                elif (a in ("retry", "rerun") or a in PATHWAYS) and IDG.requires_accession(p["code"], SET):
                     return self.send(dict(ok=False, error=IDG.requires_accession(p["code"], SET)))
                 elif a in ("retry", "rerun") and p["status"] in ("failed", "stopped", "done"):
                     if d.get("pathway") in PATHWAYS and d["pathway"] != p.get("pathway"): apply_pathway(p, d["pathway"])
                     p.update(status="waiting", error="", steps_done={}); CUR["hold"] = ""
-                elif a in ("swi_only", "recon", "coreg_masked", "synthmorph") and p["status"] in ("failed", "stopped", "done"):
+                elif a in PATHWAYS and p["status"] in ("failed", "stopped", "done"):
                     if "do not line up" in p.get("error", ""): move_bad_registration(p)
                     apply_pathway(p, a); p["note"] = f"retried with {PATHWAYS[a]}"
                     p.update(status="waiting", error="", steps_done={}); CUR["hold"] = ""

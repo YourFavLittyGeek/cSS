@@ -159,6 +159,11 @@ def cmd_import(a, B):
             found[mod] = [series_info(p) for p in nii]
         sw = found["SWI"]; kinds = [(kind_swi(s), s) for s in sw]
         main = [s for k, s in kinds if k == "swi"] or [s for k, s in kinds if k == "magnitude"] or [s for k, s in kinds if k == "unknown"]
+        # 2026-11-25: dcm2niix can split a 1-slice localizer off the series (Study-026: *_i00001 512x512x1, 0.47 mm iso, next to
+        # the real 52-slice SWI); the smallest-voxel rule below picked the localizer. Volumes with < 10 slices are never the SWI
+        # when a real volume exists.
+        vol = [s for s in main if min(s["shape"][:3]) >= 10]
+        if vol and len(vol) < len(main): flags.append("swi_localizer_skipped"); main = vol
         if len(main) > 1: flags.append("several_swi_candidates")
         swi = sorted(main, key=lambda s: float(np.prod(s["vox"])))[0] if main else None
         if swi is None: flags.append("no_swi" if not sw else "only_minip_or_phase_in_swi_folder")

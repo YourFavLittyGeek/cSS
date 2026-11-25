@@ -42,7 +42,9 @@ mri_convert "$T1" $B/data/${S}_t1_tmp.nii.gz > /dev/null || die "mri_convert cou
 mv $B/data/${S}_t1_tmp.nii.gz $B/data/${S}_t1.nii.gz
 
 A2=""
-if [ $RECON -eq 1 ] || [ -f $SUBJECTS_DIR/$S/mri/aparc.a2009s+aseg.mgz ]; then
+# 2026-11-25: a finished recon-all is re-used only when no other registration method was chosen (CSS_REG_METHOD set by the
+# app's retry = coreg_masked / synthmorph): before, a retry with another method silently repeated the same bbregister result.
+if [ $RECON -eq 1 ] || { [ -f $SUBJECTS_DIR/$S/mri/aparc.a2009s+aseg.mgz ] && [ -z "${CSS_REG_METHOD:-}" ]; }; then
   if [ ! -f $SUBJECTS_DIR/$S/mri/aparc.a2009s+aseg.mgz ]; then
     # v4.18: an unfinished subject folder (earlier failed run) blocks recon-all -i; keep it, renamed
     if [ -d $SUBJECTS_DIR/$S ]; then

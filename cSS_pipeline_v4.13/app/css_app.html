@@ -170,8 +170,15 @@ const ask=(title,html,btns)=>new Promise(res=>{$("#dlg").innerHTML=`<h2 class="w
   $("#shade").style.display="flex";$("#dlg").querySelectorAll("button").forEach(b=>b.onclick=()=>{$("#shade").style.display="none";res(b.dataset.v)})});
 const PW=()=>S.pathways;const auto=()=>S.settings.auto_retry!==false;
 const grade=(g,tip)=>g?`<span class="g g${g[0]==="A"?"A":g[0]==="B"?"B":"C"}" title="${esc(tip)}">${g}</span>`:'<span class="mut">—</span>';
-const pwSel=(cur,rec,attrs,tried)=>{const t={};(tried||[]).forEach(x=>t[x.pathway]=x.shift);const ord=Object.keys(PW()).sort((a,b)=>(a in t)-(b in t));
-  return `<select ${attrs}>${ord.map(k=>`<option value="${k}" ${k===cur?"selected":""}>${PW()[k]}${["swi_only","synthmorph"].includes(k)?" (runs alone)":""} · ${S.pw_time[k]}${k===rec?"  ✓ recommended":""}${k in t?`  · tried ✗ ${t[k]} mm`:""}</option>`).join("")}</select>`};
+/* 2026-11-25: every method list shows ✓ worked · ✗ tried and failed · ○ not tried yet · 🚫 not suitable (why); unsuitable = disabled */
+const PW_STATE={worked:"worked",failed:"tried, failed",untried:"not tried yet",unsuitable:"not suitable"};
+const pwSel=(cur,rec,attrs,tried,methods)=>{const t={};(tried||[]).forEach(x=>t[x.pathway]=x.shift);const M={};(methods||[]).forEach(m=>M[m.key]=m);
+  const rank=k=>{const s=(M[k]||{}).state;return k===rec?0:s==="untried"?1:s==="worked"?2:s==="failed"?3:s==="unsuitable"?4:(k in t?3:1)};
+  const ord=Object.keys(PW()).sort((a,b)=>rank(a)-rank(b));
+  return `<select ${attrs}>${ord.map(k=>{const m=M[k],off=m&&m.state==="unsuitable"&&k!==cur;
+    const tag=m?`${m.icon} `:(k in t?"✗ ":""),st=m?` · ${PW_STATE[m.state]}${m.why?": "+m.why:""}`:(k in t?`  · tried ✗ ${t[k]} mm`:"");
+    return `<option value="${k}" ${k===cur?"selected":""} ${off?"disabled":""} title="${esc(m&&m.why||"")}">${tag}${PW()[k]}${["swi_only","synthmorph"].includes(k)?" (runs alone)":""} · ${S.pw_time[k]}${k===rec?"  (recommended)":""}${esc(st)}</option>`}).join("")}</select>`};
+const pwList=p=>(p.methods||[]).length?`<table class="note" style="margin:6px 0">${p.methods.map(m=>`<tr><td>${m.icon}</td><td><b>${esc(PW()[m.key]||m.key)}</b></td><td>${esc(PW_STATE[m.state])}${m.why?" · "+esc(m.why):""}</td></tr>`).join("")}</table>`:"";
 const recTag=(sel,rec)=>sel===rec?'<span class="rec">✓ recommended</span>':"";
 async function openWin(url,name){const r=await api("/api/window",{url,title:name});if(r.open)window.open(url,name,"width=1150,height=560")}
 async function confirmPath(code,chosen,rec,why){if(chosen===rec)return true;
@@ -354,7 +361,7 @@ function ptsView(v){const q=S.queue,sy=S.sys,z=S.mem_zones,coh=["all"].concat(S.
     return `<span class="${p.status==="failed"?"bad":"warn"}" title="${esc(p.error)}">✗ ${esc(p.status)}${p.error?": "+esc(p.error):""}</span>`};
   const btn=(a,code,cls)=>`<button class="b ${cls||""}" data-act="${a}" data-code="${esc(code)}" title="${esc(ACT_HELP[a]||"")}">${a}</button>`;
   const acts=p=>{const c=p.code,lg=`<button class="b" data-lg="${esc(c)}" title="${esc(ACT_HELP.Log)}">Log</button>`;
-    if(misreg(p))return lg+`<button class="b bang" data-bang="${esc(c)}" title="Change the pathway by hand">!</button>`+pwSel(p.next_rec,p.next_rec,`data-retry="${esc(c)}" data-rec="${esc(p.next_rec)}" style="width:330px"`,p.tried)+btn("Retry",c,"pri");
+    if(misreg(p))return lg+`<button class="b bang" data-bang="${esc(c)}" title="Change the pathway by hand">!</button>`+pwSel(p.next_rec,p.next_rec,`data-retry="${esc(c)}" data-rec="${esc(p.next_rec)}" style="width:330px"`,p.tried,p.methods)+btn("Retry",c,"pri");
     const bang=["failed","waiting","decision","stopped"].includes(p.status)?`<button class="b bang" data-bang="${esc(c)}" title="Change the pathway by hand">!</button>`:"";
     const a=({running:["Pause","Stop"],starting:["Stop"],paused:["Resume","Stop"],waiting:["Remove"],decision:["Remove"],failed:["Retry","Remove","Delete files"],stopped:["Retry","Remove","Delete files"],done:["Re-run"]}[p.status]||[]).map(x=>btn(x,c)).join("");
     return lg+bang+(p.has_qc?`<button class="b" data-qc="${esc(c)}" title="${esc(ACT_HELP.QC)} Opens in its own window.">QC ↗</button>`:"")+a+(p.status==="done"?`<button class="b pri" data-rv="${esc(c)}" title="${esc(ACT_HELP.Review)}">Review</button>`:"")};
@@ -363,7 +370,7 @@ function ptsView(v){const q=S.queue,sy=S.sys,z=S.mem_zones,coh=["all"].concat(S.
   const pop=notes.length?`<div id="npop" class="card ${v._np?"":"hide"}" style="position:absolute;right:16px;top:48px;width:640px;z-index:6;padding:8px 12px;box-shadow:0 12px 30px #0009">
     ${notes.map(p=>`<div class="row" style="margin:0;padding:5px 0;border-bottom:1px solid var(--line);font-size:12px;flex-wrap:nowrap"><b class="${p.status==="decision"?"warn":""}">${sidH(p.code)}</b>
      <span title="${esc(p.path_note)}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.path_note.replace(/^the T1 labels do not line up with the SWI \(shift ([\d.?]+) mm, limit 1.5 mm\)/,"misaligned $1 mm").replace("retrying automatically with","retrying with"))}${p.status==="decision"?" · waits for you":""}</span><span class="sp"></span>
-     ${["waiting","decision"].includes(p.status)?pwSel(p.pathway,p.pathway,`data-pw="${esc(p.code)}" style="width:210px;font-size:12px;padding:2px 24px 2px 6px"`):""}<button class="b pri" data-ack="${esc(p.code)}" style="padding:2px 10px;font-size:12px">OK</button></div>`).join("")}
+     ${["waiting","decision"].includes(p.status)?pwSel(p.pathway,p.pathway,`data-pw="${esc(p.code)}" style="width:210px;font-size:12px;padding:2px 24px 2px 6px"`,p.tried,p.methods):""}<button class="b pri" data-ack="${esc(p.code)}" style="padding:2px 10px;font-size:12px">OK</button></div>`).join("")}
     <div class="row" style="margin:6px 0 0;font-size:12px"><span class="note">Change the pathway with the drop-down; a non-recommended choice asks to confirm.</span><span class="sp"></span><button class="b" id="ackall" style="padding:2px 10px;font-size:12px">OK to all</button></div></div>`:"";
   v.innerHTML=`
   <div class="card" style="position:relative"><div class="row"><b>Queue</b><span class="mut">Run at the same time:</span>
@@ -399,7 +406,7 @@ function ptsView(v){const q=S.queue,sy=S.sys,z=S.mem_zones,coh=["all"].concat(S.
     if(r===true)await api("/api/control",{code:p.code,action:"pathway",pathway:el.value});render()});
   v.querySelectorAll("[data-bang]").forEach(b=>b.onclick=async()=>{const p=S.patients.find(x=>x.code===b.dataset.bang),rec=p.status==="failed"?(p.next_rec||"coreg_masked"):p.pathway;
     $("#dlg").innerHTML=`<h2>Change the pathway - ${sidH(p.code)}</h2><p class="note">Now: <b>${esc(PW()[p.pathway]||p.pathway)}</b>${p.tried&&p.tried.length?` · tried: ${p.tried.map(t=>esc(PW()[t.pathway]||t.pathway)+" ("+t.shift+" mm)").join(", ")}`:""}. ${auto()?"Automatic mode: the change is applied at once.":"The change asks for confirmation if it is not the recommended one."}</p>
-     <div class="row">${pwSel(rec,rec,'id="bangsel" style="width:100%"',p.tried)}</div><div class="acts" style="margin-top:10px"><button class="b" data-v="x">Cancel</button><button class="b pri" data-v="ok">Apply</button></div>`;
+     ${pwList(p)}<div class="row">${pwSel(rec,rec,'id="bangsel" style="width:100%"',p.tried,p.methods)}</div><div class="acts" style="margin-top:10px"><button class="b" data-v="x">Cancel</button><button class="b pri" data-v="ok">Apply</button></div>`;
     $("#shade").style.display="flex";$("#dlg").querySelectorAll("button").forEach(x=>x.onclick=async()=>{const val=$("#bangsel").value;$("#shade").style.display="none";if(x.dataset.v!=="ok")return;
       const r=await confirmPath(p.code,val,rec,"");if(r===false)return;const chosen=r==="rec"?rec:val;
       const res=await api("/api/control",["waiting","decision"].includes(p.status)?{code:p.code,action:"pathway",pathway:chosen}:{code:p.code,action:chosen});if(res.error)toast(esc(res.error),1);else toast(`${sidH(p.code)}: ${esc(PW()[chosen])}`);render()})});
@@ -407,12 +414,13 @@ function ptsView(v){const q=S.queue,sy=S.sys,z=S.mem_zones,coh=["all"].concat(S.
   v.querySelectorAll("[data-act]").forEach(b=>b.onclick=async()=>{let a=b.dataset.act.toLowerCase().replace("re-run","rerun");
     if(a==="delete files"){if(typeof openRemove==="function")return openRemove([b.dataset.code]);return}
     if(a==="retry"){const sel=v.querySelector(`[data-retry="${b.dataset.code}"]`);if(sel){const recp=sel.dataset.rec,r=await confirmPath(b.dataset.code,sel.value,recp,"after a failed registration");
-      if(r===false)return;a=r==="rec"?recp:sel.value;if(a==="recon"&&!confirm("recon-all takes about 2-3 hours for this patient. Continue?"))return}}
+      if(r===false)return;a=r==="rec"?recp:sel.value;if(a==="recon"&&!confirm("recon-all takes about 2-3 hours for this patient. Continue?"))return}
+      else{const fp=S.patients.find(x=>x.code===b.dataset.code);if(fp&&["failed","stopped"].includes(fp.status))return pathwayDialog(fp,true)}}
     if(a==="stop"&&!confirm("Stop this patient?"))return;
     if(a==="rerun"){const p=S.patients.find(x=>x.code===b.dataset.code);if(S.settings.rerun_mode==="auto"){const r=await api("/api/control",{code:p.code,action:"rerun"});
         toast(r.error?esc(r.error):`${sidH(p.code)}: re-run with ${esc(PW()[p.pathway])} (same as last run)`,!!r.error);return render()}
       $("#dlg").innerHTML=`<h2>Re-run ${sidH(p.code)}</h2><p class="note">Last run: ${esc(PW()[p.pathway]||p.pathway)}${p.qc?` · QC ${esc(p.qc)}`:""}. The earlier results stay until the new run finishes.</p><div class="banner" data-ln="rerun-note" style="display:block"><b>Re-processing from the original MRI</b> — detection, measurements, MATH and the experimental scores are made again with the current pipeline. The previous run is archived (Compare runs), never replaced. Every human call is kept: it moves to a new candidate only when the match is confident; possible matches wait for your confirmation and the study shows <b>Needs re-review</b> where calls are missing.</div>
-       <div class="row">Pathway ${pwSel(p.pathway,p.pathway,'id="rrsel" style="flex:1"',p.tried)}</div><div class="note">✓ recommended = same as last run · Settings › Re-run can make this automatic.</div>
+       <div class="row">Pathway ${pwSel(p.pathway,p.pathway,'id="rrsel" style="flex:1"',p.tried,p.methods)}</div><div class="note">✓ recommended = same as last run · Settings › Re-run can make this automatic.</div>
        <div class="acts" style="margin-top:10px"><button class="b" data-v="x">Cancel</button><button class="b pri" data-v="ok">Re-run</button></div>`;
       $("#shade").style.display="flex";$("#dlg").querySelectorAll("button").forEach(x=>x.onclick=async()=>{const val=$("#rrsel").value;$("#shade").style.display="none";if(x.dataset.v!=="ok")return;
         if(val==="recon"&&!confirm("recon-all takes about 2-3 hours for this patient. Continue?"))return;
@@ -807,21 +815,23 @@ async function sheetTechnical(b,x){const a=await api("/api/proc/audit?code="+enc
    <h3>Can earlier outputs be reused?</h3><table><tr><th>Stage</th><th>Status</th><th>Why</th></tr>${Object.values(a.stages).map(z=>`<tr><td>${esc({anatomy:"Brain anatomy",registration:"Registration (SWI → T1)",align:"Labels on the SWI",detect:"cSS detection",unified:"Unified score"}[z.stage]||z.stage)}</td><td>${cat(z.status,z.label)}</td><td class="note">${esc(z.why)}</td></tr>`).join("")}</table>`}
 // shared queue actions (same API calls and confirmations as before the redesign)
 async function ctl(p,a){const c=p.code;
-  if(a==="retry"&&/do not line up/.test(p.error||""))return pathwayDialog(p,true);
+  if(a==="retry"&&["failed","stopped"].includes(p.status))return pathwayDialog(p,true);
   if(a==="stop"&&!confirm(`Stop ${c}? Its partial results are discarded; you can Retry later.`))return;
   if(a==="remove"&&!confirm(`Remove ${c} from the queue? Its files are not deleted.`))return;
   if(a==="rerun"){if(S.settings.rerun_mode==="auto"){const r=await api("/api/control",{code:c,action:"rerun"});toast(r.error?esc(r.error):`${sidH(c)}: re-run with ${esc(PW()[p.pathway])}`,!!r.error);return render()}
     return pathwayDialog(p,false,true)}
   const r=await api("/api/control",{code:c,action:a});if(r.error)toast(esc(r.error),1);render()}
-function pathwayDialog(p,isRetry,isRerun){const rec=isRetry?(p.next_rec||"coreg_masked"):p.pathway;
-  $("#dlg").innerHTML=`<h2>${isRerun?"Re-run":isRetry?"Retry":"Anatomy method"} · ${sidH(p.code)}</h2><p class="note">${isRetry?"The T1 and SWI did not line up. Choose how to register them; the 1.5 mm check runs again and refuses a bad result. The failed attempt's files are kept.":isRerun?"The earlier results stay until the new run finishes.":"How the brain anatomy is obtained for this study."}
-   ${p.tried&&p.tried.length?`<br>Tried: ${p.tried.map(t=>esc(PW()[t.pathway]||t.pathway)+" ("+t.shift+" mm)").join(", ")}`:""}</p>
-   <div class="row">${pwSel(rec,rec,'id="pwsel" style="width:100%"',p.tried)}</div>
-   <details class="note" style="margin-top:6px"><summary>Which method should I choose?</summary><table style="margin-top:6px">${[["Fast re-registration","minutes","try first"],["SynthMorph","minutes","if the fast option is refused (runs alone)"],["recon-all","~2–3 h","most accurate registration"],["SWI-only","~30 min","last resort, coarser labels"]].map(z=>`<tr><td><b>${z[0]}</b></td><td>${z[1]}</td><td>${z[2]}</td></tr>`).join("")}</table></details>
+function pathwayDialog(p,isRetry,isRerun){const mis=/do not line up/.test(p.error||"");const rec=isRetry?(p.next_rec||p.pathway||"synthseg"):p.pathway;
+  $("#dlg").innerHTML=`<h2>${isRerun?"Re-run":isRetry?"Retry":"Anatomy method"} · ${sidH(p.code)}</h2><p class="note">${isRetry?(mis?"The T1 and SWI did not line up. Choose how to register them; the 1.5 mm check runs again and refuses a bad result. The failed attempt's files are kept.":`This attempt stopped: <b>${esc((p.error||"").split(" - ")[0])}</b>. The next suitable method that was not tried yet is chosen for you; you can pick another one.`):isRerun?"The earlier results stay until the new run finishes.":"How the brain anatomy is obtained for this study."}
+   ${isRetry&&p.next_why?`<br><b>${esc(p.next_why)}</b>`:""}</p>
+   ${pwList(p)}
+   <div class="row">${pwSel(rec,rec,'id="pwsel" style="width:100%"',p.tried,p.methods)}</div>
+   <details class="note" style="margin-top:6px"><summary>Which method should I choose?</summary><table style="margin-top:6px">${[["SynthSeg","minutes","default; any T1"],["Fast re-registration","minutes","any T1; try first after a misalignment"],["SynthMorph","minutes","T1 + whole-brain SWI (not a partial slab); runs alone"],["recon-all","~2–3 h","only a 3-D T1 of 1.3 mm or finer; most accurate"],["SWI-only","~30 min","no T1, or the T1 does not match the SWI; coarser labels"]].map(z=>`<tr><td><b>${z[0]}</b></td><td>${z[1]}</td><td>${z[2]}</td></tr>`).join("")}</table>
+   <div style="margin-top:4px">✓ worked · ✗ tried and failed · ○ not tried yet · 🚫 not suitable for this study (greyed out)</div></details>
    <div class="acts" style="margin-top:14px"><button class="b" data-v="x">Cancel</button><button class="b pri" data-v="ok">${isRerun?"Re-run":isRetry?"Retry":"Apply"}</button></div>`;
   $("#shade").style.display="flex";$("#dlg").querySelectorAll("button[data-v]").forEach(x=>x.onclick=async()=>{const val=$("#pwsel").value;$("#shade").style.display="none";if(x.dataset.v!=="ok")return;
     const r=await confirmPath(p.code,val,rec,isRetry?"after a failed registration":"");if(r===false)return;const ch=r==="rec"?rec:val;if(ch==="recon"&&!confirm("recon-all takes about 2-3 hours for this study. Continue?"))return;
-    const body=isRerun?{code:p.code,action:"rerun",pathway:ch}:["waiting","decision"].includes(p.status)?{code:p.code,action:"pathway",pathway:ch}:{code:p.code,action:ch};
+    const body=isRerun?{code:p.code,action:"rerun",pathway:ch}:["waiting","decision"].includes(p.status)?{code:p.code,action:"pathway",pathway:ch}:{code:p.code,action:"retry",pathway:ch};
     const res=await api("/api/control",body);if(res.error)toast(esc(res.error),1);else toast(`${sidH(p.code)}: ${esc(PW()[ch])}`);render();if(W.cur)openSheet(W.cur)})}
 // ---------- Activity (Process Manager)
 const AC={capOpen:false};
