@@ -438,8 +438,21 @@ function nextSeq(){const i=M.seqs.findIndex(s=>s.key===panes[act].seq);setSeq(M.
 const reviewer=()=>$("#reviewer").value.trim();
 function setMissed(m){missed=(m||[]).map(r=>{let pts=null;try{pts=r.points?JSON.parse(r.points):null}catch(e){}return Object.assign({},r,{pts:(pts&&r.plane!==""&&r.shape!=="point")?pts:null})});renderMissed()}
 let loadSeq=0;
+// 2026-11-25: a reviewed study's images live on the Pensieve drive; bring them back (verified copy), then open it
+async function pensieveBringBack(sid,my){
+  let ov=$("#pvov");if(!ov){ov=document.createElement("div");ov.id="pvov";ov.style.cssText="position:fixed;inset:0;z-index:9000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55)";document.body.appendChild(ov)}
+  const box=(h)=>{ov.innerHTML=`<div style="background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px 26px;max-width:460px;text-align:center">${h}</div>`;ov.style.display="flex"};
+  const lab=esc(typeof studyLabel==="function"?studyLabel(sid):sid);
+  box(`<b>${lab} is in Pensieve</b><p class="mut">Bringing it back to the Mac…</p>`);
+  try{await api("/api/pensieve_restore",{study:sid})}catch(e){box(`<b>${lab}</b><p class="err">${esc(e.message)}</p><button class="btn pri" id="pvTry">Try again</button>`);$("#pvTry").onclick=()=>pensieveBringBack(sid,my);return}
+  for(;;){await new Promise(r=>setTimeout(r,1000));if(my!==loadSeq){ov.style.display="none";return}
+    let s;try{s=await api(`/api/pensieve?study=${encodeURIComponent(sid)}`)}catch(e){continue}
+    if(!s.away&&s.state!=="restoring"){ov.style.display="none";loadStudy(sid);return}
+    if(s.state==="failed"){box(`<b>${lab} could not be brought back</b><p class="err">${esc(s.error||"")}</p><button class="btn pri" id="pvTry">Try again</button>`);$("#pvTry").onclick=()=>pensieveBringBack(sid,my);return}
+    box(`<b>${lab} is in Pensieve</b><p class="mut">${esc(s.label||"Bringing it back to the Mac…")}</p>`)}}
 async function loadStudy(sid){status("loading study ...");const my=++loadSeq,stale=()=>my!==loadSeq;   // a newer load wins
-  const M0=await api(`/api/meta?study=${sid||""}&reviewer=${encodeURIComponent(reviewer())}${WSM?"&mode=wholestudy":""}`);if(stale())return;M=M0;[nx,ny,nz]=M.shape;vox=M.vox;vols={};luts={};WLs={};seqmeta={};M.seqs.forEach(s=>seqmeta[s.key]=s);
+  const M0=await api(`/api/meta?study=${sid||""}&reviewer=${encodeURIComponent(reviewer())}${WSM?"&mode=wholestudy":""}`);if(stale())return;
+  if(M0.in_pensieve){pensieveBringBack(M0.study,my);return}M=M0;[nx,ny,nz]=M.shape;vox=M.vox;vols={};luts={};WLs={};seqmeta={};M.seqs.forEach(s=>seqmeta[s.key]=s);
   {const G=M.groups||{},gs=Object.keys(G),cur=gs.find(g=>G[g].includes(M.study));$("#cohort").classList.toggle("hide",!gs.length);
    if(gs.length)$("#cohort").innerHTML=gs.map(g=>`<option ${g===cur?"selected":""}>${esc(g)}</option>`).join("");
    const list=cur?G[cur].filter(s=>M.studies.includes(s)):M.studies,i=list.indexOf(M.study);

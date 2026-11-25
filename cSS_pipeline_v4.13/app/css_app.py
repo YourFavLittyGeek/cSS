@@ -126,6 +126,7 @@ def save_pat(): jsave("patients.json", PAT)
 import processing_manager as PM                       # v5.14-gui Previous Processing Manager
 import identity_gui as IDG                            # v5.16 patient / examination identification (Standard / Incognito, encrypted vault)
 IDG.init(B, PAT, SET)
+SET.setdefault("pensieve_after_review", "move"); SET.setdefault("pensieve_grace_min", 5)   # 2026-11-25: reviewed studies move to the Pensieve drive (app/pensieve_move.py)
 SET.setdefault("source_cleanup", "after_processing"); SET.setdefault("source_keep_days", 7)   # temporary DICOM copies: deleted once a study is completely processed (app/source_cleanup.py)
 SET.setdefault("percival_autocycle", False)   # Stage 6: automatic training cycles OFF by default (pilot)
 SET.setdefault("percival_cycle_n", 5); SET.setdefault("percival_test_fraction", 0.2); SET.setdefault("percival_learn_from", "labelled")
@@ -442,6 +443,8 @@ def watcher():
                     save_pat(); print(f"temporary DICOM copies deleted for {k_} completed studies ({n_ / 1e6:.0f} MB)", flush=True)
                     import progress_jobs as PJ; PJ.note("cleanup", f"Temporary MRI copies deleted ({k_} studies)", f"{n_ / 1e6:.0f} MB freed on the Mac")
         except Exception as e: print(f"temporary copy cleanup: {e}", flush=True)
+        try: pensieve_tick()
+        except Exception as e: print(f"Pensieve move: {e}", flush=True)
         try:
             st = SS.status(B, sel_studies()); live = set()
             for r in st["rows"]:
@@ -952,6 +955,14 @@ def process(p):
     pm_begin_full(p)
     env["CSS_THREADS"] = str(max(2, int(SET.get("threads", 4)) // max(1, min(int(SET.get("parallel", 1)), 4)) if int(SET.get("parallel", 1)) > 1 else int(SET.get("threads", 4))))
     save_pat()
+    try:
+        import pensieve_move as PMV
+        if PMV.in_pensieve(B, code):                                      # moved after its review: bring it back before re-running
+            p["step"] = "bringing the study back from Pensieve"; save_pat()
+            r = PMV.restore(B, SET.get("vault_mount"), code)
+            if not r.get("ok"): return fail(p, f"the study is in Pensieve and could not be brought back: {r.get('error')}")
+            p["pensieve"] = PMV.status(B, code); save_pat()
+    except ImportError: pass
     if FAKE:
         for s in STEPS:
             step_begin(p, s); time.sleep(float(os.environ.get("CSS_APP_FAKE_STEP_S", "0.3")))
@@ -1768,6 +1779,80 @@ def _perform_safe_shutdown(pause_jobs: bool = True):
 
 _TRANSFER_POOL = {"pool": None}
 _TRANSFER_POOL_LOCK = threading.Lock()
+
+PENSIEVE_RUN = {"thread": None}
+
+def pv_state(code):
+    """'on_mac' / 'in_pensieve' / 'copied' / 'moving' / 'restoring' / 'failed' (marker file only when it exists: cheap per poll)"""
+    try:
+        import pensieve_move as PMV
+        s = PMV.STATUS.get(code, {}).get("state")
+        if s in ("moving", "restoring", "failed"): return s
+        return PMV.state(B, code) if os.path.exists(PMV.marker_path(B, code)) else "on_mac"
+    except Exception:
+        return "on_mac"
+
+def pensieve_tick():
+    """every 30 s: move ONE reviewed study (final review older than the grace time) to the Pensieve drive in the background"""
+    pol = SET.get("pensieve_after_review", "move")
+    if pol not in ("move", "copy"): return
+    t = PENSIEVE_RUN["thread"]
+    if t is not None and t.is_alive(): return
+    import pensieve_move as PMV
+    vault = SET.get("vault_mount")
+    if not PMV.drive_ready(vault)[0]: return
+    grace = max(0, int(SET.get("pensieve_grace_min", 5) or 0)) * 60
+    with LOCK: cands = [p for p in PAT if p.get("code") not in RUNNING and not p.get("retired") and PMV.due(B, p, grace)]
+    if not cands: return
+    p = cands[0]
+    if pol == "copy" and (PMV.read_marker(B, p["code"]) or {}).get("final_mtime") == PMV.newest_final(B, p["code"]): return
+    PENSIEVE_RUN["thread"] = threading.Thread(target=pensieve_move_one, args=(p, pol == "move"), daemon=True, name="pensieve-move")
+    PENSIEVE_RUN["thread"].start()
+
+def pensieve_move_one(p, delete_local=True):
+    import pensieve_move as PMV, progress_jobs as PJ
+    code = p["code"]
+    r = PMV.move(B, SET.get("vault_mount"), code, delete_local=delete_local)
+    with LOCK: p["pensieve"] = PMV.status(B, code); save_pat()
+    if r.get("ok"):
+        what = f"moved to Pensieve ({r.get('moved_bytes', 0) / 1e6:.0f} MB freed on the Mac)" if delete_local else "copied to Pensieve"
+        PJ.note("pensieve", f"{study_label(code) if 'study_label' in globals() else code} {what}",
+                f"{r.get('files', 0)} files verified" + (f"; {len(r['kept_local'])} kept on the Mac" if r.get("kept_local") else ""))
+        try: NC.add(B, "done", "storage", f"{code} {what}", "it comes back automatically when you open it")
+        except Exception: pass
+    else:
+        PJ.note("pensieve", f"{code}: move to Pensieve did not complete", r.get("error", ""), state="failed")
+        try: NC.add(B, "warn", "storage", f"{code} was not moved to Pensieve", r.get("error", ""))
+        except Exception: pass
+
+def pensieve_api(op, d):
+    import pensieve_move as PMV
+    if op == "summary":
+        codes = [p["code"] for p in PAT if p.get("code")]
+        ok, why = PMV.drive_ready(SET.get("vault_mount"))
+        return dict(ok=True, policy=SET.get("pensieve_after_review", "move"), grace_min=SET.get("pensieve_grace_min", 5),
+                    drive_ready=ok, drive_reason=why, counts=PMV.summary(B, codes),
+                    studies={c: PMV.state(B, c) for c in codes})
+    if op == "status": return dict(ok=True, **PMV.status(B, str(d.get("code", ""))))
+    if op == "policy":
+        pol = d.get("policy", SET.get("pensieve_after_review", "move"))
+        if pol not in ("move", "copy", "off"): return dict(ok=False, error="policy must be move, copy or off")
+        with LOCK:
+            SET["pensieve_after_review"] = pol
+            SET["pensieve_grace_min"] = max(0, min(1440, int(d.get("grace_min", SET.get("pensieve_grace_min", 5)) or 0)))
+            jsave("settings.json", SET)
+        return dict(ok=True, policy=pol, grace_min=SET["pensieve_grace_min"])
+    code = str(d.get("code", ""))
+    p = next((x for x in PAT if x.get("code") == code), None)
+    if not p: return dict(ok=False, error="unknown study")
+    if op == "move":                                                    # "Move to Pensieve now" (a reviewed or any finished study)
+        if code in RUNNING or p.get("status") != "done": return dict(ok=False, error="only a finished study that is not running can be moved")
+        t = PENSIEVE_RUN["thread"]
+        if t is not None and t.is_alive(): return dict(ok=False, error="another study is being moved - try again in a moment")
+        PENSIEVE_RUN["thread"] = threading.Thread(target=pensieve_move_one, args=(p, True), daemon=True, name="pensieve-move")
+        PENSIEVE_RUN["thread"].start(); return dict(ok=True, started=True)
+    if op == "restore": return PMV.start_restore(B, SET.get("vault_mount"), code)
+    return dict(ok=False, error=f"unknown Pensieve op {op}")
 
 def transfer_pool():
     """Phase 1d: the background transfer worker pool (journal-backed; created on first use, started once)"""
@@ -2878,6 +2963,7 @@ def state():
                         elapsed=el, remaining=rem, reg_method=p.get("reg_method", ""), pathway=p.get("pathway", "synthseg"),
                         path_note=p.get("path_note", ""), path_ack=p.get("path_ack", True), solo=solo(p), started=p.get("started", 0),
                         tried=p.get("tried", []), next_rec=next_rec(p) if p["status"] == "failed" else "", qc=qc_grade(p)[0], qc_tip=qc_grade(p)[1],
+                        pensieve=pv_state(p["code"]),
                         stalled=round((time.time() - last_activity(p["code"])) / 60) if p["status"] == "running" and last_activity(p["code"]) and time.time() - last_activity(p["code"]) > 1200 else 0, has_qc=os.path.exists(f"{AD}/qc/{p['code']}.png"), version=p.get("version", ""),
                         radiologist=p.get("radiologist", ""), grade_R=p.get("grade_R", ""), grade_L=p.get("grade_L", ""),
                         step_times={k: round(v) for k, v in p.get("steps_done", {}).items()}))
@@ -2967,6 +3053,7 @@ class H(BaseHTTPRequestHandler):
             if u.path.startswith("/api/vault/"): return self.send(vault_get(u.path[11:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/app/"): return self.send(app_lifecycle_get(u.path[9:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/transfer/"): return self.send(transfer_get(u.path[14:], {k: v[0] for k, v in parse_qs(u.query).items()}))
+            if u.path.startswith("/api/pensieve/"): return self.send(pensieve_api(u.path[14:], {k: v[0] for k, v in parse_qs(u.query).items()}) if u.path[14:] in ("summary", "status") else dict(ok=False, error="use POST"))
             if u.path.startswith("/api/clean/"): return self.send(clean_get(u.path[11:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/legacy/"): return self.send(legacy_get(u.path[12:], {k: v[0] for k, v in parse_qs(u.query).items()}))
             if u.path.startswith("/api/files/"): return self.send(files_get(u.path[11:], {k: v[0] for k, v in parse_qs(u.query).items()}))
@@ -3133,6 +3220,7 @@ class H(BaseHTTPRequestHandler):
             if u.path.startswith("/api/vault/"): return self.send(vault_post(u.path[11:], d))
             if u.path.startswith("/api/app/"): return self.send(app_lifecycle_post(u.path[9:], d))
             if u.path.startswith("/api/transfer/"): return self.send(transfer_post(u.path[14:], d))
+            if u.path.startswith("/api/pensieve/"): return self.send(pensieve_api(u.path[14:], d))
             if u.path.startswith("/api/clean/"): return self.send(clean_post(u.path[11:], d))
             if u.path.startswith("/api/legacy/"): return self.send(legacy_post(u.path[12:], d))
             if u.path.startswith("/api/files/"): return self.send(files_post(u.path[11:], d))

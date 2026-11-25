@@ -40,6 +40,30 @@ import review_blind as RB     # Phase 3A.2: server-enforced blinded initial read
 import secrets
 
 B = _base()
+
+
+def _pm():
+    """app/pensieve_move.py (loaded by file path so the app folder never shadows a reviewer module); None if absent"""
+    if "pensieve_move" in sys.modules: return sys.modules["pensieve_move"]
+    p = os.path.join(ROOT, "app", "pensieve_move.py")
+    if not os.path.exists(p): return None
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("pensieve_move", p); m = importlib.util.module_from_spec(spec)
+        sys.modules["pensieve_move"] = m; spec.loader.exec_module(m); return m
+    except Exception as e:
+        sys.modules.pop("pensieve_move", None); sys.stderr.write(f"[reviewer] Pensieve module not loaded: {e}\n"); return None
+
+
+def _vault():
+    try: return json.load(open(f"{B}/app_data/settings.json")).get("vault_mount") or ""
+    except Exception: return ""
+
+
+def away(sid):
+    """the study's images were moved to the Pensieve drive after its review (they come back on open)"""
+    pm = _pm()
+    return bool(sid and pm and pm.in_pensieve(B, sid) and not os.path.exists(f"{B}/data/{sid}_swi.nii"))
 CALLS = ["cSS", "Vessel", "Normal", "Artifact", "Unsure", "Near ICH", "Microbleed"]   # v5.7: Microbleed (fine code MB) = not cSS
 # v5.17 Quick Add: optional fine label (css_common.LABELS code) recorded WITH a call; it never changes the call's meaning (see label_schema.py)
 FINE = {
@@ -883,7 +907,7 @@ ROUTES = {("GET", "/"): "static", ("GET", "/morph3d.js"): "static", ("GET", "/ap
           ("GET", "/api/morph3d"): "refused", ("POST", "/api/import"): "refused", ("POST", "/api/screencap"): "settings",
           ("POST", "/api/snapshot"): "redacted", ("POST", "/api/openfolder"): "settings", ("POST", "/api/primary"): "removed",
           ("POST", "/api/call"): "write", ("POST", "/api/missed"): "write", ("POST", "/api/finish"): "write", ("POST", "/api/unblind"): "write",
-          ("POST", "/api/wholestudy"): "write"}
+          ("POST", "/api/wholestudy"): "write", ("GET", "/api/pensieve"): "settings", ("POST", "/api/pensieve_restore"): "settings"}
 SAFE_ERRORS = (RIO.RecoveryError, RIO.LockTimeout)
 
 
@@ -910,6 +934,12 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path); q = {k: v[0] for k, v in parse_qs(u.query).items()}; blind = ROUTES.get(("GET", u.path)) in ("redacted", "refused")
         try:
             if ("GET", u.path) not in ROUTES: return self._send(dict(error="not found"), code=404)
+            if u.path == "/api/pensieve":                                      # 2026-11-25 Pensieve move: state of one study
+                pm = _pm(); sid = q.get("study") or START[0]
+                return self._send(dict(pm.status(B, sid) if pm else dict(state="on_mac"), study=sid, away=away(sid)))
+            if u.path in ("/api/meta", "/api/labels", "/api/vol", "/api/seqmeta") and away(q.get("study") or START[0]):
+                sid = q.get("study") or START[0]                             # images on Pensieve: the page brings them back first
+                return self._send(dict(in_pensieve=True, study=sid, pensieve=_pm().status(B, sid)))
             if q.get("mode") == "wholestudy" and u.path in ("/api/meta", "/api/labels"):   # Phase 3A.3: no detector output at all
                 q["study"] = q.get("study") or START[0]; blind = True
                 if u.path == "/api/meta": return self._send(meta(q["study"], q.get("reviewer", ""), "wholestudy"))
@@ -943,6 +973,11 @@ class H(BaseHTTPRequestHandler):
             d = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
             if ("POST", u.path) not in ROUTES: return self._send(dict(error="not found"), code=404)
             if u.path == "/api/reviewer": return self._send(reviewers(d.get("name", "")))
+            if u.path == "/api/pensieve_restore":                              # bring a moved study back to the Mac (verified copy)
+                pm = _pm(); sid = str(d.get("study", ""))
+                if sid not in IDS: return self._send(dict(error="unknown study"), code=400)
+                if not pm: return self._send(dict(error="the Pensieve module is not installed"), code=500)
+                return self._send(pm.start_restore(B, _vault(), sid))
             if u.path == "/api/vset":
                 f = f"{B}/review/viewer_settings.json"; os.makedirs(os.path.dirname(f), exist_ok=True)
                 cur = json.load(open(f)) if os.path.exists(f) else {}
@@ -1118,7 +1153,8 @@ if __name__ == "__main__":
     AUDIT_ON = "--audit" in a; OPEN_READ = "--open" in a; SHOW_EXCL = "--show-excluded" in a
     for sid in IDS:
         for f in (f"{B}/data/{sid}_swi.nii", f"{B}/review/{sid}_candidates.csv", f"{B}/review/{sid}_candidates.nii.gz"):
-            if not os.path.exists(f): sys.exit(f"{sid}: {f} not found - run the detection first")
+            if not os.path.exists(f) and not (f.endswith("_swi.nii") and away(sid)):   # moved to Pensieve: restored on open
+                sys.exit(f"{sid}: {f} not found - run the detection first")
     for p in range(port, port + 20):
         try: srv = ThreadingHTTPServer(("127.0.0.1", p), H); break
         except OSError: continue
@@ -1129,7 +1165,7 @@ if __name__ == "__main__":
     if OPEN_READ: print("--open: a second look starts opened; every reviewer's first read of a study stays blind (server-enforced)", flush=True)
     print("shown candidates only (rule-excluded objects hidden)" if not AUDIT_ON else "AUDIT: a 20 % sample of the rule-excluded objects is mixed into validation reads", flush=True)
     RIO.clean_orphan_tmp(f"{B}/review")                                     # Phase 3A.1: temporary files left by a crash (own prefix only)
-    study(START[0])
+    if not away(START[0]): study(START[0])
     if "--no-browser" not in a: threading.Timer(0.5, lambda: webbrowser.open(url)).start()
     try: srv.serve_forever()
     except KeyboardInterrupt: print("\nstopped; all decisions were saved as they were made")

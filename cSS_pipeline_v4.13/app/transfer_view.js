@@ -142,7 +142,7 @@ function tcVault(vault, eject) {
 // Work on this Mac that is not a drive transfer: imports (copy from the source folder), setup, deletion of temporary copies.
 function tcMac(jobs) {
   if (!jobs || !jobs.length) return "";
-  const kind = { import: "Import (copy to the Mac)", cleanup: "Clean-up", setup_finish: "Setup" };
+  const kind = { import: "Import (copy to the Mac)", cleanup: "Clean-up", setup_finish: "Setup", pensieve: "Pensieve move" };
   const row = j => {
     const run = j.state === "running";
     const when = j.ended ? new Date(j.ended * 1000).toLocaleTimeString() : "";
