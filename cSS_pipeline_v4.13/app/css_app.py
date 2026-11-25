@@ -438,7 +438,9 @@ def watcher():
             import source_cleanup as SRC
             with LOCK:
                 k_, n_ = SRC.sweep(B, AD, PAT, SET.get("source_cleanup", "after_processing"), SET.get("source_keep_days", 7), running=set(RUNNING))
-                if k_: save_pat(); print(f"temporary DICOM copies deleted for {k_} completed studies ({n_ / 1e6:.0f} MB)", flush=True)
+                if k_:
+                    save_pat(); print(f"temporary DICOM copies deleted for {k_} completed studies ({n_ / 1e6:.0f} MB)", flush=True)
+                    import progress_jobs as PJ; PJ.note("cleanup", f"Temporary MRI copies deleted ({k_} studies)", f"{n_ / 1e6:.0f} MB freed on the Mac")
         except Exception as e: print(f"temporary copy cleanup: {e}", flush=True)
         try:
             st = SS.status(B, sel_studies()); live = set()
@@ -1012,7 +1014,9 @@ def process(p):
         try:
             import source_cleanup as SRC
             n = SRC.clean(B, AD, p)
-            if n: save_pat(); open(logf, "a").write(f"\ntemporary DICOM copies deleted ({n / 1e6:.0f} MB): re-runs use raw/{code}/*.nii.gz\n")
+            if n:
+                save_pat(); open(logf, "a").write(f"\ntemporary DICOM copies deleted ({n / 1e6:.0f} MB): re-runs use raw/{code}/*.nii.gz\n")
+                import progress_jobs as PJ; PJ.note("cleanup", f"Temporary MRI copies of {code} deleted", f"{n / 1e6:.0f} MB freed on the Mac")
         except Exception as e: open(logf, "a").write(f"\ntemporary copies not deleted: {e}\n")
     try: NC.add(B, "done", "processing", f"Patient {code} finished", "pipeline complete")
     except Exception: pass
@@ -1315,7 +1319,7 @@ def pg_get(op, q):
     if op == "albus": return PG.albus_state()                                                   # ALBUS detector evaluation + registry
     if op == "pensieve": return PG.pensieve_state()                                          # v5.25 PENSIEVE Core Memory
     if op == "pensieve_query": return PG.pensieve_query(q.get("component", "albus"))
-    if op == "vault": return PG.vault_status()                                               # v5.25 PERCIVAL DATA VAULT status
+    if op == "vault": return PG.vault_status(SET.get("vault_mount"))                                               # v5.25 PERCIVAL DATA VAULT status
     if op == "missed_lesions":                                                                # Stage 1: legacy PENSIEVE reader retired
         return dict(ok=False, retired=True, error="retired: missed-cSS marks live in review/ID_missed.csv (reviewer) and in the PENSIEVE index")
     if op == "events":                                                                         # Stage 5: event log integrity + replay check
@@ -1378,10 +1382,10 @@ def pg_post(op, d):
             if a == "cancel": return PG.cancel_training(by=str(d.get("by") or "app user"))
             if a == "retry": return PG.train_async("retry from the start (previous run " + str(d.get("run", "")) + ")")
             return dict(ok=False, error="unknown job action")
-        if op == "vault_connect": return PG.vault_connect(str(d.get("path", "")))
-        if op == "vault_create": return PG.vault_create(str(d.get("destination", "")), name=str(d.get("name", "PERCIVAL_VAULT")))
-        if op == "vault_eject": return PG.vault_eject()
-        if op == "vault_backup": return PG.vault_backup(str(d.get("destination", "")))
+        if op == "vault_connect": return vault_post("connect", d)                               # updates SET["vault_mount"]
+        if op == "vault_create": return vault_post("create", d)                                 # updates SET["vault_mount"]
+        if op == "vault_eject": return PG.vault_eject(SET.get("vault_mount"))
+        if op == "vault_backup": return PG.vault_backup(str(d.get("destination", "")), SET.get("vault_mount"))
         if op == "missed_lesion":                                                             # Phase 3A.5: disabled (it wrote unvalidated rows)
             return dict(ok=False, error="disabled: missed-cSS marks are recorded in the reviewer (validated, one journaled file per reviewer)")
         if op == "component_freeze": return PG.component_freeze(d.get("component", ""), d.get("by", ""), d.get("reason", ""), d.get("confirm", ""))       # Stage 2
@@ -1771,6 +1775,7 @@ def transfer_pool():
         if _TRANSFER_POOL["pool"] is None:
             from uengine.transfer.workers import TransferWorkerPool
             _TRANSFER_POOL["pool"] = TransferWorkerPool(B, SET.get("vault_mount")).start()
+        _TRANSFER_POOL["pool"].set_vault(SET.get("vault_mount"))      # the Pensieve drive path may be set / created after start-up
         return _TRANSFER_POOL["pool"]
 
 def transfer_pool_shutdown(timeout=15.0):
@@ -1785,6 +1790,9 @@ def transfer_pool_shutdown(timeout=15.0):
         _TRANSFER_POOL["pool"] = None
 
 def transfer_get(op, q):
+    if op == "mac_activity":                                        # imports / setup / cleanups on this Mac (progress_jobs, this session)
+        import progress_jobs as PJ
+        return dict(ok=True, jobs=PJ.recent(int(q.get("limit", 15))))
     if op in ("jobs", "job", "assess", "workers", "vault_check"):   # Phase 1d/1e endpoints (uengine/transfer/api.py)
         try:
             from uengine.transfer import api as TAPI

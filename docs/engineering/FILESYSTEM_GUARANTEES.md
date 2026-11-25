@@ -38,3 +38,10 @@ a file created by another process between Percival's checks and its commit**. Th
 - Replacing a file (stage over an existing local copy, File Manager "replace") moves the old version aside first with
   an exclusive rename, and publishes the new file exclusively. The old version is removed only after the whole job
   is verified, and it is moved back if any commit of the job fails. Files inside the Vault are never replaced.
+
+## 2026-11-25: guarded commit on exFAT (user's decision)
+The user's Pensieve drive is exFAT (no renamex_np(RENAME_EXCL), no link()). Instead of refusing, the commit now takes an
+exclusive machine-wide flock for that volume (lock file in the temp folder, nothing written to the drive), checks that the
+name is free and renames at once, then re-checks the size (copier._rename_guarded). Every Percival writer takes the same lock,
+so the remaining window is another program creating that exact archive file name at that instant. Folders are never renamed
+this way. CSS_EXFAT_STRICT=1 restores the refusal (tests run both modes on real exFAT disk images).

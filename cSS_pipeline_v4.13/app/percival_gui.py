@@ -1501,17 +1501,17 @@ def pensieve_query(component):
     return dict(ok=False, retired=True, error=PENSIEVE_RETIRED, component=str(component))
 
 
-def vault_status():
+def vault_status(root=None):
     from uengine.vault import get_vault
-    v = get_vault()
+    v = get_vault(root)                     # the CURRENT configured path (a bare get_vault() kept the first one)
     stats = v.get_storage_stats()
     integrity = v.verify_integrity() if v.is_connected() else {"ok": False}
     return {"stats": stats, "integrity": integrity}
 
 
-def vault_connect(path):
+def vault_connect(path, root=None):
     from uengine.vault import get_vault
-    v = get_vault()
+    v = get_vault(root)                     # the CURRENT configured path (a bare get_vault() kept the first one)
     ok, msg = v.connect(path)
     return {"ok": ok, "message": msg, "stats": v.get_storage_stats()}
 
@@ -1525,16 +1525,16 @@ def vault_create(destination, name="PERCIVAL_VAULT"):
         return {"ok": False, "error": str(e)}
 
 
-def vault_eject():
+def vault_eject(root=None):
     from uengine.vault import get_vault
-    v = get_vault()
+    v = get_vault(root)                     # the CURRENT configured path (a bare get_vault() kept the first one)
     ok, msg = v.safe_eject()
     return {"ok": ok, "message": msg}
 
 
-def vault_backup(destination):
+def vault_backup(destination, root=None):
     from uengine.vault import get_vault
-    v = get_vault()
+    v = get_vault(root)                     # the CURRENT configured path (a bare get_vault() kept the first one)
     ok, msg = v.create_backup(destination)
     return {"ok": ok, "message": msg}
 

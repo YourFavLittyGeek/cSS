@@ -65,6 +65,24 @@ def get(jid):
         return _public(j) if j else dict(id=jid, state="unknown", error="no such job (the app was restarted?)")
 
 
+def note(kind, title, label, state="done"):
+    """record an instant operation (e.g. temporary copies deleted) so the Transfer Center can list it with the others"""
+    jid = f"{kind}-{uuid.uuid4().hex[:10]}"; now = time.time()
+    j = dict(id=jid, kind=kind, title=title, state=state, done=1, total=1, label=label, started=now, ended=now, steps=[])
+    with LOCK:
+        JOBS[jid] = j; _ORDER.append(jid)
+        while len(_ORDER) > 30: JOBS.pop(_ORDER.pop(0), None)
+    return jid
+
+
+def recent(limit=15):
+    """running jobs first, then the most recently finished (this app session) - for the Transfer Center"""
+    with LOCK:
+        js = [JOBS[i] for i in reversed(_ORDER) if i in JOBS]
+        out = [dict(_public(j), started=j["started"], ended=j.get("ended")) for j in js]
+    return sorted(out, key=lambda j: (j["state"] != "running",))[:int(limit)]
+
+
 def running(kind=None):
     with LOCK:
         return [_public(j) for j in JOBS.values() if j["state"] == "running" and (kind is None or j["kind"] == kind)]

@@ -102,7 +102,7 @@ class Images(unittest.TestCase):
 # ================================================================================================ vault verification
 class TestVaultCheck(Images):
     def test_verdicts_per_filesystem(self):
-        for key, verdict in (("apfs", "archive_ok"), ("hfs", "archive_ok"), ("msdos", "archive_ok"), ("exfat", "read_only"),
+        for key, verdict in (("apfs", "archive_ok"), ("hfs", "archive_ok"), ("msdos", "archive_ok"), ("exfat", "archive_ok"),
                              ("ro", "read_only")):
             with self.subTest(fs=key):
                 before = sorted(os.listdir(self.vault(key)))
@@ -113,6 +113,9 @@ class TestVaultCheck(Images):
                 self.assertEqual(v["mount_point"], os.path.realpath(self.mnt(key)))
                 self.assertEqual(sorted(os.listdir(self.vault(key))), before)       # never writes
         self.assertEqual(verify_vault(self.vault("exfat"))["filesystem"], "exfat")
+        self.assertTrue(verify_vault(self.vault("exfat"))["guarded_commit"])
+        with mock.patch.dict(os.environ, {"CSS_EXFAT_STRICT": "1"}):                 # strict mode: source only, as before
+            self.assertEqual(verify_vault(self.vault("exfat"))["verdict"], "read_only")
         self.assertTrue(verify_vault(self.vault("ro"))["read_only"])
 
     def test_not_a_vault_unavailable_and_internal(self):
@@ -130,6 +133,7 @@ class TestVaultCheck(Images):
         self.assertEqual(verify_vault(plain)["verdict"], "not_a_vault")
         shutil.rmtree(plain)
 
+    @mock.patch.dict(os.environ, {"CSS_EXFAT_STRICT": "1"})      # the old refusal, still available (CSS_EXFAT_STRICT=1)
     def test_read_only_and_exfat_destinations_are_refused_before_writing(self):
         for key, word in (("ro", "read-only"), ("exfat", "exfat")):
             with self.subTest(fs=key):
@@ -146,7 +150,21 @@ class TestVaultCheck(Images):
         pool = TransferWorkerPool(self.E.base, self.vault("apfs"), poll_s=0.05).start()
         try:
             self.assertEqual(api.handle_get("vault_check", {}, pool)["vault"]["verdict"], "archive_ok")
-            self.assertEqual(api.handle_get("vault_check", {"path": self.vault("exfat")}, pool)["vault"]["verdict"], "read_only")
+            self.assertEqual(api.handle_get("vault_check", {"path": self.vault("exfat")}, pool)["vault"]["verdict"], "archive_ok")
+        finally:
+            pool.shutdown(5)
+            pool.close()
+
+    def test_pool_follows_a_vault_configured_after_start(self):
+        """2026-11-25: the pool started before the Vault existed reported 'no Vault path configured' forever"""
+        from uengine.transfer import api
+        pool = TransferWorkerPool(self.E.base, None, poll_s=0.05).start()
+        try:
+            self.assertEqual(api.handle_get("vault_check", {}, pool)["vault"]["verdict"], "unavailable")
+            self.assertTrue(pool.set_vault(self.vault("apfs")))
+            self.assertFalse(pool.set_vault(self.vault("apfs")))                     # unchanged -> no-op
+            self.assertEqual(api.handle_get("vault_check", {}, pool)["vault"]["verdict"], "archive_ok")
+            self.assertEqual(pool._svc.policy.vault, os.path.realpath(self.vault("apfs")))
         finally:
             pool.shutdown(5)
             pool.close()

@@ -484,6 +484,7 @@ class TestVolumes(unittest.TestCase):
             pool.close()
             svc.close()
 
+    @mock.patch.dict(os.environ, {"CSS_EXFAT_STRICT": "1"})      # the old refusal, still available (CSS_EXFAT_STRICT=1)
     def test_exfat_destination_refused_by_the_endpoint_layer(self):
         vault = os.path.join(self.mnt("exfat"), "PERCIVAL_VAULT")
         os.makedirs(os.path.join(vault, "studies"), exist_ok=True)

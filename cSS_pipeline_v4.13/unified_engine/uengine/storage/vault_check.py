@@ -14,7 +14,7 @@ import os
 from typing import Any, Dict
 
 from ..safety import volumes_root
-from ..transfer.copier import NO_EXCLUSIVE_COMMIT_FS, fs_type
+from ..transfer.copier import NO_EXCLUSIVE_COMMIT_FS, fs_type, guarded_commit_fs
 
 
 def _mount_point(path: str) -> str:
@@ -59,13 +59,17 @@ def verify_vault(path: str) -> Dict[str, Any]:
     out["can_stage_from"] = True
     if internal:
         out["reasons"].append("the Vault is not on a separate external volume (it is not the permanent archive drive)")
-    if fst in NO_EXCLUSIVE_COMMIT_FS:
+    guarded = guarded_commit_fs(fst)
+    out["guarded_commit"] = guarded
+    if guarded:
+        out["reasons"].append(f"{fst}: files are archived with Percival's guarded commit (locked check-then-rename, never overwrites)")
+    elif fst in NO_EXCLUSIVE_COMMIT_FS:
         out["reasons"].append(f"{fst} cannot guarantee that an archived file is never overwritten; archiving to it is refused")
     if ro:
         out["reasons"].append("the volume is mounted read-only")
     if internal:
         out["verdict"] = "not_external"
-    elif fst in NO_EXCLUSIVE_COMMIT_FS or ro or fst == "":
+    elif (fst in NO_EXCLUSIVE_COMMIT_FS and not guarded) or ro or fst == "":
         out["verdict"] = "read_only"
         if fst == "":
             out["reasons"].append("the filesystem type could not be determined")

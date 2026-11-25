@@ -575,6 +575,7 @@ class TestFilesystemsAndVolumes(unittest.TestCase):
                         svc.close()
                     shutil.rmtree(src)
 
+    @mock.patch.dict(os.environ, {"CSS_EXFAT_STRICT": "1"})      # the old refusal, still available (CSS_EXFAT_STRICT=1)
     def test_exfat_archive_refusal_unchanged(self):
         vault = os.path.join(self.mnt("exfat"), "PERCIVAL_VAULT")
         os.makedirs(os.path.join(vault, "studies"), exist_ok=True)

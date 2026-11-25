@@ -118,14 +118,18 @@ class TestFilesystems(unittest.TestCase):
                     CP._rename_exclusive(os.path.join(d, "new.part"), os.path.join(d, "old"))
                 self.assertEqual(open(os.path.join(d, "old"), "rb").read(), b"OLD")
                 if key == "exfat":
-                    with self.assertRaises(CP.ExclusiveCommitUnsupported):      # no atomic primitive -> refused, no fallback
-                        CP._rename_exclusive(os.path.join(d, "new.part"), os.path.join(d, "fresh"))
+                    with mock.patch.dict(os.environ, {"CSS_EXFAT_STRICT": "1"}):
+                        with self.assertRaises(CP.ExclusiveCommitUnsupported):  # strict: no atomic primitive -> refused
+                            CP._rename_exclusive(os.path.join(d, "new.part"), os.path.join(d, "fresh"))
                     self.assertFalse(os.path.exists(os.path.join(d, "fresh")))
                     self.assertTrue(os.path.exists(os.path.join(d, "new.part")))
+                    self.assertIn("guarded", CP._rename_exclusive(os.path.join(d, "new.part"), os.path.join(d, "fresh")))
+                    self.assertEqual(open(os.path.join(d, "fresh"), "rb").read(), b"NEW")
                 else:
                     CP._rename_exclusive(os.path.join(d, "new.part"), os.path.join(d, "fresh"))
                     self.assertEqual(open(os.path.join(d, "fresh"), "rb").read(), b"NEW")
 
+    @mock.patch.dict(os.environ, {"CSS_EXFAT_STRICT": "1"})      # the old refusal, still available (CSS_EXFAT_STRICT=1)
     def test_exfat_destination_refused_before_anything_is_written(self):
         v = self.vault_on("exfat")
         svc = TransferService(self.E.base, v)
@@ -142,6 +146,7 @@ class TestFilesystems(unittest.TestCase):
         finally:
             svc.close()
 
+    @mock.patch.dict(os.environ, {"CSS_EXFAT_STRICT": "1"})      # the old refusal, still available (CSS_EXFAT_STRICT=1)
     def test_exfat_commit_refused_even_if_preflight_is_bypassed(self):
         v = self.vault_on("exfat")
         pol = PathPolicy(self.E.base, v)
@@ -152,6 +157,36 @@ class TestFilesystems(unittest.TestCase):
             with self.assertRaises(CP.ExclusiveCommitUnsupported):
                 CP.commit_staged(staged, CommitMode.NEVER_OVERWRITE, policy=pol)
         self.assertFalse(os.path.exists(dst))
+        self.assertFalse(os.path.exists(staged.part))
+
+    def test_exfat_guarded_archive_writes_verified_and_never_overwrites(self):
+        """2026-11-25 guarded commit: archiving to exFAT works, an existing archived file is never replaced"""
+        v = self.vault_on("exfat")
+        svc = TransferService(self.E.base, v)
+        try:
+            src = self.E.work("M01/g.nii", b"GUARDED-DATA")
+            dst = os.path.join(v, "studies", "M01", "g.nii")
+            rep = svc.transfer("archive", [(src, dst)], study_id="M01")
+            self.assertTrue(rep["ok"], rep)
+            self.assertEqual(open(dst, "rb").read(), b"GUARDED-DATA")
+            self.assertEqual([n for n in os.listdir(os.path.dirname(dst)) if ".part" in n], [])
+            src2 = self.E.work("M01b/g.nii", b"OTHER-CONTENT")
+            rep2 = svc.transfer("archive", [(src2, dst)], study_id="M01")
+            self.assertFalse(rep2["ok"], rep2)
+            self.assertEqual(open(dst, "rb").read(), b"GUARDED-DATA")              # archive unchanged
+        finally:
+            svc.close()
+
+    def test_exfat_guarded_commit_loses_a_race_without_overwriting(self):
+        """a file appearing at the last moment before the guarded rename is never replaced"""
+        v = self.vault_on("exfat")
+        pol = PathPolicy(self.E.base, v)
+        src = self.E.work("M01/r.nii", b"MINE")
+        dst = os.path.join(v, "studies", "M01", "r.nii")
+        staged = CP.stage_file(src, dst, policy=pol, job_tag="jr", mode=CommitMode.NEVER_OVERWRITE)
+        r = CP.commit_staged(staged, CommitMode.NEVER_OVERWRITE, policy=pol, _before_commit=lambda: _w(dst, b"THEIRS"))
+        self.assertEqual(r.status, "conflict")
+        self.assertEqual(open(dst, "rb").read(), b"THEIRS")
         self.assertFalse(os.path.exists(staged.part))
 
     def test_reading_from_exfat_is_allowed(self):

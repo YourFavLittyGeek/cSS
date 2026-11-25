@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional
 
 from .journal import DuplicateRequest
 from .models import JobState, TERMINAL_JOB_STATES
+from ..safety import PathPolicy
 from .service import TransferRefused, TransferService
 
 J = JobState
@@ -54,6 +55,18 @@ class TransferWorkerPool:
         self.detected_at_start: List[str] = []
 
     # ------------------------------------------------------------------ lifecycle
+    def set_vault(self, vault_root: Optional[str]) -> bool:
+        """follow a changed Vault path (configured or created after start-up). New jobs and checks use it; a running
+        job keeps the service it started with. The journal and locks live in the project, so they do not change."""
+        v = vault_root or None
+        with self._lock:
+            if v == self.vault:
+                return False
+            self.vault = v
+            self._svc.vault = os.path.abspath(v) if v else None
+            self._svc.policy = PathPolicy(self.base, v)
+        return True
+
     def start(self) -> "TransferWorkerPool":
         with self._lock:
             if self._thread and self._thread.is_alive():

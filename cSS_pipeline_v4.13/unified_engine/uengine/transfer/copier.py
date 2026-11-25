@@ -12,9 +12,12 @@ Two phases, so a multi-file job can verify EVERY file before it touches ANY dest
 
 Exclusive commit (Phase 1b, measured 2026-11-23 on disk images - docs/engineering/FILESYSTEM_GUARANTEES.md):
 every publish uses renamex_np(RENAME_EXCL) - atomic "rename only if the target name is free"; if the filesystem does not
-support it, link()+unlink() (also atomic and exclusive). If NEITHER is supported (exFAT) the commit is REFUSED with
-ExclusiveCommitUnsupported - there is no check-then-rename fallback, because that cannot exclude a destination created
-between the check and the rename. A plain overwriting rename is never used to publish.
+support it, link()+unlink() (also atomic and exclusive). If NEITHER is supported (exFAT, the user's Pensieve drive) the
+commit uses the GUARDED commit (2026-11-25, user's decision): under an exclusive machine-wide lock for that volume the name
+is checked to be free and renamed immediately, then the size is re-checked. Every Percival writer takes the same lock, so
+the only window left is another program creating the very same file name in the archive folder at that instant.
+CSS_EXFAT_STRICT=1 restores the old behaviour (refused, ExclusiveCommitUnsupported). Folders are never renamed this way.
+A plain overwriting rename is never used to publish.
 
 Replacement (REPLACE_AFTER_VERIFY / PRESERVE_PREVIOUS) moves the old file aside to <dst>.replaced-<job> (exclusive) and
 then publishes the new file (exclusive); the old version stays until the caller (the service) has verified the whole job
@@ -43,8 +46,18 @@ from ..unified_transfer_engine import flush_durability
 
 CHUNK = 4 * 1024 * 1024
 JOB_TAG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
-# filesystems measured to lack BOTH renamex_np(RENAME_EXCL) and link(): refused before any data is copied
+# filesystems measured to lack BOTH renamex_np(RENAME_EXCL) and link(): guarded commit (or refused in strict mode)
 NO_EXCLUSIVE_COMMIT_FS = frozenset({"exfat"})
+
+
+def exfat_strict() -> bool:
+    """True = refuse exFAT destinations as before 2026-11-25 (CSS_EXFAT_STRICT=1); default = guarded commit"""
+    return os.environ.get("CSS_EXFAT_STRICT", "") == "1"
+
+
+def guarded_commit_fs(t: str) -> bool:
+    """a filesystem without an atomic exclusive primitive on which the guarded commit is used"""
+    return t in NO_EXCLUSIVE_COMMIT_FS and not exfat_strict()
 
 
 class CopyError(RuntimeError):
@@ -215,6 +228,8 @@ def _rename_exclusive(src: str, dst: str) -> str:
         raise
     except OSError as e:
         if e.errno in (errno.EPERM, errno.ENOTSUP, errno.EOPNOTSUPP, errno.EXDEV, errno.EMLINK, errno.ENOSYS):
+            if guarded_commit_fs(fs_type(os.path.dirname(dst) or dst)):
+                return _rename_guarded(src, dst)
             raise ExclusiveCommitUnsupported(
                 f"the filesystem of {dst} ({fs_type(dst) or 'unknown'}) supports neither an exclusive rename nor hard "
                 f"links, so Percival cannot guarantee that an existing file is never overwritten; the operation was "
@@ -222,6 +237,33 @@ def _rename_exclusive(src: str, dst: str) -> str:
         raise
     os.remove(src)
     return "link+unlink"
+
+
+def _volume_lock_path(dst: str) -> str:
+    """one lock file per destination volume, outside the volume (nothing is written to the archive for locking)"""
+    p = os.path.realpath(os.path.dirname(dst) or dst)
+    while not os.path.ismount(p) and os.path.dirname(p) != p:
+        p = os.path.dirname(p)
+    import tempfile
+    return os.path.join(tempfile.gettempdir(), f"percival_guarded_commit_{hashlib.sha1(p.encode()).hexdigest()[:16]}.lock")
+
+
+def _rename_guarded(src: str, dst: str) -> str:
+    """exFAT: check-then-rename under an exclusive lock shared by every Percival process; never replaces a file"""
+    if fcntl is None:                                                    # pragma: no cover - non-POSIX
+        raise ExclusiveCommitUnsupported(f"no file locking available for a guarded commit to {dst}")
+    size = os.lstat(src).st_size
+    with open(_volume_lock_path(dst), "a") as lk:
+        fcntl.flock(lk.fileno(), fcntl.LOCK_EX)
+        try:
+            if os.path.lexists(dst):
+                raise FileExistsError(errno.EEXIST, "destination exists", dst)
+            os.rename(src, dst)
+        finally:
+            fcntl.flock(lk.fileno(), fcntl.LOCK_UN)
+    if os.lstat(dst).st_size != size:                                    # cannot happen unless something else wrote
+        raise IntegrityError(f"{dst} has a different size right after the guarded commit")
+    return "guarded rename (exfat: locked check-then-rename)"
 
 
 def _identity(st):
@@ -256,7 +298,7 @@ def preflight_destination(dst: str) -> None:
     except OSError:
         pass
     t = fs_type(os.path.dirname(dst) or dst)
-    if t in NO_EXCLUSIVE_COMMIT_FS:
+    if t in NO_EXCLUSIVE_COMMIT_FS and not guarded_commit_fs(t):
         raise ExclusiveCommitUnsupported(
             f"the destination {dst} is on a {t} volume, which supports neither an exclusive rename nor hard links; "
             f"Percival refuses to write there because it cannot guarantee that an existing file is never overwritten "

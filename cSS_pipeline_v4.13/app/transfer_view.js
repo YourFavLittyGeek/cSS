@@ -88,10 +88,23 @@ function tcJobRow(j) {
       ${tcPill(j.state)} ${j.running ? '<span class="pill pri">worker running</span>' : ""}
       <span class="mut mono tc-id">${tcEsc(j.job_id)}</span></div>
     <div class="tc-progress"><div class="tc-bar"><i style="width:${staged}%" class="staged"></i><i style="width:${pct}%"></i></div>
-      <span class="mut">${tcEsc(p.files_done || 0)}/${tcEsc(p.files_total || 0)} files · ${tcBytes(p.bytes_committed)} of ${tcBytes(p.bytes_total)} committed
-      ${p.current_file && TC_ACTIVE.includes(j.state) ? ` · ${tcEsc(p.current_file)}` : ""}</span></div>
+      ${tcProgressText(j)}</div>
     ${j.recovery_decision ? `<div class="mut">Recovery decision: <b>${tcEsc(j.recovery_decision)}</b> (cannot be switched)</div>` : ""}
     ${err}<div class="tc-actions">${acts}</div></div>`;
+}
+
+// What is happening now, in words. A job copies + verifies every file first (bytes_staged grows), then commits them
+// all at once (files_done / bytes_committed jump) - so while copying, the copied bytes are the honest progress.
+function tcProgressText(j) {
+  const p = j.progress || {}, s = j.state, tot = p.bytes_total || 0;
+  const pctOf = n => tot ? ` (${Math.min(100, Math.round(100 * n / tot))} %)` : "";
+  const cur = p.current_file ? `<div class="tc-cur">Now: <span class="mono">${tcEsc(p.current_file)}</span></div>` : "";
+  if (["copying", "flushing", "verifying", "preparing"].includes(s))
+    return `<span class="mut">${tcEsc(TC_LABEL[s])} · ${tcBytes(p.bytes_staged)} of ${tcBytes(tot)} copied${pctOf(p.bytes_staged)} · ${tcEsc(p.files_total || 0)} files</span>${cur}`;
+  if (s === "committing" || s === "removing_sources")
+    return `<span class="mut">${tcEsc(TC_LABEL[s])} · ${tcEsc(p.files_done || 0)} of ${tcEsc(p.files_total || 0)} files in place · ${tcBytes(p.bytes_committed)} of ${tcBytes(tot)}</span>${cur}`;
+  if (s === "queued") return `<span class="mut">Waiting to start · ${tcEsc(p.files_total || 0)} files · ${tcBytes(tot)}</span>`;
+  return `<span class="mut">${tcEsc(p.files_done || 0)} of ${tcEsc(p.files_total || 0)} files · ${tcBytes(p.bytes_committed)} of ${tcBytes(tot)} in place</span>${TC_ACTIVE.includes(s) ? cur : ""}`;
 }
 
 function tcDetail(d, assess) {
@@ -119,11 +132,27 @@ function tcDetail(d, assess) {
 function tcVault(vault, eject) {
   const v = vault || {}, e = eject || {};
   const verdict = { archive_ok: "Archive ready", not_external: "Not an external drive", read_only: "Source only (read-only)",
-                    not_a_vault: "Not a Vault", unavailable: "Not connected" }[v.verdict] || "Unknown";
-  return `<div class="card tc-vault"><b>Vault drive</b>: <span data-verdict="${tcEsc(v.verdict)}">${tcEsc(verdict)}</span>
+                    not_a_vault: "Not a Pensieve drive", unavailable: "Not connected" }[v.verdict] || "Unknown";
+  return `<div class="card tc-vault"><b>Pensieve drive</b>: <span data-verdict="${tcEsc(v.verdict)}">${tcEsc(verdict)}</span>
     ${v.filesystem ? `· ${tcEsc(v.filesystem)}` : ""} ${v.free_bytes != null ? `· ${tcBytes(v.free_bytes)} free` : ""}
     ${(v.reasons || []).map(r => `<div class="mut">${tcEsc(r)}</div>`).join("")}
     <div>Eject: <b data-eject="${tcEsc(e.state)}">${tcEsc(e.state || "?")}</b> — ${tcEsc(e.reason || "")}</div></div>`;
+}
+
+// Work on this Mac that is not a drive transfer: imports (copy from the source folder), setup, deletion of temporary copies.
+function tcMac(jobs) {
+  if (!jobs || !jobs.length) return "";
+  const kind = { import: "Import (copy to the Mac)", cleanup: "Clean-up", setup_finish: "Setup" };
+  const row = j => {
+    const run = j.state === "running";
+    const when = j.ended ? new Date(j.ended * 1000).toLocaleTimeString() : "";
+    const eta = run && j.eta_s != null ? ` · about ${Math.max(1, Math.round(j.eta_s / 60))} min left` : "";
+    return `<div class="tc-macrow"><b>${tcEsc(j.title)}</b> <span class="pill ${run ? "pri" : j.state === "failed" ? "warn" : "ok"}">${run ? "Running" : j.state === "failed" ? "Failed" : "Done"}</span>
+      <span class="mut">${tcEsc(kind[j.kind] || j.kind)}${when && !run ? ` · ${tcEsc(when)}` : ""}</span>
+      ${run ? `<div class="tc-bar"><i style="width:${Number(j.pct) || 0}%"></i></div>` : ""}
+      <div class="mut">${tcEsc(run ? `${j.label} (${Math.min(j.done, j.total)}/${j.total})${eta}` : (j.error || j.label))}</div></div>`;
+  };
+  return `<div class="card tc-mac"><b>On this Mac</b> <span class="mut">(imports and clean-ups since the app started)</span>${jobs.map(row).join("")}</div>`;
 }
 
 function tcRender(data, ui) {
@@ -136,6 +165,7 @@ function tcRender(data, ui) {
   const w = data.workers || {};
   return `<div class="tc">
     ${tcVault(data.vault, data.eject)}
+    ${tcMac(data.mac)}
     <div class="tc-tabs">${tabs.map(([k, t]) => `<button class="b tc-tab${ui.tab === k ? " on" : ""}" data-tab="${k}">${t} (${g[k].length})</button>`).join("")}
       <span class="mut">Workers: ${w.alive ? "running" : "<b class='bad'>not running</b>"}</span></div>
     ${ui.tab === "history" ? `<input class="tc-search" placeholder="Search history" value="${tcEsc(ui.search || "")}">` : ""}
@@ -145,10 +175,11 @@ function tcRender(data, ui) {
 }
 
 async function tcFetch() {
-  const [jobs, workers, vault, eject] = await Promise.all([
-    api("/api/transfer/jobs?limit=200"), api("/api/transfer/workers"), api("/api/transfer/vault_check"), api("/api/storage/eject_check")]);
+  const [jobs, workers, vault, eject, mac] = await Promise.all([
+    api("/api/transfer/jobs?limit=200"), api("/api/transfer/workers"), api("/api/transfer/vault_check"), api("/api/storage/eject_check"),
+    Promise.resolve().then(() => api("/api/transfer/mac_activity")).catch(() => ({}))]);
   const data = { jobs: jobs.ok ? jobs.jobs : [], workers: workers.ok ? workers.workers : {}, vault: vault.ok ? vault.vault : {},
-                 eject: eject, error: jobs.ok ? null : jobs.error };
+                 eject: eject, mac: mac && mac.ok ? mac.jobs : [], error: jobs.ok ? null : jobs.error };
   if (TC.selected) {
     const d = await api(`/api/transfer/job?id=${encodeURIComponent(TC.selected)}`);
     data.detail = d.ok ? d : null;
@@ -197,7 +228,7 @@ const TC_CSS = `.tc-job{margin:8px 0;cursor:pointer}.tc-job.sel{outline:2px soli
 .tc-bar{position:relative;height:6px;background:var(--line,#333);border-radius:3px;margin:6px 0;overflow:hidden}
 .tc-bar i{position:absolute;left:0;top:0;bottom:0;background:var(--ok,#3a3)}.tc-bar i.staged{background:var(--mut,#777);opacity:.5}
 .tc-tabs{display:flex;gap:6px;align-items:center;margin:8px 0}.tc-tab.on{outline:2px solid var(--pri,#3987e5)}
-.tc-actions{display:flex;gap:6px;margin-top:6px}.tc-steps{display:flex;gap:4px;flex-wrap:wrap;margin:6px 0}
+.tc-actions{display:flex;gap:6px;margin-top:6px}.tc-cur{font-size:11px;margin-top:2px;word-break:break-all}.tc-macrow{margin-top:8px}.tc-steps{display:flex;gap:4px;flex-wrap:wrap;margin:6px 0}
 .tc-step{font-size:11px;padding:2px 6px;border-radius:3px;background:var(--line,#333);opacity:.5}
 .tc-step.done{opacity:.8}.tc-step.now{opacity:1;outline:1px solid var(--pri,#3987e5)}.tc-events{font-size:12px}`;
 
@@ -214,4 +245,4 @@ async function transferView(v) {
   }, 2000);
 }
 
-if (typeof module !== "undefined") module.exports = { TC, tcActions, tcGroup, tcRender, tcFetch, tcAct, tcBytes, tcEsc, tcTimeline };
+if (typeof module !== "undefined") module.exports = { TC, tcActions, tcGroup, tcRender, tcFetch, tcAct, tcBytes, tcEsc, tcTimeline, tcProgressText, tcMac, tcVault };

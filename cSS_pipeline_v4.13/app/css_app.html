@@ -127,7 +127,7 @@ table.svt td.sv{text-align:center}table.svt img.th,table.svt .th0{display:block;
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
     <span style="font-weight:600;display:flex;align-items:center;gap:4px">
       <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" fill="none" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><line x1="6" y1="12" x2="6" y2="12"/><line x1="10" y1="12" x2="10" y2="12"/></svg>
-      Vault HDD
+      Pensieve
     </span>
     <span id="side-vault-pill" class="pill" style="font-size:9px;padding:1px 5px">Checking…</span>
   </div>
@@ -230,7 +230,7 @@ async function updateSidebarVaultStatus(){
     const st=chk.state||"UNKNOWN";
     p.textContent=st;
     p.className=`pill ${(st==="SAFE TO EJECT"||st==="READY")?"ok":(st==="TRANSFERRING"||st==="VERIFYING"||st==="BUSY")?"pri":(st==="DRIVE NOT CONNECTED"||st==="OFFLINE")?"mut":"warn"}`;
-    s.textContent=chk.reason||(st==="DRIVE NOT CONNECTED"?"No Vault drive connected":"");
+    s.textContent=chk.reason||(st==="DRIVE NOT CONNECTED"?"No Pensieve drive connected":"");
     if(b){b.disabled=!chk.can_eject;b.style.opacity=b.disabled?"0.5":"1";}   /* 1e: the backend decides (journal + open files) */
     if(em){em.disabled=(st==="DRIVE NOT CONNECTED");em.style.opacity=em.disabled?"0.5":"1";}
 
@@ -244,7 +244,7 @@ async function updateSidebarVaultStatus(){
       }
     }
   }catch(e){
-    p.textContent="OFFLINE";p.className="pill mut";s.textContent="External Vault disconnected";
+    p.textContent="OFFLINE";p.className="pill mut";s.textContent="Pensieve drive disconnected";
     if(b)b.disabled=true;
   }
 }
@@ -269,7 +269,7 @@ async function handleQuitApplication(){try{const chk=await api("/api/app/shutdow
 $("#side-quit")&&($("#side-quit").onclick=handleQuitApplication);
 $("#side-transfer-meter")&&($("#side-transfer-meter").onclick=()=>{nav("transfer");});
 $("#side-vault-eject")&&($("#side-vault-eject").onclick=async()=>{
-  if(!confirm("Safely eject and unmount external Data Vault drive?"))return;
+  if(!confirm("Safely eject the Pensieve drive?"))return;
   toast("Unmounting external drive…");
   try{
     const r=await api("/api/storage/eject",{emergency:false});
