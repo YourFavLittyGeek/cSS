@@ -78,6 +78,9 @@ class TestPensieveMove(_ExfatImage):
             os.makedirs(os.path.join(self.B, d), exist_ok=True)
         for rel, data in {**STUDY_FILES, **REVIEW_FILES, **OTHER}.items():
             _w(os.path.join(self.B, rel), data)
+        t = time.time() - 3600                                                   # the reading itself happened an hour ago
+        for rel in REVIEW_FILES:
+            os.utime(os.path.join(self.B, rel), (t, t))
         PM.STATUS.clear()
 
     def tearDown(self):
@@ -155,6 +158,34 @@ class TestPensieveMove(_ExfatImage):
         self.assertEqual(m["versions"], [v1, m["version"]])
         old = os.path.join(self.vault, "studies", CODE, v1, "review", f"{CODE}_calls_Reader_A.csv")
         self.assertEqual(open(old, "rb").read(), REVIEW_FILES[f"review/{CODE}_calls_Reader_A.csv"])    # first version untouched
+
+    def test_a_crash_while_deleting_leaves_a_restorable_record(self):
+        self.final()
+        real = os.remove; n = {"k": 0}
+        def dying_remove(p):
+            n["k"] += 1
+            if n["k"] == 3: raise KeyboardInterrupt("app killed while deleting")
+            real(p)
+        with mock.patch.object(PM.os, "remove", side_effect=dying_remove):
+            with self.assertRaises(KeyboardInterrupt):
+                PM.move(self.B, self.vault, CODE)
+        PM.STATUS.clear()
+        self.assertEqual(PM.read_marker(self.B, CODE)["state"], "deleting")
+        self.assertTrue(PM.in_pensieve(self.B, CODE))
+        self.assertEqual(PM.state(self.B, CODE), "in_pensieve")
+        r = PM.restore(self.B, self.vault, CODE)
+        self.assertTrue(r["ok"], r)
+        for rel, data in STUDY_FILES.items():
+            self.assertEqual(open(os.path.join(self.B, rel), "rb").read(), data, rel)
+
+    def test_recent_reading_activity_postpones_the_move(self):
+        self.final(age_s=900)
+        _w(os.path.join(self.B, "review", f"{CODE}_events_Reader_A.jsonl"), b"{}\n")      # a decision just now
+        self.assertFalse(PM.due(self.B, dict(code=CODE, status="done"), grace_s=300))
+        t = time.time() - 900
+        for q in os.listdir(os.path.join(self.B, "review")):
+            os.utime(os.path.join(self.B, "review", q), (t, t))
+        self.assertTrue(PM.due(self.B, dict(code=CODE, status="done"), grace_s=300))
 
     def test_copy_only_keeps_the_mac_files(self):
         self.final()

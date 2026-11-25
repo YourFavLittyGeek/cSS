@@ -1782,6 +1782,10 @@ def app_lifecycle_get(op, q):
             jnl = DurableLocalJournal()
             pending_jnl = len(jnl.get_pending_entries())
 
+            try:
+                import pensieve_move as PMV
+                if PMV.busy() or (PENSIEVE_RUN["thread"] is not None and PENSIEVE_RUN["thread"].is_alive()): active_transfers.append(dict(status="transferring", what="Pensieve move"))
+            except Exception: pass
             can_quit_immediately = (len(running_pts) == 0 and len(active_transfers) == 0)
             return dict(
                 ok=True,
@@ -1804,6 +1808,8 @@ def app_lifecycle_post(op, d):
 
 def _perform_safe_shutdown(pause_jobs: bool = True):
     try:
+        t = PENSIEVE_RUN.get("thread")
+        if t is not None and t.is_alive(): t.join(120)          # a Pensieve move finishes its verified delete + marker before exit
         try:
             transfer_pool_shutdown(timeout=15.0)              # Phase 1d: running transfers pause at a safe boundary
         except Exception:
@@ -1859,7 +1865,8 @@ def pensieve_tick():
     grace = max(0, int(SET.get("pensieve_grace_min", 5) or 0)) * 60
     since = float(SET.get("pensieve_since") or 0)
     if PENSIEVE_RUN.get("earlier"): since = 0.0                          # the user asked to move the earlier reviewed studies too
-    with LOCK: cands = [p for p in PAT if p.get("code") not in RUNNING and not p.get("retired") and PMV.due(B, p, grace, since=since)]
+    busy = set(RUNNING) | set(PM_JOBS) | {p.get("code") for p in PAT if p.get("uscore_status") in ("pending", "running")}   # in use: never moved
+    with LOCK: cands = [p for p in PAT if p.get("code") not in busy and not p.get("retired") and PMV.due(B, p, grace, since=since)]
     if not cands: PENSIEVE_RUN["earlier"] = False
     if not cands: return
     p = cands[0]

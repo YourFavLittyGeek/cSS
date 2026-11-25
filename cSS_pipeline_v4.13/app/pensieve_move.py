@@ -46,17 +46,26 @@ def _write_marker(B, code, m):
     os.replace(tmp, p)
 
 
+AWAY = ("in_pensieve", "deleting")   # 'deleting' = marker written BEFORE the first Mac file is removed (a crash mid-way is restorable)
+
+
 def state(B, code):
     """'on_mac' (never moved or restored), 'in_pensieve', 'copied' (copy only, Mac files kept), or a running state"""
     s = STATUS.get(code)
     if s and s.get("state") in ("moving", "restoring"): return s["state"]
     m = read_marker(B, code)
-    return (m or {}).get("state", "on_mac")
+    st = (m or {}).get("state", "on_mac")
+    return "in_pensieve" if st == "deleting" else st
 
 
 def in_pensieve(B, code):
     m = read_marker(B, code)
-    return bool(m and m.get("state") == "in_pensieve")
+    return bool(m and m.get("state") in AWAY)
+
+
+def busy():
+    """a move or restore is running in this process (the app waits for it before quitting)"""
+    return LOCK.locked()
 
 
 def _sha(p):
@@ -115,6 +124,13 @@ def drive_ready(vault):
     return True, ""
 
 
+def last_activity(B, code):
+    """newest change of the study's review files (calls, events, final records): the reviewer writes them on every decision"""
+    mk = os.path.basename(marker_path(B, code))
+    ts = [os.path.getmtime(q) for q in glob.glob(os.path.join(B, "review", f"{code}_*")) if os.path.basename(q) != mk and ".tmp-" not in q]
+    return max(ts, default=0.0)
+
+
 def due(B, p, grace_s=300, now=None, since=0.0):
     """a finished, reviewed study whose newest final review is older than the grace time and newer than its last move.
     since: only reviews saved after this time (the moment the feature was first switched on) move automatically - studies
@@ -123,8 +139,9 @@ def due(B, p, grace_s=300, now=None, since=0.0):
     if p.get("status") != "done" or not code: return False
     fin = newest_final(B, code)
     if not fin or (now or time.time()) - fin < grace_s or fin <= float(since or 0): return False
+    if (now or time.time()) - last_activity(B, code) < grace_s: return False     # still being read / corrected
     m = read_marker(B, code) or {}
-    if m.get("state") == "in_pensieve": return False
+    if m.get("state") in AWAY: return False
     return fin > float(m.get("final_mtime") or 0)
 
 
@@ -177,6 +194,7 @@ def move(B, vault, code, delete_local=True):
                  versions=((read_marker(B, code) or {}).get("versions") or []) + [ver])
         freed = 0
         if delete_local:
+            m["state"] = "deleting"; _write_marker(B, code, m)            # BEFORE the first delete: where the files are is never lost
             _set(code, "moving", "removing the verified Mac copies")
             for f in files:
                 p = os.path.join(B, f["rel"])
@@ -235,7 +253,7 @@ def restore(B, vault, code):
     from uengine.transfer.service import TransferService
     validate_study_code(code)
     m = read_marker(B, code)
-    if not m or m.get("state") != "in_pensieve": return dict(ok=True, noop=True, state=(m or {}).get("state", "on_mac"))
+    if not m or m.get("state") not in AWAY: return dict(ok=True, noop=True, state=(m or {}).get("state", "on_mac"))
     if not LOCK.acquire(blocking=False): return dict(ok=False, error="another Pensieve move or restore is running")
     try:
         if not vault or not os.path.isdir(vault):

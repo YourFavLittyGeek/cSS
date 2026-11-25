@@ -198,6 +198,7 @@ class Study:
         sp = f"{B}/work/{sid}_seg_swispace.nii.gz"
         if os.path.exists(sp):
             seg = self._grid(sp, order=0); ctx = ((seg >= 1000) | (seg == 3) | (seg == 42)) & brain
+            self._seg = seg.astype(np.int16)                  # kept for side_check (it re-read and re-resampled the labels)
             if ctx.sum() > 1000:
                 c = np.minimum(I[ctx], np.percentile(I[brain], 99.5)); mu = float(np.median(c))
                 sd = float(1.4826 * np.median(np.abs(c - mu)) + 1e-6); self.ref_src = "cortex"
@@ -207,15 +208,7 @@ class Study:
         self._make_t1()
         self.avail = ["swi"] + [k for k, q in self.paths.items() if os.path.exists(q)]
         # candidate centres (canonical voxels) from the label volume
-        ids = self.df.cand_id.astype(int).tolist(); self.centre = {}
-        if ids:
-            com = ndi.center_of_mass(self.lab > 0, self.lab, ids)
-            for i, c in zip(ids, com):
-                c = np.round(c).astype(int) if np.all(np.isfinite(c)) else np.array(self.shape) // 2
-                if self.lab[tuple(c)] != i:                      # curved object: nearest own voxel to the centre of mass
-                    pts = np.argwhere(self.lab == i)
-                    if len(pts): c = pts[np.argmin(((pts - c) ** 2).sum(1))]
-                self.centre[i] = [int(v) for v in c]
+        self.centre = candidate_centres(self.lab, self.df.cand_id.astype(int).tolist(), self.shape)
         qp = f"{B}/review/{sid}_qc.json"; self.qc = ""
         if os.path.exists(qp):
             q = json.load(open(qp))
@@ -769,12 +762,46 @@ STUDIES = {}; IDS = []
 # (named STUDY_LABELS: 'LABELS' is css_common's fine-label table, used by meta() - v5.23 fix of the v5.20 name clash that broke /api/meta)
 try: STUDY_LABELS = json.loads(os.environ.get("CSS_STUDY_LABELS", "") or "{}")
 except Exception: STUDY_LABELS = {}
+BUILDING = {}                      # sid -> threading.Event while a background preload builds it
 def study(sid):
+    """the open study (and at most one preloaded next study) in memory. 2026-11-25: while the reviewer reads one study, the
+    next one of its cohort is prepared in the background, so "Next patient" opens without the loading wait."""
     if sid not in IDS: raise KeyError(sid)
+    ev = BUILDING.get(sid)
+    if ev is not None: ev.wait(300)                              # being preloaded right now: wait for it, do not build twice
     with LOCK:
         if sid not in STUDIES:
-            STUDIES.clear(); print(f"loading {sid} ...", flush=True); STUDIES[sid] = Study(sid)     # one study in memory
-        return STUDIES[sid]
+            print(f"loading {sid} ...", flush=True); st = Study(sid)
+            for k in [k for k in STUDIES if k != sid]: STUDIES.pop(k)
+            STUDIES[sid] = st
+        else:
+            for k in [k for k in STUDIES if k != sid]: STUDIES.pop(k)   # the other entry was the preload of this one
+        s = STUDIES[sid]
+    _preload_next(sid)
+    return s
+
+
+def _next_of(sid):
+    g = next((v for v in GROUPS.values() if sid in v), None)
+    lst = [x for x in g if x in IDS] if g else list(IDS)
+    i = lst.index(sid) if sid in lst else -1
+    return lst[i + 1] if 0 <= i < len(lst) - 1 else None
+
+
+def _preload_next(sid):
+    nxt = _next_of(sid)
+    if not nxt or nxt in STUDIES or nxt in BUILDING or away(nxt) or os.environ.get("CSS_NO_PRELOAD") == "1": return
+    ev = threading.Event(); BUILDING[nxt] = ev
+    def run():
+        try:
+            st = Study(nxt)
+            with LOCK:
+                if sid in STUDIES and nxt not in STUDIES: STUDIES[nxt] = st     # keep it only while sid is still the open study
+        except Exception as e:
+            sys.stderr.write(f"[reviewer] preload of the next study failed (it loads when opened): {type(e).__name__}: {e}\n")
+        finally:
+            BUILDING.pop(nxt, None); ev.set()
+    threading.Thread(target=run, daemon=True, name=f"preload-{nxt}").start()
 
 def reviewers(add=None):
     p = f"{B}/review/reviewers.json"; d = dict(names=[], last="")
@@ -803,17 +830,45 @@ def safe_name(n, exts=("png", "jpg")):
     return f"{base}.{ext.lower()}"
 
 
+def candidate_centres(lab, ids, shape):
+    """canonical-voxel centre of every candidate: the rounded centre of mass, or - for a curved object whose centre is not
+    its own voxel - the nearest own voxel to it. 2026-11-25: computed inside each candidate's bounding box (one
+    find_objects pass) instead of whole-volume scans (scipy center_of_mass + argwhere per curved candidate took 20 s on a
+    512x512x172 SWI); same result."""
+    out = {}
+    if not ids: return out
+    objs = ndi.find_objects(lab, max_label=max(ids))
+    for i in ids:
+        sl = objs[i - 1] if 0 < i <= len(objs) else None
+        if sl is None: out[i] = [int(v) for v in np.array(shape) // 2]; continue
+        sub = lab[sl] == i
+        off = np.array([s.start for s in sl])
+        pts = np.argwhere(sub) + off                                     # whole-volume coordinates (same rounding as before)
+        c = np.round(pts.mean(0)).astype(int)
+        if lab[tuple(c)] != i:
+            c = pts[np.argmin(((pts - c) ** 2).sum(1))]
+        out[i] = [int(v) for v in c]
+    return out
+
+
 def side_check(s):
+    if getattr(s, "_side", None) is None: s._side = _side_check(s)       # 2026-11-25: once per loaded study (4 s on every /api/meta)
+    return s._side
+
+
+def _side_check(s):
     """v5.7: do the FreeSurfer hemisphere labels agree with the image sides? World coordinates (RAS, x+ = patient right):
     (1) the left-labelled tissue must lie at smaller x than the right-labelled tissue; (2) each candidate's centre must lie
     on the side of the mid-point between the two hemisphere centroids that its hemisphere label says."""
     try:
         sp = f"{B}/work/{s.sid}_seg_swispace.nii.gz"
         if not os.path.exists(sp): return dict(n=0, agree=0, bad=False, labels_ok=None)
-        seg = s._grid(sp, order=0).astype(np.int32); A = s.can.affine
-        L = ((seg >= 1000) & (seg < 2000)) | np.isin(seg, (2, 3)); Rt = (seg >= 2000) | np.isin(seg, (41, 42))
-        if L.sum() < 1000 or Rt.sum() < 1000: return dict(n=0, agree=0, bad=False, labels_ok=None)
-        wx = lambda m: float((A @ np.r_[np.argwhere(m)[:: 50].mean(0), 1.0])[0])
+        seg = getattr(s, "_seg", None)
+        seg = (seg if seg is not None else s._grid(sp, order=0)).astype(np.int32)[::2, ::2, ::2]   # every 2nd voxel: centroids only
+        A = s.can.affine
+        L = ((seg >= 1000) & (seg < 2000)) | (seg == 2) | (seg == 3); Rt = (seg >= 2000) | (seg == 41) | (seg == 42)
+        if L.sum() < 125 or Rt.sum() < 125: return dict(n=0, agree=0, bad=False, labels_ok=None)
+        wx = lambda m: float((A @ np.r_[np.argwhere(m).mean(0) * 2, 1.0])[0])
         xl, xr = wx(L), wx(Rt); mid = (xl + xr) / 2; labels_ok = bool(xl < xr)
         n = ag = 0
         for _, r in s.df.iterrows():
