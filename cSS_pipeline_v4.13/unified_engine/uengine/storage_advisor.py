@@ -183,8 +183,9 @@ class StorageAdvisor:
             "recommendations": rec_list,
         }
 
-    def execute_prune(self, action: str, days_threshold: int = 7) -> Dict[str, Any]:
-        """Safely execute an authorized space reclamation action."""
+    def execute_prune(self, action: str, days_threshold: int = 7, skip_codes=()) -> Dict[str, Any]:
+        """Safely execute an authorized space reclamation action (never the staging folder of a study being processed)."""
+        skip_codes = set(skip_codes or ())
         now = time.time()
         cutoff = now - (days_threshold * 86400)
         reclaimed_bytes = 0
@@ -208,9 +209,9 @@ class StorageAdvisor:
             if os.path.isdir(self.staging_dir):
                 for entry in os.listdir(self.staging_dir):
                     ep = os.path.join(self.staging_dir, entry)
-                    if os.path.isdir(ep) and os.path.getmtime(ep) < cutoff:
+                    if os.path.isdir(ep) and os.path.getmtime(ep) < cutoff and entry not in skip_codes:
                         try:
-                            sz = sum(os.path.getsize(os.path.join(r, f)) for r, _, fs in os.walk(ep) for f in fs)
+                            sz = sum(os.lstat(os.path.join(r, f)).st_size for r, _, fs in os.walk(ep) for f in fs)
                             shutil.rmtree(ep, ignore_errors=True)
                             reclaimed_bytes += sz
                             items_removed += 1

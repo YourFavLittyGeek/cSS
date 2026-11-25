@@ -203,6 +203,19 @@ class TestPensieveMove(_ExfatImage):
         import source_cleanup as SRC
         self.assertTrue(SRC.has_nifti(self.B, CODE, "SWI"))                                  # moved, recorded -> still "converted"
 
+    def test_check_reads_the_drive_copy_back(self):
+        self.final()
+        self.assertTrue(PM.move(self.B, self.vault, CODE)["ok"])
+        r = PM.check(self.B, self.vault, CODE)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(r["checked"], len(STUDY_FILES))
+        root = os.path.join(self.vault, PM.read_marker(self.B, CODE)["vault_rel"])
+        with open(os.path.join(root, f"work/{CODE}_dark.nii.gz"), "ab") as f: f.write(b"corruption")   # damage on the drive
+        r = PM.check(self.B, self.vault, CODE)
+        self.assertFalse(r["ok"])
+        self.assertEqual([x["rel"] for x in r["bad"]], [f"work/{CODE}_dark.nii.gz"])
+        self.assertFalse(PM.check(self.B, os.path.join(VOLS, "NOPE"), CODE)["ok"])
+
     def test_copy_only_keeps_the_mac_files(self):
         self.final()
         r = PM.move(self.B, self.vault, CODE, delete_local=False)

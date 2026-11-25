@@ -1619,6 +1619,13 @@ def storage_get(op, q):
         return dict(error=f"unknown storage op {op}")
     except Exception as e: return dict(error=f"{type(e).__name__}: {e}")
 
+RETIRED_MSG = ("retired 2026-11-25: studies move to the Pensieve drive after their review (Settings > Pensieve after the review); "
+               "use the Pensieve buttons in the study list (Move to Pensieve / Bring back / Check)")
+RETIRED_OPS = {"storage": {"archive", "stage", "clean", "verify", "sync_execute"}, "workspace": {"stage", "archive", "clean", "enqueue", "process_next"},
+               "transfer": {"enqueue", "process_next"}}     # overlapping older systems (audit item 5): one owner = pensieve_move
+def retired(kind, op):
+    return dict(ok=False, retired=True, error=RETIRED_MSG) if op in RETIRED_OPS.get(kind, ()) else None
+
 def storage_post(op, d):
     if op == "clean_temp":                                   # delete now the temporary DICOM copies of completely processed studies (never failed / running)
         import source_cleanup as SRC
@@ -1639,6 +1646,7 @@ def storage_post(op, d):
     _g = _transfer_guard("storage", op, d)                   # Phase 1e.2
     if _g is not None:
         return _g
+    if retired("storage", op): return retired("storage", op)
     try:
         from uengine.file_manager import FileManager
         from uengine.storage_advisor import StorageAdvisor
@@ -1670,12 +1678,12 @@ def storage_post(op, d):
             sm = SyncManager(StoragePathsService(B, vault_root))
             return sm.save_sync_policy(d.get("policy", {}))
         if op == "clean": return fm.clean_staging(d.get("code", ""))
-        if op == "prune": return sa.execute_prune(d.get("action", ""), max(1, int(d.get("days", 7))))   # Phase 0: never "everything" (days 0)
+        if op == "prune": return sa.execute_prune(d.get("action", ""), max(1, int(d.get("days", 7))), skip_codes=set(RUNNING) | set(PM_JOBS))   # Phase 0: never "everything" (days 0)
         if op == "delete": return fm.delete_study(d.get("code", ""), target=d.get("target", "local"))
         if op == "free_space_execute":
             from uengine.transfer_manager import TransferManager
             tm = TransferManager(B, vault_root=vault_root)
-            return tm.execute_free_up_mac_space()
+            return tm.execute_free_up_mac_space(skip_codes=set(RUNNING) | set(PM_JOBS))
         if op == "migrate_plan":
             from uengine.working_dir_migration import WorkingDirMigrationEngine
             engine = WorkingDirMigrationEngine(B)
@@ -1715,6 +1723,7 @@ def workspace_post(op, d):
     _g = _transfer_guard("workspace", op, d)                   # Phase 1e.2
     if _g is not None:
         return _g
+    if retired("workspace", op): return retired("workspace", op)
     try:
         from uengine.study_workspace_manager import StudyWorkspaceManager
         swm = StudyWorkspaceManager(B, vault_root=SET.get("vault_mount"))
@@ -1941,6 +1950,7 @@ def pensieve_api(op, d):
         PENSIEVE_RUN["thread"] = threading.Thread(target=pensieve_move_one, args=(p, True), daemon=True, name="pensieve-move")
         PENSIEVE_RUN["thread"].start(); return dict(ok=True, started=True)
     if op == "restore": return PMV.start_restore(B, SET.get("vault_mount"), code)
+    if op == "check": return PMV.check(B, SET.get("vault_mount"), code)
     return dict(ok=False, error=f"unknown Pensieve op {op}")
 
 def transfer_pool():
@@ -2014,6 +2024,7 @@ def transfer_post(op, d):
     try:
         from uengine.transfer_manager import TransferManager
         from uengine.unified_transfer_engine import get_transfer_engine
+        if retired("transfer", op): return retired("transfer", op)
         tm = TransferManager(B, vault_root=SET.get("vault_mount"))
         engine = get_transfer_engine(os.path.join(B, "app_data", "transfers"))
         if op == "enqueue":

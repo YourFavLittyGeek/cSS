@@ -194,7 +194,7 @@ class TransferManager:
             for entry in os.listdir(stg_dir):
                 sp = os.path.join(stg_dir, entry)
                 if os.path.isdir(sp):
-                    sz = sum(os.path.getsize(os.path.join(r, f)) for r, _, fs in os.walk(sp) for f in fs)
+                    sz = sum(os.lstat(os.path.join(r, f)).st_size for r, _, fs in os.walk(sp) for f in fs)   # lstat: staging holds LINKS to the import copies
                     total_reclaimable_bytes += sz
                     reclaimable_items.append({
                         "name": f"Staging Buffer: {entry}",
@@ -210,7 +210,7 @@ class TransferManager:
         # Check scratch
         scratch_dir = os.path.join(self.base_dir, "app_data", "scratch")
         if os.path.isdir(scratch_dir):
-            sz = sum(os.path.getsize(os.path.join(r, f)) for r, _, fs in os.walk(scratch_dir) for f in fs)
+            sz = sum(os.lstat(os.path.join(r, f)).st_size for r, _, fs in os.walk(scratch_dir) for f in fs)
             if sz > 0:
                 total_reclaimable_bytes += sz
                 reclaimable_items.append({
@@ -232,14 +232,17 @@ class TransferManager:
             "items": reclaimable_items
         }
 
-    def execute_free_up_mac_space(self) -> Dict[str, Any]:
-        """Safely reclaim verified Mac space."""
+    def execute_free_up_mac_space(self, skip_codes=()) -> Dict[str, Any]:
+        """remove staging link folders and scratch (both rebuilt when needed); never a study that is being processed"""
         preview = self.free_up_mac_space_preview()
         reclaimed_bytes = 0
         cleaned_count = 0
+        skip_codes = set(skip_codes or ())
 
         for it in preview.get("items", []):
             p = it["path"]
+            if it.get("category") == "staging" and it.get("study_code") in skip_codes:
+                continue                                             # a running study still reads its staging links
             if os.path.isdir(p):
                 try:
                     sz = it["size_bytes"]

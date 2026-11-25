@@ -121,7 +121,7 @@ table.svt td.sv{text-align:center}table.svt img.th,table.svt .th0{display:block;
 .argrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin:12px 0}.arcard{margin:0}.arcard h4{font-size:14px}
 </style></head><body>
 <div id="app"><aside id="side"><div class="brand"><img id="logo" src="/icon_dark.png" alt=""><b>PERCIVAL</b></div>
-<nav><button data-v="studies"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v16"/></svg><span class="l">Studies</span><b class="cnt" id="cnt_studies"></b></button><button data-v="add"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span class="l">Add studies</span><b class="cnt" id="cnt_add"></b></button><button data-v="act"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><span class="l">Activity</span><b class="cnt" id="cnt_act"></b></button><button data-v="read"><svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><span class="l">Review</span><b class="cnt" id="cnt_read"></b></button><button data-v="qc"><svg viewBox="0 0 24 24"><path d="M12 3c-4 0-7 3-7 7 0 2.5 1.2 4.2 2.6 5.4.8.7 1.4 1.7 1.4 2.8V20h6v-1.8c0-1.1.6-2.1 1.4-2.8C17.8 14.2 19 12.5 19 10c0-4-3-7-7-7z"/><path d="M9 13l2 2 4-4"/></svg><span class="l">Anatomy QC</span><b class="cnt" id="cnt_qc"></b></button><div class="grp">Storage &amp; Data</div><button data-v="files"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><span class="l">File Manager</span><b class="cnt" id="cnt_files"></b></button><button data-v="transfer"><svg viewBox="0 0 24 24"><polyline points="17 1 21 5 17 9"></polyline><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><polyline points="7 23 3 19 7 15"></polyline><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></svg><span class="l">Transfer Center</span><b class="cnt" id="cnt_transfer"></b></button><button data-v="sync"><svg viewBox="0 0 24 24"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg><span class="l">Sync Center</span><b class="cnt" id="cnt_sync"></b></button><div class="grp">PERCIVAL AI</div><button data-v="intel"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M8 13l3 3 5-7"/></svg><span class="l">PERCIVAL</span><b class="cnt" id="cnt_intel"></b></button><div class="grp" data-proto style="padding-top:6px" title="Separate research prototypes; they do not feed PERCIVAL">Older prototypes</div><button data-v="train" data-proto><svg viewBox="0 0 24 24"><path d="M3 20h18M6 16l4-5 4 3 5-7"/><circle cx="19" cy="7" r="1.5"/></svg><span class="l">Labels &amp; image eval</span><b class="cnt" id="cnt_train"></b></button><button data-v="uni" data-proto><svg viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg><span class="l">uScore scorer</span><b class="cnt" id="cnt_uni"></b></button><button data-v="shadow" data-proto><svg viewBox="0 0 24 24"><path d="M3 12h18M12 3v18"/><circle cx="12" cy="12" r="8"/></svg><span class="l">Stage-1 prototype</span><b class="cnt" id="cnt_shadow"></b></button><button data-v="imageml" data-proto><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 15l5-5 4 4 3-3 6 6"/><circle cx="16" cy="8" r="1.5"/></svg><span class="l">Synthetic image model</span><b class="cnt" id="cnt_imageml"></b></button><div class="grp">&nbsp;</div><button data-v="setup"><svg viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg><span class="l">Setup Wizard</span><b class="cnt" id="cnt_setup"></b></button><button data-v="set"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span class="l">Settings</span><b class="cnt" id="cnt_set"></b></button></nav>
+<nav><button data-v="studies"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v16"/></svg><span class="l">Studies</span><b class="cnt" id="cnt_studies"></b></button><button data-v="add"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span class="l">Add studies</span><b class="cnt" id="cnt_add"></b></button><button data-v="act"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><span class="l">Activity</span><b class="cnt" id="cnt_act"></b></button><button data-v="read"><svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><span class="l">Review</span><b class="cnt" id="cnt_read"></b></button><button data-v="qc"><svg viewBox="0 0 24 24"><path d="M12 3c-4 0-7 3-7 7 0 2.5 1.2 4.2 2.6 5.4.8.7 1.4 1.7 1.4 2.8V20h6v-1.8c0-1.1.6-2.1 1.4-2.8C17.8 14.2 19 12.5 19 10c0-4-3-7-7-7z"/><path d="M9 13l2 2 4-4"/></svg><span class="l">Anatomy QC</span><b class="cnt" id="cnt_qc"></b></button><div class="grp">Storage &amp; Data</div><button data-v="files"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><span class="l">File Manager</span><b class="cnt" id="cnt_files"></b></button><button data-v="transfer"><svg viewBox="0 0 24 24"><polyline points="17 1 21 5 17 9"></polyline><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><polyline points="7 23 3 19 7 15"></polyline><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></svg><span class="l">Transfer Center</span><b class="cnt" id="cnt_transfer"></b></button><button data-v="sync" style="display:none" title="retired: studies move to Pensieve after their review"><svg viewBox="0 0 24 24"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg><span class="l">Sync Center</span><b class="cnt" id="cnt_sync"></b></button><div class="grp">PERCIVAL AI</div><button data-v="intel"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M8 13l3 3 5-7"/></svg><span class="l">PERCIVAL</span><b class="cnt" id="cnt_intel"></b></button><div class="grp" data-proto style="padding-top:6px" title="Separate research prototypes; they do not feed PERCIVAL">Older prototypes</div><button data-v="train" data-proto><svg viewBox="0 0 24 24"><path d="M3 20h18M6 16l4-5 4 3 5-7"/><circle cx="19" cy="7" r="1.5"/></svg><span class="l">Labels &amp; image eval</span><b class="cnt" id="cnt_train"></b></button><button data-v="uni" data-proto><svg viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg><span class="l">uScore scorer</span><b class="cnt" id="cnt_uni"></b></button><button data-v="shadow" data-proto><svg viewBox="0 0 24 24"><path d="M3 12h18M12 3v18"/><circle cx="12" cy="12" r="8"/></svg><span class="l">Stage-1 prototype</span><b class="cnt" id="cnt_shadow"></b></button><button data-v="imageml" data-proto><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 15l5-5 4 4 3-3 6 6"/><circle cx="16" cy="8" r="1.5"/></svg><span class="l">Synthetic image model</span><b class="cnt" id="cnt_imageml"></b></button><div class="grp">&nbsp;</div><button data-v="setup"><svg viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg><span class="l">Setup Wizard</span><b class="cnt" id="cnt_setup"></b></button><button data-v="set"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span class="l">Settings</span><b class="cnt" id="cnt_set"></b></button></nav>
 <div class="foot"><div>Project</div><div class="proj" id="projname">—</div><div id="awakebox" style="margin-top:8px"></div>
 <div id="side-vault-box" style="margin-top:10px;padding:8px 10px;background:var(--panel2);border:1px solid var(--bd);border-radius:6px;font-size:11px">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
@@ -227,6 +227,21 @@ async function refresh(){S=await api("/api/state");$("#ver").textContent=`pipeli
   $("#cnt_act").textContent=att?String(att):run?String(run):"";$("#cnt_act").classList.toggle("att",!!att);$("#cnt_studies").textContent=P.length?String(P.length):"";
   const lc=$("#logcode"),cur=lc.value;lc.innerHTML=S.patients.filter(p=>!p.retired).map(p=>`<option value="${esc(p.code)}">${esc(sid(p.code))}</option>`).join("");if(cur)lc.value=cur;else if(S.queue.running)lc.value=S.queue.running;
   await updateSidebarVaultStatus();}
+/* 2026-11-25: ONE Pensieve panel per study (replaces Archive / Stage / Verify / Clean of the older storage screens) */
+const PV_LAB={on_mac:"on the Mac",in_pensieve:"in Pensieve",copied:"copy in Pensieve",moving:"moving to Pensieve…",restoring:"coming back…",failed:"Pensieve move failed",detached:"detached"};
+let PVS=null,PVT=0;
+async function pvStates(force){if(force||!PVS||Date.now()-PVT>5000){try{const r=await api("/api/pensieve/summary");PVS=r&&r.ok?r:{studies:{}}}catch(e){PVS={studies:{}}}PVT=Date.now()}return PVS}
+function pvCell(code){const st=((PVS||{}).studies||{})[code]||"on_mac",c=esc(code);
+  const pill=`<span class="pill ${st==="in_pensieve"||st==="copied"?"mut":st==="failed"?"warn":st==="on_mac"?"":"pri"}" title="where this study's processed files are">${esc(PV_LAB[st]||st)}</span>`;
+  const b=(a,t,tip)=>` <button class="b sm" data-pv-${a}="${c}" title="${esc(tip)}">${t}</button>`;
+  return pill+(st==="on_mac"?b("move","Move to Pensieve","copy to the Pensieve drive, check every file, then free the Mac copy"):"")
+    +(st==="in_pensieve"?b("back","Bring back","copy the study back to the Mac (checked)"):"")+(st==="copied"||st==="in_pensieve"?b("check","Check","read the Pensieve copy back and compare every file with its record"):"")}
+function pvBind(el,after){
+  el.querySelectorAll("[data-pv-move]").forEach(x=>x.onclick=async()=>{if(!confirm(`Move ${x.dataset.pvMove} to the Pensieve drive?\nEvery file is copied and checked first; the Mac copy is then removed. Opening the study brings it back.`))return;
+    const r=await api("/api/pensieve/move",{code:x.dataset.pvMove});toast(r.ok?"moving (Transfer Center shows the progress)":esc(r.error),!r.ok);await pvStates(true);after&&after()});
+  el.querySelectorAll("[data-pv-back]").forEach(x=>x.onclick=async()=>{const r=await api("/api/pensieve/restore",{code:x.dataset.pvBack});toast(r.ok?"bringing it back…":esc(r.error),!r.ok);await pvStates(true);after&&after()});
+  el.querySelectorAll("[data-pv-check]").forEach(x=>x.onclick=async()=>{x.disabled=true;x.textContent="Checking…";const r=await api("/api/pensieve/check",{code:x.dataset.pvCheck});x.disabled=false;x.textContent="Check";
+    toast(esc(r.message||r.error||""),!r.ok)})}
 async function updateSidebarVaultStatus(){
   const p=$("#side-vault-pill"),s=$("#side-vault-sub"),b=$("#side-vault-eject"),em=$("#side-vault-emergency"),tm=$("#side-transfer-meter"),tt=$("#side-transfer-txt");
   if(!p||!s)return;
@@ -961,7 +976,7 @@ function setView(v){const s=S.settings,F=s.features;const L={duplicate_check:"Du
          <td style="padding:6px"><b>Working Directory</b><br><span class="note">Active staging &amp; scratch (fast SSD)</span></td>
          <td class="mono" style="font-size:12px;padding:6px">${esc(S.project.path || "Default")}</td>
          <td style="padding:6px"><span class="pill ok">Active</span></td>
-         <td style="text-align:center;padding:6px"><button class="b sm pri" id="set-ch-work">Migrate…</button></td>
+         <td style="text-align:center;padding:6px"><span class="note" title="Moving the whole project is disabled (it was always refused): choose another project folder in Setup instead">use Setup</span></td>
        </tr>
        <tr style="border-bottom:1px solid var(--line)">
          <td style="padding:6px"><b>External Data Vault</b><br><span class="note">Pensieve memory &amp; archival</span></td>
@@ -973,43 +988,43 @@ function setView(v){const s=S.settings,F=s.features;const L={duplicate_check:"Du
          <td style="padding:6px"><b>Scratch Directory</b><br><span class="note">Intermediate resamplings</span></td>
          <td class="mono" style="font-size:12px;padding:6px">${esc(s.scratch_dir || (S.project.path + "/app_data/scratch"))}</td>
          <td style="padding:6px"><span class="pill ok">Active</span></td>
-         <td style="text-align:center;padding:6px"><button class="b sm" id="set-ch-scratch">Change…</button></td>
+         <td style="text-align:center;padding:6px"><span class="note" title="Percival always uses this folder inside the project; changing it here had no effect (not read by the pipeline)">fixed</span></td>
        </tr>
        <tr style="border-bottom:1px solid var(--line)">
          <td style="padding:6px"><b>Original MRI Acquisitions</b><br><span class="note">Raw DICOM/NIfTI scans</span></td>
          <td class="mono" style="font-size:12px;padding:6px">${esc(s.originals_dir || (S.project.path + "/data"))}</td>
          <td style="padding:6px"><span class="pill ok">Active</span></td>
-         <td style="text-align:center;padding:6px"><button class="b sm" id="set-ch-orig">Change…</button></td>
+         <td style="text-align:center;padding:6px"><span class="note" title="Percival always uses this folder inside the project; changing it here had no effect (not read by the pipeline)">fixed</span></td>
        </tr>
        <tr style="border-bottom:1px solid var(--line)">
          <td style="padding:6px"><b>Processed MRI (FreeSurfer)</b><br><span class="note">Cortical reconstructions &amp; masks</span></td>
          <td class="mono" style="font-size:12px;padding:6px">${esc(s.processed_dir || (S.project.path + "/subjects"))}</td>
          <td style="padding:6px"><span class="pill ok">Active</span></td>
-         <td style="text-align:center;padding:6px"><button class="b sm" id="set-ch-proc">Change…</button></td>
+         <td style="text-align:center;padding:6px"><span class="note" title="Percival always uses this folder inside the project; changing it here had no effect (not read by the pipeline)">fixed</span></td>
        </tr>
        <tr style="border-bottom:1px solid var(--line)">
          <td style="padding:6px"><b>ALBUS Outputs</b><br><span class="note">Sulcal geometries &amp; Darboux tensors</span></td>
          <td class="mono" style="font-size:12px;padding:6px">${esc(s.albus_dir || (S.project.path + "/review"))}</td>
          <td style="padding:6px"><span class="pill ok">Active</span></td>
-         <td style="text-align:center;padding:6px"><button class="b sm" id="set-ch-albus">Change…</button></td>
+         <td style="text-align:center;padding:6px"><span class="note" title="Percival always uses this folder inside the project; changing it here had no effect (not read by the pipeline)">fixed</span></td>
        </tr>
        <tr style="border-bottom:1px solid var(--line)">
          <td style="padding:6px"><b>LUMOS Outputs</b><br><span class="note">Neural network inferences &amp; GradCAMs</span></td>
          <td class="mono" style="font-size:12px;padding:6px">${esc(s.lumos_dir || (S.project.path + "/unified_engine/percival"))}</td>
          <td style="padding:6px"><span class="pill ok">Active</span></td>
-         <td style="text-align:center;padding:6px"><button class="b sm" id="set-ch-lumos">Change…</button></td>
+         <td style="text-align:center;padding:6px"><span class="note" title="Percival always uses this folder inside the project; changing it here had no effect (not read by the pipeline)">fixed</span></td>
        </tr>
        <tr style="border-bottom:1px solid var(--line)">
          <td style="padding:6px"><b>NOX Outputs</b><br><span class="note">Epistemic uncertainty maps</span></td>
          <td class="mono" style="font-size:12px;padding:6px">${esc(s.nox_dir || (S.project.path + "/results/nox"))}</td>
          <td style="padding:6px"><span class="pill ok">Active</span></td>
-         <td style="text-align:center;padding:6px"><button class="b sm" id="set-ch-nox">Change…</button></td>
+         <td style="text-align:center;padding:6px"><span class="note" title="Percival always uses this folder inside the project; changing it here had no effect (not read by the pipeline)">fixed</span></td>
        </tr>
        <tr style="border-bottom:1px solid var(--line)">
          <td style="padding:6px"><b>Pensieve Backups</b><br><span class="note">Zero-corruption SQLite snapshots</span></td>
          <td class="mono" style="font-size:12px;padding:6px">${esc(s.pensieve_backups_dir || (S.project.path + "/app_data/pensieve_snapshots"))}</td>
          <td style="padding:6px"><span class="pill ok">Active</span></td>
-         <td style="text-align:center;padding:6px"><button class="b sm" id="set-ch-pensieve">Change…</button></td>
+         <td style="text-align:center;padding:6px"><span class="note" title="Percival always uses this folder inside the project; changing it here had no effect (not read by the pipeline)">fixed</span></td>
        </tr>
        <tr>
          <td style="padding:6px"><b>Reports &amp; Exports</b><br><span class="note">Clinical PDFs &amp; spreadsheets</span></td>

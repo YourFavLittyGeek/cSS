@@ -311,6 +311,23 @@ def marker_file(B, code, rel):
     return next((f for f in m.get("files", []) if f.get("rel") == rel), None)
 
 
+def check(B, vault, code):
+    """read every recorded file of the newest version back from the drive and compare its SHA-256 with the record"""
+    m = read_marker(B, code)
+    if not m or not m.get("vault_rel"): return dict(ok=False, error=f"{code} has no copy on the Pensieve drive")
+    root = os.path.join(vault or "", m["vault_rel"])
+    if not vault or not os.path.isdir(root): return dict(ok=False, error="connect the Pensieve drive to check this study")
+    bad, n = [], 0
+    for f in m.get("files", []):
+        p = os.path.join(root, f["rel"]); n += 1
+        try:
+            if _sha(p) != f["sha256"]: bad.append(dict(rel=f["rel"], why="different content"))
+        except OSError as e:
+            bad.append(dict(rel=f["rel"], why=f"not readable: {e.strerror or e}"))
+    return dict(ok=not bad, checked=n, bad=bad[:20], n_bad=len(bad), version=m.get("version"),
+                message=f"{n} files on Pensieve identical to the record" if not bad else f"{len(bad)} of {n} files differ or are missing")
+
+
 def start_restore(B, vault, code):
     """restore in a background thread (reviewer / app); poll state(B, code) / STATUS"""
     if STATUS.get(code, {}).get("state") == "restoring": return dict(ok=True, running=True)

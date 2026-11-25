@@ -681,10 +681,10 @@ async function renderSectionTransfer(el) {
     <div class="card" style="padding:18px;background:var(--panel2);border:1px solid var(--acc);margin-bottom:18px">
       <div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
         <div>
-          <b style="font-size:16px">Sync &amp; Transfer Operational Centre</b>
-          <p class="note" style="margin:2px 0 0">Synchronize study workspaces between Mac SSD and External Data Vault with SHA-256 integrity.</p>
+          <b style="font-size:16px">Moving studies to Pensieve</b>
+          <p class="note" style="margin:2px 0 0">Reviewed studies move to the Pensieve drive automatically (Settings › Mac storage › "Pensieve · after the review"); the study lists have Move / Bring back / Check buttons and the Transfer Center shows every copy. The older Sync and transfer queue are retired.</p>
         </div>
-        <div style="display:flex;gap:8px">
+        <div style="display:none">
           <button class="b pri" id="st-sync-preview-btn">🔍 Preview Sync with Vault</button>
           <button class="b" id="st-proc-btn">Process Next Transfer</button>
         </div>
@@ -745,11 +745,11 @@ async function renderSectionTransfer(el) {
 
     <!-- Archival Policies -->
     <div class="card" style="padding:18px">
-      <b>Category Archival Policies</b>
-      <p class="note" style="margin:2px 0 12px">Automatic background migration rules when studies finish processing.</p>
+      <b>Category Archival Policies</b> <span class="pill warn">not active</span>
+      <p class="note" style="margin:2px 0 12px">These rules were never read by the app. Moving studies is done by "Pensieve · after the review" (Settings › Mac storage).</p>
       <div class="row">
-        <label style="display:flex;align-items:center;gap:8px">
-          <input type="checkbox" id="st-rem-orig" ${policies.remove_local_original_after_verify ? 'checked' : ''}>
+        <label style="display:flex;align-items:center;gap:8px;opacity:.5">
+          <input type="checkbox" id="st-rem-orig" disabled ${policies.remove_local_original_after_verify ? 'checked' : ''}>
           Remove local original MRI after verified SHA-256 archive (DEFAULT: OFF)
         </label>
       </div>
@@ -836,8 +836,8 @@ async function renderSectionCleaning(el) {
         <b style="font-size:18px">${qItems.length} items (${dash.quarantine_mb || 0} MB)</b>
       </div>
       <div class="card" style="flex:1;margin:0;padding:12px">
-        <div class="note">Cleaning Policy Mode</div>
-        <b style="font-size:18px">${esc(String(dash.mode || "assisted").toUpperCase())}</b>
+        <div class="note">Cleaning Policy Mode <span class="pill warn" title="the mode is shown but never changes what is cleaned">not active</span></div>
+        <b style="font-size:18px;opacity:.5">${esc(String(dash.mode || "assisted").toUpperCase())}</b>
       </div>
     </div>
 
@@ -854,11 +854,11 @@ async function renderSectionCleaning(el) {
           <tr><th>Category</th><th>Retention Period</th><th>Eligible Files</th><th>Space</th></tr>
         </thead>
         <tbody>
-          ${cats.map(c => `
-            <tr>
-              <td><b>${esc(c.name)}</b></td>
+          ${cats.map(c => { const live = ["temp_processing", "failed_temp"].includes(c.id); return `
+            <tr style="${live ? "" : "opacity:.5"}" title="${live ? "" : "not active: Execute Safe Cleaning never touches this category"}">
+              <td><b>${esc(c.name)}</b>${live ? "" : ' <span class="pill warn">not active</span>'}</td>
               <td>
-                <select data-cat-ret="${c.id}" style="font-size:12px;padding:3px 8px">
+                <select data-cat-ret="${c.id}" style="font-size:12px;padding:3px 8px" ${live ? "" : "disabled"}>
                   <option value="7" ${c.retention_days === 7 ? 'selected' : ''}>7 Days</option>
                   <option value="14" ${c.retention_days === 14 ? 'selected' : ''}>14 Days</option>
                   <option value="30" ${c.retention_days === 30 ? 'selected' : ''}>30 Days</option>
@@ -870,7 +870,7 @@ async function renderSectionCleaning(el) {
               <td>${c.eligible_count} files</td>
               <td><b>${c.eligible_mb} MB</b></td>
             </tr>
-          `).join("")}
+          `; }).join("")}
         </tbody>
       </table>
     </div>
@@ -1314,7 +1314,7 @@ async function renderSectionScratch(el) {
       <b>Scratch &amp; Temporary Working Buffers</b>
       <p class="note">Scratch space on fast Mac SSD used during slice extraction and deformation tensor computation.</p>
       <div class="row">
-        <button class="b sm" onclick="api('/api/storage/clean_staging',{})">Clean Orphan Staging Buffers</button>
+        <button class="b sm" onclick="svPruneStaging()" title="removes staging link folders older than 7 days (they are rebuilt when a study runs again); never a study being processed">Clean Orphan Staging Buffers</button>
       </div>
     </div>
   `;
@@ -1469,4 +1469,12 @@ async function renderSectionActivity(el) {
       <button class="b" onclick="go('act')">Open Pipeline Activity Monitor ▸</button>
     </div>
   `;
+}
+
+
+// 2026-11-25: "Clean Orphan Staging Buffers" called an operation that did not exist; staging prune skips running studies
+async function svPruneStaging() {
+  const r = await api("/api/storage/prune", { action: "prune_staging", days: 7 });
+  const ok = r && r.ok !== false;
+  toast(ok ? "Old staging links removed (" + (r.items_removed || 0) + " folders; studies being processed skipped)" : esc((r && r.error) || "not done"), !ok);
 }

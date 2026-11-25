@@ -12,7 +12,8 @@ empty). The wait was the reviewer's own computation (fixed in 8273d1c: 27 s -> 4
 | A study could move while processing (Processing Manager / unified score) or while still being read | skipped; also waits until its review files are unchanged for the grace time |
 | Quit did not wait for a running move | it waits; the quit check counts it |
 
-## Plan (waiting for the user's go) - single owner: app/pensieve_move.py, view: Transfer Center
+## Plan - DONE 2026-11-25 (user: "go ahead"): items 1-4 in 4da2b2c, 5-8 in the next commit; 9-10 still open
+Single owner: app/pensieve_move.py, view: Transfer Center
 ### High
 1. **Protect `<Pensieve>/studies/`** (`safety.py` PROTECTED_VAULT_DIRS lacks it): after a move it holds the ONLY copy of
    raw/ + data/, yet `/api/files/delete|move` could remove it. Make it write-once: only new version folders through
@@ -40,3 +41,12 @@ empty). The wait was the reviewer's own computation (fixed in 8273d1c: 27 s -> 4
    hidden), workspace "Clean" (can never pass). Remove or wire.
 9. Unverified own copies (Vault backup, import copy into import_src): route through the journaled engine.
 10. Proposed earlier, still open: when the Mac drops below ~50 GB, offer to move reviewed studies.
+
+## Status of items 5-8 (implemented)
+5. Retired (answer `retired`, pointing to Pensieve): storage archive / stage / clean / verify / sync_execute, workspace stage /
+   archive / clean / enqueue / process_next, transfer enqueue / process_next. Sync Center hidden from the menu. Storage and
+   File Manager study rows show ONE Pensieve panel (state, Move to Pensieve, Bring back, Check = read back + compare SHA-256).
+6. Free up Mac space and staging prune skip studies being processed; sizes with lstat (links, not their targets).
+7. Labelled "not active" / disabled: archival policies, cleaning mode, 13 of 15 cleaning categories, folder settings that
+   are never read (now "fixed").
+8. "Change working directory" -> "use Setup"; "Clean Orphan Staging Buffers" wired to the staging prune.

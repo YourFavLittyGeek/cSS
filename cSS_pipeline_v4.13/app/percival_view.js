@@ -117,6 +117,7 @@ async function intelView(v){{const hq=location.hash.match(/^#intel\?tab=(\w+)/);
   if(PV.tab==="vault"){
     const ov=await api("/api/storage/overview");
     const stList=(await api("/api/storage/studies")).studies||[];
+    if(typeof pvStates==="function")await pvStates();
     const adv=await api("/api/storage/advisor");
     const vt=await api("/api/percival/vault");
     const st=vt.stats||{};
@@ -170,10 +171,7 @@ async function intelView(v){{const hq=location.hash.match(/^#intel\?tab=(\w+)/);
           <td class="mono">${s.local_size_mb||0} MB</td>
           <td>
             <button class="b" data-fm-tree="${esc(s.study_code)}">Files</button>
-            ${s.status!=="SYNCHRONIZED"&&st.connected?`<button class="b" data-fm-arch="${esc(s.study_code)}">Archive</button>`:""}
-            ${s.status!=="STAGED"&&st.connected?`<button class="b" data-fm-stg="${esc(s.study_code)}">Stage</button>`:""}
-            ${st.connected?`<button class="b" data-fm-vrf="${esc(s.study_code)}">Verify SHA-256</button>`:""}
-            <button class="b" data-fm-cln="${esc(s.study_code)}">Clean Staging</button>
+            ${typeof pvCell==="function"?pvCell(s.study_code):""}
           </td>
         </tr>`).join("")}
       </table>
@@ -210,6 +208,7 @@ async function intelView(v){{const hq=location.hash.match(/^#intel\?tab=(\w+)/);
       const t=await api("/api/storage/tree?code="+encodeURIComponent(code));
       alert(`Study: ${code}\nLocal files (${t.local_files_count}):\n${t.local_files.map(f=>f.name+" ("+f.location+")").join("\n") || "None"}\n\nVault files (${t.vault_files_count}):\n${t.vault_files.map(f=>f.name+" ("+f.location+")").join("\n") || "None"}`);
     });
+    if(typeof pvBind==="function")pvBind(el,()=>intelView(v));
     el.querySelectorAll("[data-fm-arch]").forEach(b=>b.onclick=async()=>{
       const code=b.dataset.fmArch;
       const r=await api("/api/storage/archive",{code});

@@ -22,6 +22,7 @@ const FM = {
 
 async function filesView(v) {
   v.innerHTML = `<div class="card" style="padding:20px;text-align:center"><span class="mut">Loading Research-Data Workspace…</span></div>`;
+  if (typeof pvStates === "function") await pvStates();
   
   try {
     const [catRes, ovRes, studiesRes, recRes] = await Promise.all([
@@ -196,9 +197,7 @@ function renderStudiesCenterPane() {
                 <td><span class="pill ${s.archive_status==='archived_and_verified'?'ok':'mut'}">${esc(s.archive_status || 'not_archived')}</span></td>
                 <td>
                   <div class="row" style="gap:4px;margin:0">
-                    <button class="b sm pri" data-ws-stage="${esc(s.study_id)}" title="Stage to SSD">Stage</button>
-                    <button class="b sm" data-ws-archive="${esc(s.study_id)}" title="Archive to Vault">Archive</button>
-                    <button class="b sm bad" data-ws-clean="${esc(s.study_id)}" title="Clean local workspace">Clean</button>
+                    ${typeof pvCell === "function" ? pvCell(s.study_id) : ""}
                   </div>
                 </td>
               </tr>
@@ -455,6 +454,7 @@ function bindFileManagerEvents(v, data) {
   }
 
   // Study actions (Stage, Archive, Clean)
+  if (typeof pvBind === "function") pvBind(v, () => filesView(v));
   v.querySelectorAll("[data-ws-stage]").forEach(b => {
     b.onclick = async () => {
       b.disabled = true;
