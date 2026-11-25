@@ -268,6 +268,14 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
 <script src="/morph3d.js"></script>
 <script>
 "use strict";
+// 2026-11-25 identity on the image: asked from the app through the reviewer server for the shown study, refreshed every 20 s (a switch to
+// Incognito hides the identifiers at the next refresh); kept in memory only
+let IDENT={};
+async function fetchIdent(sid){if(!sid)return;try{const d=await api(`/api/ident?study=${encodeURIComponent(sid)}`);const k=JSON.stringify(d),old=JSON.stringify(IDENT[sid]||null);IDENT[sid]=d;if(k!==old&&typeof M!=="undefined"&&M&&M.study===sid)draw()}catch(e){}}
+function identLines(live){const sid=typeof M!=="undefined"&&M?M.study:"",d=IDENT[sid];if(!sid)return [];
+  if(!live||!d||d.mode!=="standard")return [`Study ${(d&&d.code)||sid}`];
+  const a=[d.name,d.mrn?"MRN "+d.mrn:""].filter(Boolean).join(" · "),out=[];if(a)out.push(a);out.push(d.accession?"Acc "+d.accession:"Acc (none)");return out}
+setInterval(()=>{if(typeof M!=="undefined"&&M&&!document.hidden)fetchIdent(M.study)},20000);
 const studyLabel=s=>(typeof M!=="undefined"&&M&&M.labels&&M.labels[s])||s;   // v5.20 study label from the app (accession in Standard, code in Incognito); v5.23: renamed from LB (clashed with loadStudy's label buffer)
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const MAC=/Mac|iPhone|iPad/.test(navigator.platform||navigator.userAgent), MOD=MAC?"⌘":"Ctrl";
@@ -383,10 +391,13 @@ function drawPane(p,x,W,H,o){
   if(o.text){
     x.font="12px Menlo,Consolas,monospace";x.fillStyle="#ffd866";x.shadowColor="#000";x.shadowBlur=3;x.textBaseline="alphabetic";
     const T=(t,xx,yy,al)=>{x.textAlign=al||"left";x.fillText(t,xx,yy)},sm=seqmeta[p.seq]||{},lab=(sm.label||p.seq)+(p.mip&&p.plane===0?" · minIP":"");
-    T(`${studyLabel(M.study)} · ${PLN[p.plane]}`,o.lm,o.tm);T(lab,o.lm,o.tm+16);if(c)T(`Cand #${did(c)} of ${M.cands.length}`,o.lm,o.tm+32);
+    T(`${o.live?studyLabel(M.study):M.study} · ${PLN[p.plane]}`,o.lm,o.tm);T(lab,o.lm,o.tm+16);if(c)T(`Cand #${did(c)} of ${M.cands.length}`,o.lm,o.tm+32);
     T(`Slice ${cur[V.s]+1} / ${[nx,ny,nz][V.s]}`,W-o.rm,o.tm,"right");T(`Zoom ${zoom.toFixed(1)}×${Math.abs(zoom-1)<0.001?" (fit)":""}`,W-o.rm,o.tm+16,"right");
     const w=getWL(p.seq);T(`C ${Math.round(101-w[0])}  B ${Math.round(w[1])}`,o.lm,H-24);T(`${vox.map(v=>v.toFixed(1)).join("×")} mm`,o.lm,H-8);
-    T(`Reviewer ${(o.rev||"")}`,W-o.rm,H-24,"right");if(M.acq&&(M.acq.TE_ms||M.acq.field_T))T(`${M.acq.TE_ms?"TE "+M.acq.TE_ms+" ms":""}${M.acq.TE_ms&&M.acq.field_T?" · ":""}${M.acq.field_T?M.acq.field_T+" T":""}`,W-o.rm,H-8,"right");
+    // 2026-11-25 identity under the reviewer name (bottom right, yellow): Standard = name · MRN, accession; Incognito / locked = study code.
+    // Live screen only: saved snapshots get the study code (identifiers never written into an image file).
+    const idl=identLines(o.live),acqT=M.acq&&(M.acq.TE_ms||M.acq.field_T)?`${M.acq.TE_ms?"TE "+M.acq.TE_ms+" ms":""}${M.acq.TE_ms&&M.acq.field_T?" · ":""}${M.acq.field_T?M.acq.field_T+" T":""}`:"";
+    {let yy=H-8;for(let i=idl.length-1;i>=0;i--){T(idl[i],W-o.rm,yy,"right");yy-=16}T(`Reviewer ${(o.rev||"")}`,W-o.rm,yy,"right");yy-=16;if(acqT)T(acqT,W-o.rm,yy,"right")}
         if(o.scale){x.shadowBlur=0;const pm=g.sx/vox[V.h],mm=niceBar(pm,H*0.3),px=mm*pm,bx=W-o.rm-6,by=H*0.62;x.strokeStyle="#ffd866";x.lineWidth=2;x.beginPath();x.moveTo(bx,by);x.lineTo(bx,by+px);x.moveTo(bx-4,by);x.lineTo(bx+4,by);x.moveTo(bx-4,by+px);x.lineTo(bx+4,by+px);x.stroke();
       x.shadowBlur=3;x.fillStyle="#ffd866";T(mm>=10?(mm/10)+" cm":mm+" mm",bx-8,by+px/2+4,"right")}
     x.shadowBlur=0;x.textAlign="left"}
@@ -452,7 +463,7 @@ async function pensieveBringBack(sid,my){
     box(`<b>${lab} is in Pensieve</b><p class="mut">${esc(s.label||"Bringing it back to the Mac…")}</p>`)}}
 async function loadStudy(sid){status("loading study ...");const my=++loadSeq,stale=()=>my!==loadSeq;   // a newer load wins
   const M0=await api(`/api/meta?study=${sid||""}&reviewer=${encodeURIComponent(reviewer())}${WSM?"&mode=wholestudy":""}`);if(stale())return;
-  if(M0.in_pensieve){pensieveBringBack(M0.study,my);return}M=M0;[nx,ny,nz]=M.shape;vox=M.vox;vols={};luts={};WLs={};seqmeta={};M.seqs.forEach(s=>seqmeta[s.key]=s);
+  if(M0.in_pensieve){pensieveBringBack(M0.study,my);return}M=M0;fetchIdent(M.study);[nx,ny,nz]=M.shape;vox=M.vox;vols={};luts={};WLs={};seqmeta={};M.seqs.forEach(s=>seqmeta[s.key]=s);
   {const G=M.groups||{},gs=Object.keys(G),cur=gs.find(g=>G[g].includes(M.study));$("#cohort").classList.toggle("hide",!gs.length);
    if(gs.length)$("#cohort").innerHTML=gs.map(g=>`<option ${g===cur?"selected":""}>${esc(g)}</option>`).join("");
    const list=cur?G[cur].filter(s=>M.studies.includes(s)):M.studies,i=list.indexOf(M.study);

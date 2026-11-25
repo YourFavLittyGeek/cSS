@@ -953,6 +953,24 @@ def _meta_full(sid, reviewer, mode, s, blind=False):
                 call_names=CALLS, fine_labels={k: [[c, LABELS[c][0]] for c in v] for k, v in FINE.items()}, side_check=side_check(s), snapdir=f"{B}/review/snapshots/{sid}", acq=acq_info(sid))
 
 
+def viewer_ident(sid):
+    """2026-11-25: name / MRN / accession for the image overlay - asked from the Percival app for every request (Standard + vault readable:
+    the identifiers; Incognito / locked: the study code). Only these keys are passed on; nothing is cached on disk or logged. Without the app
+    (reviewer started by hand) the study code is shown."""
+    port = os.environ.get("CSS_APP_PORT", "")
+    if not port.isdigit(): return dict(mode="incognito", code=sid)
+    try:
+        import urllib.request, urllib.parse
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/viewer_ident?code={urllib.parse.quote(sid)}", timeout=2) as r:
+            d = json.loads(r.read().decode())
+        if d.get("mode") == "standard":
+            return dict(mode="standard", code=str(d.get("code") or sid), name=str(d.get("name") or ""), mrn=str(d.get("mrn") or ""),
+                        accession=str(d.get("accession") or ""))
+        return dict(mode=d.get("mode") if d.get("mode") in ("incognito", "locked") else "incognito", code=str(d.get("code") or sid))
+    except Exception:
+        return dict(mode="incognito", code=sid)
+
+
 # Phase 3A.2: every route and what the blind initial read does with it. A route missing here is not served (tests compare this table with
 # the handler code). static / image / settings: no candidate or AI content. redacted: served with AI content removed and blinded ids.
 # refused: not served during the blind read. write: translated (blinded id -> candidate) and journaled with the server's read phase.
@@ -962,7 +980,8 @@ ROUTES = {("GET", "/"): "static", ("GET", "/morph3d.js"): "static", ("GET", "/ap
           ("GET", "/api/morph3d"): "refused", ("POST", "/api/import"): "refused", ("POST", "/api/screencap"): "settings",
           ("POST", "/api/snapshot"): "redacted", ("POST", "/api/openfolder"): "settings", ("POST", "/api/primary"): "removed",
           ("POST", "/api/call"): "write", ("POST", "/api/missed"): "write", ("POST", "/api/finish"): "write", ("POST", "/api/unblind"): "write",
-          ("POST", "/api/wholestudy"): "write", ("GET", "/api/pensieve"): "settings", ("POST", "/api/pensieve_restore"): "settings"}
+          ("POST", "/api/wholestudy"): "write", ("GET", "/api/pensieve"): "settings", ("POST", "/api/pensieve_restore"): "settings",
+          ("GET", "/api/ident"): "settings"}
 SAFE_ERRORS = (RIO.RecoveryError, RIO.LockTimeout)
 
 
@@ -989,6 +1008,9 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path); q = {k: v[0] for k, v in parse_qs(u.query).items()}; blind = ROUTES.get(("GET", u.path)) in ("redacted", "refused")
         try:
             if ("GET", u.path) not in ROUTES: return self._send(dict(error="not found"), code=404)
+            if u.path == "/api/ident":                                         # 2026-11-25 identity on the image (asked from the app, live)
+                sid = q.get("study") or START[0]
+                return self._send(viewer_ident(sid if sid in IDS else START[0]))
             if u.path == "/api/pensieve":                                      # 2026-11-25 Pensieve move: state of one study
                 pm = _pm(); sid = q.get("study") or START[0]
                 return self._send(dict(pm.status(B, sid) if pm else dict(state="on_mac"), study=sid, away=away(sid)))

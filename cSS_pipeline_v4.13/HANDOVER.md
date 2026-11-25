@@ -90,12 +90,21 @@ Read this first, then CLAUDE.md (project science + history). Do not trust older 
   problems: docs/engineering/FILE_MANAGEMENT_AUDIT_2026-11-25.md (items 1-8 DONE on the user's go; 9-10 open). Since ~12:06 the live app has moved
   Study-039..046 to Pensieve after their final reviews (verified, as designed).
 
+- Late evening: ca4bcc2 role change rebuilds the effective calls (review/ID_calls.csv was empty for every study read before
+  the user became expert at 14:04; their own calls files were always complete - audit of 35 studies: calls file = events =
+  review log). Audit items 9-10 done (checked_copy.py for import copy + Vault backup; low-space offer + "Free Mac space").
+  Reviewer shows name · MRN / accession bottom right under the reviewer name (Standard, vault readable; asked live from the
+  app via /api/viewer_ident, CSS_APP_PORT); Incognito / locked = study code; snapshots never carry identifiers (top-left
+  uses the code too). Training state for the user: expert role set; local learning switch still off; test group (split v001,
+  20 %, 9 patients) can reach at most 4 cSS-positive with the current patients - more import needed (user's decision on a
+  25 % split version).
+- The user ran an OLD reviewer (port 8767, started 11:04) next to the current one: never kill it; ask them to close the tab.
+
 ## 6. Open items / next steps (ask the user before starting)
 1. User reported the app WINDOW froze after "Use Percival_project" (server answered, page idle, no JS error in
    Chrome or JavaScriptCore). Not reproduced; ask what the screen shows on the 0cb269d build. Idea: a page
    heartbeat + "not responding - reload" overlay; log requests per minute server-side.
-2. Proposed, not built: when the Mac drops below ~50 GB, offer (or automatically, user to decide) to archive
-   completed + reviewed studies to the Data Vault with transparent restore on open.
+2. (done late evening 2026-11-25: low-space offer, Settings › Pensieve.)
 3. Known baseline test failures in tests/run_uscore_tests.sh: check_app_identity / check_app_import_v518 (headless
    Chrome timeouts), check_app_setup (FileExistsError in its own temp setup), + processing_manager, write_guard,
    local_only, ui_poll, app_review_qc, app_identity, app_training, app_add_layout, study_admin (pre-existing).
