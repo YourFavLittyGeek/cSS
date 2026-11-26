@@ -42,7 +42,7 @@ Read this first, then CLAUDE.md (project science + history). Do not trust older 
 
 ## 4. Build / release
 - App zip: `bash tools/build_percival_dev_app.sh ~/PERCIVAL_releases` (committed files only) ->
-  `Percival_v5.25-dev_<sha>.zip` + `_BUILD_INFO.txt`. Current: `Percival_v5.25-dev_3afe20e.zip`
+  `Percival_v5.25-dev_<sha>.zip` + `_BUILD_INFO.txt`. Current: `Percival_v5.25-dev_01e95bc.zip`
   (sha256 d3ba09edbb66fd10520bd809c779832c5044bd06cb060696b910290348236e6c).
   NEWER: `Percival_v5.25-dev_1a0bbcc.zip` (sha256 4418b70780927a230cafb0242f87efcb753ba3deb8bffd3f88ede0e58e24f13a; incl. audit items 1-8) -
   not yet installed by the user at the time of writing.
@@ -109,6 +109,9 @@ Read this first, then CLAUDE.md (project science + history). Do not trust older 
   screens (Training, uScore scorer, Stage-1, Image ML prototype) still use old names - hidden, not part of the architecture.
   Isolated checks: run old check_*.py through a wrapper that calls tests/_isolation.activate() first (they do not isolate
   themselves); check_percival / _learning / image_ml_integration / adversarial_leakage / trace_candidate pass.
+
+- 01e95bc missed-cSS marks: NONE of the user's marks was ever saved (page sent the plane index, server wants the name; plus drafts
+  dropped silently). Fixed + regression test. The user must re-mark missed cSS in the studies where they drew them (they are lost).
 
 ## 6. Open items / next steps (ask the user before starting)
 1. User reported the app WINDOW froze after "Use Percival_project" (server answered, page idle, no JS error in
