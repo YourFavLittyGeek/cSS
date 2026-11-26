@@ -181,6 +181,16 @@ def _pl_fit(X, y, g, w, cols, nested=True):
 
 
 # ------------------------------------------------------------------ level-0 components
+def _with_marks(M, y, g, extra, patients):
+    """LUMOS learning from expert-marked missed cSS (2026-11-25): add the image patches of the marks whose patient is among the training
+    patients (never a held-out or locked-test patient). extra: rows dict(patient, maps, y=1). -> M, y, g, number added"""
+    ex = [r for r in (extra or []) if r.get("maps") is not None and str(r["patient"]) in {str(p) for p in patients}]
+    if not ex: return M, y, g, 0
+    Mx = np.stack([np.asarray(r["maps"], np.float32) for r in ex]); yx = np.array([float(r.get("y", 1)) for r in ex])
+    gx = np.array([r["patient"] for r in ex], dtype=np.asarray(g).dtype if np.asarray(g).dtype != object else object)
+    return np.concatenate([M, Mx]), np.concatenate([y, yx]), np.concatenate([np.asarray(g), gx]), len(ex)
+
+
 def _fit_image(kind, M, y, g, seed, epochs):
     if kind == "pixel_logistic": return PixelLogistic(seed).fit(M, y, g)
     if kind == "cnn_ensemble":                                             # Stage 3: augmented, class-balanced seed ensemble (LUMOS registry)
@@ -197,14 +207,15 @@ class Components:
         self.char_kind, self.image_kind = char_kind, image_kind; self.ood = None; self.image_ood = None
         self.char_cols = list(char_cols or CHAR)              # Stage 2: the NOX feature list is part of the model
 
-    def fit(self, rows, seed=0, image_logit_oof=None, char_logit_oof=None, cnn_epochs=30):
+    def fit(self, rows, seed=0, image_logit_oof=None, char_logit_oof=None, cnn_epochs=30, image_extra=None):
         y = np.array([r["y"] for r in rows], float); g = [r["patient"] for r in rows]; w = patient_weights(rows)
         NF = CI.NOX.features(rows, char_cols=self.char_cols)
         self.math = MathRecalibration().fit(CI.ALBUS.features(rows)["math"], y, w)
         Xc = NF["char"]; self.char = LR.fit_tabular(self.char_kind, Xc, y, g, w, self.char_cols, seed)
-        LF = CI.LUMOS.features(rows); M, have = LF["image"], LF["have"]; self.image = None
+        LF = CI.LUMOS.features(rows); M, have = LF["image"], LF["have"]; self.image = None; self.n_marks = 0
         if cnn_epochs and have.sum() >= 20 and len(np.unique(y[have])) == 2:
-            try: self.image = _fit_image(self.image_kind, M[have], y[have], np.asarray(g)[have], seed, cnn_epochs)
+            Mi, yi, gi, self.n_marks = _with_marks(M[have], y[have], np.asarray(g)[have], image_extra, set(map(str, g)))
+            try: self.image = _fit_image(self.image_kind, Mi, yi, gi, seed, cnn_epochs)
             except ValueError: self.image = None
         self.ood = IN.OOD().fit(Xc)
         self.image_ood = IN.OOD().fit(patch_stats(M[have])) if have.sum() >= 20 else None      # v5.24: patches unlike the training patches
@@ -276,28 +287,50 @@ def _common(oofs):
     return m
 
 
-def component_oof(rows, k=5, seed=0, cnn_epochs=30, progress=None, char_kinds=None, image_kinds=None, fusion_kinds=None, char_cols=None):
+def component_oof(rows, k=5, seed=0, cnn_epochs=30, progress=None, char_kinds=None, image_kinds=None, fusion_kinds=None, char_cols=None, image_extra=None, compare_marks=True):
     """patient-grouped out-of-fold log-odds of every component (ALBUS, NOX, LUMOS) for the given (development) rows, and the model-family
-    comparisons of NOX and LUMOS on the SAME folds. -> Z, report. fusion_kinds: accepted and ignored (Fusion removed 2026-11-25)."""
+    comparisons of NOX and LUMOS on the SAME folds. -> Z, report. fusion_kinds: accepted and ignored (Fusion removed 2026-11-25).
+    image_extra: image patches of expert-marked missed cSS (rows dict(patient, maps, y=1)); added to LUMOS's training folds for the
+    training patients only; every out-of-fold prediction and metric stays on candidates."""
     say = progress or (lambda *a: None); CC = list(char_cols or CHAR)
     char_kinds = char_kinds or LR.CHAR_KINDS; image_kinds = image_kinds or LR.IMAGE_KINDS
     y = np.array([r["y"] for r in rows], float); g = np.array([r["patient"] for r in rows]); w = patient_weights(rows); F = folds(g, k, seed)
     Xc = X_of(rows, CC, "char"); M, have = maps_of(rows); rep = {}
-    # 1. LUMOS families
-    img = {kd: np.full(len(rows), np.nan) for kd in image_kinds}; spr = {kd: np.full(len(rows), np.nan) for kd in image_kinds}
-    for i, (tr, te) in enumerate(F):
-        htr, hte = tr[have[tr]], te[have[te]]
-        if len(htr) >= 20 and len(np.unique(y[htr])) == 2 and len(hte):
-            for kd in image_kinds:
-                try:
-                    net = _fit_image(kd, M[htr], y[htr], g[htr], seed + i, cnn_epochs); lg, sp = net.logit_tta(M[hte]); img[kd][hte] = lg
-                    spr[kd][hte] = sp
-                except ValueError: pass
-        say(f"LUMOS image models fold {i + 1}/{len(F)}", 0.1 + 0.3 * (i + 1) / len(F))
-    m = _common(img); ik, ires = _select({kd: np.where(m, v, np.nan) for kd, v in img.items()}, y, g, LR.IMAGE_KINDS)
-    ik = ik or image_kinds[-1]; img_oof = img[ik]; spread = spr[ik]
+    # 1. LUMOS families (with the expert-marked missed cSS: compared on the SAME folds with and without them, used only when they do not
+    #    make LUMOS worse on the candidates - a drawn mark gives a patch that only partly resembles a detector candidate's)
+    def lumos(extra):
+        img = {kd: np.full(len(rows), np.nan) for kd in image_kinds}; spr = {kd: np.full(len(rows), np.nan) for kd in image_kinds}; n_mk = []
+        for i, (tr, te) in enumerate(F):
+            htr, hte = tr[have[tr]], te[have[te]]
+            if len(htr) >= 20 and len(np.unique(y[htr])) == 2 and len(hte):
+                Mi, yi, gi, nm = _with_marks(M[htr], y[htr], g[htr], extra, set(map(str, g[tr]))); n_mk.append(nm)
+                for kd in image_kinds:
+                    try:
+                        net = _fit_image(kd, Mi, yi, gi, seed + i, cnn_epochs); lg, sp = net.logit_tta(M[hte]); img[kd][hte] = lg
+                        spr[kd][hte] = sp
+                    except ValueError: pass
+            say(f"LUMOS image models{' with the missed-cSS marks' if extra else ''} fold {i + 1}/{len(F)}", 0.1 + 0.3 * (i + 1) / len(F))
+        m = _common(img); ik, ires = _select({kd: np.where(m, v, np.nan) for kd, v in img.items()}, y, g, LR.IMAGE_KINDS)
+        return img, spr, n_mk, m, (ik or image_kinds[-1]), ires
+    pats = set(map(str, g)); avail = [r for r in (image_extra or []) if r.get("maps") is not None and str(r["patient"]) in pats]
+    if avail and compare_marks:
+        base = lumos(None); withm = lumos(avail)
+        lb = (base[5].get(base[4]) or {}).get("logloss"); lw = (withm[5].get(withm[4]) or {}).get("logloss")
+        use = lw is not None and (lb is None or lw <= lb)
+        img, spr, n_mk, m, ik, ires = withm if use else base
+        mk = dict(available=len(avail), used=bool(use), added_per_fold=withm[2] if use else [], logloss_without=lb, logloss_with=lw,
+                  auc_without=(base[5].get(base[4]) or {}).get("auc"), auc_with=(withm[5].get(withm[4]) or {}).get("auc"),
+                  decision=("used: LUMOS log loss on the candidates is not worse with the marks" if use else
+                            "not used this cycle: LUMOS predicted the candidates worse with the marks (kept for the next cycle)"))
+    else:
+        img, spr, n_mk, m, ik, ires = lumos(avail or None)
+        mk = dict(available=len(avail), used=bool(avail and any(n_mk)), added_per_fold=n_mk,
+                  decision="no expert-marked missed cSS" if not avail else "used (decided by the outer training cycle)")
+    mk["note"] = "expert-marked missed cSS: extra cSS image examples in LUMOS training folds (training patients only); evaluation on candidates only"
+    img_oof = img[ik]; spread = spr[ik]
     rep["image"] = dict(chosen=ik, results=ires, n_with_image=int(have.sum()), tta_spread_median=float(np.nanmedian(spread)) if np.isfinite(spread).any() else None,
-                        rule="simplest image model within one bootstrap SE of the lowest CV log loss (pixel_logistic < cnn)", compared_on=int(m.sum()))
+                        rule="simplest image model within one bootstrap SE of the lowest CV log loss (pixel_logistic < cnn)", compared_on=int(m.sum()),
+                        missed_marks=mk)
     # 2. NOX families
     ch = {kd: np.full(len(rows), np.nan) for kd in char_kinds}
     for i, (tr, te) in enumerate(F):
@@ -497,13 +530,19 @@ def module_report(comp_metrics, families, previous=None):
             d = cur["logloss"] - old["logloss"]
             rec.update(delta_logloss=round(float(d), 4), verdict="improved" if d < 0 else "not improved",
                        loop="retrained every cycle; adopted only when better than its previous version")
+        if k == "image":
+            mk = (families.get("image") or {}).get("missed_marks") or {}
+            rec["missed_marks"] = int(mk.get("available") or 0) if mk.get("used") else 0; rec["missed_marks_available"] = int(mk.get("available") or 0)
+            rec["loop"] += ("; learned from the expert-marked missed cSS (extra cSS image examples, training folds only)" if mk.get("used")
+                            else f"; {mk.get('available')} expert-marked missed cSS not used this cycle (they made LUMOS worse on the candidates)" if mk.get("available")
+                            else "; no expert-marked missed cSS to learn from yet")
         out[mod] = rec
     out["PERCIVAL"] = dict(module="PERCIVAL", verdict="see acceptance (locked test cohort)", loop="refitted on the module outputs every cycle; "
                            "becomes active only after acceptance AND your approval")
     return out
 
 
-def train_cycle(rows, version, seed=0, cnn_epochs=30, progress=None, mins=None, nested=True, features=None, frozen=None, previous=None):
+def train_cycle(rows, version, seed=0, cnn_epochs=30, progress=None, mins=None, nested=True, features=None, frozen=None, previous=None, image_extra=None):
     """one complete, reproducible training cycle -> model dict (components + meta + calibration + thresholds + full report)"""
     mins = mins or dict(studies=MIN_STUDIES, candidates=MIN_CANDIDATES, per_class=MIN_PER_CLASS)
     check_partitions(rows)
@@ -515,7 +554,10 @@ def train_cycle(rows, version, seed=0, cnn_epochs=30, progress=None, mins=None, 
     CC = list((features or {}).get("char") or CHAR)                # Stage 2: the approved NOX feature set (component registry), else built-in
     FZ = {k: v for k, v in (frozen or {}).items() if v}            # Stage 2: frozen component families (component registry) - no re-selection
     kinds = dict(char_kinds=[FZ["char"]] if "char" in FZ else None, image_kinds=[FZ["image"]] if "image" in FZ else None)
-    Z, fam = component_oof(dev, seed=seed, cnn_epochs=cnn_epochs, progress=say, char_cols=CC, **kinds)
+    dev_p = {str(r["patient"]) for r in dev}; test_p = {str(r["patient"]) for r in test}
+    XI = [r for r in (image_extra or []) if str(r["patient"]) in dev_p and str(r["patient"]) not in test_p and not r.get("test")]   # never a test patient
+    Z, fam = component_oof(dev, seed=seed, cnn_epochs=cnn_epochs, progress=say, char_cols=CC, image_extra=XI, **kinds)
+    if not ((fam.get("image") or {}).get("missed_marks") or {}).get("used"): XI = []      # the marks did not help LUMOS this cycle
     comp_metrics = {c: metrics(y, sigmoid(Z[c]), g) for c in COMPONENTS}
     say("meta-model discovery", 0.62); D, oofs = discover(Z, y, g, w, seed=seed)
     chosen = D["chosen"]; meta_oof = oofs[chosen]
@@ -528,7 +570,7 @@ def train_cycle(rows, version, seed=0, cnn_epochs=30, progress=None, mins=None, 
                  disagreement=IN.disagreement(Z, y, COMPONENTS), reliability=IN.reliability(y, p_dev), families=fam,
                  note="all analyses on the development cohort's patient-grouped out-of-fold predictions; the locked test cohort is not used")
     say("final fit on the development cohort", 0.7)
-    C = Components(fam["char"]["chosen"], fam["image"]["chosen"], char_cols=CC).fit(dev, seed, cnn_epochs=cnn_epochs)
+    C = Components(fam["char"]["chosen"], fam["image"]["chosen"], char_cols=CC).fit(dev, seed, cnn_epochs=cnn_epochs, image_extra=XI)
     M = Meta(chosen).fit(Z, y, g, w)
     ens = []
     rng = np.random.default_rng(seed + 99); u = np.unique(g)
@@ -544,7 +586,11 @@ def train_cycle(rows, version, seed=0, cnn_epochs=30, progress=None, mins=None, 
                            test_patients=len({r["patient"] for r in test}), css=int(sum(r["y"] for r in rows)), not_css=int(sum(1 - r["y"] for r in rows)),
                            studies=len({r["study"] for r in rows}), with_image=int(sum(r.get("maps") is not None for r in rows)),
                            trained_on=sorted({r["study"] for r in dev}),
-                           dataset_hash=hashlib.sha256(json.dumps(sorted((r["study"], r["cand_id"], r["y"]) for r in rows)).encode()).hexdigest()[:16]),
+                           lumos_missed_marks=dict(available=len(image_extra or []), used=len(XI), in_final_fit=getattr(C, "n_marks", 0),
+                                                   studies=sorted({r["study"] for r in XI}),
+                                                   decision=((fam.get("image") or {}).get("missed_marks") or {}).get("decision")),
+                           dataset_hash=hashlib.sha256(json.dumps(sorted((r["study"], r["cand_id"], r["y"]) for r in rows)
+                                                     + sorted((r["study"], str(r["cand_id"]), "lumos_mark") for r in XI)).encode()).hexdigest()[:16]),
                  note="experimental assessment score - trained on this computer on this project's expert reviews; not clinically validated",
                  interpretation="PERCIVAL score = 100 x a CALIBRATED model output on the development cohort. It is a ranking / assessment score, "
                                 "not a validated probability of cSS: calibration is checked on the locked test cohort and only on this project's data.")
@@ -579,7 +625,8 @@ def train_cycle(rows, version, seed=0, cnn_epochs=30, progress=None, mins=None, 
     if nested:
         say("nested cross-fitting of the whole procedure (development cohort)", 0.72)
         from . import nested as NS
-        model["nested"], _ = NS.nested_crossfit(dev, seed=seed, cnn_epochs=cnn_epochs, progress=lambda m, p: say(m, 0.72 + 0.12 * p), char_cols=CC, kinds=kinds)
+        model["nested"], _ = NS.nested_crossfit(dev, seed=seed, cnn_epochs=cnn_epochs, progress=lambda m, p: say(m, 0.72 + 0.12 * p), char_cols=CC, kinds=kinds,
+                                                image_extra=XI)
     say("evaluation on the locked test cohort", 0.85)
     model["test"] = evaluate_test(model, test)
     model["model_hash"] = AN.model_hash(model)

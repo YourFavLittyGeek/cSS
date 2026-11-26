@@ -172,6 +172,108 @@ def extract_study(base, sid, write=False):
     return dict(study_id=sid, index=rec, rows=rows, patches=patches, blocked=blocked)
 
 
+PLANE_AXIS = {"sagittal": 0, "coronal": 1, "axial": 2}                     # canonical (RAS) axis held constant by the drawn plane
+MARK_MAX_VOXELS = 20000
+
+
+def _mark_region(mark, can_shape):
+    """expert missed-cSS mark (reviewer viewer, canonical voxel coordinates) -> boolean region on the canonical grid.
+    rect: the box between its corners; pen: the outline filled on its slice; point: the voxel. Then +-1 voxel through the drawn plane
+    (a point: +-1 voxel in every direction), so the region covers the lesion's neighbouring slices as a detector object does."""
+    strokes = mark.get("strokes") or []
+    pts = np.array([q for st in strokes for q in st], float).reshape(-1, 3)
+    if not len(pts): raise ValueError("mark without points")
+    shp = np.array(can_shape[:3]); R = np.zeros(tuple(shp), bool)
+    ax = PLANE_AXIS.get(str(mark.get("plane", "")).lower())
+    if ax is None:
+        flat = [a for a in range(3) if np.ptp(pts[:, a]) < 0.5]; ax = flat[0] if flat else None
+    shape = str(mark.get("shape", "point"))
+    if shape == "rect" and len(pts) >= 2:
+        lo = np.clip(np.floor(pts.min(0)).astype(int), 0, shp - 1); hi = np.clip(np.ceil(pts.max(0)).astype(int), 0, shp - 1)
+        R[lo[0]:hi[0] + 1, lo[1]:hi[1] + 1, lo[2]:hi[2] + 1] = True
+    elif shape == "pen" and ax is not None and len(pts) >= 3:
+        for st in strokes:
+            q = np.array(st, float).reshape(-1, 3)
+            if len(q) < 2: continue
+            q = np.vstack([q, q[:1]])                                    # closed outline
+            for a, b in zip(q[:-1], q[1:]):                               # dense line between consecutive points
+                n = int(np.ceil(np.abs(b - a).max() * 2)) + 1
+                for t in np.linspace(0, 1, n):
+                    v = np.clip(np.round(a + t * (b - a)).astype(int), 0, shp - 1); R[tuple(v)] = True
+        k = int(np.clip(round(float(np.median(pts[:, ax]))), 0, shp[ax] - 1))
+        sl = [slice(None)] * 3; sl[ax] = k; S2 = R[tuple(sl)]
+        R[tuple(sl)] = ndi.binary_fill_holes(S2)
+    else:
+        v = np.clip(np.round(pts.mean(0)).astype(int), 0, shp - 1); R[tuple(v)] = True; ax = None
+    st = np.zeros((3, 3, 3), bool)
+    if ax is None: st[:] = True
+    else: idx = [1, 1, 1]; idx[ax] = slice(None); st[tuple(idx)] = True
+    R = ndi.binary_dilation(R, structure=st)
+    if R.sum() > MARK_MAX_VOXELS: raise ValueError(f"mark region too large ({int(R.sum())} voxels)")
+    return R
+
+
+def mark_object(swi_arr, brain, region_native, dark=None, dark_z=3.0, min_vox=3):
+    """the expert-marked region -> object mask on the SWI grid: the dark voxels INSIDE the drawn region (largest connected part). Dark =
+    the detector's own dark map (work/ID_dark.nii.gz) when it has >= min_vox voxels in the mark, else darker than -dark_z robust SD of
+    the local brain (+-12 voxels). No growing beyond the drawing (on the phantom it leaked into the neighbouring veins). The drawn region
+    itself when nothing dark is found. -> (mask, how)"""
+    c = np.argwhere(region_native)
+    if not len(c): raise ValueError("mark outside the image")
+    cands = []
+    if dark is not None: cands.append((np.asarray(dark, bool), "detector dark map"))
+    m = np.round(c.mean(0)).astype(int); bx = tuple(slice(max(a - 12, 0), min(a + 13, n)) for a, n in zip(m, swi_arr.shape[:3]))
+    ref = swi_arr[bx][brain[bx]]
+    if ref.size >= 50:
+        med = float(np.median(ref)); mad = 1.4826 * float(np.median(np.abs(ref - med))) or 1.0
+        cands.append((((swi_arr - med) / mad) < -dark_z, f"darker than -{dark_z:g} SD of the local brain"))
+    for D, src in cands:
+        seed = D & brain & region_native
+        if seed.sum() < min_vox: continue
+        lab, n = ndi.label(seed, structure=np.ones((3, 3, 3), bool))
+        sizes = ndi.sum(seed, lab, range(1, n + 1)); big = int(np.argmax(sizes)) + 1
+        if sizes[big - 1] >= min_vox: return lab == big, f"dark voxels inside the mark ({src})"
+    if region_native.sum() < min_vox: raise ValueError("mark region smaller than 3 voxels")
+    return region_native.copy(), "drawn region (no dark voxels found)"
+
+
+def extract_marks(base, sid, marks):
+    """Image patches for expert-marked missed cSS (LUMOS learning, 2026-11-25), with the SAME extractor, frame and size as the
+    candidate patches. marks: {key: dict(strokes=[[[i, j, k], ...]], shape, plane)} in the reviewer's canonical voxel coordinates.
+    -> dict(patches={key: dict(image_swi, valid_swi, object_mask)}, skipped={key: reason}, how={key: text}, blocked)"""
+    rec = X.index_study(base, sid)
+    usable = set(rec["usable_channels"]); ch = rec["channels"]; out, skipped, how = {}, {}, {}
+    if rec["status"] not in X.USABLE: return dict(patches={}, skipped={k: "study geometry" for k in marks}, how={}, blocked=f"study geometry: {rec['status']}")
+    if "pial_sd" not in usable: return dict(patches={}, skipped={k: "no surface frame" for k in marks}, how={}, blocked="pial_sd unusable")
+    SAP = _sap()
+    try:
+        swi = nib.load(os.path.join(base, ch["swi"]["file"])); psd = nib.load(os.path.join(base, ch["pial_sd"]["file"]))
+        chans = {"swi": swi}
+        for c in ("phase", "flair", "labels"):
+            if c in usable: chans[c] = nib.load(os.path.join(base, ch[c]["file"]))
+        A = SAP._arr(swi); brain = ndi.binary_fill_holes(A > 0)
+        dp = os.path.join(base, "work", f"{sid}_dark.nii.gz")                 # the detector's dark map (region growing), when present
+        dark = None
+        if os.path.exists(dp):
+            dk = nib.load(dp); dark = np.asarray(dk.dataobj) > 0 if dk.shape[:3] == A.shape[:3] and np.allclose(dk.affine, swi.affine, atol=1e-3) else None
+        can = nib.as_closest_canonical(swi); c2n = np.linalg.inv(swi.affine) @ can.affine
+        for key, mk in marks.items():
+            try:
+                Rc = _mark_region(mk, can.shape)
+                ijk = np.argwhere(Rc); nat = np.round((c2n[:3, :3] @ ijk.T).T + c2n[:3, 3]).astype(int)
+                ok = np.all((nat >= 0) & (nat < np.array(A.shape[:3])), axis=1); nat = nat[ok]
+                Rn = np.zeros(A.shape[:3], bool); Rn[tuple(nat.T)] = True
+                obj, how[key] = mark_object(A, brain, Rn, dark=dark)
+                M_img = nib.Nifti1Image(obj.astype(np.int16), swi.affine)
+                P = SAP.extract_patch(chans, psd, M_img, SIZE_MM, SPACING_MM, obj_id=1, labels=chans.get("labels"), brain=brain)
+                om = SAP.sample(obj.astype(np.float32), swi.affine, P["grid"], order=0)[0] > 0.5
+                out[key] = dict(image_swi=P["arrays"]["image_swi"], valid_swi=P["valids"]["valid_swi"], object_mask=om)
+            except (ValueError, IndexError) as e: skipped[key] = str(e)[:120]
+    finally:
+        SAP._ARR.clear()
+    return dict(patches=out, skipped=skipped, how=how, blocked=None)
+
+
 def load_patch(path):
     """-> (arrays, metadata); refuses a patch whose arrays no longer match its recorded patch_sha"""
     with np.load(path, allow_pickle=False) as z: arrs = {k: z[k] for k in z.files}

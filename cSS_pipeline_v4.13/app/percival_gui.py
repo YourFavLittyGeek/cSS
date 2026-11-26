@@ -528,13 +528,13 @@ def _gather(sid, labelled=True):
     from uengine.percival.meta import CHAR, PREDICTORS, test_assignment
     cp = os.path.join(B(), "review", f"{sid}_candidates.csv")
     if not os.path.exists(cp): return []
-    deps = [cp, os.path.join(B(), "uscore", "features", f"{sid}.json")]
+    deps = [cp, os.path.join(B(), "uscore", "features", f"{sid}.json"), os.path.join(B(), "review", f"{sid}_missed.csv")]   # + LUMOS marks
     import review_calls_gui as RCG
     NX, _nv = nox_feature_set(); EXTRA = [c for c in NX if c not in CHAR]   # Stage 2: approved extra NOX measurements are gathered too
     deps.append(os.path.join(B(), "review", f"{sid}_qc.json"))                 # Stage 3: calibration subgroups
     key = RCG.file_key(deps, B()) + [int(may_read(sid))] + ([["nox_extra"] + EXTRA] if EXTRA else [])   # Phase 3D review: content hashes
     cj, cz = P("cache", f"{sid}.json"), P("cache", f"{sid}.npz"); C = _jl(cj, {})
-    if C.get("key") != key or C.get("v") != 5 or not os.path.exists(cz):        # v5 (2026-11-25): NOX set with uScore x1 / x2 / x5
+    if C.get("key") != key or C.get("v") != 6 or not os.path.exists(cz):        # v5: NOX set with x1 / x2 / x5; v6: missed-mark patches (LUMOS)
         if CTX.get("ensure_local"):                                         # images moved to Pensieve after the review: bring them back first
             try:
                 el = CTX["ensure_local"](sid)
@@ -561,10 +561,11 @@ def _gather(sid, labelled=True):
                              hemi=str(r["hemi"]) if "hemi" in cand.columns else "", pred=pred.get(cid, {}), char=ch, has_maps=cid in maps,
                              albus=dict(review_tier=None if tier is None or (isinstance(tier, float) and np.isnan(tier)) else str(int(float(tier)))),
                              subgroups=sub))
+        marks, mk_maps = _mark_maps(sid) if may_read(sid) else ([], {})          # 2026-11-25: LUMOS learns from expert-marked missed cSS
         os.makedirs(os.path.dirname(cz), exist_ok=True)
-        with open(cz + ".tmp", "wb") as f_: np.savez_compressed(f_, **{str(k): v for k, v in maps.items()})
+        with open(cz + ".tmp", "wb") as f_: np.savez_compressed(f_, **{str(k): v for k, v in maps.items()}, **mk_maps)
         os.replace(cz + ".tmp", cz)                                               # atomic: a reader never sees a half-written cache
-        C = dict(key=key, v=5, rows=rows); _js(cj, C)
+        C = dict(key=key, v=6, rows=rows, marks=marks); _js(cj, C)
     with np.load(cz) as Zf: Z = {k: Zf[k] for k in Zf.files}
     rows = []; pat = IDS().patient(sid)
     test = bool(pat) and _partition(pat) == "test"                           # no patient: never trained on (eligibility); 3D split authority
@@ -573,6 +574,49 @@ def _gather(sid, labelled=True):
     if labelled:
         L, _ = _labels(sid); rows = [dict(r, y=L[r["cand_id"]]) for r in rows if r["cand_id"] in L]
     return rows
+
+
+def _lumos_marks(sid, E):
+    """the missed-cSS marks of one study that LUMOS learns from: eligible expert truth (cSS), development partition, with an image patch,
+    and not lying on a candidate the detector showed (that candidate has its own call)"""
+    ok = {e["cand_id"] for e in E if str(e["cand_id"]).startswith("missed_") and e["status"] == "eligible" and e["partition"] == "development"
+          and e.get("y") == 1 and not str(e.get("detector_fate") or "").startswith("overlaps shown candidate")}
+    return [m for m in gather_marks(sid) if m["cand_id"] in ok and not m["test"]] if ok else []
+
+
+def _mark_maps(sid):
+    """image patches (LUMOS maps) of every active missed-cSS mark of a study, with the candidate patch extractor -> (records, maps)"""
+    md = label_summary(sid).get("missed_detail") or {}
+    if not md: return [], {}
+    from uengine.imaging import patches as PT
+    from uengine.percival.cnn import patch_maps
+    marks = {}
+    for k, d in md.items():
+        try: strokes = json.loads(d.get("points") or "[]")
+        except ValueError: strokes = []
+        marks[k] = dict(strokes=strokes, shape=d.get("shape", "point"), plane=d.get("plane", ""))
+    try: E = PT.extract_marks(B(), sid, marks)
+    except Exception as e:
+        log(f"{CTX['label'](sid)}: missed-cSS patches not made ({type(e).__name__}: {str(e)[:80]})")
+        return [dict(cand_id=k, has_maps=False, skip=f"{type(e).__name__}") for k in marks], {}
+    out, recs = {}, []
+    for k in marks:
+        m = patch_maps(E["patches"][k]) if k in E["patches"] else None
+        if m is not None: out[k] = m
+        recs.append(dict(cand_id=k, has_maps=m is not None, how=E["how"].get(k, ""), skip=E["skipped"].get(k, "" if m is not None else "no valid SWI in the patch")))
+    return recs, out
+
+
+def gather_marks(sid):
+    """expert-marked missed cSS of a study as LUMOS image examples: dict(study, cand_id, patient, test, maps, y=1, how) per mark with a patch.
+    Uses the gathered cache (gather() makes it)."""
+    gather(sid, labelled=False)
+    C = _jl(P("cache", f"{sid}.json"), {}); cz = P("cache", f"{sid}.npz")
+    if not C.get("marks") or not os.path.exists(cz): return []
+    pat = IDS().patient(sid); test = bool(pat) and _partition(pat) == "test"
+    with np.load(cz) as Zf: Z = {k: Zf[k] for k in Zf.files if k.startswith("missed_")}
+    return [dict(study=sid, cand_id=m["cand_id"], patient=pat, test=test, maps=Z[m["cand_id"]], y=1, how=m.get("how", ""))
+            for m in C["marks"] if m.get("has_maps") and m["cand_id"] in Z]
 
 
 # ------------------------------------------------------------------ selection + integrity
@@ -961,10 +1005,12 @@ def _train(reason):
         integ = integrity([x["code"] for x in SL if x["n_labelled"] or x.get("n_missed")])     # v5.24: conflicts / duplicates over EVERY labelled study
         dup = set(integ["duplicates"]) & set(sel); rows, exs = [], []
         log(f"cycle started ({reason}): {len(sel)} studies with eligible labels", 0.01)
-        S = CTX["SET"]; ex = set(S.get("learner_exclude", []))
+        S = CTX["SET"]; ex = set(S.get("learner_exclude", [])); marks = []
         for k, c in enumerate(sel):
             g = {r["cand_id"]: r for r in gather(c, labelled=False)}
             E = _examples(c, dict(excluded=c in ex, duplicate=c in dup), rows=g); exs += E
+            mk = _lumos_marks(c, E)
+            if mk: marks += mk; log(f"{CTX['label'](c)}: {len(mk)} expert-marked missed cSS used as LUMOS image examples", 0.01 + 0.06 * (k + 1) / len(sel))
             for e in E:
                 if e["components"]["meta"] and e["cand_id"] in g:
                     r = dict(g[e["cand_id"]], y=e["y"])
@@ -1009,7 +1055,7 @@ def _train(reason):
         if feats: log(f"NOX feature set {feats['nox_version']}: {len(feats['char'])} measurements", 0.08)
         if frozen: log("frozen components (component registry): " + ", ".join(f"{k}={v}" for k, v in frozen.items()), 0.08)
         M = MT.train_cycle(rows, v, cnn_epochs=int(os.environ.get("CSS_PERCIVAL_EPOCHS", "30")), progress=lambda m, p: log(m, p), mins=_env_min(),
-                           features=feats, frozen=frozen, previous=_model_any())
+                           features=feats, frozen=frozen, previous=_model_any(), image_extra=marks)
         M["data"].update(dataset=man["id"], dataset_hash_manifest=man["content_hash"], eligibility_rules=EL.RULES_VERSION,
                          split=man.get("split"), leakage_audit=dict(passed=audit["passed"], checks=audit["checks"]),
                          feature_schema=DS.FEATURE_SCHEMA, patch_spec=DS.PATCH_SPEC, code_version=_code_version())

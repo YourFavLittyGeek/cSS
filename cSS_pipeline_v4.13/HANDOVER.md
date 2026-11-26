@@ -112,6 +112,13 @@ Read this first, then CLAUDE.md (project science + history). Do not trust older 
 
 - 01e95bc missed-cSS marks: NONE of the user's marks was ever saved (page sent the plane index, server wants the name; plus drafts
   dropped silently). Fixed + regression test. The user must re-mark missed cSS in the studies where they drew them (they are lost).
+- LUMOS learns from the missed-cSS marks (user decision): uengine/imaging/patches.extract_marks (same surface-aligned extractor;
+  object = dark voxels INSIDE the drawing - detector dark map work/ID_dark.nii.gz first, else < -3 robust SD of the local brain;
+  growing beyond the drawing leaked into veins on the phantom); percival_gui _mark_maps / gather_marks / _lumos_marks (eligible
+  expert, development partition, not on a shown candidate), cache v6 (missed csv in the key); meta.component_oof compares LUMOS
+  with / without the marks on the same folds and uses them only when the candidate log loss is not worse (decision in
+  model.data.lumos_missed_marks + modules.LUMOS); training folds only, never held-out / test patients; nested gets the decision.
+  docs/percival_app/LUMOS_MISSED_MARKS.md, tests/test_lumos_missed_marks.py.
 
 ## 6. Open items / next steps (ask the user before starting)
 1. User reported the app WINDOW froze after "Use Percival_project" (server answered, page idle, no JS error in
