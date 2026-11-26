@@ -67,7 +67,9 @@ def log(msg, prog=None):
             JOB["progress"] = max(float(prog), JOB.get("progress", 0.0))           # never backwards
             JOB.setdefault("samples", []).append((now, JOB["progress"])); JOB["samples"] = JOB["samples"][-60:]
         if JOB.get("state") in ACTIVE_STATES:
-            JOB["heartbeat"] = now; JOB["stage"] = _stage_of(msg, JOB.get("stage", "")); JOB.pop("stall", None)
+            st_new = _stage_of(msg, JOB.get("stage", ""))
+            if st_new != JOB.get("stage"): JOB.setdefault("stage_times", {}).setdefault(st_new, now)     # when each stage began
+            JOB["heartbeat"] = now; JOB["stage"] = st_new; JOB.pop("stall", None)
         cancel = JOB.get("cancel") and JOB.get("state") in ACTIVE_STATES
     if cancel: raise Cancelled("cancelled by " + str(JOB.get("cancel_by", "you")))
 
@@ -84,6 +86,31 @@ STATE_LABEL = dict(idle="Idle", preparing="Preparing dataset", running="Training
 # stage-aware stall limits (seconds without any reported work): dataset gathering reads MRI patches study by study; a training stage
 # reports at least once per fold (nested cross-fitting: once per inner step). Overridable for tests: CSS_PERCIVAL_STALL_S
 STALL_S = dict(preparing=300, components=600, nested=900, discovery=600, final=600, evaluation=300, registering=120)
+# the stages of one cycle in the order they run (meta.train_cycle): shown in the Training Center as done / current / left
+STAGES = [("preparing", "Preparing the dataset (every study's expert calls and image patches)"),
+          ("components", "Component models: LUMOS images, NOX measurements (cross-validated)"),
+          ("discovery", "PERCIVAL meta-model discovery and analyses"),
+          ("final", "Final fit on the development cohort"),
+          ("nested", "Nested cross-validation of the whole procedure"),
+          ("evaluation", "Evaluation on the locked test group"),
+          ("registering", "Registering the new model version")]
+
+
+def _stages(now):
+    """done / current / left / skipped for every stage, with how long each took (from the first log line of the stage)"""
+    keys = [k for k, _ in STAGES]; cur = JOB.get("stage", ""); state = JOB.get("state", "idle"); T = JOB.get("stage_times", {})
+    finished = state == "finished"; seen = [keys.index(x) for x in T if x in keys]
+    ci = len(keys) if finished else keys.index(cur) if cur in keys else max(seen) if seen else -1   # failed / cancelled: where it stopped
+    out = []
+    for i, (k, lab) in enumerate(STAGES):
+        st = "done" if (finished or i < ci) else "current" if i == ci and state in ACTIVE_STATES else "stopped" if i == ci else "left"
+        if st == "done" and k not in T: st = "skipped"
+        t0 = T.get(k); nxt = [T[x] for x in keys[i + 1:] if x in T]
+        t1 = min(nxt) if nxt else (JOB.get("ended") or now)
+        out.append(dict(key=k, label=lab, status=st, duration_s=round(t1 - t0) if t0 and st in ("done", "current", "stopped") else None))
+    return out
+
+
 def _stage_of(msg, cur):
     m = msg.lower()
     for key, st in (("nested", "nested"), ("meta-model discovery", "discovery"), ("final fit", "final"), ("locked test", "evaluation"),
@@ -99,6 +126,7 @@ def _transition(new, **kw):
         old = JOB.get("state", "idle")
         if new not in TRANSITIONS.get(old, set()): raise RuntimeError(f"invalid training-job transition {old} -> {new}")
         JOB.update(state=new, **kw); JOB.setdefault("transitions", []).append(dict(frm=old, to=new, at=time.strftime("%Y-%m-%d %H:%M:%S")))
+        if new in ACTIVE_STATES and kw.get("stage"): JOB.setdefault("stage_times", {}).setdefault(kw["stage"], time.time())   # progress card
         if new in TERMINAL_STATES: JOB["ended"] = time.time(); JOB.pop("stall", None)
 
 
@@ -169,7 +197,11 @@ def job_state():
         j.update(state_label=STATE_LABEL.get(JOB.get("state", "idle"), JOB.get("state")), stalled=bool(st),
                  elapsed_s=round((end or now) - start) if start else None, heartbeat_age_s=round(now - JOB["heartbeat"]) if JOB.get("heartbeat") else None,
                  run=RUN.get("id"), log=JOB.get("log", [])[-40:], resume_supported=False,
-                 retry_note="retry restarts the cycle from the beginning (no partial-result resume: a cycle is a single reproducible computation)")
+                 retry_note="retry restarts the cycle from the beginning (no partial-result resume: a cycle is a single reproducible computation)",
+                 active=JOB.get("state") in ACTIVE_STATES, stages=_stages(now), n_stages=len(STAGES))
+        j["stages_left"] = sum(1 for x in j["stages"] if x["status"] == "left")
+        j["stage_label"] = next((x["label"] for x in j["stages"] if x["key"] == JOB.get("stage")), JOB.get("stage") or "")
+        j.pop("stage_times", None)
         if JOB.get("state") in ACTIVE_STATES: j.update(eta=_eta(now))
     j["resources"] = _proc_resources() if j.get("state") in ACTIVE_STATES else JOB.get("resources_last")
     if j.get("state") in ACTIVE_STATES:
@@ -532,7 +564,9 @@ def _gather(sid, labelled=True):
     import review_calls_gui as RCG
     NX, _nv = nox_feature_set(); EXTRA = [c for c in NX if c not in CHAR]   # Stage 2: approved extra NOX measurements are gathered too
     deps.append(os.path.join(B(), "review", f"{sid}_qc.json"))                 # Stage 3: calibration subgroups
-    key = RCG.file_key(deps, B()) + [int(may_read(sid))] + ([["nox_extra"] + EXTRA] if EXTRA else [])   # Phase 3D review: content hashes
+    from uengine.imaging import geometry as _G
+    key = RCG.file_key(deps, B()) + [int(may_read(sid))] + ([["nox_extra"] + EXTRA] if EXTRA else []) \
+          + [["envelope", _G.MAX_INPLANE_MM, _G.MAX_SLICE_MM, _G.VOXEL_TOL_MM]]                  # a new voxel-size limit re-extracts the patches
     cj, cz = P("cache", f"{sid}.json"), P("cache", f"{sid}.npz"); C = _jl(cj, {})
     if C.get("key") != key or C.get("v") != 6 or not os.path.exists(cz):        # v5: NOX set with x1 / x2 / x5; v6: missed-mark patches (LUMOS)
         if CTX.get("ensure_local"):                                         # images moved to Pensieve after the review: bring them back first
@@ -1164,7 +1198,8 @@ def train_async(reason="manual"):
     with LOCK:
         if JOB["state"] in ACTIVE_STATES: return dict(ok=True, already_running=True)
         for k in ("cancel", "cancel_by", "cancel_at", "stall", "ended", "resources_peak", "resources_last", "samples", "transitions"): JOB.pop(k, None)
-    _transition("preparing", log=[], progress=0.0, error="", reason=reason, started=time.time(), heartbeat=time.time(), stage="preparing")
+    _transition("preparing", log=[], progress=0.0, error="", reason=reason, started=time.time(), heartbeat=time.time(), stage="preparing",
+                stage_times=dict(preparing=time.time()))
     th = threading.Thread(target=_train, args=(reason,), daemon=True)
     with LOCK: JOB["thread"] = th
     th.start(); return dict(ok=True, started=True)
@@ -1245,7 +1280,8 @@ def _train(reason):
     if JOB.get("state") != "preparing":
         with LOCK:
             for k in ("cancel", "cancel_by", "cancel_at", "stall", "ended", "resources_peak", "resources_last", "samples"): JOB.pop(k, None)
-        _transition("preparing", log=[], progress=0.0, error="", reason=reason, started=time.time(), heartbeat=time.time(), stage="preparing")
+        _transition("preparing", log=[], progress=0.0, error="", reason=reason, started=time.time(), heartbeat=time.time(), stage="preparing",
+                    stage_times=dict(preparing=time.time()))
     _run_start(reason)
     try:
         SL = selection(); sel = [s["code"] for s in SL if s["included"]]
@@ -1800,7 +1836,8 @@ def inputs(sel):
 def state():
     from uengine.percival import meta as MT, datasets as DS
     if not STORE["ok"]: return dict(store=STORE, authorized=authorized(), job=dict(state="idle"), selection=[], versions=[], history=[], log=[])
-    with LOCK: job = {k: v for k, v in JOB.items() if k != "log"}; jlog = JOB["log"][-60:]      # job FIRST (v5.23): a cycle finishing while
+    job = job_state(); job.pop("log", None)                                                     # stages, elapsed, ETA (v5.25 progress card)
+    with LOCK: jlog = JOB["log"][-60:]                                                          # job FIRST (v5.23): a cycle finishing while
     vs = versions(); latest = load(vs[-1]) if vs else None; M = active(); sel = selection()      # this runs must not look finished with old versions
     strip = lambda m: None if not m else {k: v for k, v in m.items() if k not in ("components", "meta_ensemble")}
     return dict(authorized=authorized(), autocycle=CTX["SET"].get("percival_autocycle", False), cycle_n=int(CTX["SET"].get("percival_cycle_n", 5)),

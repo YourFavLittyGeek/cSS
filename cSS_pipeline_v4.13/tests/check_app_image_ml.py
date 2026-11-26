@@ -96,7 +96,7 @@ try:
     check("engine-verified inputs unchanged", d.get("original_inputs_unchanged") is True)
     post(U, "/api/im/run", dict(code="SYN002")); r2 = wait(U, "SYN002")
     st2 = {c["status"] for c in (r2.get("image_ml") or {}).get("candidates", [])}
-    check("invalid image study (3 mm slices) -> not scorable", st2 == {"not_scorable"} and "quality_refused" in ((r2.get("image_ml") or {}).get("study") or {}).get("blocked", ""), str(st2))
+    check("invalid image study (3.5 mm slices) -> not scorable", st2 == {"not_scorable"} and "quality_refused" in ((r2.get("image_ml") or {}).get("study") or {}).get("blocked", ""), str(st2))
     os.makedirs(os.path.join(B, "unified_engine", "models", "image"), exist_ok=True)
     with open(os.path.join(B, "unified_engine", "models", "image", "zz_corrupt.json"), "w") as fh: fh.write("{broken")
     ms = get(U, "/api/im/models?force=1").get("models", [])

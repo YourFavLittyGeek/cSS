@@ -58,7 +58,7 @@ def sample_profile(rng, **override):
     field = float(rng.choice([1.5, 3.0], p=[0.3, 0.7]))
     p = dict(vendor=str(rng.choice(["SYNTH-A", "SYNTH-B"])), field_T=field,
              TE_ms=round(float(rng.uniform(30, 45) if field == 1.5 else rng.uniform(15, 30)), 1),
-             inplane_mm=round(float(rng.uniform(0.5, 1.0)), 2), slice_mm=round(float(rng.choice([1.0, 1.2, 1.5, 2.0, 2.5, 3.0], p=[.2, .3, .2, .15, .1, .05])), 2),
+             inplane_mm=round(float(rng.uniform(0.5, 1.0)), 2), slice_mm=round(float(rng.choice([1.0, 1.2, 1.5, 2.0, 2.5, 3.5], p=[.2, .3, .2, .15, .1, .05])), 2),
              snr=round(float(rng.uniform(10, 40) if rng.random() > 0.05 else 6.0), 1), bias=round(float(rng.uniform(0, 0.3)), 3),
              ghost=round(float(rng.choice([0.0, rng.uniform(0.05, 0.2), 0.4], p=[0.8, 0.15, 0.05])), 3),
              tilt_deg=round(float(rng.uniform(0, 15)), 1), axcodes=str(rng.choice(["RAS", "LAS", "LPS"])),

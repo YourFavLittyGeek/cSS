@@ -75,7 +75,9 @@ class TestGate(unittest.TestCase):
 
     def test_voxel_envelope(self):
         self.assertEqual(self.st(_img(vox=(0.8, 0.8, 2.2)))["status"], "low_confidence")       # css_qc thick slices
-        g = self.st(_img(vox=(0.8, 0.8, 3.0))); self.assertEqual(g["status"], "quality_refused")
+        g = self.st(_img(vox=(0.8, 0.8, 3.5))); self.assertEqual(g["status"], "quality_refused")
+        for z in (3.0, 3.000335, 2.999985):                                                      # 2026-11-26: 3 mm clinical SWI is learned from
+            self.assertNotEqual(self.st(_img(vox=(0.898438, 0.898438, z)))["status"], "quality_refused", z)
         g = self.st(_img(vox=(1.2, 1.2, 1.5))); self.assertEqual(g["status"], "quality_refused")
 
     def test_header_codes_zero_refused(self):

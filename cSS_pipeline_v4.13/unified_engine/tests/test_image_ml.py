@@ -111,7 +111,7 @@ class TestInference(Fixture):
         r = INF.run_study(b, "SYN010", model_path=self.model)
         self.assertTrue(r["candidates"]); self.assertTrue(all(c["status"] == "not_scorable" for c in r["candidates"]))
         self.assertIn("geometry_refused", r["study"]["blocked"])
-        b2 = os.path.join(self.W, "thick"); C.write_study(b2, "SYN011", C.sample_profile(np.random.default_rng(0), slice_mm=3.0),
+        b2 = os.path.join(self.W, "thick"); C.write_study(b2, "SYN011", C.sample_profile(np.random.default_rng(0), slice_mm=3.5),
                                                            C.sample_objects(np.random.default_rng(1), 1, 2))
         r = INF.run_study(b2, "SYN011", model_path=self.model); self.assertIn("quality_refused", r["study"]["blocked"])
         b3 = os.path.join(self.W, "corruptimg"); p = S.write_study(b3, "SYN012")

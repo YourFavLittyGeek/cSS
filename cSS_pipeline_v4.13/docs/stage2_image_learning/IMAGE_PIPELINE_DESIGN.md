@@ -15,7 +15,7 @@ Every stage is a pure function of (files, their sha256, parameters) and writes o
 |---|---|---|
 | header | qform or sform code > 0; affine finite, determinant != 0 | `geometry_refused` |
 | slice axis | the detector's rule: array axis 2 is the S-I axis and the thickest | `geometry_refused` (the detector stops anyway) |
-| voxel size | in-plane <= 1.0 mm, slice <= 2.5 mm (proposal) | `quality_refused`, reported |
+| voxel size | in-plane <= 1.0 mm, slice <= 3.0 mm (2026-11-26 user decision, was 2.5; tolerance 0.01 mm for header rounding) | `quality_refused`, reported |
 | channel grid | FLAIR / labels / phase on the SWI grid (shape + affine within 1e-4 mm) | channel absent, not resampled silently |
 | freshness | channel not older than the SWI | channel absent (existing `stale_against`) |
 | registration | `bbregister` cost from the LTA chain below a threshold (to be set on synthetic misregistration tests; css_qc already records it) | channel absent + `low_confidence_review` |

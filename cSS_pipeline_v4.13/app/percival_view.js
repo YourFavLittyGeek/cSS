@@ -39,6 +39,25 @@ function pvTip(H){const tip=$("#pvtip");if(!tip)return;document.querySelectorAll
   tip.innerHTML=`<b>${esc(h.version)}</b> · ${esc((h.at||"").replace("T"," "))}<br>${h.studies} studies · ${h.candidates} candidates<br>chosen: ${esc(MN[h.chosen]||h.chosen)}<br>locked test AUC <b>${g3(h.test_auc)}</b>${h.test_ci?` [${g3(h.test_ci[0])}–${g3(h.test_ci[1])}]`:""} · ALBUS ${g3(h.test_math_auc)}<br>${h.promoted?"promoted":h.passed?"passed":"not promoted"}`;
   tip.classList.remove("hide");const b=r.getBoundingClientRect(),p=r.closest("div").getBoundingClientRect();tip.style.left=Math.min(b.left-p.left+16,p.width-230)+"px";tip.style.top="8px"};r.onmouseleave=()=>tip.classList.add("hide")})}
 function pvMetricsRow(name,m,sw){m=m||{};return `<tr><td>${sw?`<i class="lv-sw" style="background:${sw}"></i>`:""}${name}</td><td class="mono">${g3(m.auc)}</td><td class="mono">${m.auc_ci?`${g3(m.auc_ci[0])}–${g3(m.auc_ci[1])}`:"—"}</td><td class="mono">${g3(m.pr_auc)}</td><td class="mono">${g3(m.brier)}</td><td class="mono">${g3(m.calib_slope)}</td><td>${m.n??"—"}</td></tr>`}
+// v5.25 training progress: one card for the PERCIVAL header and the Training Center - stages done / current / left, elapsed and
+// remaining time, stall warning and the last log lines. The button reads "Training…" (greyed, locked) while a cycle is active.
+const PV_ACTIVE=j=>!!j&&(j.active||j.state==="preparing"||j.state==="running");
+function pvDur(x){if(x==null||!isFinite(x))return "—";x=Math.max(0,Math.round(x));const h=Math.floor(x/3600),m=Math.floor(x%3600/60),sec=x%60;return h?`${h} h ${m} min`:m?`${m} min ${sec} s`:`${sec} s`}
+function pvTrainBtn(j,id,idle){const on=PV_ACTIVE(j);return `<button class="b pri" id="${id}" data-pv="train-btn" ${on?'disabled aria-disabled="true" title="a training cycle is running - this unlocks when it finishes"':""}>${on?"Training…":idle}</button>`}
+function pvJobCard(j,full){j=j||{};const on=PV_ACTIVE(j),st=j.stages||[];if(!on&&!full&&!["finished","failed","cancelled","insufficient_data","interrupted"].includes(j.state))return "";
+  const pc=Math.round(100*(j.progress||0)),E=j.eta||{},done=st.filter(x=>x.status==="done"||x.status==="skipped").length,cur=st.find(x=>x.status==="current");
+  const rem=on?(E.eta_s!=null?`${pvDur(E.eta_s)}${E.eta_range_s&&E.eta_range_s[0]!=null&&E.eta_range_s[1]!=null?` (range ${pvDur(E.eta_range_s[0])} – ${pvDur(E.eta_range_s[1])})`:""}${E.reliable?"":" · early estimate"}`:"estimating…"):"—";
+  const icon=x=>x.status==="done"?'<span class="ok">✓</span>':x.status==="current"?'<span class="pulse">●</span>':x.status==="skipped"?'<span class="note">–</span>':x.status==="stopped"?'<span class="bad">✗</span>':'<span class="note">○</span>';
+  const head=on?`<b>${esc(j.state_label||"Training")}</b> · stage ${Math.min(done+1,st.length||7)} of ${st.length||7}${cur?`: ${esc(cur.label)}`:""}`:`<b>${esc(j.state_label||j.state||"Idle")}</b>`;
+  return `<div class="card" data-pv="job-card" style="margin:10px 0">
+   <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><span>${head}</span><span class="mono">${pc} %</span></div>
+   <div style="background:var(--border);height:10px;border-radius:5px;overflow:hidden;margin:6px 0"><div style="background:var(--lv-1);height:100%;width:${pc}%;transition:width .3s"></div></div>
+   <div class="row" style="gap:18px;flex-wrap:wrap"><span class="note">Elapsed <b>${pvDur(j.elapsed_s)}</b></span><span class="note">Remaining <b>${rem}</b></span>
+    <span class="note">Stages left <b>${on?j.stages_left??"—":0}</b> of ${st.length||7}</span>${on&&j.heartbeat_age_s!=null?`<span class="note">last activity ${pvDur(j.heartbeat_age_s)} ago</span>`:""}<span class="sp"></span>${on&&!j.cancel?`<button class="b sm danger" data-pv-cancel="1" title="stops at the next step; no model is registered">Cancel cycle</button>`:on&&j.cancel?'<span class="note">cancelling at the next step…</span>':""}</div>
+   ${j.stall?`<p class="warn" style="margin:6px 0">${esc(j.stall.reason)}</p>`:""}${j.state==="failed"||j.state==="insufficient_data"?`<p class="${j.state==="failed"?"bad":"warn"}" style="margin:6px 0">${esc(j.error||"")}</p>`:""}
+   <ol style="margin:8px 0 4px;padding-left:20px">${st.map(x=>`<li style="margin:2px 0;${x.status==="current"?"font-weight:600":x.status==="left"?"opacity:.6":""}">${icon(x)} ${esc(x.label)}${x.duration_s!=null?` <span class="note">· ${pvDur(x.duration_s)}</span>`:""}${x.status==="skipped"?' <span class="note">· not run</span>':""}</li>`).join("")}</ol>
+   ${(j.log||[]).length?`<details ${on&&full?"open":""}><summary class="note" style="cursor:pointer">What is happening now (last ${Math.min(8,j.log.length)} steps)</summary><pre class="mono" style="white-space:pre-wrap;font-size:11.5px;margin:4px 0">${j.log.slice(-8).map(esc).join("\n")}</pre></details>`:""}
+   <p class="note" style="margin:4px 0 0">The remaining time is estimated from the progress so far; image training (LUMOS) is the longest stage. Keep the app open and the drive connected.</p></div>`}
 const PVMH='<tr><th></th><th>AUC</th><th>95 % CI</th><th>PR-AUC</th><th>Brier</th><th>calibration slope</th><th>n</th></tr>';
 async function intelView(v){{const hq=location.hash.match(/^#intel\?tab=(\w+)/);if(hq&&PV._hq!==hq[1]){PV._hq=hq[1];PV.tab=hq[1]}}
   PV.tab=({training:"center",registry:"models"})[PV.tab]||PV.tab;   // v5.24 names (old deep links still work)   // v5.23 deep link #intel?tab=evidence
@@ -51,9 +70,10 @@ async function intelView(v){{const hq=location.hash.match(/^#intel\?tab=(\w+)/);
       <button class="b sm ${PV.viewMode==='standard'?'pri':''}" id="pv-mode-std" title="Clinical research terminology">Standard View</button>
       <button class="b sm ${PV.viewMode==='advanced'?'pri':''}" id="pv-mode-adv" title="In-depth algorithmic formulas and metrics">Advanced Research View</button>
     </div>
-    ${s.authorized?`<button class="b pri" id="pv-train" ${job.state==="running"?"disabled":""}>${job.state==="running"?`training cycle… ${Math.round(100*(job.progress||0))} %`:"Start a training cycle"}</button><span class="note">next automatic cycle after ${Math.max(0,s.cycle_n-s.since_last)} more finished studies</span>`
+    ${s.authorized?`${pvTrainBtn(job,"pv-train","Start a training cycle")}<span class="note">next automatic cycle after ${Math.max(0,s.cycle_n-s.since_last)} more finished studies</span>`
       :'<button class="b pri" id="pv-on" data-pv="switch-on">Switch on local learning</button><span class="note">lets the app learn from this project\'s MRI and expert reviews - on this Mac only</span>'}
     <span class="sp"></span>${job.state==="failed"?`<span class="bad">last cycle failed: ${esc(job.error)}</span>`:job.state==="insufficient_data"?`<span class="warn">training paused: expert review needed</span>`:""}</div>
+   ${PV.tab==="center"?"":pvJobCard(job,false)}
    <div class="tiles" data-pv="tiles">
     <div class="tile"><div class="n">${d?d.studies:0}</div><div class="t">studies learned</div></div>
     <div class="tile"><div class="n">${d?d.dev_candidates+d.test_candidates:0}</div><div class="t">candidates${d?` · ${d.css} cSS / ${d.not_css} not`:""}</div></div>
@@ -266,10 +286,11 @@ async function intelView(v){{const hq=location.hash.match(/^#intel\?tab=(\w+)/);
   $("#pv-mode-adv")&&($("#pv-mode-adv").onclick=()=>{PV.viewMode="advanced";localStorage.setItem("pv_view_mode","advanced");intelView(v)});
   $("#pv-rb")&&($("#pv-rb").onclick=async()=>{const r=await api("/api/percival/rollback",{});toast(r.ok?`rolled back to ${esc(r.version)}`:esc(r.error),!r.ok);intelView(v)});
   $("#pv-on")&&($("#pv-on").onclick=async()=>{if(!confirm("Switch on local learning? Percival will read this project's MRI and expert reviews to learn - on this Mac only; nothing is uploaded and no external AI service is used."))return;await api("/api/percival/authorize",{on:true});await api("/api/percival/train",{});toast("switched on - the first training cycle started");intelView(v)});
+  v.querySelectorAll("[data-pv-cancel]").forEach(b=>b.onclick=async()=>{if(!confirm("Cancel the running training cycle? It stops at its next step and no model is registered."))return;b.disabled=true;const r=await api("/api/percival/job",{action:"cancel"});toast(r.ok?"cancelling - stops at the next step":esc(r.error),!r.ok);intelView(v)});
   $("#pv-train")&&($("#pv-train").onclick=async()=>{await api("/api/percival/train",{});toast("training cycle started");intelView(v)});
   v.querySelectorAll("[data-pvsh]").forEach(b=>b.onclick=async()=>{const r=await api("/api/percival/shadow",{version:b.dataset.pvsh});toast(r.ok?`shadow run of ${esc(b.dataset.pvsh)} started`:esc(r.error),!r.ok);intelView(v)});
   v.querySelectorAll("[data-pvds]").forEach(a=>a.onclick=e=>{e.preventDefault();PV.tab="center";PV.ds=a.dataset.pvds;intelView(v)});
-  if(job.state==="running")setTimeout(()=>V==="intel"&&intelView(v),2500)}
+  clearTimeout(PV.jt);if(PV_ACTIVE(job))PV.jt=setTimeout(()=>V==="intel"&&intelView(v),2500)}   // refresh while preparing AND training
 
 // 2026-11-25 one learning loop per module: each module checked on its own against its previous version
 function pvModules(X){const Mo=(X||{}).modules;if(!Mo)return "";const v=r=>r.verdict==="improved"?'<span class="pill ok">improved</span>':r.verdict==="not improved"?'<span class="pill warn">not improved - previous version kept</span>':`<span class="pill">${esc(r.verdict||"")}</span>`;
@@ -371,7 +392,7 @@ async function pvCenter(el,s,v){
         <h3 style="margin:0 0 4px">1. Training Overview</h3>
         <p class="note" style="margin:0">${isAdv?"State telemetry: study registry, ALBUS candidate discovery, expert ground truth, missed lesions, and cohort partitioning.":"Summary of registered MRI scans, candidate discovery, expert radiologist annotations, and learning readiness."}</p>
       </div>
-      <span class="pill ${preflightPass?'ok':s.job&&s.job.state==='running'?'warn':L.stale?'warn':'bad'}">${s.job&&s.job.state==='running'?'Training Active':preflightPass?'Ready for Training':minReqsMet?'Awaiting Pre-flight':'More Annotations Needed'}</span>
+      <span class="pill ${preflightPass?'ok':PV_ACTIVE(s.job)?'warn':L.stale?'warn':'bad'}">${PV_ACTIVE(s.job)?'Training Active':preflightPass?'Ready for Training':minReqsMet?'Awaiting Pre-flight':'More Annotations Needed'}</span>
     </div>
     <div class="tiles" style="margin-top:12px">
       ${tile(O.registered,isAdv?"Registered Studies":"Total Studies Registered")}
@@ -577,9 +598,7 @@ async function pvCenter(el,s,v){
         <h3 style="margin:0 0 4px">9. Start Training Cycle</h3>
         <p class="note" style="margin:0">Pre-flight readiness audit and manual training execution trigger.</p>
       </div>
-      <button class="b pri" id="pvc-start-train" ${j.state==="running"?"disabled":""}>
-        ${j.state==="running"?`Training in progress (${Math.round(100*(j.progress||0))}%)`:"Start Training Cycle"}
-      </button>
+      ${pvTrainBtn(j,"pvc-start-train","Start Training Cycle")}
     </div>
     <div style="background:var(--bg);border-radius:6px;padding:12px;margin-top:12px">
       <h4 style="margin:0 0 8px">Pre-Flight Diagnostic Checklist</h4>
@@ -600,16 +619,7 @@ async function pvCenter(el,s,v){
   <div class="card" data-pv="section-progress">
     <h3 style="margin:0 0 4px">10. Live Training Progress &amp; Heartbeat</h3>
     <p class="note" style="margin-top:0">Monitors background training worker, feature extraction, cross-validation folds, and model convergence.</p>
-    <div style="margin:12px 0">
-      <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-        <span class="note">Worker State: <b>${esc(j.state||"idle")}</b> ${j.state==="running"?'<span class="pulse">●</span>':''}</span>
-        <span class="mono">${Math.round(100*(j.progress||0))}%</span>
-      </div>
-      <div style="background:var(--border);height:8px;border-radius:4px;overflow:hidden">
-        <div style="background:var(--lv-1);height:100%;width:${Math.round(100*(j.progress||0))}%;transition:width 0.3s"></div>
-      </div>
-      <p class="note" style="margin-top:6px">${esc(j.phase||(j.state==="running"?"Training models across cross-validation folds...":"Ready for training cycle."))}</p>
-    </div>
+    ${pvJobCard(j,true)}
   </div>
 
   <!-- SECTION 11: Evaluation Results -->

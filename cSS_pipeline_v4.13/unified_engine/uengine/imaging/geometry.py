@@ -23,7 +23,8 @@ OBLIQUE_LOW_CONF_DEG = _QC["OBLIQUE_LOW_CONF_DEG"]
 
 # Stage 2 design envelope (IMAGE_PIPELINE_DESIGN section 2; approved as proposed, NOT validated on clinical data)
 MAX_INPLANE_MM = 1.0
-MAX_SLICE_MM = 2.5
+MAX_SLICE_MM = 3.0          # 2026-11-26 user decision: 3 mm clinical SWI is learned from (was 2.5; a new milestone + retrain)
+VOXEL_TOL_MM = 0.01         # header rounding (e.g. 3.000335 mm) is not a thicker slice
 QS_AGREE_MM = 0.01          # qform and sform both coded: larger disagreement = ambiguous geometry
 ZOOM_AGREE_MM = 1e-3        # header voxel size vs affine column norms
 GRID_TOL_MM = 1e-4          # "same grid" tolerance (DATA_SCHEMA: on_swi_grid)
@@ -120,7 +121,7 @@ def gate(d):
         F.append(_f("slice_axis", "geometry_refused", f"array axis 2 is not the S-I / thickest axis (orientation {d['axcodes']}, voxel "
                                                      f"{d['zooms_mm']}): the detector stops; reslicing is refused here, not guessed"))
     z = d["zooms_mm"]; inpl = max(z[0], z[1])
-    if not any(f["check"] == "slice_axis" for f in F) and (inpl > MAX_INPLANE_MM or z[2] > MAX_SLICE_MM):
+    if not any(f["check"] == "slice_axis" for f in F) and (inpl > MAX_INPLANE_MM + VOXEL_TOL_MM or z[2] > MAX_SLICE_MM + VOXEL_TOL_MM):
         F.append(_f("voxel_size", "quality_refused", f"voxel {z} outside the image-learning envelope (in-plane <= {MAX_INPLANE_MM}, "
                                                     f"slice <= {MAX_SLICE_MM} mm)"))
     if max(z) > THICK_SLICE_MM:

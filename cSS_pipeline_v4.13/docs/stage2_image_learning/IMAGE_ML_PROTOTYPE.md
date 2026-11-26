@@ -63,7 +63,7 @@ CSS_BASE=/tmp/percival_imageml_demo CSS_EXPERIMENTAL=1 PYTHONPATH=app/guard pyth
 ```
 Then open **http://127.0.0.1:8830/#imageml** (or click **Research > Image ML**). Press **Run inference** on a study, then **Open**; click a
 candidate row to see its patches, class probabilities, features and provenance. Direct links: `#imageml:SYN001`, `#imageml:SYN001:c1`.
-In this seed SYN002 and SYN004 have 3 mm slices and show the "not scorable" path; SYN003 (2.5 mm slices) shows quality-flagged "uncertain".
+In this seed SYN002 and SYN004 have 3.5 mm slices (3 mm until 2026-11-26, when the limit became 3.0 mm) and show the "not scorable" path; SYN003 (2.5 mm slices) shows quality-flagged "uncertain".
 Stop the app with Ctrl-C. Optional: `python unified_engine/run_imaging.py infer SYN001 --base /tmp/percival_imageml_demo --write` (CLI).
 Requirements: the existing `css` environment (numpy, scipy, nibabel, pandas); no internet, no GPU, no PyTorch; the model weights are in the
 repository. Retrain (synthetic, ~4 min, never overwrites): `python unified_engine/run_imaging.py train-synthetic /tmp/my_model.json`, then copy
