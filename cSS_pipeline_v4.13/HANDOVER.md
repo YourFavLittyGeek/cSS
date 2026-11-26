@@ -119,6 +119,17 @@ Read this first, then CLAUDE.md (project science + history). Do not trust older 
   with / without the marks on the same folds and uses them only when the candidate log loss is not worse (decision in
   model.data.lumos_missed_marks + modules.LUMOS); training folds only, never held-out / test patients; nested gets the decision.
   docs/percival_app/LUMOS_MISSED_MARKS.md, tests/test_lumos_missed_marks.py.
+- LUMOS second look (built, INACTIVE until >= 50 marks / 10 patients / 70 % held-out marks recognised): second_look.py, app
+  PG.second_look (background scan, percival/second_look/ID.json+npz), css_app /api/second_look (blind-gated), reviewer card +
+  /api/lumos_reject (expert rejects = LUMOS 'not cSS' examples), Model Center line. Also fixed: marks with a plane NAME did not
+  draw / 'go to' in the viewer. tests/test_lumos_second_look.py. User started re-marking (026: 2, 027: 1 saved OK).
+- Steps 1-4 (2026-11-26): ALBUS re-detection of marks (app/albus_redetect.py + scripts/albus_measure.py: PINNED detector executed with
+  forced objects in memory on a disposable APFS-clone copy; detect_css.py NOT changed), reviewer confirms ALBUS's orange outline
+  (/api/albus_marks, /api/albus_confirm, review/ID_missed_confirm_by_*.csv), NOX learns from confirmed objects (origin AUC <= 0.75 +
+  paired no-harm rule meta.no_harm, also for LUMOS), PERCIVAL scores marks without ALBUS (meta.NoAlbus; test.missed_lesions separate), Model
+  Center "Where ALBUS loses cSS" (fate_report). Viewer: Save button fixed (onclick took the event), pen clipped to the image.
+  tests/test_albus_redetect.py (phantom end-to-end: project untouched). NOTE: detect_css.py fails on uengine synthetic_images studies
+  (NameError _dil at line 647) - pre-existing, not touched; phantom_v4 studies run.
 
 ## 6. Open items / next steps (ask the user before starting)
 1. User reported the app WINDOW froze after "Use Percival_project" (server answered, page idle, no JS error in

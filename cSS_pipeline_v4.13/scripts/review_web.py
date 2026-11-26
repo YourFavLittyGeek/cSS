@@ -954,6 +954,75 @@ def _meta_full(sid, reviewer, mode, s, blind=False):
                 call_names=CALLS, fine_labels={k: [[c, LABELS[c][0]] for c in v] for k, v in FINE.items()}, side_check=side_check(s), snapdir=f"{B}/review/snapshots/{sid}", acq=acq_info(sid))
 
 
+def second_look(sid):
+    """2026-11-25 LUMOS second look: suggestions of possible missed cSS for this study, asked from the Percival app (it owns the model and
+    the activation gate). AI content: refused during a blind initial read (ROUTES)."""
+    port = os.environ.get("CSS_APP_PORT", "")
+    if not port.isdigit(): return dict(active=False, reasons=["the reviewer was not started from the Percival app"])
+    try:
+        import urllib.request, urllib.parse
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/second_look?code={urllib.parse.quote(sid)}", timeout=3) as r:
+            return json.loads(r.read().decode())
+    except Exception as e:
+        return dict(active=False, reasons=[f"the Percival app did not answer ({type(e).__name__})"])
+
+
+def albus_marks(sid):
+    """2026-11-25 ALBUS's re-detection of this study's missed-cSS marks (outline + measurements summary), asked from the Percival app.
+    Detector output: refused during a blind initial read (ROUTES)."""
+    port = os.environ.get("CSS_APP_PORT", "")
+    if not port.isdigit(): return dict(state="unavailable", marks={}, note="the reviewer was not started from the Percival app")
+    try:
+        import urllib.request, urllib.parse
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/albus_marks?code={urllib.parse.quote(sid)}", timeout=3) as r:
+            return json.loads(r.read().decode())
+    except Exception as e:
+        return dict(state="unavailable", marks={}, note=f"the Percival app did not answer ({type(e).__name__})")
+
+
+CONF_COLS = ["missed_id", "object_sha", "status", "reviewer", "time", "read_phase"]
+
+
+def albus_confirm(sid, reviewer, d, **info):
+    """the reviewer says ALBUS's outline of a missed-cSS mark is correct / wrong -> review/ID_missed_confirm_by_<reviewer>.csv (own file,
+    the latest answer per mark and object). Only confirmed outlines teach NOX and PERCIVAL."""
+    try: mid = int(d.get("missed_id"))
+    except (TypeError, ValueError): raise RB.BlindError("invalid mark", 400)
+    st = str(d.get("status", "")); sha = str(d.get("object_sha", ""))
+    if st not in ("correct", "wrong") or not re.fullmatch(r"[0-9a-f]{16}", sha): raise RB.BlindError("invalid answer", 400)
+    p = f"{B}/review/{sid}_missed_confirm_by_{slug(reviewer)}.csv"
+    with RIO.study_lock(B, sid):
+        df = pd.read_csv(p, dtype=str).fillna("") if os.path.exists(p) else pd.DataFrame(columns=CONF_COLS)
+        df = df[~((df["missed_id"] == str(mid)) & (df["object_sha"] == sha))]
+        df = pd.concat([df, pd.DataFrame([dict(missed_id=str(mid), object_sha=sha, status=st, reviewer=reviewer, time=now(),
+                                               read_phase=str(info.get("read_phase", "")))])], ignore_index=True)[CONF_COLS]
+        tmp = p + ".tmp"; df.to_csv(tmp, index=False); os.replace(tmp, p)
+    return df.to_dict("records")
+
+
+REJ_COLS = ["key", "model", "p", "vox_i", "vox_j", "vox_k", "reviewer", "time", "read_phase", "ai_visible"]
+
+
+def lumos_reject(sid, reviewer, d, **info):
+    """the reviewer says a LUMOS suggestion is not cSS -> review/ID_lumos_rejects_by_<reviewer>.csv (own file, one row per suggestion;
+    a later answer replaces the earlier one). LUMOS learns these as 'not cSS' image examples."""
+    key = str(d.get("key", ""))
+    if not re.fullmatch(r"spot_\d{1,4}", key): raise RB.BlindError("invalid suggestion", 400)
+    v = d.get("vox") or [0, 0, 0]
+    try: v = [int(x) for x in v][:3]
+    except (TypeError, ValueError): raise RB.BlindError("invalid suggestion", 400)
+    p = f"{B}/review/{sid}_lumos_rejects_by_{slug(reviewer)}.csv"
+    with RIO.study_lock(B, sid):
+        df = pd.read_csv(p, dtype=str).fillna("") if os.path.exists(p) else pd.DataFrame(columns=REJ_COLS)
+        model = re.sub(r"[^\w.-]", "", str(d.get("model", "")))[:20]
+        df = df[~((df["key"] == key) & (df["model"] == model))]
+        row = dict(key=key, model=model, p=str(round(float(d.get("p") or 0), 3)), vox_i=str(v[0]), vox_j=str(v[1]), vox_k=str(v[2]),
+                   reviewer=reviewer, time=now(), read_phase=str(info.get("read_phase", "")), ai_visible=str(info.get("ai_visible", "")))
+        df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)[REJ_COLS]
+        tmp = p + ".tmp"; df.to_csv(tmp, index=False); os.replace(tmp, p)
+    return df.to_dict("records")
+
+
 def viewer_ident(sid):
     """2026-11-25: name / MRN / accession for the image overlay - asked from the Percival app for every request (Standard + vault readable:
     the identifiers; Incognito / locked: the study code). Only these keys are passed on; nothing is cached on disk or logged. Without the app
@@ -982,7 +1051,8 @@ ROUTES = {("GET", "/"): "static", ("GET", "/morph3d.js"): "static", ("GET", "/ap
           ("POST", "/api/snapshot"): "redacted", ("POST", "/api/openfolder"): "settings", ("POST", "/api/primary"): "removed",
           ("POST", "/api/call"): "write", ("POST", "/api/missed"): "write", ("POST", "/api/finish"): "write", ("POST", "/api/unblind"): "write",
           ("POST", "/api/wholestudy"): "write", ("GET", "/api/pensieve"): "settings", ("POST", "/api/pensieve_restore"): "settings",
-          ("GET", "/api/ident"): "settings"}
+          ("GET", "/api/ident"): "settings", ("GET", "/api/second_look"): "refused", ("POST", "/api/lumos_reject"): "refused",
+          ("GET", "/api/albus_marks"): "refused", ("POST", "/api/albus_confirm"): "refused"}
 SAFE_ERRORS = (RIO.RecoveryError, RIO.LockTimeout)
 
 
@@ -1035,6 +1105,8 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/seqmeta":
                 s = study(q["study"]); s.volume(q["seq"]); return self._send(s.meta_seq[q["seq"]])
             if u.path == "/api/struct3d": return self._send(study(q["study"]).struct3d(int(q["cand"])))
+            if u.path == "/api/second_look": return self._send(second_look(q["study"]))
+            if u.path == "/api/albus_marks": return self._send(albus_marks(q["study"]))
             if u.path == "/api/uscore": return self._send(uscore_report(q["study"], int(q["cand"])))   # v5.14-gui screen B (read-only)
             if u.path == "/api/morph3d": return self._send(study(q["study"]).morph3d(int(q["cand"]), float(q.get("margin", 8))))
             if u.path == "/morph3d.js": return self._send(open(os.path.join(HERE, "morph3d_view.js"), "rb").read(), "text/javascript; charset=utf-8")
@@ -1157,9 +1229,16 @@ class H(BaseHTTPRequestHandler):
                            blind_id=ctx.to_blind(cid) if blind else None, **jinfo)
                     if d.get("mode") == "validation" or SHOW_EXCL: calls.update(s.load_audit(rev))
                 return self._send(dict(ok=True, calls=RB.redact_calls(calls, ctx) if blind else calls, saved=now()))
+            if u.path == "/api/albus_confirm":
+                with LOCK: r_ = albus_confirm(s.sid, rev, d, **jinfo)
+                return self._send(dict(ok=True, confirmations=r_, saved=now()))
+            if u.path == "/api/lumos_reject":
+                with LOCK: r_ = lumos_reject(s.sid, rev, d, **jinfo)
+                return self._send(dict(ok=True, rejects=r_, saved=now()))
             if u.path == "/api/missed":
                 wst = s.ws_state(rev); ws = d.get("mode") == "wholestudy" and wst["started"] and not wst["completed"]
-                with LOCK: m = s.missed_edit(rev, str(d.get("action", "")), d, context="whole_study" if ws else "candidate_review", **jinfo)
+                ctxname = "lumos_suggestion" if d.get("source") == "lumos_suggestion" and not blind else ("whole_study" if ws else "candidate_review")
+                with LOCK: m = s.missed_edit(rev, str(d.get("action", "")), d, context=ctxname, **jinfo)
                 return self._send(dict(ok=True, missed=RB.redact_missed(m, ctx) if (blind or ws) else m, saved=now()))
             if u.path == "/api/finish":
                 with LOCK, RIO.study_lock(B, s.sid):                     # Phase 3A.1

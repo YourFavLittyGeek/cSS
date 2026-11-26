@@ -352,6 +352,22 @@ def viewer_ident(code):
         return dict(mode="locked" if i.get("locked") else "incognito", code=dc)
     except Exception:
         return dict(mode="incognito", code=code)
+def second_look_for_reviewer(code):
+    """2026-11-25 LUMOS second look for the reviewer window: refused while the study's blind initial read is pending (AI content)"""
+    try:
+        bs = BG.state(B, code)
+        if bs.get("pending"): return dict(active=False, hidden=True, reasons=[bs.get("reason") or "blind initial read"], suggestions=[])
+        return PG.second_look(code)
+    except Exception as e:
+        return dict(active=False, reasons=[f"{type(e).__name__}"], suggestions=[])
+def albus_marks_for_reviewer(code):
+    """2026-11-25 ALBUS re-detection of the study's missed-cSS marks for the reviewer window (refused during the blind initial read)"""
+    try:
+        bs = BG.state(B, code)
+        if bs.get("pending"): return dict(state="hidden", marks={}, note=bs.get("reason") or "blind initial read")
+        return PG.albus_marks(code)
+    except Exception as e:
+        return dict(state="unavailable", marks={}, note=type(e).__name__)
 def os_label(code):
     """macOS banners are stored by macOS outside the app: Incognito shows the code, Standard no identifier at all (open the app to see it)"""
     try: return "A study" if IDG.mode(SET) == "standard" else (IDG.ident(code, SET).get("deid_code") or code)
@@ -1392,6 +1408,8 @@ def pg_get(op, q):
     if op == "readiness": return PG.readiness()                                              # 3D
     if op == "split": return PG.split_state()
     if op == "shadow": return PG.shadow_summaries()                                          # v5.24 Percival shadow mode                        # only on request: reads other projects' patients.json
+    if op == "second_look": return PG.second_look_status()
+    if op == "albus_misses": return PG.albus_miss_report()                                    # 2026-11-25 which rule / gate loses the marked cSS                                   # 2026-11-25 LUMOS second look gate
     if op == "architecture": return PG.architecture_state()                                  # architecture: honest component states
     if op == "contracts": return PG.candidate_contracts(q.get("code", ""))                      # PERCIVAL candidate contracts (no patient ids)
     if op == "components_report": return PG.components_report()
@@ -3222,6 +3240,8 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/": return self.send(open(f"{HERE}/css_app.html", "rb").read(), ctype="text/html; charset=utf-8")
             if u.path == "/api/state": return self.send(state())
             if u.path == "/api/viewer_ident": return self.send(viewer_ident(q.get("code", "")))
+            if u.path == "/api/second_look": return self.send(second_look_for_reviewer(q.get("code", "")))
+            if u.path == "/api/albus_marks": return self.send(albus_marks_for_reviewer(q.get("code", "")))
             if u.path == "/api/review_counts": return self.send(dict(cohorts=review_counts()))
             if u.path == "/api/job":                                     # background job progress (setup Finish, study import)
                 import progress_jobs as PJ; q_ = {k: v[0] for k, v in parse_qs(u.query).items()}

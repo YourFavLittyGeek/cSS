@@ -237,41 +237,67 @@ def mark_object(swi_arr, brain, region_native, dark=None, dark_z=3.0, min_vox=3)
     return region_native.copy(), "drawn region (no dark voxels found)"
 
 
+def _open_study(base, sid):
+    """shared set-up of extract_marks / extract_objects -> dict(...) or dict(blocked=reason)"""
+    rec = X.index_study(base, sid)
+    usable = set(rec["usable_channels"]); ch = rec["channels"]
+    if rec["status"] not in X.USABLE: return dict(blocked=f"study geometry: {rec['status']}")
+    if "pial_sd" not in usable: return dict(blocked="pial_sd unusable")
+    SAP = _sap()
+    swi = nib.load(os.path.join(base, ch["swi"]["file"])); psd = nib.load(os.path.join(base, ch["pial_sd"]["file"]))
+    chans = {"swi": swi}
+    for c in ("phase", "flair", "labels"):
+        if c in usable: chans[c] = nib.load(os.path.join(base, ch[c]["file"]))
+    A = SAP._arr(swi); brain = ndi.binary_fill_holes(A > 0)
+    dp = os.path.join(base, "work", f"{sid}_dark.nii.gz")                 # the detector's dark map (region growing), when present
+    dark = None
+    if os.path.exists(dp):
+        dk = nib.load(dp); dark = np.asarray(dk.dataobj) > 0 if dk.shape[:3] == A.shape[:3] and np.allclose(dk.affine, swi.affine, atol=1e-3) else None
+    can = nib.as_closest_canonical(swi)
+    return dict(blocked=None, SAP=SAP, swi=swi, psd=psd, chans=chans, A=A, brain=brain, dark=dark, can=can,
+                c2n=np.linalg.inv(swi.affine) @ can.affine, n2c=np.linalg.inv(can.affine) @ swi.affine)
+
+
+def _patch_of(S, obj):
+    SAP = S["SAP"]; M_img = nib.Nifti1Image(obj.astype(np.int16), S["swi"].affine)
+    P = SAP.extract_patch(S["chans"], S["psd"], M_img, SIZE_MM, SPACING_MM, obj_id=1, labels=S["chans"].get("labels"), brain=S["brain"])
+    om = SAP.sample(obj.astype(np.float32), S["swi"].affine, P["grid"], order=0)[0] > 0.5
+    return dict(image_swi=P["arrays"]["image_swi"], valid_swi=P["valids"]["valid_swi"], object_mask=om)
+
+
 def extract_marks(base, sid, marks):
     """Image patches for expert-marked missed cSS (LUMOS learning, 2026-11-25), with the SAME extractor, frame and size as the
     candidate patches. marks: {key: dict(strokes=[[[i, j, k], ...]], shape, plane)} in the reviewer's canonical voxel coordinates.
     -> dict(patches={key: dict(image_swi, valid_swi, object_mask)}, skipped={key: reason}, how={key: text}, blocked)"""
-    rec = X.index_study(base, sid)
-    usable = set(rec["usable_channels"]); ch = rec["channels"]; out, skipped, how = {}, {}, {}
-    if rec["status"] not in X.USABLE: return dict(patches={}, skipped={k: "study geometry" for k in marks}, how={}, blocked=f"study geometry: {rec['status']}")
-    if "pial_sd" not in usable: return dict(patches={}, skipped={k: "no surface frame" for k in marks}, how={}, blocked="pial_sd unusable")
-    SAP = _sap()
+    S = _open_study(base, sid); out, skipped, how = {}, {}, {}
+    if S["blocked"]: return dict(patches={}, skipped={k: S["blocked"] for k in marks}, how={}, blocked=S["blocked"])
     try:
-        swi = nib.load(os.path.join(base, ch["swi"]["file"])); psd = nib.load(os.path.join(base, ch["pial_sd"]["file"]))
-        chans = {"swi": swi}
-        for c in ("phase", "flair", "labels"):
-            if c in usable: chans[c] = nib.load(os.path.join(base, ch[c]["file"]))
-        A = SAP._arr(swi); brain = ndi.binary_fill_holes(A > 0)
-        dp = os.path.join(base, "work", f"{sid}_dark.nii.gz")                 # the detector's dark map (region growing), when present
-        dark = None
-        if os.path.exists(dp):
-            dk = nib.load(dp); dark = np.asarray(dk.dataobj) > 0 if dk.shape[:3] == A.shape[:3] and np.allclose(dk.affine, swi.affine, atol=1e-3) else None
-        can = nib.as_closest_canonical(swi); c2n = np.linalg.inv(swi.affine) @ can.affine
+        A, c2n = S["A"], S["c2n"]
         for key, mk in marks.items():
             try:
-                Rc = _mark_region(mk, can.shape)
+                Rc = _mark_region(mk, S["can"].shape)
                 ijk = np.argwhere(Rc); nat = np.round((c2n[:3, :3] @ ijk.T).T + c2n[:3, 3]).astype(int)
                 ok = np.all((nat >= 0) & (nat < np.array(A.shape[:3])), axis=1); nat = nat[ok]
                 Rn = np.zeros(A.shape[:3], bool); Rn[tuple(nat.T)] = True
-                obj, how[key] = mark_object(A, brain, Rn, dark=dark)
-                M_img = nib.Nifti1Image(obj.astype(np.int16), swi.affine)
-                P = SAP.extract_patch(chans, psd, M_img, SIZE_MM, SPACING_MM, obj_id=1, labels=chans.get("labels"), brain=brain)
-                om = SAP.sample(obj.astype(np.float32), swi.affine, P["grid"], order=0)[0] > 0.5
-                out[key] = dict(image_swi=P["arrays"]["image_swi"], valid_swi=P["valids"]["valid_swi"], object_mask=om)
+                obj, how[key] = mark_object(A, S["brain"], Rn, dark=S["dark"])
+                out[key] = _patch_of(S, obj)
             except (ValueError, IndexError) as e: skipped[key] = str(e)[:120]
     finally:
-        SAP._ARR.clear()
+        S["SAP"]._ARR.clear()
     return dict(patches=out, skipped=skipped, how=how, blocked=None)
+
+
+def extract_objects(base, sid, objects):
+    """patches for ready-made objects (LUMOS second look): {key: boolean mask on the SWI grid} -> dict(patches, skipped, blocked)"""
+    S = _open_study(base, sid); out, skipped = {}, {}
+    if S["blocked"]: return dict(patches={}, skipped={k: S["blocked"] for k in objects}, blocked=S["blocked"])
+    try:
+        for key, obj in objects.items():
+            try: out[key] = _patch_of(S, obj)
+            except (ValueError, IndexError) as e: skipped[key] = str(e)[:120]
+    finally:
+        S["SAP"]._ARR.clear()
+    return dict(patches=out, skipped=skipped, blocked=None)
 
 
 def load_patch(path):

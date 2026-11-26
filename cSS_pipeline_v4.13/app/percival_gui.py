@@ -584,6 +584,218 @@ def _lumos_marks(sid, E):
     return [m for m in gather_marks(sid) if m["cand_id"] in ok and not m["test"]] if ok else []
 
 
+# ------------------------------------------------------------------ ALBUS re-detection of the expert-marked missed cSS (2026-11-25)
+AREDO = {"thread": None, "queue": []}
+
+
+def _marks_input(sid):
+    md = label_summary(sid).get("missed_detail") or {}; out = {}
+    for k, d in md.items():
+        try: strokes = json.loads(d.get("points") or "[]")
+        except ValueError: strokes = []
+        out[k] = dict(strokes=strokes, shape=d.get("shape", "point"), plane=d.get("plane", ""), fate=d.get("detector_fate", ""))
+    return out
+
+
+def _scripts_dir():
+    """the detector the app runs (the installed scripts; the repository's when it has no albus_measure.py yet)"""
+    s_ = CTX.get("SC") or os.path.join(B(), "scripts")
+    return s_ if os.path.exists(os.path.join(s_, "albus_measure.py")) else os.path.join(os.path.dirname(HERE), "scripts")
+
+
+def _aredo_worker():
+    import albus_redetect as AR_
+    while AREDO["queue"]:
+        sid = AREDO["queue"].pop(0)
+        try:
+            if CTX.get("ensure_local"): CTX["ensure_local"](sid)
+            AR_.run(B(), sid, _marks_input(sid), P("albus_redetect"), scripts=_scripts_dir(), python=CTX.get("python") or sys.executable, log=log)
+        except Exception as e:
+            _js(P("albus_redetect", f"{sid}.json"), dict(study=sid, key="failed", error=f"{type(e).__name__}: {str(e)[:200]}", marks={}))
+    AREDO["thread"] = None
+
+
+def albus_marks(sid, start=True):
+    """ALBUS's re-detection of every missed-cSS mark of a study + the reviewers' confirmations. Starts the re-detection in the background
+    when the marks changed (one study at a time). -> dict(state, marks={key: ...}, confirmations)"""
+    import albus_redetect as AR_
+    mk = _marks_input(sid)
+    if not mk: return dict(state="no_marks", marks={})
+    key = AR_.marks_key(mk, _scripts_dir()); R = _jl(P("albus_redetect", f"{sid}.json"), {}) or {}
+    conf = _mark_confirmations(sid)
+    if R.get("key") == key: return dict(state="done", marks=R.get("marks", {}), at=R.get("at"), confirmations=conf, uscore_note=R.get("uscore_note"))
+    if start and may_read(sid):
+        if sid not in AREDO["queue"]: AREDO["queue"].append(sid)
+        if AREDO["thread"] is None:
+            AREDO["thread"] = threading.Thread(target=_aredo_worker, daemon=True); AREDO["thread"].start()
+    return dict(state="running" if start else "pending", marks=R.get("marks", {}) if R.get("key") else {}, confirmations=conf,
+                note="ALBUS is measuring the marked lesions (a few minutes per study)")
+
+
+def _mark_confirmations(sid):
+    """{mark key: {reviewer: dict(status correct / wrong, object_sha, role)}} from review/ID_missed_confirm_by_<reviewer>.csv"""
+    import pandas as pd
+    L = _ledger_mod(); roles = L.RR.current(B()); out = {}
+    for f in sorted(glob.glob(os.path.join(B(), "review", f"{sid}_missed_confirm_by_*.csv"))):
+        try: df = pd.read_csv(f, dtype=str).fillna("")
+        except Exception: continue
+        for _, r in df.iterrows():
+            out.setdefault(f"missed_{r['missed_id']}", {})[r["reviewer"]] = dict(status=r["status"], object_sha=r["object_sha"], time=r["time"],
+                                                                                role=L.RR.role_of(B(), r["reviewer"], roles))
+    return out
+
+
+def _confirmed(rec, conf):
+    """an ALBUS object teaches NOX / PERCIVAL only when an EXPERT said 'correct' for THIS object and no expert said 'wrong'"""
+    if not rec or rec.get("status") != "measured": return False
+    ex = [c for c in (conf or {}).values() if c["role"] == "expert" and c["object_sha"] == rec.get("object_sha")]
+    return any(c["status"] == "correct" for c in ex) and not any(c["status"] == "wrong" for c in ex)
+
+
+def _char_from(meas, pred):
+    """the NOX measurements of a re-detected object, with the same mapping as gather() uses for candidates"""
+    from uengine.percival.meta import CHAR, PREDICTORS
+    NX, _nv = nox_feature_set(); EXTRA = [c for c in NX if c not in CHAR]; ch = {}
+    parts = [q for c_ in EXTRA if "*" in c_ for q in c_.split("*", 1)]
+    for c in dict.fromkeys(list(CHAR) + [c_ for c_ in EXTRA if "*" not in c_] + parts):
+        src = "volume_mm3" if c == "log_volume_mm3" else c
+        v = meas.get(src) if src in meas else ((pred or {}).get(c) if c in PREDICTORS else None)
+        try: v = None if v is None or v == "" else float(v)
+        except (TypeError, ValueError): v = None
+        if v is not None and not np.isfinite(v): v = None
+        ch[c] = float(np.log(max(v, 1.0))) if c == "log_volume_mm3" and v is not None else v
+    for c in [c_ for c_ in EXTRA if "*" in c_]:
+        a_, b_ = c.split("*", 1); ch[c] = None if ch.get(a_) is None or ch.get(b_) is None else float(ch[a_]) * float(ch[b_])
+    return ch
+
+
+def confirmed_mark_rows(sid, E=None):
+    """CONFIRMED ALBUS re-detections of eligible expert marks -> rows for NOX / PERCIVAL (and their patch for LUMOS): dict(study, cand_id,
+    patient, test, y=1, math=None, char, maps, origin='mark'). E: the study's eligibility examples (training) or None (scoring: every
+    confirmed object)."""
+    A = albus_marks(sid, start=False)
+    if A.get("state") != "done": return []
+    ok = None if E is None else {e["cand_id"] for e in E if str(e["cand_id"]).startswith("missed_") and e["status"] == "eligible" and e.get("y") == 1
+                                 and not str(e.get("detector_fate") or "").startswith("overlaps shown candidate")}
+    keys = [k for k, r in A["marks"].items() if _confirmed(r, A["confirmations"].get(k)) and (ok is None or k in ok)]
+    if not keys: return []
+    zp = P("albus_redetect", f"{sid}.npz")
+    if not os.path.exists(zp): return []
+    with np.load(zp) as Zf: V = {k: Zf[k] for k in Zf.files if k in keys}
+    cache = P("cache", f"{sid}_albus.npz"); C = {}
+    if os.path.exists(cache):
+        with np.load(cache) as Zc: C = {k: Zc[k] for k in Zc.files}
+    import nibabel as nib
+    need = {k: v for k, v in V.items() if f"{k}|{A['marks'][k]['object_sha']}" not in C}
+    if need and may_read(sid):
+        from uengine.imaging import patches as PT
+        from uengine.percival.cnn import patch_maps
+        shp = nib.load(os.path.join(B(), "data", f"{sid}_swi.nii")).shape[:3]; objs = {}
+        for k, v in need.items():
+            m = np.zeros(shp, bool); m[tuple(np.asarray(v, int).T)] = True; objs[k] = m
+        try:
+            E2 = PT.extract_objects(B(), sid, objs)
+            for k, a in E2["patches"].items():
+                mp = patch_maps(a)
+                if mp is not None: C[f"{k}|{A['marks'][k]['object_sha']}"] = mp
+            os.makedirs(os.path.dirname(cache), exist_ok=True)
+            with open(cache + ".tmp", "wb") as f_: np.savez_compressed(f_, **C)
+            os.replace(cache + ".tmp", cache)
+        except Exception as e: log(f"{CTX['label'](sid)}: patches of the re-detected marks not made ({type(e).__name__})")
+    pat = IDS().patient(sid); test = bool(pat) and _partition(pat) == "test"; out = []
+    for k in keys:
+        r = A["marks"][k]
+        out.append(dict(study=sid, cand_id=k, patient=pat, test=test, y=1, math=None, origin="mark", hemi=str((r.get("measurements") or {}).get("hemi", "")),
+                        char=_char_from(r.get("measurements") or {}, r.get("uscore")), maps=C.get(f"{k}|{r['object_sha']}"),
+                        how=r.get("source", ""), object_sha=r["object_sha"]))
+    return out
+
+
+def albus_miss_report():
+    """step 4: where ALBUS loses the expert-marked cSS, over every study with marks"""
+    import albus_redetect as AR_
+    studies = [p["code"] for p in _study_list() if os.path.exists(os.path.join(B(), "review", f"{p['code']}_missed.csv"))]
+    res = {s_: _jl(P("albus_redetect", f"{s_}.json"), None) for s_ in studies}
+    return AR_.fate_report(B(), studies, res)
+
+
+# ------------------------------------------------------------------ LUMOS second look (2026-11-25; inactive until enough marks)
+SLOOK = {}                                     # study -> running thread
+
+
+def second_look_status():
+    from uengine.percival import second_look as SLK
+    return SLK.status(active(), CTX["SET"])
+
+
+def second_look(sid):
+    """suggestions of possible missed cSS for the reviewer: only when the active model passes the activation gate. The scan runs in the
+    background; the result is kept per model version and candidate list (percival/second_look/ID.json + .npz with the patches)"""
+    import review_calls_gui as RCG
+    from uengine.percival import second_look as SLK
+    st = second_look_status()
+    if not st["active"]: return dict(st, suggestions=[])
+    if not may_read(sid): return dict(st, active=False, reasons=["study images not readable"], suggestions=[])
+    key = [st["model"], SLK.VERSION] + RCG.file_key([os.path.join(B(), "review", f"{sid}_candidates.csv")], B())
+    jp, zp = P("second_look", f"{sid}.json"), P("second_look", f"{sid}.npz"); R = _jl(jp, {}) or {}
+    if R.get("key") == key: return dict(st, **{k: v for k, v in R.items() if k != "key"}, decided=_sl_decided(sid, st["model"]))
+    t = SLOOK.get(sid)
+    if t is not None and t.is_alive(): return dict(st, running=True, suggestions=[])
+    def run():
+        try:
+            from uengine.percival import meta as MT
+            if CTX.get("ensure_local"): CTX["ensure_local"](sid)
+            net = MT.Components.from_json(active()["components"]).image
+            r = SLK.scan(B(), sid, net); maps = r.pop("maps", {})
+            os.makedirs(os.path.dirname(zp), exist_ok=True)
+            with open(zp + ".tmp", "wb") as f_: np.savez_compressed(f_, **maps)
+            os.replace(zp + ".tmp", zp); _js(jp, dict(r, key=key, model=st["model"], at=time.strftime("%Y-%m-%d %H:%M:%S")))
+            log(f"{CTX['label'](sid)}: LUMOS second look - {len(r['suggestions'])} suggestion(s) from {r.get('n_spots', 0)} dark spots")
+        except Exception as e:
+            _js(jp, dict(key=key, suggestions=[], error=f"{type(e).__name__}: {str(e)[:120]}"))
+    th = threading.Thread(target=run, daemon=True); SLOOK[sid] = th; th.start()
+    return dict(st, running=True, suggestions=[])
+
+
+def _sl_decided(sid, model):
+    """suggestions of this model already answered in this study (any reviewer): {key: 'accepted' | 'rejected'}"""
+    import pandas as pd
+    out = {}
+    for f in glob.glob(os.path.join(B(), "review", f"{sid}_lumos_rejects_by_*.csv")):
+        try:
+            for _, r in pd.read_csv(f, dtype=str).fillna("").iterrows():
+                if r.get("model") == model: out[r["key"]] = "rejected"
+        except Exception: pass
+    mp = os.path.join(B(), "review", f"{sid}_missed.csv")
+    if os.path.exists(mp):
+        try:
+            import re as _re
+            for _, r in pd.read_csv(mp, dtype=str).fillna("").iterrows():
+                m_ = _re.match(r"LUMOS suggestion (spot_\d+) \(([^)]*)\)", str(r.get("comment", "")))
+                if m_ and m_.group(2) == model: out[m_.group(1)] = "accepted"
+        except Exception: pass
+    return out
+
+
+def _lumos_rejects(sid, test):
+    """the LUMOS suggestions an EXPERT reviewer rejected in this study -> 'not cSS' image examples (y = 0) for LUMOS training. The patch is
+    the one LUMOS was shown (kept with the suggestions). A suggestion another expert accepted as a missed cSS is not used."""
+    if test: return []
+    zp = P("second_look", f"{sid}.npz")
+    if not os.path.exists(zp): return []
+    import pandas as pd
+    L = _ledger_mod(); roles = L.RR.current(B()); pat = IDS().patient(sid); out = {}
+    with np.load(zp) as Zf: Z = {k: Zf[k] for k in Zf.files}
+    for f in sorted(glob.glob(os.path.join(B(), "review", f"{sid}_lumos_rejects_by_*.csv"))):
+        try: df = pd.read_csv(f, dtype=str).fillna("")
+        except Exception: continue
+        for _, r in df.iterrows():
+            if L.RR.role_of(B(), r["reviewer"], roles) != "expert" or r["key"] not in Z: continue
+            out[r["key"]] = dict(study=sid, cand_id=f"lumos_reject_{r['key']}", patient=pat, test=False, maps=Z[r["key"]], y=0,
+                                 how="LUMOS suggestion rejected by an expert", vox=(r["vox_i"], r["vox_j"], r["vox_k"]))
+    return list(out.values())
+
+
 def _mark_maps(sid):
     """image patches (LUMOS maps) of every active missed-cSS mark of a study, with the candidate patch extractor -> (records, maps)"""
     md = label_summary(sid).get("missed_detail") or {}
@@ -1005,12 +1217,20 @@ def _train(reason):
         integ = integrity([x["code"] for x in SL if x["n_labelled"] or x.get("n_missed")])     # v5.24: conflicts / duplicates over EVERY labelled study
         dup = set(integ["duplicates"]) & set(sel); rows, exs = [], []
         log(f"cycle started ({reason}): {len(sel)} studies with eligible labels", 0.01)
-        S = CTX["SET"]; ex = set(S.get("learner_exclude", [])); marks = []
+        S = CTX["SET"]; ex = set(S.get("learner_exclude", [])); marks = []; cmarks = []
         for k, c in enumerate(sel):
             g = {r["cand_id"]: r for r in gather(c, labelled=False)}
             E = _examples(c, dict(excluded=c in ex, duplicate=c in dup), rows=g); exs += E
+            cr = confirmed_mark_rows(c, E) if IDS().patient(c) else []
+            if cr: cmarks += cr; log(f"{CTX['label'](c)}: {len(cr)} confirmed ALBUS re-detection(s) of missed cSS (NOX / PERCIVAL)", 0.01 + 0.06 * (k + 1) / len(sel))
             mk = _lumos_marks(c, E)
+            if cr:                                       # LUMOS sees ALBUS's confirmed object instead of the drawn region
+                best = {r["cand_id"]: r for r in cr if r.get("maps") is not None}
+                mk = [dict(m, maps=best[m["cand_id"]]["maps"], how=best[m["cand_id"]]["how"]) if m["cand_id"] in best else m for m in mk]
             if mk: marks += mk; log(f"{CTX['label'](c)}: {len(mk)} expert-marked missed cSS used as LUMOS image examples", 0.01 + 0.06 * (k + 1) / len(sel))
+            _pt = bool(IDS().patient(c)) and _partition(IDS().patient(c)) == "test"
+            rj = _lumos_rejects(c, _pt) if IDS().patient(c) else []
+            if rj: marks += rj; log(f"{CTX['label'](c)}: {len(rj)} rejected LUMOS suggestion(s) used as 'not cSS' image examples", 0.01 + 0.06 * (k + 1) / len(sel))
             for e in E:
                 if e["components"]["meta"] and e["cand_id"] in g:
                     r = dict(g[e["cand_id"]], y=e["y"])
@@ -1055,7 +1275,7 @@ def _train(reason):
         if feats: log(f"NOX feature set {feats['nox_version']}: {len(feats['char'])} measurements", 0.08)
         if frozen: log("frozen components (component registry): " + ", ".join(f"{k}={v}" for k, v in frozen.items()), 0.08)
         M = MT.train_cycle(rows, v, cnn_epochs=int(os.environ.get("CSS_PERCIVAL_EPOCHS", "30")), progress=lambda m, p: log(m, p), mins=_env_min(),
-                           features=feats, frozen=frozen, previous=_model_any(), image_extra=marks)
+                           features=feats, frozen=frozen, previous=_model_any(), image_extra=marks, char_extra=cmarks)
         M["data"].update(dataset=man["id"], dataset_hash_manifest=man["content_hash"], eligibility_rules=EL.RULES_VERSION,
                          split=man.get("split"), leakage_audit=dict(passed=audit["passed"], checks=audit["checks"]),
                          feature_schema=DS.FEATURE_SCHEMA, patch_spec=DS.PATCH_SPEC, code_version=_code_version())
@@ -1216,6 +1436,10 @@ def score_study(sid, M=None):
                provenance=dict(model=M["version"], engine=M.get("engine", ""), dataset=(M.get("data") or {}).get("dataset", "(trained before v5.24 - no manifest)"),
                                feature_schema=(M.get("data") or {}).get("feature_schema", ""), code=(M.get("data") or {}).get("code_version", {}),
                                processing_run=_run_id(sid)))
+    try:                                                         # 2026-11-25 PERCIVAL scores the confirmed re-detected missed cSS (NOX + LUMOS)
+        rec["missed_marks"] = MT.score_marks(M, confirmed_mark_rows(sid))
+        if rec["missed_marks"]: rec["missed_marks_note"] = "expert-marked missed cSS, re-detected by ALBUS and confirmed: PERCIVAL without ALBUS (NOX + LUMOS); not part of the 0-4 score"
+    except Exception as e: rec["missed_marks_error"] = type(e).__name__
     lp = P("ledger", sid, f"{M['version']}__{rec['run']}.json")
     if not os.path.exists(lp): _js(lp, rec)                     # immutable: a later model writes a NEW file
     _js(P("scores", f"{sid}.json"), rec); return rec

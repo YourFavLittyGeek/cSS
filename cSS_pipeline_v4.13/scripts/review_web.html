@@ -161,7 +161,8 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
     <div id="readout" class="mut"></div></div>
   </div>
   <div class="tab" id="tab-cands"><div class="card"><div class="h"><span>Candidates</span><span class="mut sm">click to open</span></div><table class="cmp" id="candtable"></table></div>
-   <div class="card"><div class="h"><span>Missed cSS marks</span><span class="mut sm">add with <kbd>X</kbd></span></div><div id="misslist"></div></div></div>
+   <div class="card"><div class="h"><span>Missed cSS marks</span><span class="mut sm">add with <kbd>X</kbd></span></div><div id="misslist"></div></div>
+   <div class="card hide" id="slcard"><div class="h"><span>LUMOS second look</span><span class="mut sm" id="slnote">possible missed cSS</span></div><div id="sllist"></div></div></div>
   <div class="tab" id="tab-calls"><div class="card"><div class="h"><span id="cmptitle">AI vs reviewer</span><button class="btn" id="bDiffer" title="show only the candidates where you and the meter differ">Only differ</button></div><table class="cmp" id="cmptable"></table></div>
    <div class="card"><div class="h"><span>cSS score</span><span class="mut sm">reviewer score updates with <kbd>Q</kbd></span></div><div id="scorecard"></div></div>
    <div class="card"><div class="h">Summary</div><div id="cmpsum"></div>
@@ -224,7 +225,7 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
  <h3>The final score</h3>
  <p><kbd>Q</kbd> scores your calls. Each hemisphere gets 0 (no cSS), 1 (one sulcus or up to 3 immediately adjacent sulci) or 2 (two or more non-adjacent sulci, or more than 3 adjacent sulci); the total is 0&ndash;4. Category: <b>focal</b> = 1&ndash;3 sulci, <b>disseminated (diffuse)</b> = more than 3 sulci. Several pieces of one continuous lining count as one line and never raise the score. Before the final save a window compares your calls and score with the AI's; from there you can re-review any disagreement, then <b>Save final</b>. The window can be switched off there or in the <b>Settings</b> menu. The final scores go to <code>review/css_report.xlsx</code>. The AI score is the same scoring applied to the candidates in the meter's green band; it is not validated.</p>
  <h3>Marking a cSS the detector missed</h3>
- <p>Press <kbd>X</kbd> (or right-click &rarr; <i>Mark a missed cSS here</i>). A small bar appears: draw a <b>rectangle</b> around the lesion (default) or trace it with the <b>pen</b> (<kbd>W</kbd> switches; several pen strokes are allowed, <kbd>Backspace</kbd> removes the last one). Type a note if you wish, then <b>Save</b> (<kbd>Enter</kbd>); <kbd>Esc</kbd> cancels. Mark the one slice where the lesion is clearest. Saved marks are listed in the <b>Candidates</b> tab with what the detector did at that place (shown, excluded by a rule, below a size gate, or not generated). They are reported next to the score but are <b>not counted</b> in the 0&ndash;4 score.</p>
+ <p>Press <kbd>X</kbd> (or right-click &rarr; <i>Mark a missed cSS here</i>). A small bar appears: draw a <b>rectangle</b> around the lesion (default) or trace it with the <b>pen</b> (<kbd>W</kbd> switches; several pen strokes are allowed, <kbd>Backspace</kbd> removes the last one). Type a note if you wish, then <b>Save</b> (<kbd>Enter</kbd>). A rectangle is saved when you release the mouse; a pen outline when you press Save, Enter or Esc, change tool, slice or patient. Only <b>Cancel</b> throws a drawing away. Mark the one slice where the lesion is clearest. Saved marks are listed in the <b>Candidates</b> tab with what the detector did at that place (shown, excluded by a rule, below a size gate, or not generated). They are reported next to the score but are <b>not counted</b> in the 0&ndash;4 score.</p>
  <h3>Other tools</h3>
  <p><b>Darkness probe</b>: mean signal of the 3 &times; 3 voxels under the click, as a percentage of the normal cortex and in standard deviations below it (candidates start at about &minus;2.5 SD). <b>Ruler</b>: drag a line, length in mm. <b>Magnifier</b>: a lens follows the mouse. Sequences that are not listed were not imported for this patient.</p>
  <p class="mut">Everything is stored on this computer in the project's <code>review</code> folder, with the reviewer name and time. Close with <kbd>Esc</kbd>.</p>
@@ -385,8 +386,13 @@ function drawPane(p,x,W,H,o){
   if(o.outline)strokeEdges(x,g,p.E,1);
   if(o.cross){const [cx,cy]=toScrG(g,cur);x.strokeStyle="rgba(120,200,255,.16)";x.lineWidth=1;x.beginPath();x.moveTo(0,cy);x.lineTo(W,cy);x.moveTo(cx,0);x.lineTo(cx,H);x.stroke()}
   if(o.outline)for(const m of missed){const pt=[m.can_i,m.can_j,m.can_k];
-    if(m.pts&&+m.plane===p.plane){if(+m.slice===cur[V.s])drawShape(x,g,m.shape,m.pts,"missed "+m.missed_id,false)}
+    if(m.pts&&m.pi===p.plane){if(+m.slice===cur[V.s])drawShape(x,g,m.shape,m.pts,"missed "+m.missed_id,false)}
     else if(Math.abs(pt[V.s]-cur[V.s])*vox[V.s]<=2.5){const [a,b]=toScrG(g,pt);x.strokeStyle="#35d0ff";x.lineWidth=2;x.beginPath();x.arc(a,b,9,0,6.3);x.stroke();x.fillStyle="#35d0ff";x.font="12px Menlo,monospace";x.fillText("missed "+m.missed_id,a+12,b+4)}}
+  if(o.live&&amShow())for(const k in AM.marks){const a=AM.marks[k];if(!a||a.status!=="measured"||!a.outline)continue;x.fillStyle="rgba(255,159,67,.45)";
+    for(const q of a.outline){if(q[V.s]!==cur[V.s])continue;const [qa,qb]=toScrG(g,q);x.fillRect(qa-g.sx/2,qb-g.sy/2,g.sx,g.sy)}}
+  if(o.live&&slShow())for(const sg of SL.items){if(SL.done[sg.key])continue;const pt=sg.can;if(Math.abs(pt[V.s]-cur[V.s])*vox[V.s]>2.5)continue;
+    const [a,b]=toScrG(g,pt);x.save();x.setLineDash([4,3]);x.strokeStyle="#c6ff4a";x.lineWidth=2;x.beginPath();x.arc(a,b,11,0,6.3);x.stroke();x.restore();
+    x.fillStyle="#c6ff4a";x.font="12px Menlo,monospace";x.fillText("LUMOS? "+sg.key.replace("spot_","#"),a+14,b+4)}
   if(o.live){
     if(draft&&draft.k===p.plane&&draft.s===cur[V.s])drawShape(x,g,draft.type,draft.strokes,"new mark · not saved",true);
     if(ruler&&ruler.k===p.plane&&ruler.s===cur[V.s]){const [a,b]=toScrG(g,ruler.a),[e,f]=toScrG(g,ruler.b);x.strokeStyle="#7CFC9A";x.lineWidth=2;x.beginPath();x.moveTo(a,b);x.lineTo(e,f);x.stroke();x.fillStyle="#7CFC9A";x.font="13px Menlo,monospace";x.fillText(ruler.mm.toFixed(1)+" mm",e+8,f-6)}
@@ -454,7 +460,8 @@ async function loadVol(s){if(!vols[s]){status("loading "+s+" ...");const r=await
 async function setSeq(s){if(!M.seqs.some(q=>q.key===s))return;await loadVol(s);panes[act].seq=s;$("#seq").value=s;draw()}
 function nextSeq(){const i=M.seqs.findIndex(s=>s.key===panes[act].seq);setSeq(M.seqs[(i+1)%M.seqs.length].key)}
 const reviewer=()=>$("#reviewer").value.trim();
-function setMissed(m){missed=(m||[]).map(r=>{let pts=null;try{pts=r.points?JSON.parse(r.points):null}catch(e){}return Object.assign({},r,{pts:(pts&&r.plane!==""&&r.shape!=="point")?pts:null})});renderMissed()}
+const planeIdx=v=>{const s=String(v??"").toLowerCase(),i=PLN.findIndex(n=>n.toLowerCase()===s);return i>=0?i:(s!==""&&!isNaN(+s)?+s:-1)};   // marks store the plane NAME (2026-11-25); old rows an index
+function setMissed(m){missed=(m||[]).map(r=>{let pts=null;try{pts=r.points?JSON.parse(r.points):null}catch(e){}const pi=planeIdx(r.plane);return Object.assign({},r,{pi,pts:(pts&&pi>=0&&r.shape!=="point")?pts:null})});renderMissed()}
 let loadSeq=0;
 // 2026-11-25: a reviewed study's images live on the Pensieve drive; bring them back (verified copy), then open it
 async function pensieveBringBack(sid,my){
@@ -491,7 +498,7 @@ async function loadStudy(sid){if(draftOk(draft))flushDraft();status("loading stu
   const b=$("#banner"),msg=[M.qc,M.note,sideChk&&sideChk.bad?sideMsg():""].filter(Boolean).join("  ·  ");$("#seqnote").textContent=M.missing_seqs.length?("Not imported for this patient: "+M.missing_seqs.join(", ")):"";b.textContent=msg;b.style.display=msg?"block":"none";
   const lr=await fetch(`/api/labels?study=${M.study}&reviewer=${encodeURIComponent(reviewer())}&mode=${WSM?"wholestudy":vmode?"validation":""}`);const LB=new Uint16Array(await lr.arrayBuffer());if(stale())return;LAB=LB;
   await loadVol("swi");if(stale())return;panes.forEach(p=>{p.seq="swi";p.mip=false});fitView();
-  buildStrip();setMissed(M.missed);const first=M.cands.findIndex(c=>!isDone(c));go(first<0?0:first);status("");
+  buildStrip();setMissed(M.missed);const first=M.cands.findIndex(c=>!isDone(c));go(first<0?0:first);status("");fetchSecondLook(M.study);fetchAlbusMarks(M.study);
   if(!reviewer())status("Enter your name (upper right) before the first decision.",true)}
 
 // ---------- candidates ----------
@@ -659,7 +666,7 @@ function exportCsv(){if(vmode){status("Export is switched off during a validatio
   const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([lines.join("\n")+"\n"],{type:"text/csv"}));a.download=`${M.study}_ai_vs_${reviewer().replace(/\W+/g,"_")||"reviewer"}.csv`;a.click();status("Exported "+a.download)}
 
 // ---------- v5.7 validation read, primary reviewer, import ----------
-function paintMode(){const b=$("#vsym");if(b)b.style.display=vmode?"flex":"none";
+function paintMode(){if(M&&SL.study!==null&&typeof fetchSecondLook==="function")setTimeout(()=>M&&fetchSecondLook(M.study),0);const b=$("#vsym");if(b)b.style.display=vmode?"flex":"none";
   const h=$("#aicard .h > span:last-child");if(h)h.innerHTML=vmode?"hidden in a validation read 🔒":'hide <kbd>K</kbd>';tog()}
 function nextAudit(){const L=M.cands.map((c,i)=>c.audit?i:-1).filter(i=>i>=0);
   if(!L.length){status("No excluded objects in this read (validation read off, or none sampled).",true);return}
@@ -711,9 +718,45 @@ $("#grip").addEventListener("mousedown",e=>{e.preventDefault();resizing=true;con
   window.addEventListener("mousemove",mv);window.addEventListener("mouseup",up)});
 
 // ---------- missed cSS ----------
-function renderMissed(){$("#misslist").innerHTML=missed.length?missed.map(m=>`<div class="miss"><button class="btn" data-go="${m.missed_id}" title="go to it">${m.missed_id}</button><input type="text" data-mid="${m.missed_id}" value="${esc(m.comment)}" placeholder="note (${esc(m.reviewer)})"><button class="btn" data-del="${m.missed_id}" title="delete">×</button></div><div class="mut sm" style="margin:-2px 0 6px 2px">${esc(m.shape||"point")} · ${esc(m.detector_fate||"")}</div>`).join(""):'<span class="mut sm">None. Press X, draw a rectangle or trace with the pen, then Save.</span>';if(M)paintLists()}
+function renderMissed(){$("#misslist").innerHTML=missed.length?missed.map(m=>`<div class="miss"><button class="btn" data-go="${m.missed_id}" title="go to it">${m.missed_id}</button><input type="text" data-mid="${m.missed_id}" value="${esc(m.comment)}" placeholder="note (${esc(m.reviewer)})"><button class="btn" data-del="${m.missed_id}" title="delete">×</button></div><div class="mut sm" style="margin:-2px 0 6px 2px">${esc(m.shape||"point")} · ${esc(m.detector_fate||"")}</div>${albusLine(m)}`).join(""):'<span class="mut sm">None. Press X, draw a rectangle or trace with the pen, then Save.</span>';if(M)paintLists()}
+// ---------- 2026-11-25 LUMOS second look: suggestions of possible missed cSS (inactive until LUMOS learned from enough marks) ----------
+let SL={study:null,items:[],done:{},model:"",poll:null};
+const slShow=()=>!!(M&&SL.study===M.study&&SL.items.length&&!vmode&&!WSM&&!M.blind);
+async function fetchSecondLook(sid,tries=0){clearTimeout(SL.poll);if(!M||M.study!==sid)return;
+  if(vmode||WSM||M.blind){$("#slcard").classList.add("hide");return}
+  let r;try{r=await api(`/api/second_look?study=${encodeURIComponent(sid)}&reviewer=${encodeURIComponent(reviewer())}`)}catch(e){$("#slcard").classList.add("hide");return}
+  if(!M||M.study!==sid)return;
+  if(!r.active){SL={study:sid,items:[],done:{},model:"",poll:null};$("#slcard").classList.add("hide");return}
+  SL.study=sid;SL.model=r.model||"";SL.items=r.suggestions||[];SL.done=Object.assign({},r.decided||{});$("#slcard").classList.remove("hide");
+  if(r.running&&tries<24){$("#sllist").innerHTML='<span class="mut sm">LUMOS is looking at the dark spots ALBUS did not show …</span>';SL.poll=setTimeout(()=>fetchSecondLook(sid,tries+1),5000);return}
+  renderSL();draw()}
+function renderSL(){const open=SL.items.filter(s=>!SL.done[s.key]);$("#slnote").textContent=open.length+" to check";
+  $("#sllist").innerHTML=SL.items.length?SL.items.map(s=>`<div class="miss"><button class="btn" data-slgo="${s.key}" title="go to it">${s.key.replace("spot_","#")}</button><span class="mut sm">LUMOS ${Math.round(100*s.p)} %</span>${SL.done[s.key]?`<span class="mut sm">${SL.done[s.key]==="accepted"?"✓ marked as missed cSS":"✗ not cSS"}</span>`:`<button class="btn" data-slyes="${s.key}" title="it is a cSS ALBUS missed: saved as a missed-cSS mark">✓ cSS</button><button class="btn" data-slno="${s.key}" title="not cSS: LUMOS learns from it">✗ not cSS</button>`}</div>`).join("")+'<div class="mut sm">Suggestions only - check each one. They never change a call or a score.</div>':'<span class="mut sm">No suggestion for this study.</span>'}
+async function slDecide(key,yes){const s=SL.items.find(x=>x.key===key);if(!s||!M)return;if(!reviewer()){status("Enter your name first.",true);return}
+  if(yes){const ok=await missedApi({action:"add",plane:"axial",slice:s.can[2],shape:"point",strokes:[[s.can]],comment:`LUMOS suggestion ${s.key} (${SL.model}) · ${Math.round(100*s.p)} %`,source:"lumos_suggestion"});if(ok)SL.done[key]="accepted"}
+  else{try{await api("/api/lumos_reject",{study:M.study,reviewer:reviewer(),key:s.key,model:SL.model,p:s.p,vox:s.vox});SL.done[key]="rejected";status("✓ saved: not cSS - LUMOS learns from it at the next training")}catch(e){status("NOT SAVED: "+e.message,true)}}
+  renderSL();draw()}
+// ---------- 2026-11-25 ALBUS re-detection of the missed-cSS marks: ALBUS draws its own outline, the reviewer confirms it ----------
+let AM={study:null,state:"",marks:{},conf:{},poll:null};
+const amShow=()=>!!(M&&AM.study===M.study&&!vmode&&!WSM&&!M.blind);
+async function fetchAlbusMarks(sid,tries=0){clearTimeout(AM.poll);if(!M||M.study!==sid||vmode||WSM||M.blind)return;
+  let r;try{r=await api(`/api/albus_marks?study=${encodeURIComponent(sid)}&reviewer=${encodeURIComponent(reviewer())}`)}catch(e){return}
+  if(!M||M.study!==sid)return;AM={study:sid,state:r.state||"",marks:r.marks||{},conf:r.confirmations||{},poll:null,note:r.note||""};
+  if((r.state==="running"||r.state==="pending")&&tries<90)AM.poll=setTimeout(()=>fetchAlbusMarks(sid,tries+1),10000);
+  renderMissed();draw()}
+function albusLine(m){if(!amShow())return "";const k="missed_"+m.missed_id,a=AM.marks[k];
+  if(!a)return AM.state==="running"||AM.state==="pending"?'<div class="mut sm" style="margin:-4px 0 6px 2px">ALBUS is measuring this lesion …</div>':"";
+  if(a.status!=="measured")return `<div class="mut sm" style="margin:-4px 0 6px 2px">ALBUS could not measure it: ${esc(a.reason||"")}</div>`;
+  const mine=((AM.conf[k]||{})[reviewer()]||{}),cur_=mine.object_sha===a.object_sha?mine.status:"";
+  const why=[a.would_exclude?("rule "+a.would_exclude.split(":")[0]):"",a.gate?("gate "+a.gate):""].filter(Boolean).join(" · ");
+  return `<div class="sm" style="margin:-4px 0 8px 2px"><span style="color:#ff9f43">ALBUS outline</span> <span class="mut">${a.n_vox} voxels${why?" · lost by "+esc(why):""}</span>
+    ${cur_?`<span class="mut"> · you said: ${cur_==="correct"?"✓ correct":"✗ wrong"}</span> <button class="btn" data-amredo="${k}" title="change your answer">change</button>`:
+      `<button class="btn" data-amok="${k}" title="the orange outline is the lesion: ALBUS's measurements of it teach NOX and PERCIVAL">✓ outline correct</button><button class="btn" data-amno="${k}" title="the orange outline is not the lesion (not used for learning); redraw the mark if needed">✗ wrong</button>`}</div>`}
+async function amConfirm(k,ok){const a=AM.marks[k];if(!a||!M)return;if(!reviewer()){status("Enter your name first.",true);return}
+  try{await api("/api/albus_confirm",{study:M.study,reviewer:reviewer(),missed_id:+k.replace("missed_",""),object_sha:a.object_sha,status:ok?"correct":"wrong"});
+    AM.conf[k]=Object.assign({},AM.conf[k]||{},{[reviewer()]:{status:ok?"correct":"wrong",object_sha:a.object_sha}});status(ok?"✓ ALBUS outline confirmed - NOX and PERCIVAL learn from it at the next training":"✓ saved: ALBUS outline wrong - not used for learning");renderMissed()}catch(e){status("NOT SAVED: "+e.message,true)}}
 async function missedApi(body){if(!reviewer()){status("Enter your name first - the missed cSS mark was NOT saved.",true);return false}const sid=body.study||M.study;
-  try{const r=await api("/api/missed",Object.assign({study:sid,reviewer:reviewer(),mode:WSM?"wholestudy":""},body));if(M&&M.study===sid){setMissed(r.missed);draw()}status("✓ Missed cSS saved · "+r.saved.slice(11));return true}catch(e){status("Missed cSS NOT SAVED: "+e.message,true);return false}}
+  try{const r=await api("/api/missed",Object.assign({study:sid,reviewer:reviewer(),mode:WSM?"wholestudy":""},body));if(M&&M.study===sid){setMissed(r.missed);draw();setTimeout(()=>fetchAlbusMarks(sid),1500)}status("✓ Missed cSS saved · "+r.saved.slice(11));return true}catch(e){status("Missed cSS NOT SAVED: "+e.message,true);return false}}
 function setShape(s){shape=s;$("#dRect").classList.toggle("on",s==="rect");$("#dPen").classList.toggle("on",s==="pen");if(draft&&draft.type!==s){flushDraft();draw()}}
 // 2026-11-25: a drawn mark used to stay a draft until Save / Enter and was DROPPED without a word on a tool change, Esc, another patient,
 // another shape or the final save - no missed cSS mark of the user's 45 reviews reached the disk. Now: a rectangle saves when the mouse is
@@ -722,7 +765,8 @@ let PENDING_MISS=Promise.resolve(true);
 const draftOk=d=>!!(d&&d.strokes&&d.strokes.length&&!(d.type==="rect"&&(d.strokes[0].length<2||(d.strokes[0][0]+"")===(d.strokes[0][1]+""))));
 async function saveDraft(dd){const d=dd||draft;if(!draftOk(d)){if(!dd)$("#readout").textContent="Draw the missed cSS first.";return false}
   if(d===draft)draft=null;const note=$("#dNote").value;$("#dNote").value="";draw();
-  const ok=await missedApi({study:d.study||(M&&M.study),action:"add",plane:PLN[d.k].toLowerCase(),slice:d.s,shape:d.type,strokes:d.strokes,comment:note});   // plane NAME: the server refused the index (root cause)
+  const lim=M?M.shape:[1e9,1e9,1e9],clip=q=>q.map((v,a)=>Math.min(Math.max(+v,0),lim[a]-1));   // a pen stroke past the image edge made the server refuse the WHOLE mark
+  const ok=await missedApi({study:d.study||(M&&M.study),action:"add",plane:PLN[d.k].toLowerCase(),slice:d.s,shape:d.type,strokes:d.strokes.map(st=>st.map(clip)),comment:note});   // plane NAME: the server refused the index (root cause)
   if(ok)$("#readout").textContent="Missed cSS saved. Draw another, or Esc to finish.";else if(M&&M.study===d.study&&!draft){draft=d;draw()}   // not saved: keep it visible
   return ok}
 window.addEventListener("beforeunload",e=>{if(draftOk(draft)){flushDraft();e.preventDefault();e.returnValue=""}});   // closing with an unsaved outline: saved, and the browser asks
@@ -1036,7 +1080,7 @@ $("#win").oninput=e=>setWLp(panes[act].seq,101-e.target.value,getWL(panes[act].s
 $("#tMark").onclick=A.mark.f;$("#tOther").onclick=A.other.f;$("#tMip").onclick=A.mip.f;$("#tAuto").onclick=A.auto.f;
 $("#bReset").onclick=resetView;$("#bCentre").onclick=gotoCandidate;$("#bScore").onclick=summary;$("#bExport").onclick=exportCsv;$("#bUnread").onclick=nextUnread;
 $("#bDiffer").onclick=()=>{onlyDiffer=!onlyDiffer;paintLists()};
-$("#dRect").onclick=()=>setShape("rect");$("#dPen").onclick=()=>setShape("pen");$("#dUndo").onclick=undoStroke;$("#dSave").onclick=saveDraft;$("#dCancel").onclick=cancelDraft;
+$("#dRect").onclick=()=>setShape("rect");$("#dPen").onclick=()=>setShape("pen");$("#dUndo").onclick=undoStroke;$("#dSave").onclick=()=>{if(!draftOk(draft)){$("#readout").textContent="Draw the missed cSS first.";return}flushDraft()};   // 2026-11-25: was onclick=saveDraft -> the click EVENT was taken for the drawing, nothing saved$("#dCancel").onclick=cancelDraft;
 $("#cRe").onclick=reReview;$("#cSave").onclick=()=>finalSave(true);$("#cClose").onclick=()=>$("#compare").classList.remove("show");$("#cNo").onchange=e=>setCompare(!e.target.checked);
 $("#cmpbody").addEventListener("click",e=>{if(e.target.id==="cInh"){const i=M.cands.findIndex(isInh);$("#compare").classList.remove("show");if(i>=0)go(i);return}
   const r=e.target.closest("tr.r");if(r){$("#compare").classList.remove("show");onlyDiffer=true;setTab("calls");go(+r.dataset.i);status("Re-review this candidate; press Q to return to the comparison.")}});
@@ -1044,7 +1088,9 @@ $("#saSave").onclick=saveAsGo;$("#saCancel").onclick=()=>{$("#saveas").classList
 $("#sumbody").addEventListener("click",e=>{const r=e.target.closest("tr[data-aud]");if(!r)return;const i=M.cands.findIndex(c=>c.id===+r.dataset.aud);if(i>=0){$("#summary").classList.remove("show");go(i)}});
 $("#imGo").onclick=doImport;$("#imCancel").onclick=()=>$("#import").classList.remove("show");
 $("#sOk").onclick=saveSnapSettings;$("#sCancel").onclick=()=>$("#snapdlg").classList.remove("show");$("#sOpen").onclick=openSnapFolder;$("#snapdlg").addEventListener("change",snapPrev);
-$("#misslist").addEventListener("click",e=>{const d=e.target.dataset;if(d.del)missedApi({action:"delete",id:+d.del});if(d.go){const m=missed.find(x=>x.missed_id==d.go);if(m){cur=[m.can_i,m.can_j,m.can_k];if(m.pts)cur[VIEWS[+m.plane].s]=+m.slice;if(zoom>1.001)ctr=cur.slice();draw()}}});
+$("#misslist").addEventListener("click",e=>{const d=e.target.dataset;if(d.del)missedApi({action:"delete",id:+d.del});if(d.go){const m=missed.find(x=>x.missed_id==d.go);if(m){cur=[+m.can_i,+m.can_j,+m.can_k];if(m.pts&&VIEWS[m.pi])cur[VIEWS[m.pi].s]=+m.slice;if(zoom>1.001)ctr=cur.slice();draw()}}});
+$("#misslist").addEventListener("click",e=>{const d=e.target.dataset;if(d.amok)amConfirm(d.amok,true);if(d.amno)amConfirm(d.amno,false);if(d.amredo){const k=d.amredo;if(AM.conf[k])delete AM.conf[k][reviewer()];renderMissed()}});
+$("#sllist").addEventListener("click",e=>{const d=e.target.dataset;if(d.slgo){const s=SL.items.find(x=>x.key===d.slgo);if(s){cur=s.can.slice();if(zoom>1.001)ctr=cur.slice();draw()}}if(d.slyes)slDecide(d.slyes,true);if(d.slno)slDecide(d.slno,false)});
 $("#misslist").addEventListener("change",e=>{const d=e.target.dataset;if(d.mid)missedApi({action:"comment",id:+d.mid,comment:e.target.value})});
 $$(".modal").forEach(m=>m.addEventListener("click",e=>{if(e.target===m)m.classList.remove("show")}));
 $("#comment").addEventListener("blur",saveComment);
@@ -1052,13 +1098,13 @@ $("#reviewer").addEventListener("change",async()=>{const n=reviewer();if(!n)retu
 new ResizeObserver(()=>draw()).observe($("#vgrid"));
 window.addEventListener("keydown",e=>{const tag=(e.target.tagName||"").toLowerCase(),typing=(tag==="input"&&(e.target.type==="text"||e.target.type==="search"))||tag==="textarea";
   if(e.key==="Escape"){if($(".menu")){closeMenus();return}if(typing){e.target.blur();return}if($(".modal.show")){$$(".modal").forEach(m=>m.classList.remove("show"));return}if(tool==="miss"){flushDraft();setTool("pan");return}setTool("pan");ruler=null;probe=null;draw();return}
-  if(typing){if(e.key==="Enter"){if(e.target.id==="dNote"){e.target.blur();saveDraft()}else if(e.target.id!=="saName"&&e.target.id!=="saFolder")e.target.blur()}return}
+  if(typing){if(e.key==="Enter"){if(e.target.id==="dNote"){e.target.blur();flushDraft()}else if(e.target.id!=="saName"&&e.target.id!=="saFolder")e.target.blur()}return}
   if(!M)return;if((e.metaKey||e.ctrlKey)&&e.key==="Enter"){e.preventDefault();saveFinal();return}
   if((e.metaKey||e.ctrlKey)&&!e.altKey&&e.key.toLowerCase()==="s"){e.preventDefault();takeSnapshot(e.shiftKey);return}
   if(e.altKey||((e.metaKey||e.ctrlKey)&&!["=","-","+","_"].includes(e.key)))return;
   if($(".modal.show")&&e.key!=="?")return;
   const k=e.key.length===1?e.key.toLowerCase():e.key;let used=true;
-  if(tool==="miss"&&k==="Enter")saveDraft();else if(tool==="miss"&&k==="w")setShape(shape==="rect"?"pen":"rect");else if(tool==="miss"&&(k==="Backspace"||k==="Delete"))undoStroke();
+  if(tool==="miss"&&k==="Enter")flushDraft();else if(tool==="miss"&&k==="w")setShape(shape==="rect"?"pen":"rect");else if(tool==="miss"&&(k==="Backspace"||k==="Delete"))undoStroke();
   else if(k==="h"&&e.shiftKey)setMirror(!mir);else if(e.shiftKey&&/^Digit[1-6]$/.test(e.code))pickFine(+e.code.slice(5));else if(CALLKEYS[k])decide(CALLKEYS[k]);
   else if(k==="ArrowRight")go(ci+1);else if(k==="ArrowLeft")go(ci-1);else if(k==="j")nextUnread();
   else if(k==="ArrowUp")step(panes[act],1);else if(k==="ArrowDown")step(panes[act],-1);else if(k==="PageUp")step(panes[act],5);else if(k==="PageDown")step(panes[act],-5);
