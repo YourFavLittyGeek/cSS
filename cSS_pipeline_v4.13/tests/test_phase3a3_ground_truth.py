@@ -198,6 +198,30 @@ class TestReviewerMissedAndWholeStudy(unittest.TestCase):
     def setUp(self):
         self.b = tempfile.mkdtemp(prefix="p3a3w_", dir=os.environ["CSS_BASE"]); build(self.b)
 
+    def test_missed_marks_drawn_in_the_viewer_are_saved(self):
+        """2026-11-25 regression: the page sent the plane INDEX (0 / 1 / 2) and the server accepted only names - every drawn mark was refused
+        ('invalid shape or plane') and the user's 45 reviews saved none. The request below is exactly what the page sends now and before."""
+        b = self.b; srv = Server(b)
+        try:
+            for plane in (0, "axial", 2):
+                r = srv.post("/api/missed", dict(study="S1", reviewer="Reader P", mode="", action="add", plane=plane, slice=5, shape="rect",
+                                                 strokes=[[[4.2, 4.0, 5.0], [7.5, 6.8, 5.0]]], comment=""))
+                self.assertTrue(r.get("ok"), (plane, r))
+            r = srv.post("/api/missed", dict(study="S1", reviewer="Reader P", mode="", action="add", plane=1, slice=5, shape="pen",
+                                             strokes=[[[4.0, 5.0, 4.0], [5.0, 5.0, 5.0], [6.0, 5.0, 6.0]]], comment="pen"))
+            self.assertTrue(r.get("ok"), r)
+            self.assertIn("error", srv.post("/api/missed", dict(study="S1", reviewer="Reader P", action="add", plane="oblique", shape="rect",
+                                                                strokes=[[[4, 4, 5], [6, 6, 5]]])))
+        finally: srv.stop()
+        own = pd.read_csv(os.path.join(b, "review", "S1_missed_by_Reader_P.csv"))
+        self.assertEqual(list(own.plane), ["axial", "axial", "sagittal", "coronal"]); self.assertEqual(list(own.status), ["active"] * 4)
+        shared = pd.read_csv(os.path.join(b, "review", "S1_missed.csv"))                     # what ALBUS / PERCIVAL read
+        self.assertEqual(int((shared.reviewer == "Reader P").sum()), 4)
+        html = open(os.path.join(ROOT, "scripts", "review_web.html")).read()
+        self.assertIn('plane:PLN[d.k].toLowerCase()', html)                                 # the page sends the plane name
+        for k in ('if(t!=="miss")flushDraft();', 'if(tool==="miss"){flushDraft();setTool("pan");return}', "await PENDING_MISS"):
+            self.assertIn(k, html)                                                           # moving on saves the drawn mark, never drops it
+
     def test_missed_marks_per_reviewer_tombstones_no_reuse_validation_legacy_kept(self):
         b = self.b; legacy = open(os.path.join(b, "review", "S1_missed.csv"), "rb").read()
         srv = Server(b)

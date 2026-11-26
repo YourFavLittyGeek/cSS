@@ -702,7 +702,8 @@ class Study:
             if not isinstance(strokes, list) or not strokes or any(not isinstance(st, list) or not st for st in strokes): raise RB.BlindError("invalid outline", 400)
             pts = np.array([self._mpoint(q) for st in strokes for q in st], float)
             if len(pts) > 20000: raise RB.BlindError("outline too large", 400)
-            shape = str(d.get("shape", "point")); plane = str(d.get("plane", ""))
+            shape = str(d.get("shape", "point")); plane = str(d.get("plane", "")).strip().lower()
+            plane = {"0": "axial", "1": "coronal", "2": "sagittal"}.get(plane, plane)   # 2026-11-25: the page sent the plane index - every mark was refused
             if shape not in ("point", "rect", "pen") or plane not in ("", "axial", "coronal", "sagittal"): raise RB.BlindError("invalid shape or plane", 400)
             sl = str(d.get("slice", ""))
             if sl and not sl.lstrip("-").isdigit(): raise RB.BlindError("invalid slice", 400)

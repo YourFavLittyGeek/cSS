@@ -468,7 +468,7 @@ async function pensieveBringBack(sid,my){
     if(!s.away&&s.state!=="restoring"){ov.style.display="none";loadStudy(sid);return}
     if(s.state==="failed"){box(`<b>${lab} could not be brought back</b><p class="err">${esc(s.error||"")}</p><button class="btn pri" id="pvTry">Try again</button>`);$("#pvTry").onclick=()=>pensieveBringBack(sid,my);return}
     box(`<b>${lab} is in Pensieve</b><p class="mut">${esc(s.label||"Bringing it back to the Mac…")}</p>`)}}
-async function loadStudy(sid){status("loading study ...");const my=++loadSeq,stale=()=>my!==loadSeq;   // a newer load wins
+async function loadStudy(sid){if(draftOk(draft))flushDraft();status("loading study ...");const my=++loadSeq,stale=()=>my!==loadSeq;   // a newer load wins
   const M0=await api(`/api/meta?study=${sid||""}&reviewer=${encodeURIComponent(reviewer())}${WSM?"&mode=wholestudy":""}`);if(stale())return;
   if(M0.in_pensieve){pensieveBringBack(M0.study,my);return}M=M0;fetchIdent(M.study);[nx,ny,nz]=M.shape;vox=M.vox;vols={};luts={};WLs={};seqmeta={};M.seqs.forEach(s=>seqmeta[s.key]=s);
   {const G=M.groups||{},gs=Object.keys(G),cur=gs.find(g=>G[g].includes(M.study));$("#cohort").classList.toggle("hide",!gs.length);
@@ -631,7 +631,7 @@ async function summary(){if(!reviewer()){status("Enter your name first.",true);r
       +(M.cands.filter(isInh).length?`<p class="err">${M.cands.filter(isInh).length} inherited call(s) not re-confirmed (dashed in the strip): press the same key on them to confirm. <button class="btn" id="cInh">Go to the first one</button></p>`:"")
       +`<h3>Calls that differ from the AI (${dx.length})</h3>`+(dx.length?`<table class="cmp" id="cmpdiff"><tr><th>#</th><th>Side · region</th><th>AI</th><th>Your call</th><th></th></tr>${rowsd}</table>`:'<p class="mut">None: every decided candidate agrees with the AI band (yellow counts as neither).</p>')}
   catch(e){const b=cmpOn?$("#cmpbody"):$("#sumbody");b.innerHTML=`<p class="err">${esc(e.message)}</p>`}}
-async function finalSave(shown){$("#compare").classList.remove("show");$("#sumbody").innerHTML="<p>Saving the final review ...</p>";$("#summary").classList.add("show");
+async function finalSave(shown){if(draftOk(draft))flushDraft();await PENDING_MISS;$("#compare").classList.remove("show");$("#sumbody").innerHTML="<p>Saving the final review ...</p>";$("#summary").classList.add("show");
   try{const r=await api("/api/finish",{study:M.study,reviewer:reviewer(),final:true,n_inherited_unconfirmed:M.cands.filter(isInh).length,n_differ:differIdx().length,meter_visible:showAI&&!vmode?1:0,comparison_shown:!!shown,read_mode:vmode?"validation":"second look"});
     readerScore=r.reader_score;finalRec=r.final;revoteMode=false;paintScores();
     const L=cohortList(),i=L.indexOf(M.study),nxt=i>=0&&i<L.length-1?L[i+1]:"";
@@ -712,15 +712,26 @@ $("#grip").addEventListener("mousedown",e=>{e.preventDefault();resizing=true;con
 
 // ---------- missed cSS ----------
 function renderMissed(){$("#misslist").innerHTML=missed.length?missed.map(m=>`<div class="miss"><button class="btn" data-go="${m.missed_id}" title="go to it">${m.missed_id}</button><input type="text" data-mid="${m.missed_id}" value="${esc(m.comment)}" placeholder="note (${esc(m.reviewer)})"><button class="btn" data-del="${m.missed_id}" title="delete">×</button></div><div class="mut sm" style="margin:-2px 0 6px 2px">${esc(m.shape||"point")} · ${esc(m.detector_fate||"")}</div>`).join(""):'<span class="mut sm">None. Press X, draw a rectangle or trace with the pen, then Save.</span>';if(M)paintLists()}
-async function missedApi(body){if(!reviewer()){status("Enter your name first.",true);return false}try{const r=await api("/api/missed",Object.assign({study:M.study,reviewer:reviewer(),mode:WSM?"wholestudy":""},body));setMissed(r.missed);draw();status("✓ Saved · "+r.saved.slice(11));return true}catch(e){status("NOT SAVED: "+e.message,true);return false}}
-function setShape(s){shape=s;$("#dRect").classList.toggle("on",s==="rect");$("#dPen").classList.toggle("on",s==="pen");if(draft&&draft.type!==s){draft=null;draw()}}
-async function saveDraft(){if(!draft||!draft.strokes.length||(draft.type==="rect"&&draft.strokes[0].length<2)){$("#readout").textContent="Draw the missed cSS first.";return}
-  const ok=await missedApi({action:"add",plane:draft.k,slice:draft.s,shape:draft.type,strokes:draft.strokes,comment:$("#dNote").value});if(ok){draft=null;$("#dNote").value="";$("#readout").textContent="Missed cSS saved. Draw another, or Esc to finish.";draw()}}
-function cancelDraft(){draft=null;$("#dNote").value="";setTool("pan")}
+async function missedApi(body){if(!reviewer()){status("Enter your name first - the missed cSS mark was NOT saved.",true);return false}const sid=body.study||M.study;
+  try{const r=await api("/api/missed",Object.assign({study:sid,reviewer:reviewer(),mode:WSM?"wholestudy":""},body));if(M&&M.study===sid){setMissed(r.missed);draw()}status("✓ Missed cSS saved · "+r.saved.slice(11));return true}catch(e){status("Missed cSS NOT SAVED: "+e.message,true);return false}}
+function setShape(s){shape=s;$("#dRect").classList.toggle("on",s==="rect");$("#dPen").classList.toggle("on",s==="pen");if(draft&&draft.type!==s){flushDraft();draw()}}
+// 2026-11-25: a drawn mark used to stay a draft until Save / Enter and was DROPPED without a word on a tool change, Esc, another patient,
+// another shape or the final save - no missed cSS mark of the user's 45 reviews reached the disk. Now: a rectangle saves when the mouse is
+// released; a pen outline saves when the reader moves on (tool, patient, slice / plane, new outline, Esc, final save). Only Cancel discards.
+let PENDING_MISS=Promise.resolve(true);
+const draftOk=d=>!!(d&&d.strokes&&d.strokes.length&&!(d.type==="rect"&&(d.strokes[0].length<2||(d.strokes[0][0]+"")===(d.strokes[0][1]+""))));
+async function saveDraft(dd){const d=dd||draft;if(!draftOk(d)){if(!dd)$("#readout").textContent="Draw the missed cSS first.";return false}
+  if(d===draft)draft=null;const note=$("#dNote").value;$("#dNote").value="";draw();
+  const ok=await missedApi({study:d.study||(M&&M.study),action:"add",plane:PLN[d.k].toLowerCase(),slice:d.s,shape:d.type,strokes:d.strokes,comment:note});   // plane NAME: the server refused the index (root cause)
+  if(ok)$("#readout").textContent="Missed cSS saved. Draw another, or Esc to finish.";else if(M&&M.study===d.study&&!draft){draft=d;draw()}   // not saved: keep it visible
+  return ok}
+window.addEventListener("beforeunload",e=>{if(draftOk(draft)){flushDraft();e.preventDefault();e.returnValue=""}});   // closing with an unsaved outline: saved, and the browser asks
+function flushDraft(){if(!draftOk(draft)){draft=null;return PENDING_MISS}const d=draft;draft=null;PENDING_MISS=PENDING_MISS.then(()=>saveDraft(d));return PENDING_MISS}
+function cancelDraft(){const had=draftOk(draft);draft=null;$("#dNote").value="";if(had)status("Missed cSS mark discarded (Cancel) - not saved.",true);setTool("pan")}
 function undoStroke(){if(draft){draft.strokes.pop();if(!draft.strokes.length)draft=null;draw()}}
 
 // ---------- tools ----------
-function setTool(t){tool=t;LSS("tool",t==="miss"?"pan":t);if(t!=="miss")draft=null;panes.forEach(p=>p.cv.style.cursor=t==="pan"?"grab":t==="zoom"?"zoom-in":t==="scroll"?"ns-resize":"crosshair");
+function setTool(t){tool=t;LSS("tool",t==="miss"?"pan":t);if(t!=="miss")flushDraft();panes.forEach(p=>p.cv.style.cursor=t==="pan"?"grab":t==="zoom"?"zoom-in":t==="scroll"?"ns-resize":"crosshair");
   $("#drawbar").classList.toggle("show",t==="miss");if(t==="miss")setShape(shape);
   $("#readout").textContent={pan:"",zoom:"Zoom: drag up / down.",wl:"Window: drag left–right = contrast, up–down = brightness.",scroll:"Scroll: drag up / down.",dark:"Darkness probe: click a point.",ruler:"Ruler: drag a line.",miss:"Missed cSS: draw on the slice where it is clearest, then Save."}[t]||"";paintToolbar();draw()}
 function doProbe(p,pt){const V=VIEWS[p.plane],d=[nx,ny,nz],VOL=vols[p.seq];let s=0,n=0;for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const q=pt.slice();q[V.h]+=a;q[V.v]+=b;if(q[V.h]<0||q[V.v]<0||q[V.h]>=d[V.h]||q[V.v]>=d[V.v])continue;s+=VOL[IDX(q[0],q[1],q[2])];n++}
@@ -742,7 +753,7 @@ function attachPane(p){const c=p.cv,pos=e=>{const r=c.getBoundingClientRect();re
     if(e.button===2||(e.button===0&&e.ctrlKey&&MAC))mode="wlmenu";else if(e.button===1)mode="pan";else if(e.button===0)mode=e.shiftKey?"wl":tool;else return;
     drag={p,mode,btn:e.button,x:e.clientX,y:e.clientY,mx,my,moved:false,ctr:ctr.slice(),zoom0:zoom,wl0:getWL(p.seq),s0:cur[V.s],p0:toVox(p,mx,my)};
     if(mode==="ruler")ruler={k:p.plane,s:cur[V.s],a:drag.p0,b:drag.p0,mm:0};
-    if(mode==="miss"){const s=cur[V.s],pt=toVoxF(p,mx,my);if(!draft||draft.k!==p.plane||draft.s!==s||draft.type!==shape||shape==="rect")draft={k:p.plane,s,type:shape,strokes:[]};draft.strokes.push(shape==="rect"?[pt,pt]:[pt]);draw()}})}
+    if(mode==="miss"){const s=cur[V.s],pt=toVoxF(p,mx,my);if(!draft||draft.k!==p.plane||draft.s!==s||draft.type!==shape||shape==="rect"){flushDraft();draft={k:p.plane,s,type:shape,strokes:[],study:M.study}}draft.strokes.push(shape==="rect"?[pt,pt]:[pt]);draw()}})}
 window.addEventListener("mousemove",e=>{if(!drag)return;const d=drag,p=d.p,dx=e.clientX-d.x,dy=e.clientY-d.y,V=VIEWS[p.plane];if(Math.abs(dx)+Math.abs(dy)>3)d.moved=true;
   const r=p.cv.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
   if(d.mode==="wl"||d.mode==="wlmenu"){if(d.moved)setWLp(p.seq,d.wl0[0]-dx*0.15,d.wl0[1]-dy*0.15)}
@@ -755,7 +766,8 @@ window.addEventListener("mouseup",e=>{if(!drag)return;const d=drag,p=d.p,V=VIEWS
   if(d.mode==="wlmenu"){if(!d.moved)ctxMenu(e.clientX,e.clientY,p,d.p0);return}
   if(d.btn!==0)return;
   if(d.mode==="dark")doProbe(p,d.p0);
-  else if(d.mode==="miss"&&draft){const t=draft.strokes[draft.strokes.length-1];if(draft.type==="rect"&&!d.moved){draft=null;draw()}else if(draft.type==="rect")$("#readout").textContent=`Rectangle ${(Math.abs(t[1][V.h]-t[0][V.h])*vox[V.h]).toFixed(0)} × ${(Math.abs(t[1][V.v]-t[0][V.v])*vox[V.v]).toFixed(0)} mm · Enter = save`}
+  else if(d.mode==="miss"&&draft){const t=draft.strokes[draft.strokes.length-1];if(draft.type==="rect"&&!d.moved){draft=null;draw()}else if(draft.type==="rect"){$("#readout").textContent=`Rectangle ${(Math.abs(t[1][V.h]-t[0][V.h])*vox[V.h]).toFixed(0)} × ${(Math.abs(t[1][V.v]-t[0][V.v])*vox[V.v]).toFixed(0)} mm · saving…`;flushDraft()}
+    else $("#readout").textContent="Pen outline: keep drawing, Enter = save now (it also saves when you move on)"}
   else if(d.mode==="pan"&&!d.moved){cur=d.p0;draw()}});
 
 // ---------- snapshots ----------
@@ -853,7 +865,7 @@ const MENUS_OLD={file:()=>[],edit:()=>["undo","clear","comment"],
 // ---------- Save final, screenshot, settings window ----------
 function unreadN(){return M?M.cands.filter(c=>!c.audit&&!callOf(c)).length:0}
 setInterval(()=>{const b=$("#bSaveFinal");if(!b||!M)return;const n=unreadN();b.textContent=n?`💾 Save final · ${n} unread`:"💾 Save final";b.style.background=n?"":"#2e8b46";b.style.color=n?"":"#fff"},800);
-async function saveFinal(){if(!M)return;const n=unreadN();if(n&&!confirm(`${n} candidate(s) not read - save anyway? The score is then a lower bound.`))return;summary()}
+async function saveFinal(){if(!M)return;if(draftOk(draft))flushDraft();await PENDING_MISS;const n=unreadN();if(n&&!confirm(`${n} candidate(s) not read - save anyway? The score is then a lower bound.`))return;summary()}
 async function screenCap(){if(!M)return;const area=LS("scap","window")==="area";status(area?"drag over the area to capture (Esc cancels) …":"capturing the window …");
   const name=`${M.study}_screen_${new Date().toISOString().slice(0,19).replace(/[:T]/g,"-")}.png`;
   try{const r=await api("/api/screencap",{study:M.study,reviewer:reviewer()||"screen",mode:area?"area":"window",x:window.screenX,y:window.screenY,w:window.outerWidth,h:window.outerHeight,folder:snap.folder||"",name});status("saved "+r.path)}
@@ -1039,7 +1051,7 @@ $("#comment").addEventListener("blur",saveComment);
 $("#reviewer").addEventListener("change",async()=>{const n=reviewer();if(!n)return;await api("/api/reviewer",{name:n});await loadStudy(M?M.study:"");status("Reviewer: "+n)});
 new ResizeObserver(()=>draw()).observe($("#vgrid"));
 window.addEventListener("keydown",e=>{const tag=(e.target.tagName||"").toLowerCase(),typing=(tag==="input"&&(e.target.type==="text"||e.target.type==="search"))||tag==="textarea";
-  if(e.key==="Escape"){if($(".menu")){closeMenus();return}if(typing){e.target.blur();return}if($(".modal.show")){$$(".modal").forEach(m=>m.classList.remove("show"));return}if(tool==="miss"){cancelDraft();return}setTool("pan");ruler=null;probe=null;draw();return}
+  if(e.key==="Escape"){if($(".menu")){closeMenus();return}if(typing){e.target.blur();return}if($(".modal.show")){$$(".modal").forEach(m=>m.classList.remove("show"));return}if(tool==="miss"){flushDraft();setTool("pan");return}setTool("pan");ruler=null;probe=null;draw();return}
   if(typing){if(e.key==="Enter"){if(e.target.id==="dNote"){e.target.blur();saveDraft()}else if(e.target.id!=="saName"&&e.target.id!=="saFolder")e.target.blur()}return}
   if(!M)return;if((e.metaKey||e.ctrlKey)&&e.key==="Enter"){e.preventDefault();saveFinal();return}
   if((e.metaKey||e.ctrlKey)&&!e.altKey&&e.key.toLowerCase()==="s"){e.preventDefault();takeSnapshot(e.shiftKey);return}
