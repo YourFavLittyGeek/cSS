@@ -82,7 +82,7 @@ class TestReviewerServer(unittest.TestCase):
 class TestPage(unittest.TestCase):
     def lines(self, ident, live):
         src = open(HTML).read()
-        code = (f"let M={{study:'K1'}};let IDENT={{K1:{json.dumps(ident)}}};\n" + grab(src, "function identLines(") +
+        code = (f"let M={{study:'K1'}};let IDENT_OLD=false;let IDENT={json.dumps({'K1': ident} if ident is not None else {'K0': {'mode': 'standard', 'name': 'PREVIOUS'}})};\n" + grab(src, "function identLines(") +
                 f"\nprocess.stdout.write(JSON.stringify(identLines({'true' if live else 'false'})));")
         r = subprocess.run([NODE, "-e", code], capture_output=True, text=True, timeout=30)
         if r.returncode: raise RuntimeError(r.stderr)
@@ -94,6 +94,8 @@ class TestPage(unittest.TestCase):
         self.assertEqual(self.lines(std, False), ["Study Study-901"])                                # snapshot: never the identifiers
         self.assertEqual(self.lines(dict(mode="incognito", code="Study-901"), True), ["Study Study-901"])
         self.assertEqual(self.lines(dict(std, accession=""), True), ["TEST^PATIENT · MRN 000111", "Acc (none)"])
+        self.assertEqual(self.lines(None, True), ["…"])                  # answer for the shown study not there yet: never the previous patient
+        self.assertEqual(self.lines(None, False), ["Study K1"])
 
     def test_snapshots_draw_not_live_and_top_left_uses_the_code(self):
         src = open(HTML).read()

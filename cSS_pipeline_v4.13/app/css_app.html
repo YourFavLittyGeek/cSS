@@ -457,9 +457,23 @@ function ptsView(v){const q=S.queue,sy=S.sys,z=S.mem_zones,coh=["all"].concat(S.
    <p class="note">The failed attempt's files are kept (renamed), never deleted. The method used is shown in the Pathway column.</p></div>`;$("#qcimg").scrollIntoView({behavior:"smooth"})});
   v.querySelectorAll("[data-qc]").forEach(b=>b.onclick=()=>openWin("/qc?code="+encodeURIComponent(b.dataset.qc),"cssqc"));
   v.querySelectorAll("[data-rv]").forEach(b=>b.onclick=()=>review([b.dataset.rv]))}
-async function review(codes,cohort){const w=window.open("about:blank","cssreview");if(w)w.document.write('<p style="font:16px -apple-system,sans-serif;padding:30px;color:#888;background:#111418;margin:0;height:100vh">starting the reviewer…</p>');
-  toast("starting the reviewer…");const r=await api("/api/review",{codes,cohort,reviewer:localStorage.getItem("cssapp_reviewer")||""});
+async function review(codes,cohort,opts){const w=window.open("about:blank","cssreview");if(w)w.document.write('<p style="font:16px -apple-system,sans-serif;padding:30px;color:#888;background:#111418;margin:0;height:100vh">starting the reviewer…</p>');
+  toast("starting the reviewer…");const r=await api("/api/review",Object.assign({codes,cohort,reviewer:localStorage.getItem("cssapp_reviewer")||""},opts||{}));
   if(!r.ok){if(w)w.close();return toast(esc(r.error),1)}if(r.opened){if(w)w.close();return}if(w)w.location=r.url;else toast(`pop-up blocked - open <a href="${r.url}" target="_blank">${r.url}</a>`,1)}
+// 2026-11-25 "Review all not yet reviewed" (every cohort) and "Choose cohorts..." (checklist, one or several; only not yet reviewed by default)
+function reviewOpen(){review([""],"",{cohorts:null,only_open:true})}
+async function reviewCohortsDlg(){const r=await api("/api/review_counts"),C=r.cohorts||[];if(!C.length)return toast("no processed study yet",1);
+  const lab=c=>c==="-"?"(no cohort)":c;
+  $("#dlg").innerHTML=`<h2>Review: choose cohorts</h2><p class="note">Tick one or several cohorts. The reviewer lists only the studies of the ticked cohorts.</p>
+   <div style="margin:8px 0">${C.map(c=>`<div class="row" style="margin:4px 0"><label><input type="checkbox" class="rcoh" value="${esc(c.cohort)}" ${c.open?"checked":""}> <b>${esc(lab(c.cohort))}</b> <span class="note">${c.open} not yet reviewed of ${c.total}</span></label></div>`).join("")}</div>
+   <div class="row"><button class="b sm" id="rcAll">Select all</button><button class="b sm" id="rcNone">Select none</button></div>
+   <div class="row" style="margin-top:8px"><label><input type="checkbox" id="rcOpen" checked> only studies not yet reviewed (ready, in progress, needs re-review)</label></div>
+   <div class="acts"><button class="b" data-v="x">Cancel</button><button class="b pri" data-v="ok">Open the reviewer ▸</button></div>`;
+  $("#shade").style.display="flex";
+  $("#rcAll").onclick=()=>document.querySelectorAll(".rcoh").forEach(x=>x.checked=true);$("#rcNone").onclick=()=>document.querySelectorAll(".rcoh").forEach(x=>x.checked=false);
+  $("#dlg").querySelectorAll("button[data-v]").forEach(x=>x.onclick=()=>{if(x.dataset.v!=="ok"){$("#shade").style.display="none";return}
+    const coh=[...document.querySelectorAll(".rcoh:checked")].map(x=>x.value);if(!coh.length)return toast("tick at least one cohort",1);
+    $("#shade").style.display="none";review([""],"",{cohorts:coh,only_open:$("#rcOpen").checked})})}
 // ---------------- results
 async function releaseAI(code){   // Phase 3A.2: explicit, recorded release of a study's AI results without a blind read
   const why=prompt("Release the AI results of "+code+" WITHOUT a blind read?\nLater reads of this study will be recorded as not independent of them.\n\nReason:");if(!why)return;
@@ -492,12 +506,13 @@ function agreement(R){let n=0,a=0;R.forEach(r=>{if(r.score_total==null||r.rad_R=
 async function readView(v){const pk=await api("/api/packets"),done=S.patients.filter(p=>p.status==="done");
   v.innerHTML=`<div class="card"><h2>Review (AI support visible)</h2><div class="row"><span class="lab">Reviewer name</span><input id="rvn" value="${esc(localStorage.getItem("cssapp_reviewer")||"")}" placeholder="e.g. Selim_v1"></div>
    <div class="row" style="flex-wrap:wrap">${done.map(p=>`<label style="margin-right:10px"><input type="checkbox" class="rc" value="${esc(p.code)}"> ${sidH(p.code)}</label>`).join("")||'<span class="mut">no processed patients yet</span>'}</div>
+   <div class="row"><button class="b pri" id="rvopen">Review all not yet reviewed ▸</button><button class="b" id="rvcoh">Choose cohorts…</button><span class="note">or tick studies above:</span></div>
    <div class="row"><button class="b pri" id="rv">Open the reviewer ▸</button><button class="b" id="vsetb2">⚙ Reviewer settings…</button><span class="note">opens the usual reviewer with the AI meter, AI score and 3-D view visible</span></div></div>
   <div class="card"><h2>Blind read (no detector output)</h2><div class="row"><span class="lab">Reader code</span><input id="brd" value="${esc(localStorage.getItem("cssapp_reader")||"READER1")}"></div>
    <div class="row"><span class="lab">Existing packet</span><select id="pk">${pk.map(x=>`<option>${esc(x)}</option>`).join("")}</select><button class="b pri" id="bopen">Open blind read ▸</button></div>
    <div class="row"><span class="lab">or new packet from</span><span class="note">the patients ticked above</span><input id="npk" placeholder="packet name, e.g. W2"><button class="b" id="bnew">Create and open ▸</button></div></div>`;
   const sel=()=>[...document.querySelectorAll(".rc:checked")].map(x=>x.value);
-  $("#vsetb2").onclick=vsetDlg;
+  $("#vsetb2").onclick=vsetDlg;$("#rvopen").onclick=()=>{localStorage.setItem("cssapp_reviewer",$("#rvn").value.trim());reviewOpen()};$("#rvcoh").onclick=()=>{localStorage.setItem("cssapp_reviewer",$("#rvn").value.trim());reviewCohortsDlg()};
   $("#rv").onclick=()=>{const c=sel();if(!c.length)return toast("tick at least one patient",1);localStorage.setItem("cssapp_reviewer",$("#rvn").value.trim());review(c)};
   const blind=async(body)=>{localStorage.setItem("cssapp_reader",$("#brd").value.trim());toast("starting the blind viewer…");const r=await api("/api/blind",Object.assign({reader:$("#brd").value.trim()},body));if(!r.ok)return toast(esc(r.error),1);window.open(r.url,"_blank")};
   $("#bopen").onclick=()=>{if(!$("#pk").value)return toast("no packet yet",1);blind({packet:$("#pk").value})};
@@ -732,7 +747,7 @@ async function studiesView(v){const D=await loadStudies();if(V!=="studies")retur
     <button class="b" id="sedit" data-id="bulk-edit" title="edit the cohort / display name of the ticked studies">Edit</button>
     <span style="position:relative"><button class="b" id="sarch" data-id="archive-menu">Archive ▾</button><div class="menu hide" id="sarchm"><button id="sarch1">Archive ticked studies</button><button id="sarch2">Archive a cohort…</button><div class="divider" style="margin:6px 0"></div><button id="sarch3" data-id="open-archive">Open the archive (${(W.archivedRows||[]).length+(W.retiredRows||[]).length})</button></div></span>
     <button class="b" id="srem" data-id="remove">Remove…</button>
-    <button class="b" id="scalls" onclick="openCalls()" title="every reviewer's calls are kept; choose whose calls are used">Reviewer calls</button><button class="b" id="srev">${W.sel.size?`Review ${W.sel.size} selected`:"Review"}</button>
+    <button class="b" id="scalls" onclick="openCalls()" title="every reviewer's calls are kept; choose whose calls are used">Reviewer calls</button><span style="position:relative"><button class="b" id="srev" data-id="review-menu">Review ▾</button><div class="menu hide" id="srevm"><button id="srev1">Review all not yet reviewed (${D.rows.filter(FIL[3][2]).length})</button><button id="srev2">Choose cohorts…</button><div class="divider" style="margin:6px 0"></div><button id="srev3">${W.sel.size?`Review ${W.sel.size} selected`:"Review the studies shown"}</button></div></span>
     <span style="position:relative"><button class="b" id="sexp">Export ▾</button><div class="menu hide" id="sexpm">${[["xlsx","Excel workbook (.xlsx)"],["csv","CSV (.csv)"],["docx","Word report (.docx)"],["pdf","PDF report (.pdf)"]].map(([f,l])=>`<button data-fmt="${f}">${l}</button>`).join("")}<button id="sxf" data-id="export-files">Studies with files…</button><button id="spkg">Share package (.zip)</button><div class="divider" style="margin:6px 0"></div><button id="sopx">Open results workbook</button><button id="sai">Update AI scores</button><div class="note" style="padding:4px 10px">Written only to a local folder you choose, after a warning</div></div></span>
     <button class="b pri" onclick="go('add')">Add studies</button></div>
    <div class="fbar" data-id="filters"><span class="note">Filter</span>
@@ -755,10 +770,12 @@ async function studiesView(v){const D=await loadStudies();if(V!=="studies")retur
   bindSeg("sgrp",x=>{W.grp=x;re()});
   v.querySelectorAll("[data-sk]").forEach(h=>h.onclick=()=>{const k=h.dataset.sk;W.sort=W.sort.k===k?{k,d:-W.sort.d}:{k,d:1};re()});
   v.querySelectorAll("[data-grp]").forEach(g=>g.onclick=()=>{const k=g.dataset.grp;W.closed.has(k)?W.closed.delete(k):W.closed.add(k);re()});
-  v.querySelectorAll("[data-sc]").forEach(c=>{c.onclick=e=>e.stopPropagation();c.onchange=()=>{c.checked?W.sel.add(c.dataset.sc):W.sel.delete(c.dataset.sc);$("#srev").textContent=W.sel.size?`Review ${W.sel.size} selected`:"Review"}});
+  v.querySelectorAll("[data-sc]").forEach(c=>{c.onclick=e=>e.stopPropagation();c.onchange=()=>{c.checked?W.sel.add(c.dataset.sc):W.sel.delete(c.dataset.sc);$("#srev3").textContent=W.sel.size?`Review ${W.sel.size} selected`:"Review the studies shown"}});
   $("#sall").onchange=e=>{vis.forEach(x=>e.target.checked?W.sel.add(x.code):W.sel.delete(x.code));re()};
   v.querySelectorAll("[data-st]").forEach(tr=>tr.onclick=()=>openSheet(tr.dataset.st));
-  $("#srev").onclick=()=>{const c=W.sel.size?[...W.sel]:vis.filter(x=>x.r&&x.r.candidates!=null).map(x=>x.code);if(!c.length)return toast("no processed study to review",1);review(c,W.coh==="all"?"":W.coh)};
+  $("#srev").onclick=e=>{e.stopPropagation();$("#srevm").classList.toggle("hide")};document.addEventListener("click",()=>$("#srevm")&&$("#srevm").classList.add("hide"),{once:true});
+  $("#srev1").onclick=()=>reviewOpen();$("#srev2").onclick=()=>reviewCohortsDlg();
+  $("#srev3").onclick=()=>{const c=W.sel.size?[...W.sel]:vis.filter(x=>x.r&&x.r.candidates!=null).map(x=>x.code);if(!c.length)return toast("no processed study to review",1);review(c,W.coh==="all"?"":W.coh)};
   $("#sexp").onclick=e=>{e.stopPropagation();$("#sexpm").classList.toggle("hide")};document.addEventListener("click",()=>$("#sexpm")&&$("#sexpm").classList.add("hide"),{once:true});
   v.querySelectorAll("[data-fmt]").forEach(b=>b.onclick=()=>clinicalExport("/api/export",{fmt:b.dataset.fmt,cohort:W.coh}));
   $("#spkg").onclick=()=>clinicalExport("/api/share",{codes:vis.filter(x=>x.r&&x.r.candidates!=null).map(x=>x.code)});

@@ -2962,6 +2962,38 @@ def eta(p):
     return el, rem
 
 # ------------------------------------------------------------------ results
+def review_open(code, cohort=""):
+    """True when the study still needs a read: not started, in progress or needs re-review (any reviewer state other than 'reviewed')"""
+    import review_calls_gui as RCG
+    return RCG.state(B, code, cohort).get("state") != "reviewed"
+
+
+def review_selection(cohorts=None, only_open=True):
+    """2026-11-25 the studies a "Review ..." choice opens: processed (candidate list), not archived / retired, in the chosen cohorts
+    (None = every cohort; '-' = studies without a cohort) and - with only_open - not yet reviewed. Ordered by study code."""
+    want = None if cohorts is None else {str(c) for c in cohorts}
+    out = []
+    for p in PAT:
+        c = p.get("code")
+        if not c or p.get("status") != "done" or p.get("archived") or p.get("retired"): continue
+        if not os.path.exists(f"{B}/review/{c}_candidates.csv"): continue
+        if want is not None and (p.get("cohort") or "-") not in want: continue
+        if only_open and not review_open(c, p.get("cohort", "")): continue
+        out.append(c)
+    return sorted(out, key=lambda x: [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", x)])
+
+
+def review_counts():
+    """per cohort: processed studies and how many still need a read (the "Choose cohorts..." checklist)"""
+    out = {}
+    for p in PAT:
+        c = p.get("code")
+        if not c or p.get("status") != "done" or p.get("archived") or p.get("retired") or not os.path.exists(f"{B}/review/{c}_candidates.csv"): continue
+        k = p.get("cohort") or "-"; o = out.setdefault(k, dict(cohort=k, total=0, open=0))
+        o["total"] += 1; o["open"] += int(review_open(c, p.get("cohort", "")))
+    return sorted(out.values(), key=lambda x: x["cohort"])
+
+
 def results():
     import pandas as pd
     rows = []
@@ -3189,6 +3221,7 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/": return self.send(open(f"{HERE}/css_app.html", "rb").read(), ctype="text/html; charset=utf-8")
             if u.path == "/api/state": return self.send(state())
             if u.path == "/api/viewer_ident": return self.send(viewer_ident(q.get("code", "")))
+            if u.path == "/api/review_counts": return self.send(dict(cohorts=review_counts()))
             if u.path == "/api/job":                                     # background job progress (setup Finish, study import)
                 import progress_jobs as PJ; q_ = {k: v[0] for k, v in parse_qs(u.query).items()}
                 return self.send(PJ.get(q_["id"]) if q_.get("id") else dict(running=PJ.running()))
@@ -3378,10 +3411,16 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/rollback": return self.send(rollback())
             if u.path == "/api/review":
                 done = [p for p in PAT if p["status"] == "done" and os.path.exists(f"{B}/review/{p['code']}_candidates.csv")]
+                if d.get("cohorts") is not None or d.get("only_open"):          # 2026-11-25 "Review all not yet reviewed" / "Choose cohorts..."
+                    sel = review_selection(d.get("cohorts"), bool(d.get("only_open")))
+                    if not sel: return self.send(dict(ok=False, error="no study to review in this choice" + (" (all reviewed)" if d.get("only_open") else "")))
+                    d["codes"] = sel; done = [p for p in done if p["code"] in set(sel)]
+                    d["cohort"] = ""
                 groups = {}
                 for p in done: groups.setdefault(p.get("cohort") or "-", []).append(p["code"])
                 start = d["codes"][0]
                 if d.get("cohort"): d["codes"] = groups.get(d["cohort"], d["codes"]); start = d["codes"][0] if d["codes"] else start
+                elif d.get("cohorts") is not None or d.get("only_open"): start = d["codes"][0]
                 else: d["codes"] = [p["code"] for p in done] + [c for c in d["codes"] if c not in {p["code"] for p in done}]   # studies found on disk (Processing tab) too
                 json.dump(groups, open(f"{AD}/review_groups.json", "w")); d["start"] = start
                 r = launch_child("review", d, 8765)

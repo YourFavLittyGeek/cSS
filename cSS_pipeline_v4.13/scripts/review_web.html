@@ -270,9 +270,16 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
 "use strict";
 // 2026-11-25 identity on the image: asked from the app through the reviewer server for the shown study, refreshed every 20 s (a switch to
 // Incognito hides the identifiers at the next refresh); kept in memory only
-let IDENT={};
-async function fetchIdent(sid){if(!sid)return;try{const d=await api(`/api/ident?study=${encodeURIComponent(sid)}`);const k=JSON.stringify(d),old=JSON.stringify(IDENT[sid]||null);IDENT[sid]=d;if(k!==old&&typeof M!=="undefined"&&M&&M.study===sid)draw()}catch(e){}}
+// Every answer is stored under the study it was ASKED for (a late answer for another study can never be shown on this one); while the
+// answer for the shown study is missing the line says "…" - never the previous patient. An older reviewer server (no /api/ident:
+// window opened before the update) gets a red bar asking to reopen the reviewer from Percival.
+let IDENT={},IDENT_OLD=false;
+async function fetchIdent(sid){if(!sid)return;try{const d=await api(`/api/ident?study=${encodeURIComponent(sid)}`);const k=JSON.stringify(d),old=JSON.stringify(IDENT[sid]||null);IDENT[sid]=d;if(k!==old&&typeof M!=="undefined"&&M&&M.study===sid)draw()}
+  catch(e){if(/not found/i.test(String(e&&e.message))&&!IDENT_OLD){IDENT_OLD=true;const b=document.createElement("div");b.id="oldsrv";
+    b.style.cssText="position:fixed;left:0;right:0;top:0;z-index:9999;background:#b3261e;color:#fff;font:600 13px -apple-system,sans-serif;padding:8px 14px;text-align:center";
+    b.textContent="Older reviewer window: patient details cannot be shown. Close this window and open the reviewer from Percival.";document.body.appendChild(b)}}}
 function identLines(live){const sid=typeof M!=="undefined"&&M?M.study:"",d=IDENT[sid];if(!sid)return [];
+  if(live&&!d&&!IDENT_OLD)return ["…"];
   if(!live||!d||d.mode!=="standard")return [`Study ${(d&&d.code)||sid}`];
   const a=[d.name,d.mrn?"MRN "+d.mrn:""].filter(Boolean).join(" · "),out=[];if(a)out.push(a);out.push(d.accession?"Acc "+d.accession:"Acc (none)");return out}
 setInterval(()=>{if(typeof M!=="undefined"&&M&&!document.hidden)fetchIdent(M.study)},20000);
