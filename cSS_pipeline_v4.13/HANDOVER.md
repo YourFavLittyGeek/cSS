@@ -42,7 +42,7 @@ Read this first, then CLAUDE.md (project science + history). Do not trust older 
 
 ## 4. Build / release
 - App zip: `bash tools/build_percival_dev_app.sh ~/PERCIVAL_releases` (committed files only) ->
-  `Percival_v5.25-dev_<sha>.zip` + `_BUILD_INFO.txt`. Current: `Percival_v5.25-dev_b543b6a.zip` (missed-cSS loop steps 1-4 + second look + Save fix; sha256 96a3c829c110e67eeb64774ef05c6101e8457abe4dfbf7eed68b653fb5b36671). Before: `Percival_v5.25-dev_6dda504.zip` (LUMOS learns from missed marks; sha256 8bd20cfe7706871085b7add4b28cfc50827150913ee10ba8f58fe5b1c284d803). Before: `Percival_v5.25-dev_01e95bc.zip`
+  `Percival_v5.25-dev_<sha>.zip` + `_BUILD_INFO.txt`. Current: `Percival_v5.25-dev_9e0ae13.zip` (audit fixes: grade-0 repair, bands, one AI opinion; sha256 79b90a138d25d6f81206537cd1b942501271762450cbfffa1fa9c5c44ea9e53b). Before: `Percival_v5.25-dev_b543b6a.zip` (missed-cSS loop steps 1-4 + second look + Save fix; sha256 96a3c829c110e67eeb64774ef05c6101e8457abe4dfbf7eed68b653fb5b36671). Before: `Percival_v5.25-dev_6dda504.zip` (LUMOS learns from missed marks; sha256 8bd20cfe7706871085b7add4b28cfc50827150913ee10ba8f58fe5b1c284d803). Before: `Percival_v5.25-dev_01e95bc.zip`
   (sha256 d3ba09edbb66fd10520bd809c779832c5044bd06cb060696b910290348236e6c).
   NEWER: `Percival_v5.25-dev_1a0bbcc.zip` (sha256 4418b70780927a230cafb0242f87efcb753ba3deb8bffd3f88ede0e58e24f13a; incl. audit items 1-8) -
   not yet installed by the user at the time of writing.
