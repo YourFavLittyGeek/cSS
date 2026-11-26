@@ -2783,16 +2783,45 @@ def queue_unified(p, force=False):
             try: write_results_file()
             except Exception: pass
     threading.Thread(target=run, daemon=True).start()
+SCORE_REPAIR = dict(running=False, done=[], failed={}, pending=[])
+
+
 def calls_refresh_stale():
-    """2026-11-25: a role change before this fix left review/ID_calls.csv as it was (empty for every study read before the reviewer
-    became an expert) - rebuild every study whose effective calls are older than the roles journal"""
+    """rebuild every study whose shared calls / score do not match the call ledger (2026-11-25 role change; 2026-11-26 the final save
+    rebuilt them before the review counted as completed -> 0 effective calls and a shared score of 0). A study on Pensieve cannot be
+    re-scored in place (its labels moved with it): it is brought back (verified) and re-scored in the background, one at a time."""
     try:
         import review_calls_gui as RCG
         st = RCG.stale_effective(B, PAT)
         if st:
-            r = RCG.refresh_effective(B, PAT, st, by="role change (startup)")
-            print(f"effective calls rebuilt after a role change: {len(r)} studies", flush=True)
+            r = RCG.refresh_effective(B, PAT, st, by="startup repair (calls / score out of date)")
+            print(f"effective calls rebuilt: {len(r)} studies", flush=True)
+        away = [c for c in st if not RCG.score_current(B, c) and RCG._away(B, c)]
+        if away:
+            SCORE_REPAIR.update(pending=list(away)); threading.Thread(target=_score_repair, daemon=True).start()
     except Exception as e: print(f"effective calls not rebuilt: {e}", flush=True)
+
+
+def _score_repair():
+    """bring each study back from Pensieve (verified) and re-score its effective calls; the normal Pensieve setting moves it again later"""
+    import review_calls_gui as RCG
+    SCORE_REPAIR["running"] = True
+    try:
+        while SCORE_REPAIR["pending"]:
+            c = SCORE_REPAIR["pending"].pop(0)
+            try:
+                el = ensure_local(c)
+                if el and not el.get("ok", True): SCORE_REPAIR["failed"][c] = "not brought back: " + str(el.get("error", ""))[:120]; continue
+                RCG.refresh_effective(B, PAT, [c], by="score repair (study brought back from Pensieve)")
+                if RCG.score_current(B, c): SCORE_REPAIR["done"].append(c)
+                else: SCORE_REPAIR["failed"][c] = "score not recomputed"
+            except Exception as e: SCORE_REPAIR["failed"][c] = f"{type(e).__name__}: {str(e)[:120]}"
+        if SCORE_REPAIR["done"] or SCORE_REPAIR["failed"]:
+            print(f"study scores repaired: {len(SCORE_REPAIR['done'])}, failed: {len(SCORE_REPAIR['failed'])}", flush=True)
+            try: notify_c("done", "review", "Study scores repaired", f"{len(SCORE_REPAIR['done'])} studies re-scored from the effective calls"
+                          + (f"; {len(SCORE_REPAIR['failed'])} could not be (Pensieve drive not connected?) - they are repaired at the next start" if SCORE_REPAIR["failed"] else ""))
+            except Exception: pass
+    finally: SCORE_REPAIR["running"] = False
 
 
 def ai_backfill():
@@ -3033,6 +3062,14 @@ def results():
             f = f"{B}/review/{c}_score{key}.json"
             if os.path.exists(f):
                 j = json.load(open(f)); r[f"{tag}_L"] = j.get("L_score"); r[f"{tag}_R"] = j.get("R_score"); r[f"{tag}_total"] = j.get("multifocality_0_4")
+        r["ai_source"] = "rule meter" if r.get("ai_total") is not None else ""
+        try:                                                     # 2026-11-26 (audit A2): ONE AI opinion - the trained PERCIVAL grade when it exists
+            P_ = json.load(open(f"{B}/percival/scores/{c}.json")) if os.path.exists(f"{B}/percival/scores/{c}.json") else {}
+            us = P_.get("study_score") or {}
+            if us.get("total") is not None:
+                r.update(ai_L=us.get("L_score"), ai_R=us.get("R_score"), ai_total=us.get("total"), ai_total_upper=us.get("total_upper"),
+                         ai_source="Percival", ai_status=us.get("status", ""), ai_model=P_.get("model", ""))
+        except Exception: pass
         r["qc_grade"], r["qc_tip"] = qc_grade(p); r["ai_err"] = p.get("ai_note", "")
         u = p.get("uscore") or {}                   # v5.14 experimental unified score (counts of candidates per category; none hidden)
         r["unified_status"] = p.get("uscore_status") or ("off" if not SET["features"].get("unified_score") else "")
@@ -3097,7 +3134,7 @@ def export_as(fmt, cohort=""):
     else: raise ValueError(f"unknown format {fmt}")
     return out
 COLS_SHORT = [("study_id", "Study"), ("deid_code", "Code"), ("cohort", "Cohort"), ("status", "Status"), ("qc_grade", "QC"), ("candidates", "Candidates"), ("score_L", "Reader L"),
-              ("score_R", "Reader R"), ("score_total", "Reader total"), ("ai_total", "AI total*"), ("rad_R", "Radiologist R"), ("rad_L", "Radiologist L")]
+              ("score_R", "Reader R"), ("score_total", "Reader total"), ("ai_total", "AI total*"), ("ai_total_upper", "AI total incl. possible*"), ("ai_source", "AI source*"), ("rad_R", "Radiologist R"), ("rad_L", "Radiologist L")]
 def _cells(df):
     cols = [(k, h) for k, h in COLS_SHORT if k in df.columns]
     rows = [[("" if (v is None or (isinstance(v, float) and v != v)) else (str(int(v)) if isinstance(v, float) and v == int(v) else str(v))) for v in (r[k] for k, _ in cols)] for _, r in df.iterrows()]

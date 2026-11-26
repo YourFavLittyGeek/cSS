@@ -105,14 +105,15 @@ try:
         check("promoted by the user (explicit approval) -> active", r.get("ok") and s["active"]["version"] == "v001" and s["status"]["v001"]["status"] == "active", str(r))
     time.sleep(6)
     sc = get(f"/api/percival/score?code={studies[2]}")
-    check("every study assessed: Percival Score 0-100, band, status, components", sc.get("candidates") and all((c["percival_score"] is None or 0 <= c["percival_score"] <= 100) for c in sc["candidates"]) and set(sc["candidates"][0]["components"]) == {"math", "unified", "char", "image", "fusion"})
+    check("every study assessed: Percival Score 0-100, band, status, components", sc.get("candidates") and all((c["percival_score"] is None or 0 <= c["percival_score"] <= 100) for c in sc["candidates"]) and set(sc["candidates"][0]["components"]) == {"math", "char", "image"})      # 2026-11-25 architecture: ALBUS / NOX / LUMOS only
     check("prediction ledger written", bool(get(f"/api/percival/history?code={studies[2]}")["ledger"]))
     for tab, mark in (("overview", 'class="lv-svg"'), ):      # markers follow the current views: System is the default tab (81d9bd4); the 14-section Training Center (26568a1); detection / segmentation eligibility (26568a1)
         D = dom("#intel?tab=overview"); check("Intelligence screen: tiles, learning curve, locked-test table", 'data-pv="tiles"' in D and mark in D and 'data-pv="test"' in D)
     shot("v522_intelligence_overview", "#intel")
     De = dom("#intel?tab=evidence", 15000)
-    check("v5.23 Evidence & reliability tab: model families, fusion benefit, shared inputs, incremental value, disagreement, calibration, review snapshots",
-          all(f'data-pv="{k}"' in De for k in ("family-char", "family-image", "family-fusion", "overlap", "ablation", "disagreement", "calibration")) and "Expert-review snapshots" in De and "Does fusion help?" in De)
+    check("v5.23 Evidence & reliability tab: model families, shared inputs, incremental value, disagreement, calibration, review snapshots",   # 2026-11-25: no Fusion layer
+          all(f'data-pv="{k}"' in De for k in ("family-char", "family-image", "overlap", "ablation", "disagreement", "calibration")) and "Expert-review snapshots" in De
+          and 'data-pv="family-fusion"' not in De)
     shot("v523_intelligence_evidence", "#intel?tab=evidence", 2600)
     Dc = dom("#intel?tab=center", 15000)
     check("v5.24 Training Center: separate states (studies / processed / candidates / called / eligible), datasets per component, study table",
@@ -134,7 +135,7 @@ try:
           rp.get("ok") and (rp.get("identical") is True or (rp["n_differences"] > 0 and set(rp["changes"]) <= {"input availability changed (predictor)"})), json.dumps(rp)[:1500])
     shot("v524_training_runs", "#intel?tab=center", 2600)
     cc = get(f"/api/percival/candidates?code={studies[0]}")
-    check("v5.24 candidate drill-down: eligibility per component with reasons in words", cc.get("candidates") and all(set(c["components"]) == {"char", "image", "fusion", "meta", "predictor", "shadow", "detection", "segmentation"} and "reasons_text" in c and "missing" in c for c in cc["candidates"]), str(cc)[:300])
+    check("v5.24 candidate drill-down: eligibility per component with reasons in words", cc.get("candidates") and all(set(c["components"]) == {"char", "image", "meta", "shadow", "detection", "segmentation"} and "reasons_text" in c and "missing" in c for c in cc["candidates"]), str(cc)[:300])
     Dx = dom("#intel?tab=explore", 15000)
     check("v5.23 candidate explorer lists why a candidate is uncertain", "why uncertain" in Dx)
     # the ordinary viewer: ONE primary score

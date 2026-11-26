@@ -130,6 +130,11 @@ Read this first, then CLAUDE.md (project science + history). Do not trust older 
   Center "Where ALBUS loses cSS" (fate_report). Viewer: Save button fixed (onclick took the event), pen clipped to the image.
   tests/test_albus_redetect.py (phantom end-to-end: project untouched). NOTE: detect_css.py fails on uengine synthetic_images studies
   (NameError _dil at line 647) - pre-existing, not touched; phantom_v4 studies run.
+- 2026-11-26 audit (docs/AUDIT_pipeline_2026-11-26.md, from branch claude/pensive-brahmagupta-09dlhu) VERIFIED first
+  (docs/AUDIT_pipeline_2026-11-26_VERIFICATION.md). Found + fixed a bigger bug: final save rebuilt the effective calls before the review
+  counted as complete -> 13 patients showed grade 0 in Results / cSS_results.xlsx (startup repair rebuilds + re-scores, Pensieve studies
+  brought back). Also: grade from the model's bands (total / total_upper, needs_review), one AI opinion (PERCIVAL, rule meter fallback),
+  legacy albus.py bugs. vault.py / pensieve.py are LIVE - do not delete (audit A4 was wrong there).
 
 ## 6. Open items / next steps (ask the user before starting)
 1. User reported the app WINDOW froze after "Use Percival_project" (server answered, page idle, no JS error in

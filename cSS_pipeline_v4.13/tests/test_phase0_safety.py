@@ -534,15 +534,15 @@ class TestScientificIntegrity(unittest.TestCase):
                 p.stop()
         return rec, runs
 
-    SCORED = [dict(cand_id=1, percival_score=72.0, band="likely", status="reliable"),
-              dict(cand_id=2, percival_score=30.0, band="unlikely", status="reliable")]
+    SCORED = [dict(cand_id=1, percival_score=72.0, band="green", status="reliable"),      # the bands score_rows writes (red / yellow / green)
+              dict(cand_id=2, percival_score=30.0, band="red", status="reliable")]
 
     def test_s11_missing_core_output_never_overwrites_the_trained_score(self):
         self.set["features"]["experimental_core"] = True          # even with the experimental layer ON
         rec, runs = self._score(self.SCORED)
         c = {s["cand_id"]: s for s in rec["candidates"]}
         self.assertEqual(c[1]["percival_score"], 72.0)
-        self.assertEqual(c[1]["band"], "likely")
+        self.assertEqual(c[1]["band"], "green")
         self.assertEqual(c[1]["status"], "reliable")
         self.assertEqual(c[2]["percival_score"], 30.0)
         self.assertIn("EXPERIMENTAL", c[1]["experimental_core"]["label"])

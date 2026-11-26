@@ -74,7 +74,7 @@ def release(B, code, by, reason, confirm, here=os.path.dirname(os.path.abspath(_
     return dict(ok=True, state=state(B, code, here))
 
 
-RESULT_AI_KEYS = ("ai_L", "ai_R", "ai_total", "ai_err", "unified_css_compatible", "unified_uncertain", "unified_alternative", "unified_model", "unified_note")
+RESULT_AI_KEYS = ("ai_L", "ai_R", "ai_total", "ai_total_upper", "ai_source", "ai_status", "ai_model", "ai_err", "unified_css_compatible", "unified_uncertain", "unified_alternative", "unified_model", "unified_note")
 
 
 def mask_result(r, st):

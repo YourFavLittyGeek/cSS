@@ -1287,6 +1287,10 @@ class H(BaseHTTPRequestHandler):
                     out, n, xl = css_report.build(B); res["final"] = fin; res["report"] = f"{out}.csv{xl}"
                     if blind and len(c) >= len(s.df):                              # Phase 3A.2: every shown candidate called + final save
                         RB.record_completed(B, s.sid, rev, len(s.df), len(c)); res["initial_complete"] = True
+                    # 2026-11-26 audit follow-up: the effective calls were rebuilt BEFORE the final record / blind-read completion existed, so
+                    # this reviewer did not count yet -> 0 effective calls and a shared score of 0 (17 studies). Rebuild once more now.
+                    with LOCK: eff2 = CL.materialize(B, s.sid, by=rev, rescore=True)
+                    if eff2.get("score_ok") is False: res["text"] = (res.get("text") or "") + "\neffective score failed: " + eff2.get("score_note", "")
                 if blind:                                                           # no AI content, no candidate numbers, no rules
                     res.update(text="saved", ai_score=None, missed=RB.redact_missed(res["missed"], ctx), reader_score=RB.redact_score(res["reader_score"]),
                                audit=[dict(id=ctx.to_blind(a["id"]), call=a["call"]) for a in res["audit"]])

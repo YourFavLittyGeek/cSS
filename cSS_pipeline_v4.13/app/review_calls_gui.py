@@ -136,15 +136,39 @@ def refresh_effective(B, PAT, codes=None, by="role change"):
 
 
 def stale_effective(B, PAT):
-    """studies whose effective calls were written BEFORE the newest role change (they must be rebuilt)"""
+    """studies whose shared calls / score do not match the call ledger and must be rebuilt: written before the newest role change, a stored
+    number of effective calls different from what the ledger resolves now (2026-11-26: the final save rebuilt them before the review counted
+    as completed), or a shared score computed from other calls than the current shared calls (not re-scored while on Pensieve)"""
+    import hashlib, json
     try: rt = os.path.getmtime(_ledger(B).RR.roles_journal(B))
-    except OSError: return []
-    st = []
-    for code, _ in _studies(B, PAT):
+    except OSError: rt = 0.0
+    L = _ledger(B); st = []
+    for code, coh in _studies(B, PAT):
         if not glob.glob(os.path.join(B, "review", f"{code}_calls_*.csv")): continue
         ep = os.path.join(B, "review", f"{code}_effective.json")
-        if not os.path.exists(ep) or os.path.getmtime(ep) < rt: st.append(code)
+        if not os.path.exists(ep) or os.path.getmtime(ep) < rt: st.append(code); continue
+        try:
+            with open(ep) as f: rec = json.load(f)
+            E = L.effective(B, code, coh)
+            live = sum(1 for r in E["rows"] if r.get("effective_call"))
+            if E.get("problems"): continue                                 # materialize refuses these anyway (journal mismatch)
+            if int(rec.get("n_effective") or 0) != live: st.append(code); continue
+            cp = os.path.join(B, "review", f"{code}_calls.csv")
+            sha = hashlib.sha256(open(cp, "rb").read()).hexdigest() if os.path.exists(cp) else ""
+            if live and rec.get("score_ok") is not False and (rec.get("scored_calls_sha256") != sha or not os.path.exists(os.path.join(B, "review", f"{code}_score.json"))):
+                st.append(code)                                            # a failed score attempt is not retried at every start
+        except Exception: continue
     return st
+
+
+def score_current(B, code):
+    """True when the shared score was computed from the current shared calls"""
+    import hashlib, json
+    try:
+        with open(os.path.join(B, "review", f"{code}_effective.json")) as f: rec = json.load(f)
+        cp = os.path.join(B, "review", f"{code}_calls.csv")
+        return os.path.exists(os.path.join(B, "review", f"{code}_score.json")) and rec.get("scored_calls_sha256") == hashlib.sha256(open(cp, "rb").read()).hexdigest()
+    except Exception: return False
 def set_adjudicator(B, name, allowed, by, reason, confirm): return _ledger(B).RR.set_adjudicator(B, name, allowed, by, reason, confirm)
 def verify_historical(B, code, reviewer, by, reason, evidence, confirm): return _ledger(B).RR.verify_historical(B, code, reviewer, by, reason, evidence, confirm)
 

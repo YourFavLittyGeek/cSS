@@ -1,4 +1,10 @@
-"""uengine/albus.py - ALBUS: Mathematical Candidate Discovery Engine
+"""uengine/albus.py - RETIRED legacy ALBUS engine (kept only behind the CORE comparison adapter, Settings features.experimental_core,
+default OFF; see uengine/legacy_guard.RETIRED). It is NOT the detector: ALBUS = scripts/detect_css.py, evaluated against expert truth in
+uengine/albus_detection.py and re-run on expert marks by app/albus_redetect.py. Lowering a score threshold cannot recover lesions lost at
+the detector's generation gates or exclusion rules. 2026-11-26 audit fixes: 'threshold_before' was read after the update; the per-patient
+normalisation was inverted (12 misses in ONE patient moved the threshold most) - now at most 3 misses per patient count.
+
+Original description:
 
 The initial analytical component in the Percival pipeline:
   MRI -> ALBUS -> LUMOS + NOX -> PERCIVAL CORE -> PERCIVAL SCORE
@@ -104,17 +110,20 @@ class AlbusDiscoveryEngine:
         fp_corrections = albus_mem.get("false_positive_corrections", [])
         n_fp = len(fp_corrections)
 
-        # Patient-level normalization for both missed lesions and false positives
-        missed_studies = set(m.get("study_id") for m in missed_list if m.get("study_id"))
-        n_missed_patients = max(1, len(missed_studies))
-        missed_per_patient = n_missed / n_missed_patients
-
-        fp_studies = set(c.get("study_id") for c in fp_corrections if c.get("study_id"))
-        n_fp_patients = max(1, len(fp_studies))
-        fp_per_patient = n_fp / n_fp_patients
+        # Patient-level normalization (2026-11-26 fix): the evidence is the number of PATIENTS with misses / false positives, each patient
+        # counting at most PER_PATIENT_CAP events - so one scan cannot move the threshold more than a few scans would. (Before: events /
+        # patients, which made 12 misses in one patient the strongest signal.)
+        PER_PATIENT_CAP = 3
+        def _breadth(items):
+            per = {}
+            for i, it in enumerate(items):
+                k = it.get("study_id") or f"_unknown_{i}"; per[k] = per.get(k, 0) + 1
+            return sum(min(v, PER_PATIENT_CAP) for v in per.values()) / PER_PATIENT_CAP
+        missed_evidence = _breadth(missed_list) if missed_list else float(n_missed) / PER_PATIENT_CAP
+        fp_evidence = _breadth(fp_corrections)
 
         # Sensitivity multiplier: bounded in [0.5, 2.0]
-        s_adapt = float(np.clip(1.0 + 0.12 * missed_per_patient - 0.05 * fp_per_patient, 0.5, 2.0))
+        s_adapt = float(np.clip(1.0 + 0.12 * missed_evidence - 0.05 * fp_evidence, 0.5, 2.0))
         self.adaptive_multiplier = s_adapt
 
         # Exponential smoothing (alpha = 0.35) to prevent threshold oscillation
@@ -196,14 +205,15 @@ class AlbusDiscoveryEngine:
             pattern=f"{primary_failure}: {diagnosis}"
         )
         
-        # Trigger adaptive threshold update
+        # Trigger adaptive threshold update (2026-11-26: the threshold BEFORE the update is recorded first - it was read after it)
+        thresh_before = self.threshold
         new_thresh = self.update_adaptive_threshold()
         
         event = {
             "correction_id": cid,
             "study_id": study_id,
             "calculated_score": score,
-            "threshold_before": self.threshold,
+            "threshold_before": thresh_before,
             "threshold_after": new_thresh,
             "failure_category": primary_failure,
             "contributing_factors": contributing_factors,
@@ -280,7 +290,7 @@ class AlbusDiscoveryEngine:
             )
 
         return {
-            "status": "active_learning_applied",
+            "status": "retired_legacy_adaptive_threshold (not used by the app's ALBUS)",
             "missed_lesions_to_recover": missed_count,
             "false_positives_recorded": len(fp_corrections),
             "current_formula": self.formula_id,

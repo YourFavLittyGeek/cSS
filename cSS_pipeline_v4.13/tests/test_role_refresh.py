@@ -57,5 +57,29 @@ class TestRoleRefresh(unittest.TestCase):
         self.assertEqual(self.n_shared("S1"), 3)
 
 
+    def test_stale_by_content_not_only_by_time(self):
+        """2026-11-26: the final save rebuilt the effective calls before the review counted as completed -> 0 stored, while the ledger
+        resolves every call; and a study on Pensieve kept a score computed from other calls. Both are found at startup."""
+        import json, hashlib
+        RR.set_role(self.B, "Dr A", "expert", "admin", "expert", RR.CONFIRM_ROLE); time.sleep(0.02)
+        CL.materialize(self.B, "S1", "", by="Dr A", rescore=False); self.assertEqual(self.n_shared("S1"), 3)
+        ep = os.path.join(self.B, "review", "S1_effective.json"); rec = json.load(open(ep))
+        self.assertEqual(RCG.stale_effective(self.B, self.PAT), ["S1"])                 # never scored: the score is not current
+        cp = os.path.join(self.B, "review", "S1_calls.csv"); sha = hashlib.sha256(open(cp, "rb").read()).hexdigest()
+        open(os.path.join(self.B, "review", "S1_score.json"), "w").write("{}")
+        json.dump(dict(rec, scored_calls_sha256=sha), open(ep, "w")); self.assertEqual(RCG.stale_effective(self.B, self.PAT), [])
+        self.assertTrue(RCG.score_current(self.B, "S1"))
+        json.dump(dict(rec, scored_calls_sha256=sha, n_effective=0), open(ep, "w"))     # the user's state: 0 stored, 3 resolved
+        self.assertEqual(RCG.stale_effective(self.B, self.PAT), ["S1"])
+        json.dump(dict(rec, scored_calls_sha256="x", score_ok=False), open(ep, "w"))    # a failed score is not retried at every start
+        self.assertEqual(RCG.stale_effective(self.B, self.PAT), [])
+
+    def test_final_save_rebuilds_after_the_final_record(self):
+        src = open(os.path.join(ROOT, "scripts", "review_web.py")).read()
+        i = src.index('if u.path == "/api/finish":'); body = src[i:src.index('if blind:                                                           # no AI content', i)]
+        self.assertGreater(body.rindex("CL.materialize("), body.index("RB.record_completed("))
+        self.assertGreater(body.rindex("CL.materialize("), body.index("RIO.atomic_write_json(final_path("))
+
+
 if __name__ == "__main__":
     unittest.main()

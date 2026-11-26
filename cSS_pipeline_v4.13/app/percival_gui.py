@@ -1411,23 +1411,38 @@ def score_study(sid, M=None):
     if experimental_core_enabled():
         _experimental_core(sid, S, rows)
 
-    # Study score with the reader's own scoring method, on the candidates Percival calls. A study in which NO candidate
-    # has a valid trained score is UNASSESSABLE: score_css.py is not run (with no accepted ids it records a 0-4 score
-    # of 0, i.e. a negative study) and the total stays None with the reason.
+    # Study score with the reader's own scoring method, on the candidates Percival calls. 2026-11-26 (audit A1): the candidates are chosen
+    # with the MODEL'S OWN calibrated cuts (its bands), not a fixed 50: 'total' = green candidates (likely cSS, specificity-first cut),
+    # 'total_upper' = green + yellow (sensitivity-first cut, red_below), so the grade is shown as a range when they differ. Candidates
+    # PERCIVAL holds back for expert review (no score) are counted: the study is 'needs_review' and its grade is a lower bound - never a
+    # silent negative. A study in which NO candidate has a valid score is UNASSESSABLE (score_css is not run).
     valid = [s for s in S if s.get("percival_score") is not None]
-    ids = [s["cand_id"] for s in valid if s["percival_score"] >= 50]
-    study = dict(n_called=len(ids), called_ids=ids, L_score=None, R_score=None, total=None, error="",
-                 n_scored=len(valid), n_candidates=len(S))
+    held = [s["cand_id"] for s in S if s.get("percival_score") is None and s.get("status") in ("review", "insufficient")]
+    ids = [s["cand_id"] for s in valid if s.get("band") == "green"]
+    ids_up = [s["cand_id"] for s in valid if s.get("band") in ("green", "yellow")]
+    th = M.get("thresholds") or {}
+    study = dict(n_called=len(ids), called_ids=ids, n_called_upper=len(ids_up), called_ids_upper=ids_up, n_review=len(held), review_ids=held,
+                 L_score=None, R_score=None, total=None, total_upper=None, error="", n_scored=len(valid), n_candidates=len(S),
+                 cuts=dict(green_from=th.get("green_from"), red_below=th.get("red_below"),
+                           basis="the model's calibrated cuts: green = likely cSS (total), green + yellow = possible cSS (total_upper)"))
+    def _grade(sel, tag):
+        r = subprocess.run([sys.executable, os.path.join(CTX["SC"], "score_css.py"), sid, "--accept-ids", ",".join(map(str, sel)) or "none", "--tag", tag],
+                           capture_output=True, text=True, timeout=600, env=dict(os.environ, CSS_BASE=B(), PYTHONWARNINGS="ignore"))
+        J = _jl(os.path.join(B(), "review", f"{sid}_score_{tag}.json"), {})
+        return J, ("" if r.returncode == 0 else (r.stderr or r.stdout)[-160:])
     if not valid:
         study.update(status="unassessable", reason="no candidate has a valid PERCIVAL score (insufficient or unavailable evidence) - "
                                                    "this is not a negative result")
     else:
-        study["status"] = "scored"
+        study["status"] = "needs_review" if held else "scored"
+        if held: study["reason"] = f"{len(held)} candidate(s) need expert review (PERCIVAL abstained): the grade is a lower bound"
         try:
-            r = subprocess.run([sys.executable, os.path.join(CTX["SC"], "score_css.py"), sid, "--accept-ids", ",".join(map(str, ids)) or "none", "--tag", "percival"],
-                               capture_output=True, text=True, timeout=600, env=dict(os.environ, CSS_BASE=B(), PYTHONWARNINGS="ignore"))
-            J = _jl(os.path.join(B(), "review", f"{sid}_score_percival.json"), {})
-            study.update(L_score=J.get("L_score"), R_score=J.get("R_score"), total=J.get("multifocality_0_4"), error="" if r.returncode == 0 else (r.stderr or r.stdout)[-160:])
+            J, err = _grade(ids, "percival")
+            study.update(L_score=J.get("L_score"), R_score=J.get("R_score"), total=J.get("multifocality_0_4"), error=err)
+            if ids_up != ids:
+                J2, err2 = _grade(ids_up, "percival_upper")
+                study.update(L_upper=J2.get("L_score"), R_upper=J2.get("R_score"), total_upper=J2.get("multifocality_0_4"), error=err or err2)
+            else: study.update(L_upper=study["L_score"], R_upper=study["R_score"], total_upper=study["total"])
         except Exception as e: study["error"] = type(e).__name__
     in_tr = sid in set((M.get("data") or {}).get("trained_on") or [])
     rec = dict(study=sid, model=M["version"], run=_run_id(sid), created=time.strftime("%Y-%m-%d %H:%M:%S"), ready=M["ready"], thresholds=M["thresholds"],

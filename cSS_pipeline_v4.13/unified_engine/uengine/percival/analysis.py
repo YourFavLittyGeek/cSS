@@ -133,7 +133,7 @@ def study_agreement(pred, expert, boot=500, seed=0):
     return dict(n=len(ids), available=True, kappa_quadratic=qwk(a, b), kappa_ci=[float(np.percentile(ks, 2.5)), float(np.percentile(ks, 97.5))] if ks else None,
                 exact_agreement=float(np.mean(d == 0)), within_one=float(np.mean(np.abs(d) <= 1)),
                 bland_altman=dict(mean_difference=float(d.mean()), loa=[float(d.mean() - 1.96 * d.std(ddof=1)), float(d.mean() + 1.96 * d.std(ddof=1))] if len(d) > 2 else None),
-                basis="study-level PERCIVAL multifocality (candidates scored >= 50 -> score_css) vs expert patient grades; patient bootstrap CI")
+                basis="study-level PERCIVAL multifocality (green-band candidates, the model's own calibrated cut -> score_css) vs expert patient grades; patient bootstrap CI")
 
 
 def prioritise(scored, k=20):
