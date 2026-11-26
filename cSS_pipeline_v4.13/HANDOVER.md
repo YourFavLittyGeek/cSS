@@ -42,7 +42,7 @@ Read this first, then CLAUDE.md (project science + history). Do not trust older 
 
 ## 4. Build / release
 - App zip: `bash tools/build_percival_dev_app.sh ~/PERCIVAL_releases` (committed files only) ->
-  `Percival_v5.25-dev_<sha>.zip` + `_BUILD_INFO.txt`. Current: `Percival_v5.25-dev_01e95bc.zip`
+  `Percival_v5.25-dev_<sha>.zip` + `_BUILD_INFO.txt`. Current: `Percival_v5.25-dev_6dda504.zip` (LUMOS learns from missed marks; sha256 8bd20cfe7706871085b7add4b28cfc50827150913ee10ba8f58fe5b1c284d803). Before: `Percival_v5.25-dev_01e95bc.zip`
   (sha256 d3ba09edbb66fd10520bd809c779832c5044bd06cb060696b910290348236e6c).
   NEWER: `Percival_v5.25-dev_1a0bbcc.zip` (sha256 4418b70780927a230cafb0242f87efcb753ba3deb8bffd3f88ede0e58e24f13a; incl. audit items 1-8) -
   not yet installed by the user at the time of writing.
