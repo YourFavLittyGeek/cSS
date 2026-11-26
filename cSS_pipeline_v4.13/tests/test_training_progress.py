@@ -75,6 +75,30 @@ class TestButtonAndCard(unittest.TestCase):
             self.assertIn(t, h)
         self.assertEqual(self.run_js('pvJobCard({state:"idle"},false)'), "")              # nothing to show in the header when idle
 
+    def test_in_place_updates_no_page_rebuild(self):
+        """the screen used to be rebuilt every 2.5 s (and twice as often on Model Center): now only the card + button change"""
+        src = open(JS).read(); a = src.index("const PV_ACTIVE="); b = src.index("const PVMH=")
+        sim = r"""
+const esc=x=>String(x);const PV={tab:"system",jg:1};let V="intel";let rebuilt=0;const intelView=()=>{rebuilt++};const toast=()=>{};
+const slot0={dataset:{pvJobslot:"0"},innerHTML:"old"},slot1={dataset:{pvJobslot:"1"},innerHTML:"old"};
+const btn={disabled:false,textContent:"Start a training cycle"};
+const v={querySelectorAll:q=>q==="[data-pv-jobslot]"?[slot0,slot1]:[]};
+globalThis.document={getElementById:id=>id==="pv-train"?btn:null};globalThis.window={scrollY:420,scrollTo:(x,y)=>{globalThis.sy=y}};
+let J={state:"running",active:true,progress:.3,stages:[],log:[]};const api=async()=>J;
+let timers=0;globalThis.setTimeout=()=>{timers++;return timers};globalThis.clearTimeout=()=>{};
+""" + src[a:b] + r"""
+(async()=>{await pvJobPoll(v,1);const r1=[rebuilt,slot0.innerHTML.includes("30 %"),slot1.innerHTML.includes("30 %"),btn.disabled,btn.textContent,timers,globalThis.sy];
+ await pvJobPoll(v,0);const r2=[rebuilt,timers];                      // a stale chain stops by itself
+ J={state:"finished",progress:1};await pvJobPoll(v,1);const r3=[rebuilt,timers];
+ process.stdout.write(JSON.stringify([r1,r2,r3]))})()"""
+        r = subprocess.run([NODE, "-e", sim], capture_output=True, text=True, timeout=30)
+        if r.returncode: raise RuntimeError(r.stderr)
+        r1, r2, r3 = json.loads(r.stdout)
+        self.assertEqual(r1, [0, True, True, True, "Training…", 1, 420])      # no rebuild, card + button updated, scroll kept, one timer
+        self.assertEqual(r2, [0, 1])                                          # stale chain: nothing, no new timer
+        self.assertEqual(r3, [1, 1])                                          # cycle over: ONE full refresh, no further timer
+        self.assertIn("clearTimeout(PV.sht)", src)                            # Model Center shadow poll: one chain
+
     def test_refresh_while_preparing(self):
         src = open(JS).read(); self.assertIn("if(PV_ACTIVE(job))PV.jt=setTimeout", src)
         self.assertNotIn('job.state==="running"?`training cycle…', src)

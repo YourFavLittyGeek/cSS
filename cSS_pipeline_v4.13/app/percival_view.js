@@ -56,8 +56,22 @@ function pvJobCard(j,full){j=j||{};const on=PV_ACTIVE(j),st=j.stages||[];if(!on&
     <span class="note">Stages left <b>${on?j.stages_left??"—":0}</b> of ${st.length||7}</span>${on&&j.heartbeat_age_s!=null?`<span class="note">last activity ${pvDur(j.heartbeat_age_s)} ago</span>`:""}<span class="sp"></span>${on&&!j.cancel?`<button class="b sm danger" data-pv-cancel="1" title="stops at the next step; no model is registered">Cancel cycle</button>`:on&&j.cancel?'<span class="note">cancelling at the next step…</span>':""}</div>
    ${j.stall?`<p class="warn" style="margin:6px 0">${esc(j.stall.reason)}</p>`:""}${j.state==="failed"||j.state==="insufficient_data"?`<p class="${j.state==="failed"?"bad":"warn"}" style="margin:6px 0">${esc(j.error||"")}</p>`:""}
    <ol style="margin:8px 0 4px;padding-left:20px">${st.map(x=>`<li style="margin:2px 0;${x.status==="current"?"font-weight:600":x.status==="left"?"opacity:.6":""}">${icon(x)} ${esc(x.label)}${x.duration_s!=null?` <span class="note">· ${pvDur(x.duration_s)}</span>`:""}${x.status==="skipped"?' <span class="note">· not run</span>':""}</li>`).join("")}</ol>
-   ${(j.log||[]).length?`<details ${on&&full?"open":""}><summary class="note" style="cursor:pointer">What is happening now (last ${Math.min(8,j.log.length)} steps)</summary><pre class="mono" style="white-space:pre-wrap;font-size:11.5px;margin:4px 0">${j.log.slice(-8).map(esc).join("\n")}</pre></details>`:""}
+   ${(j.log||[]).length?`<details data-pv-logd="1" ${(typeof PV!=="undefined"&&PV.logOpen!=null?PV.logOpen:on&&full)?"open":""}><summary class="note" style="cursor:pointer">What is happening now (last ${Math.min(8,j.log.length)} steps)</summary><pre class="mono" style="white-space:pre-wrap;font-size:11.5px;margin:4px 0">${j.log.slice(-8).map(esc).join("\n")}</pre></details>`:""}
    <p class="note" style="margin:4px 0 0">The remaining time is estimated from the progress so far; image training (LUMOS) is the longest stage. Keep the app open and the drive connected.</p></div>`}
+// v5.25 (2026-11-26): while a cycle runs only the progress card(s) and the training button are updated in place (light
+// /api/percival/job poll every 3 s) - the page is no longer rebuilt (it flashed, jumped to the top and closed what was open).
+// One full refresh when the cycle ends, to show the new model.
+function pvBindJob(v){
+  v.querySelectorAll("[data-pv-cancel]").forEach(b=>b.onclick=async()=>{if(!confirm("Cancel the running training cycle? It stops at its next step and no model is registered."))return;b.disabled=true;const r=await api("/api/percival/job",{action:"cancel"});toast(r.ok?"cancelling - stops at the next step":esc(r.error),!r.ok);pvJobPoll(v)});
+  v.querySelectorAll("[data-pv-logd]").forEach(d=>d.ontoggle=()=>{PV.logOpen=d.open})}
+async function pvJobPoll(v,g){g=g??PV.jg;clearTimeout(PV.jt);if(V!=="intel"||g!==PV.jg)return;   // g: one poll chain only
+  let j;try{j=await api("/api/percival/job")}catch(e){if(g===PV.jg)PV.jt=setTimeout(()=>pvJobPoll(v,g),5000);return}
+  if(V!=="intel"||g!==PV.jg)return;
+  if(!PV_ACTIVE(j)){PV.logOpen=null;return intelView(v)}                 // finished / failed / cancelled: one full refresh
+  v.querySelectorAll("[data-pv-jobslot]").forEach(sl=>{const full=sl.dataset.pvJobslot==="1";if(!full&&PV.tab==="center")return;
+    const y=window.scrollY;sl.innerHTML=pvJobCard(j,full);window.scrollTo(0,y)});
+  ["pv-train","pvc-start-train"].forEach(id=>{const b=document.getElementById(id);if(b){b.disabled=true;b.textContent="Training…"}});
+  pvBindJob(v);PV.jt=setTimeout(()=>pvJobPoll(v,g),3000)}
 const PVMH='<tr><th></th><th>AUC</th><th>95 % CI</th><th>PR-AUC</th><th>Brier</th><th>calibration slope</th><th>n</th></tr>';
 async function intelView(v){{const hq=location.hash.match(/^#intel\?tab=(\w+)/);if(hq&&PV._hq!==hq[1]){PV._hq=hq[1];PV.tab=hq[1]}}
   PV.tab=({training:"center",registry:"models"})[PV.tab]||PV.tab;   // v5.24 names (old deep links still work)   // v5.23 deep link #intel?tab=evidence
@@ -73,7 +87,7 @@ async function intelView(v){{const hq=location.hash.match(/^#intel\?tab=(\w+)/);
     ${s.authorized?`${pvTrainBtn(job,"pv-train","Start a training cycle")}<span class="note">next automatic cycle after ${Math.max(0,s.cycle_n-s.since_last)} more finished studies</span>`
       :'<button class="b pri" id="pv-on" data-pv="switch-on">Switch on local learning</button><span class="note">lets the app learn from this project\'s MRI and expert reviews - on this Mac only</span>'}
     <span class="sp"></span>${job.state==="failed"?`<span class="bad">last cycle failed: ${esc(job.error)}</span>`:job.state==="insufficient_data"?`<span class="warn">training paused: expert review needed</span>`:""}</div>
-   ${PV.tab==="center"?"":pvJobCard(job,false)}
+   <div data-pv-jobslot="0">${PV.tab==="center"?"":pvJobCard(job,false)}</div>
    <div class="tiles" data-pv="tiles">
     <div class="tile"><div class="n">${d?d.studies:0}</div><div class="t">studies learned</div></div>
     <div class="tile"><div class="n">${d?d.dev_candidates+d.test_candidates:0}</div><div class="t">candidates${d?` · ${d.css} cSS / ${d.not_css} not`:""}</div></div>
@@ -127,7 +141,7 @@ async function intelView(v){{const hq=location.hash.match(/^#intel\?tab=(\w+)/);
     <table><tr><th>Version</th><th>Run</th><th>vs active</th><th>band agreement</th><th>mean |difference|</th><th>prospective calls</th><th>AUC shadow (unseen)</th><th>Head-to-head AUC shadow vs active</th></tr>
     ${(SH.runs||[]).map(r=>`<tr><td class="mono"><b>${esc(r.version)}</b></td><td class="note">${esc(r.at)} · ${r.studies} studies</td><td class="mono">${esc(r.active||"—")}</td><td class="mono">${r.band_agreement==null?"—":Math.round(100*r.band_agreement)+" %"}</td><td class="mono">${r.mean_abs_difference==null?"—":r.mean_abs_difference.toFixed(1)}</td><td class="mono">${r.prospective.n} (${r.prospective.css} cSS)</td><td class="mono">${g3((r.prospective.shadow||{}).auc)}</td><td class="mono" title="${r.prospective.n_fair??0} calls neither model learned from">${r.prospective.n_fair?`${g3((r.prospective.fair_shadow||{}).auc)} vs ${g3((r.prospective.active||{}).auc)} <span class="note">(n ${r.prospective.n_fair})</span>`:'<span class="mut">no calls unseen by both</span>'}</td></tr>`).join("")||'<tr><td colspan="8" class="empty">No shadow run yet.</td></tr>'}</table>
     <p class="note">AUC shadow: on expert calls this version never learned from. Head-to-head: only calls that <b>neither</b> model learned from (otherwise the active model would be judged on its own training data). Synthetic or small projects give unstable numbers; these are not clinical results.</p></div>`);
-    if(j.state==="running")setTimeout(()=>V==="intel"&&PV.tab==="models"&&intelView(v),2500)}
+    clearTimeout(PV.sht);if(j.state==="running")PV.sht=setTimeout(()=>V==="intel"&&PV.tab==="models"&&intelView(v),5000)}
   if(PV.tab==="system"){await pvSystem(el)}
   if(PV.tab==="albus"){await pvAlbus(el)}
   if(PV.tab==="pensieve"){await pvPensieve(el)}
@@ -286,11 +300,10 @@ async function intelView(v){{const hq=location.hash.match(/^#intel\?tab=(\w+)/);
   $("#pv-mode-adv")&&($("#pv-mode-adv").onclick=()=>{PV.viewMode="advanced";localStorage.setItem("pv_view_mode","advanced");intelView(v)});
   $("#pv-rb")&&($("#pv-rb").onclick=async()=>{const r=await api("/api/percival/rollback",{});toast(r.ok?`rolled back to ${esc(r.version)}`:esc(r.error),!r.ok);intelView(v)});
   $("#pv-on")&&($("#pv-on").onclick=async()=>{if(!confirm("Switch on local learning? Percival will read this project's MRI and expert reviews to learn - on this Mac only; nothing is uploaded and no external AI service is used."))return;await api("/api/percival/authorize",{on:true});await api("/api/percival/train",{});toast("switched on - the first training cycle started");intelView(v)});
-  v.querySelectorAll("[data-pv-cancel]").forEach(b=>b.onclick=async()=>{if(!confirm("Cancel the running training cycle? It stops at its next step and no model is registered."))return;b.disabled=true;const r=await api("/api/percival/job",{action:"cancel"});toast(r.ok?"cancelling - stops at the next step":esc(r.error),!r.ok);intelView(v)});
   $("#pv-train")&&($("#pv-train").onclick=async()=>{await api("/api/percival/train",{});toast("training cycle started");intelView(v)});
   v.querySelectorAll("[data-pvsh]").forEach(b=>b.onclick=async()=>{const r=await api("/api/percival/shadow",{version:b.dataset.pvsh});toast(r.ok?`shadow run of ${esc(b.dataset.pvsh)} started`:esc(r.error),!r.ok);intelView(v)});
   v.querySelectorAll("[data-pvds]").forEach(a=>a.onclick=e=>{e.preventDefault();PV.tab="center";PV.ds=a.dataset.pvds;intelView(v)});
-  clearTimeout(PV.jt);if(PV_ACTIVE(job))PV.jt=setTimeout(()=>V==="intel"&&intelView(v),2500)}   // refresh while preparing AND training
+  pvBindJob(v);clearTimeout(PV.jt);const g=PV.jg=(PV.jg||0)+1;if(PV_ACTIVE(job))PV.jt=setTimeout(()=>pvJobPoll(v,g),3000)}   // while preparing AND training: in-place updates only
 
 // 2026-11-25 one learning loop per module: each module checked on its own against its previous version
 function pvModules(X){const Mo=(X||{}).modules;if(!Mo)return "";const v=r=>r.verdict==="improved"?'<span class="pill ok">improved</span>':r.verdict==="not improved"?'<span class="pill warn">not improved - previous version kept</span>':`<span class="pill">${esc(r.verdict||"")}</span>`;
@@ -619,7 +632,7 @@ async function pvCenter(el,s,v){
   <div class="card" data-pv="section-progress">
     <h3 style="margin:0 0 4px">10. Live Training Progress &amp; Heartbeat</h3>
     <p class="note" style="margin-top:0">Monitors background training worker, feature extraction, cross-validation folds, and model convergence.</p>
-    ${pvJobCard(j,true)}
+    <div data-pv-jobslot="1">${pvJobCard(j,true)}</div>
   </div>
 
   <!-- SECTION 11: Evaluation Results -->
