@@ -1498,6 +1498,8 @@ def pg_post(op, d):
         if op == "shadow_run": return PG.shadow_run_trial(str(d.get("target", "ALBUS")), str(d.get("hypothesis", "")), d.get("config", {}))
         if op == "score_unified": return PG.score_study_unified(str(d.get("study_id", "")))
         if op == "test_group_balance": return PG.test_group_balance(d.get("by", ""), d.get("reason", ""), d.get("confirm", ""))
+        if op == "test_group_policy": return PG.test_group_policy(str(d.get("policy", "")), d.get("by", ""), d.get("reason", ""), d.get("confirm", ""), d.get("target"))
+        if op == "test_group_open": return PG.test_group_open(d.get("by", ""), d.get("reason", ""), d.get("confirm", ""))
         if op == "split_new_version": return PG.split_new_version(float(d.get("fraction", 0)), d.get("by", ""), d.get("reason", ""), d.get("confirm", ""))   # 3D
         if op == "dataset_export": return PG.export_dataset(str(d.get("id", "")))
         return dict(ok=False, error=f"unknown {op}")

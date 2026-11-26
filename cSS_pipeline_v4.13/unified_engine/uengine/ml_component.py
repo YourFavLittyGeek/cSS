@@ -131,6 +131,21 @@ class PenalizedLogistic:
         return self
 
 
+# ---------------- order-keeping (monotone) 1-D logistic fit (2026-11-26)
+SLOPE_MIN = 1e-3     # a recalibration / calibration may rescale a score, never reverse its order
+
+
+def monotone_irls(x, y, lam, w=None):
+    """logit = a + b x with b >= SLOPE_MIN. The unconstrained fit is used when its slope is positive; otherwise (the data do not
+    support the score's direction - seen 2026-11-26: calibration slope -0.41 turned a 0.92 ranking into 0.09) the slope is held at
+    SLOPE_MIN (order kept, probabilities near the base rate) and only the intercept is refitted. -> (a, b, clamped)"""
+    x = np.nan_to_num(np.asarray(x, float)); y = np.asarray(y, float)
+    beta, _, _ = irls(x[:, None], y, lam, None, w)
+    if np.isfinite(beta[1]) and beta[1] >= SLOPE_MIN: return float(beta[0]), float(beta[1]), False
+    a, _, _ = irls(np.zeros((len(x), 0)), y, 0.0, SLOPE_MIN * x, w)
+    return float(a[0]), SLOPE_MIN, True
+
+
 # ---------------- math recalibration (2 learned parameters; turns the MATH score into a logit for the fusion offset)
 @dataclass
 class MathRecalibration:
@@ -139,12 +154,12 @@ class MathRecalibration:
     a: float = 0.0
     b: float = 1.0
     eps: float = 0.05
+    clamped: bool = False        # 2026-11-26: slope held at SLOPE_MIN (the data gave a negative slope) - the order is never reversed
 
     def x(self, s): return np.log(np.clip(np.asarray(s, float), 0, None) + self.eps)
 
     def fit(self, s, y, w=None):
-        Z = self.x(s)[:, None]; beta, _, _ = irls(Z, np.asarray(y, float), 1e-6, None, w)
-        self.a, self.b = float(beta[0]), float(beta[1]); return self
+        self.a, self.b, self.clamped = monotone_irls(self.x(s), y, 1e-6, w); return self
 
     def logit(self, s): return self.a + self.b * self.x(s)
 

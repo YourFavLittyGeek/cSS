@@ -122,7 +122,7 @@ def nested_crossfit(dev, k_outer=K_OUTER, k_inner=K_INNER, seed=0, cnn_epochs=30
         C = MT.Components(fam["char"]["chosen"], fam["image"]["chosen"], char_cols=char_cols).fit(R, seed, cnn_epochs=cnn_epochs, image_extra=image_extra, char_extra=char_extra)   # marks of outer-training patients only
         D, oofs_in = MT.discover(Zin, ytr, gtr, wtr, k=k_inner, seed=seed + 1000 * (i + 1))
         chosen = D["chosen"]; Mm = MT.Meta(chosen).fit(Zin, ytr, gtr, wtr)
-        cb, _, _ = irls(np.nan_to_num(oofs_in[chosen])[:, None], ytr, MT.CAL_LAMBDA); cal = dict(a=float(cb[0]), b=float(cb[1]))
+        ca_, cb_, _ = MT.monotone_irls(oofs_in[chosen], ytr, MT.CAL_LAMBDA); cal = dict(a=ca_, b=cb_)     # never reverses the order
         p_in = sigmoid(cal["a"] + cal["b"] * oofs_in[chosen]); th = MT.thresholds(ytr, p_in)
         sub("held-out scoring", 0.9)
         # step 3: apply once to the held-out patients - nothing is refitted here

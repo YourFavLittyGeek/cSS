@@ -37,7 +37,7 @@ Brier <= active + 0.01, calibration slope in [0.6, 1.6]; no data-integrity error
 """
 import datetime, hashlib, json
 import numpy as np
-from ..ml_component import PenalizedLogistic, MathRecalibration, sigmoid, irls
+from ..ml_component import PenalizedLogistic, MathRecalibration, sigmoid, irls, monotone_irls
 from .cnn import SmallCNN
 from . import learners as LR, intelligence as IN
 from .learners import PixelLogistic
@@ -316,7 +316,7 @@ class Components:
 
     def to_json(self):
         return dict(kinds=dict(char=self.char_kind, image=self.image_kind), char_cols=list(self.char_cols),
-                    math=dict(a=self.math.a, b=self.math.b, eps=self.math.eps), char=LR.tab_json(self.char),
+                    math=dict(a=self.math.a, b=self.math.b, eps=self.math.eps, clamped=bool(getattr(self.math, "clamped", False))), char=LR.tab_json(self.char),
                     image=None if self.image is None else self.image.to_json(),
                     ood=None if self.ood is None else self.ood.to_json(), image_ood=None if self.image_ood is None else self.image_ood.to_json())
 
@@ -530,7 +530,7 @@ class Meta:
     def fit(self, Z, y, g, w=None):
         X = meta_inputs(Z, self.kind); k = self.kind
         if k == "math_only":
-            b, _, _ = irls(np.nan_to_num(Z["math"])[:, None], y, 1e-6, None, w); self.model = dict(a=float(b[0]), b=float(b[1]), src="math")
+            a_, b_, cl_ = monotone_irls(Z["math"], y, 1e-6, w); self.model = dict(a=a_, b=b_, src="math", clamped=cl_)   # never reversed
         elif k == "equal_mean": self.model = dict()
         elif k == "boosted": self.model = Stumps().fit(X, y, w)
         else:
@@ -683,7 +683,8 @@ def train_cycle(rows, version, seed=0, cnn_epochs=30, progress=None, mins=None, 
     chosen = D["chosen"]; meta_oof = oofs[chosen]
     # Platt calibration with a mild ridge on the slope (CAL_LAMBDA): without it, separable development data drive the slope to
     # infinity and every score to 0 or 100 (seen in v5.22: calibration slope 7.9 on the test cohort)
-    cal_b, _, _ = irls(np.nan_to_num(meta_oof)[:, None], y, CAL_LAMBDA); cal = dict(a=float(cal_b[0]), b=float(cal_b[1]), ridge=CAL_LAMBDA)
+    ca_, cb_, ccl_ = monotone_irls(meta_oof, y, CAL_LAMBDA); cal = dict(a=ca_, b=cb_, ridge=CAL_LAMBDA, clamped=ccl_)   # never reverses the order
+    if ccl_: say("calibration: the development data gave a negative slope - held at the minimum (order kept); the model is flagged", 0.7)
     p_dev = sigmoid(cal["a"] + cal["b"] * meta_oof); th = IN.stable_thresholds(y, p_dev, g, sens_spec, seed=seed)
     say("PERCIVAL analyses: ablation, disagreement, reliability", 0.66)
     intel = dict(provenance=IN.PROVENANCE, overlap=IN.overlap(), ablation=IN.ablation(Z, y, g, INDEP, folds(g, 5, seed + 7), auc, seed=seed),
@@ -914,6 +915,9 @@ def acceptance(model, active):
         np_ = (ns.get("percival") or {}).get("auc"); A_ = ns.get("ablation") or {}; nm = ((A_.get("ALBUS alone") or A_.get("MATH alone")) or {}).get("auc")
         if np_ is None: reasons.append("nested evaluation produced no AUC")
         elif nm is not None and np_ + 1e-9 < nm: reasons.append(f"nested development AUC {np_:.3f} below ALBUS alone {nm:.3f}")
+    if (model.get("calibration") or {}).get("clamped"):
+        reasons.append("calibration: the development data gave a negative slope (held at the minimum so the order is not reversed) - "
+                       "the scores are not calibrated")
     iden = (model.get("data") or {}).get("identity") or {}
     if iden.get("assumed"): reasons.append(f"patient identity is assumed (one patient per study, not verified) for {iden['assumed']} studies")
     return dict(passed=not reasons, reasons=reasons,

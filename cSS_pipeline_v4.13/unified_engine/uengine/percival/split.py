@@ -55,8 +55,8 @@ def _versions(store):
     return sorted(f[:-5] for f in os.listdir(d) if f.startswith("v") and f.endswith(".json")) if os.path.isdir(d) else []
 
 
-def create(store, fraction, by, reason, patients=(), carry_test=()):
-    """a new LOCKED split version (internal; first use or new_version)"""
+def create(store, fraction, by, reason, patients=(), carry_test=(), carry=None):
+    """a new LOCKED split version (internal; first use or new_version). carry: the assignment policy (+ fresh cohort, log) kept"""
     if not 0.05 <= float(fraction) <= 0.5: raise SplitError("test fraction must be between 0.05 and 0.5")
     v = f"v{len(_versions(store)) + 1:03d}"
     A = {str(p): "test" for p in carry_test}
@@ -65,9 +65,14 @@ def create(store, fraction, by, reason, patients=(), carry_test=()):
     S = dict(schema=SCHEMA, version=v, created=time.strftime("%Y-%m-%d %H:%M:%S"), by=by, reason=reason, test_fraction=float(fraction), salt=SALT,
              locked=True, carried_test=sorted(str(p) for p in carry_test), assignment=A, additions=[],
              rule=f"patient is 'test' iff sha256(salt + patient)[:8] / 0xFFFFFFFF < {fraction}; previous test patients stay test")
+    for k, val in (carry or {}).items():
+        if k in ("policy", "fresh", "policy_log"): S[k] = val
     S["assignment_sha256"] = digest(S)
     _js(os.path.join(_dir(store), f"{v}.json"), S); _js(os.path.join(_dir(store), "current.json"), dict(version=v, since=S["created"]))
     return S
+
+
+def _carry(S): return {k: S[k] for k in ("policy", "fresh", "policy_log") if k in (S or {})}
 
 
 def partition_of(store, patient, default_fraction=0.2):
@@ -77,8 +82,12 @@ def partition_of(store, patient, default_fraction=0.2):
         S = current(store) or create(store, default_fraction, "Percival (first use)", "split created automatically at first use")
         p = str(patient)
         if p not in S["assignment"]:
-            part = "test" if rule(p, S["test_fraction"], S.get("salt", SALT)) else "development"
-            S["assignment"][p] = part; S["additions"].append(dict(patient=p, partition=part, at=time.strftime("%Y-%m-%d %H:%M:%S")))
+            pol = S.get("policy", "random"); F = S.get("fresh") or {}
+            if pol == "development_only": part = "development"
+            elif pol == "fresh_test": part = "test" if not F.get("closed") else "development"
+            else: part = "test" if rule(p, S["test_fraction"], S.get("salt", SALT)) else "development"
+            if pol == "fresh_test" and part == "test": F.setdefault("members", []).append(p)
+            S["assignment"][p] = part; S["additions"].append(dict(patient=p, partition=part, policy=pol, at=time.strftime("%Y-%m-%d %H:%M:%S")))
             S["assignment_sha256"] = digest(S); _js(os.path.join(_dir(store), f"{S['version']}.json"), S)
         return S["assignment"][p]
 
@@ -89,7 +98,7 @@ def new_version(store, fraction, by, reason, confirm):
     with _LOCK:
         old = current(store) or dict(assignment={})
         keep = [p for p, part in old["assignment"].items() if part == "test"]
-        return create(store, fraction, str(by).strip(), str(reason).strip(), patients=sorted(old["assignment"]), carry_test=keep)
+        return create(store, fraction, str(by).strip(), str(reason).strip(), patients=sorted(old["assignment"]), carry_test=keep, carry=_carry(old))
 
 
 CONFIRM_BALANCE = "BALANCE TEST GROUP"
@@ -131,7 +140,8 @@ def balance(store, classes, by, reason, confirm, frozen=(), min_per_class=5):
         if not plan["add"]: raise SplitError("nothing to balance: " + ("; ".join(f"{c}: {w}" for c, w in plan["short"].items()) or "every class already has enough test patients"))
         old = current(store) or dict(assignment={}, test_fraction=0.2)
         keep = [p for p, part in old["assignment"].items() if part == "test"] + list(plan["add"])
-        S = create(store, old.get("test_fraction", 0.2), str(by).strip(), str(reason).strip(), patients=sorted(old["assignment"]), carry_test=keep)
+        S = create(store, old.get("test_fraction", 0.2), str(by).strip(), str(reason).strip(), patients=sorted(old["assignment"]), carry_test=keep,
+                   carry=_carry(old))
         S.update(mode="balanced", balance=dict(added=plan["add"], before=plan["before"], after=plan["after"], short=plan["short"],
                                               min_per_class=int(min_per_class), salt=BALANCE_SALT, frozen=len(set(frozen)),
                                               rule="current test patients stay test; per class short of the minimum, development patients of that class "
@@ -139,6 +149,81 @@ def balance(store, classes, by, reason, confirm, frozen=(), min_per_class=5):
         S["assignment_sha256"] = digest(S)
         _js(os.path.join(_dir(store), f"{S['version']}.json"), S)
         return S
+
+
+# ------------------------------------------------------------------ 2026-11-26 the user's "mix" (develop first, then ONE fresh test cohort)
+# random            new patients: salted-hash rule (about 1 in 5 to test) - the default
+# development_only  new patients: development. The patients already in test stay there (the early-warning test group, evaluated at
+#                   every milestone).
+# fresh_test        EVERY new patient, in the order Percival meets them (consecutive - never chosen by cSS status), goes to the fresh
+#                   test cohort until its finished reviews hold FRESH_TARGET patients with cSS AND FRESH_TARGET without; then it closes
+#                   and new patients go to development again. The fresh cohort is SEALED: never trained on and never evaluated until
+#                   it is closed and opened ONCE (typed confirmation, person, reason).
+CONFIRM_DEV_ONLY = "NEW PATIENTS TO DEVELOPMENT"
+CONFIRM_FRESH = "START FRESH TEST COHORT"
+CONFIRM_OPEN = "OPEN FINAL TEST"
+FRESH_TARGET = 30
+
+
+def _who(by, reason):
+    if not str(by or "").strip() or not str(reason or "").strip(): raise SplitError("refused: a name and a reason are required")
+    return str(by).strip(), str(reason).strip()
+
+
+def _save_current(store, S):
+    S["assignment_sha256"] = digest(S); _js(os.path.join(_dir(store), f"{S['version']}.json"), S)
+
+
+def set_policy(store, policy, by, reason, confirm, target=FRESH_TARGET):
+    """random -> development_only (CONFIRM_DEV_ONLY); development_only -> fresh_test (CONFIRM_FRESH, target patients per class).
+    No patient changes partition; recorded in policy_log."""
+    by, reason = _who(by, reason)
+    with _LOCK:
+        S = current(store) or create(store, 0.2, "Percival (first use)", "split created automatically at first use")
+        cur = S.get("policy", "random"); now = time.strftime("%Y-%m-%d %H:%M:%S")
+        if policy == "development_only":
+            if confirm != CONFIRM_DEV_ONLY: raise PermissionError(f"refused: type exactly '{CONFIRM_DEV_ONLY}' to confirm")
+            if cur != "random": raise SplitError(f"refused: the split is already '{cur}'")
+        elif policy == "fresh_test":
+            if confirm != CONFIRM_FRESH: raise PermissionError(f"refused: type exactly '{CONFIRM_FRESH}' to confirm")
+            if cur != "development_only": raise SplitError("refused: switch new patients to development first (the fresh cohort follows the development phase)")
+            if S.get("fresh"): raise SplitError("refused: a fresh test cohort was already started (there is only one final test)")
+            t = int(target)
+            if t < 10: raise SplitError("refused: the fresh test cohort needs at least 10 patients per class")
+            S["fresh"] = dict(started=now, by=by, reason=reason, target_per_class=t, members=[], closed=None, opened=None)
+        else: raise SplitError(f"unknown policy {policy!r}")
+        S["policy"] = policy; S.setdefault("policy_log", []).append(dict(frm=cur, to=policy, at=now, by=by, reason=reason))
+        _save_current(store, S); return S
+
+
+def fresh_state(store, classes):
+    """counts of the fresh cohort from finished reviews; closes it (recorded) once both classes reach the target"""
+    with _LOCK:
+        S = current(store) or {}; F = S.get("fresh")
+        if not F: return None
+        mem = list(F.get("members", [])); n = {c: sum(1 for p in mem if classes.get(p) == c) for c in ("css", "no_css")}
+        t = F.get("target_per_class", FRESH_TARGET)
+        if not F.get("closed") and n["css"] >= t and n["no_css"] >= t:
+            F["closed"] = time.strftime("%Y-%m-%d %H:%M:%S"); F["closed_counts"] = dict(n, members=len(mem)); _save_current(store, S)
+        return dict(started=F["started"], by=F["by"], target_per_class=t, members=len(mem), css=n["css"], no_css=n["no_css"],
+                    unreviewed=sum(1 for p in mem if p not in classes), closed=F.get("closed"), opened=F.get("opened"))
+
+
+def sealed(store):
+    """fresh-cohort patients that may not be trained on or evaluated yet (not opened)"""
+    F = (current(store) or {}).get("fresh") or {}
+    return set() if F.get("opened") else set(map(str, F.get("members", [])))
+
+
+def open_final(store, by, reason, confirm):
+    by, reason = _who(by, reason)
+    if confirm != CONFIRM_OPEN: raise PermissionError(f"refused: type exactly '{CONFIRM_OPEN}' to confirm")
+    with _LOCK:
+        S = current(store) or {}; F = S.get("fresh")
+        if not F: raise SplitError("refused: no fresh test cohort was started")
+        if not F.get("closed"): raise SplitError("refused: the fresh test cohort is not complete yet")
+        if F.get("opened"): raise SplitError(f"refused: the final test was already opened ({F['opened']['at']})")
+        F["opened"] = dict(at=time.strftime("%Y-%m-%d %H:%M:%S"), by=by, reason=reason); _save_current(store, S); return S
 
 
 def held_out_elsewhere(base):

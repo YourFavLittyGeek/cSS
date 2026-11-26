@@ -906,10 +906,28 @@ async function pvTestGroup(el){const T=await api("/api/percival/test_group"),C=T
     <b>Balance</b> adds development patients of the short class in a fixed hash order: only patients whose expert review is finished and that no model was ever trained on; the current test patients stay; at least 8 per class stay for training. A new split version is written (the old one is kept).</p>
    <table><tr><th>Patients</th><th>test</th><th>development</th><th>test after balancing</th></tr>${row("css","with cSS")}${row("no_css","without cSS")}</table>
    <p class="note">Split ${esc(T.version||"—")} (${esc(T.mode||"hash")})${T.unclassified?` · ${T.unclassified} patient(s) without a finished review are not counted`:""}${Object.keys(Pn.short||{}).length?" · still short: "+Object.entries(Pn.short).map(([k,v])=>`${k==="css"?"with cSS":"without cSS"} ${esc(v)}`).join("; "):""}</p>
-   <div class="row"><button class="btn" id="pv-tg-bal" ${Pn.add?"":"disabled"}>Balance the test group (+${Pn.add||0} patient${Pn.add===1?"":"s"})…</button></div>`;
+   <div class="row"><button class="btn" id="pv-tg-bal" ${Pn.add?"":"disabled"}>Balance the test group (+${Pn.add||0} patient${Pn.add===1?"":"s"})…</button></div>
+   ${pvSplitPolicy(T)}`;
   const b=document.getElementById("pv-tg-bal");if(b)b.onclick=async()=>{const by=prompt("Your name (recorded):",arWho()||"");if(!by)return;const why=prompt("Reason:");if(!why)return;
     const c=prompt(`Type ${T.confirm} to write the balanced split:`);const r=await api("/api/percival/test_group_balance",{by,reason:why,confirm:c});
-    r.ok?toast(`split ${esc(r.version)}: ${r.added} patient(s) added to the test group`):toast(esc(r.error),1);pvTestGroup(el)}}
+    r.ok?toast(`split ${esc(r.version)}: ${r.added} patient(s) added to the test group`):toast(esc(r.error),1);pvTestGroup(el)};
+  const ask=async(url,body,phrase)=>{const by=prompt("Your name (recorded):",arWho()||"");if(!by)return;const why=prompt("Reason:");if(!why)return;
+    const c=prompt(`Type ${phrase} to confirm:`);if(c===null)return;const r=await api(url,Object.assign(body,{by,reason:why,confirm:c}));toast(r.ok?"recorded":esc(r.error),!r.ok);pvTestGroup(el)};
+  const d1=document.getElementById("pv-tg-dev");if(d1)d1.onclick=()=>ask("/api/percival/test_group_policy",{policy:"development_only"},T.confirm_dev_only);
+  const d2=document.getElementById("pv-tg-fresh");if(d2)d2.onclick=()=>{const t=prompt("Patients per class in the fresh test cohort (with cSS AND without):",String(T.target||30));if(!t)return;ask("/api/percival/test_group_policy",{policy:"fresh_test",target:+t},T.confirm_fresh)};
+  const d3=document.getElementById("pv-tg-open");if(d3)d3.onclick=()=>{if(!confirm("Open the final test? This is done ONCE: from now on the fresh cohort is evaluated at the next training cycle and no model change may be made because of its result."))return;ask("/api/percival/test_group_open",{},T.confirm_open)}}
+// 2026-11-26 the user's "mix": early-warning test group + development phase + ONE fresh, sealed, consecutive test cohort
+function pvSplitPolicy(T){const pol=T.policy||"random",F=T.fresh,E=T.early_test||{};
+  const step=(n,on,done,txt)=>`<li style="margin:3px 0;${on?"font-weight:600":done?"":"opacity:.6"}">${done?'<span class="ok">✓</span>':on?'<span class="pulse">●</span>':'<span class="note">○</span>'} ${txt}</li>`;
+  const fs=F?`${F.members} patients in the fresh cohort · reviewed: ${F.css} with cSS, ${F.no_css} without (target ${F.target_per_class} + ${F.target_per_class})${F.unreviewed?` · ${F.unreviewed} not reviewed yet`:""}`:"";
+  return `<h4 style="margin:14px 0 4px">Split plan (develop first, then one fresh test cohort)</h4>
+   <ol style="margin:4px 0 6px;padding-left:20px;list-style:none">
+    ${step(1,pol==="random",pol!=="random",`<b>Early-warning test group</b>: the current test patients stay locked (${E.css??0} with cSS, ${E.no_css??0} without) and are evaluated at every milestone.`)}
+    ${step(2,pol==="development_only",pol==="fresh_test",`<b>Development phase</b>: every new patient goes to development (about 150 patients). ${pol==="random"?'<button class="b sm" id="pv-tg-dev">Send new patients to development…</button>':""}`)}
+    ${step(3,pol==="fresh_test"&&F&&!F.closed,!!(F&&F.closed),`<b>Fresh test cohort</b>: every new patient in order (never chosen by cSS status) until ${T.target||30} with cSS AND ${T.target||30} without are reviewed; SEALED - never trained on, never evaluated. ${pol==="development_only"?'<button class="b sm" id="pv-tg-fresh">Start the fresh test cohort…</button>':""}${F?`<br><span class="note">${fs}</span>`:""}`)}
+    ${step(4,!!(F&&F.closed&&!F.opened),!!(F&&F.opened),`<b>Final test, opened once</b>${F&&F.opened?` · opened ${esc(F.opened.at)} by ${esc(F.opened.by)}`:""}. ${F&&F.closed&&!F.opened?'<button class="b sm" id="pv-tg-open">Open the final test…</button>':""}`)}
+   </ol>
+   <p class="note">Each step needs your name, a reason and a typed phrase; no patient ever changes group. New patients: ${pol==="random"?"about 1 in 5 to test (hash rule)":pol==="development_only"?"development":F&&F.closed?"development (fresh cohort complete)":"fresh test cohort (sealed)"}.</p>`}
 async function pvPlan(el){const E=await api("/api/percival/evaluation_plan");const P=E.plan,C=E.consultations||[];
   el.innerHTML=`<p class="note" style="margin-top:0">The locked test cohort supports acceptance <b>once per pre-registered milestone</b>; every consultation is recorded.
    Automatic training cycles are off by default for the pilot.</p>

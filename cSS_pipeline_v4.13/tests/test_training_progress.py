@@ -113,5 +113,57 @@ class TestEnvelope(unittest.TestCase):
         src = open(os.path.join(ROOT, "app", "percival_gui.py")).read(); self.assertIn('["envelope", _G.MAX_INPLANE_MM, _G.MAX_SLICE_MM', src)
 
 
+
+class TestStageSequence(unittest.TestCase):
+    def test_real_message_sequence(self):
+        """the 2026-11-26 run: the card showed 6/7 - the dataset line read as 'evaluation', the registration line as 'nested'"""
+        import percival_gui as PG
+        seq = [("cycle started (x): 48 studies", "preparing"), ("S1: 4 eligible of 4 called candidates", "preparing"),
+               ("dataset ds002 (content ab): 770 called candidates, meta-model development 559 / locked test 211", "preparing"),
+               ("component out-of-fold predictions", "components"), ("LUMOS image models fold 1/5", "components"),
+               ("meta-model discovery", "discovery"), ("PERCIVAL analyses: ablation, disagreement, reliability", "discovery"),
+               ("final fit on the development cohort", "final"), ("nested cross-fitting of the whole procedure", "nested"),
+               ("nested fold 1/5: LUMOS image models fold 1/3", "nested"), ("evaluation on the locked test cohort", "evaluation"),
+               ("registering", "registering"), ("v001 registered as experimental: test AUC 0.09; nested development AUC 0.26", "registering")]
+        c = "preparing"
+        for msg, want in seq:
+            c = PG._stage_of(msg, c); self.assertEqual(c, want, msg)
+        self.assertEqual(PG._stage_of("final fit on the development cohort", "evaluation"), "evaluation")     # never backwards
+
+
+class TestNeverReversed(unittest.TestCase):
+    """2026-11-26 user's v001: calibration slope -0.41 turned ALBUS's 0.92 test ranking into 0.09. A recalibration / calibration may
+    rescale a score, never reverse its order."""
+    def setUp(self):
+        import numpy as np
+        rng = np.random.default_rng(0); self.np = np
+        self.x = rng.normal(size=300); self.y_inv = (rng.random(300) < 1 / (1 + np.exp(2.0 * self.x))).astype(float)   # higher x -> LESS likely
+        self.y_ok = 1 - self.y_inv
+
+    def test_monotone_fit(self):
+        from uengine.ml_component import monotone_irls, SLOPE_MIN, irls
+        a, b, cl = monotone_irls(self.x, self.y_inv, 1e-6); self.assertTrue(cl); self.assertEqual(b, SLOPE_MIN)
+        self.assertAlmostEqual(1 / (1 + self.np.exp(-a)), self.y_inv.mean(), places=2)          # intercept refitted: base rate
+        a, b, cl = monotone_irls(self.x, self.y_ok, 1e-6); beta, _, _ = irls(self.x[:, None], self.y_ok, 1e-6)
+        self.assertFalse(cl); self.assertAlmostEqual(b, float(beta[1]), places=9)               # positive data: unchanged
+
+    def test_albus_recalibration_and_math_only_meta(self):
+        from uengine.ml_component import MathRecalibration
+        from uengine.percival import meta as MT
+        s = self.np.exp(self.x)                                                                   # a positive score
+        R = MathRecalibration().fit(s, self.y_inv); self.assertGreater(R.b, 0); self.assertTrue(R.clamped)
+        lg = R.logit(s); self.assertTrue(self.np.all(self.np.diff(lg[self.np.argsort(s)]) >= 0))     # order kept
+        Z = dict(math=self.x, char=self.x * 0, image=self.x * 0)
+        M = MT.Meta("math_only").fit(Z, self.y_inv, self.np.zeros(300)); self.assertGreater(M.model["b"], 0); self.assertTrue(M.model["clamped"])
+
+    def test_clamped_calibration_blocks_acceptance(self):
+        from uengine.percival import meta as MT
+        src = open(os.path.join(ROOT, "unified_engine", "uengine", "percival", "meta.py")).read()
+        self.assertIn("monotone_irls(meta_oof, y, CAL_LAMBDA)", src)
+        self.assertIn("MT.monotone_irls(", open(os.path.join(ROOT, "unified_engine", "uengine", "percival", "nested.py")).read())
+        r = MT.acceptance(dict(calibration=dict(a=0, b=1e-3, clamped=True), test={}, data={}), None)
+        self.assertTrue(any("negative slope" in x for x in r["reasons"]))
+
+
 if __name__ == "__main__":
     unittest.main()

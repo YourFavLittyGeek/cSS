@@ -20,7 +20,7 @@ model or AI service is used (see docs/percival_app/LOCAL_AI_ARCHITECTURE.md).
                      Percival Score was visible to the reviewer, the prediction that existed when the review was saved, coordinates,
                      measurements, patch hashes, processing / model versions - the provenance of the local learning dataset.
 Files name studies by their internal key; no identifier is written here."""
-import glob, hashlib, json, os, subprocess, sys, threading, time
+import glob, hashlib, json, os, re, subprocess, sys, threading, time
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
@@ -112,12 +112,20 @@ def _stages(now):
 
 
 def _stage_of(msg, cur):
-    m = msg.lower()
-    for key, st in (("nested", "nested"), ("meta-model discovery", "discovery"), ("final fit", "final"), ("locked test", "evaluation"),
-                    ("component", "components"), ("image models", "components"), ("characteristic models", "components"),
-                    ("dataset", "preparing"), ("eligible of", "preparing"), ("registered", "registering"), ("cycle started", "preparing")):
-        if key in m: return st
-    return cur or "preparing"
+    """the stage a log line belongs to, from how the engine STARTS its messages (meta.train_cycle / nested_crossfit). 2026-11-26: matching
+    words anywhere misread lines - the dataset line names the 'locked test' (-> evaluation during preparation) and the final
+    'v001 registered as experimental: ... nested development AUC' line read as 'nested'. Stages only move forward."""
+    m = msg.strip().lower(); keys = [k for k, _ in STAGES]
+    if m.startswith("nested"): st = "nested"
+    elif m.startswith(("meta-model discovery", "percival analyses")): st = "discovery"
+    elif m.startswith(("final fit", "calibration:")): st = "final"
+    elif m.startswith("evaluation on the locked test"): st = "evaluation"
+    elif m.startswith("registering") or re.match(r"v\d+ (registered|made active)", m): st = "registering"
+    elif m.startswith(("component", "lumos image models", "nox measurement models", "components fold", "nox feature set", "frozen components")): st = "components"
+    elif m.startswith(("cycle started", "dataset ")) or "eligible of" in m: st = "preparing"
+    else: return cur or "preparing"
+    if cur in keys and keys.index(st) < keys.index(cur): return cur          # never backwards
+    return st
 
 
 def _transition(new, **kw):
@@ -653,7 +661,38 @@ def test_group_state():
     return dict(version=S.get("version"), mode=S.get("mode", "hash"), counts=cnt, minimum=MT.MIN_TEST_PATIENTS_PER_CLASS,
                 plan=dict(add=len(plan["add"]), by_class={c: sum(1 for k in plan["add"].values() if k == c) for c in ("css", "no_css")},
                           after=plan["after"], short=plan["short"], development_after=plan["development_after"]),
-                confirm=SP.CONFIRM_BALANCE, unclassified=sum(1 for p_ in A if p_ not in cl))
+                confirm=SP.CONFIRM_BALANCE, unclassified=sum(1 for p_ in A if p_ not in cl), **_fresh_info())
+
+
+def _sealed():
+    from uengine.percival import split as SP
+    try: return SP.sealed(P())
+    except Exception: return set()
+
+
+def _fresh_info():
+    from uengine.percival import split as SP
+    S = SP.current(P()) or {}; cl = patient_classes(); fr = SP.fresh_state(P(), cl)
+    mem = set(map(str, ((S.get("fresh") or {}).get("members") or [])))
+    early = {c: sum(1 for p_, k in cl.items() if k == c and (S.get("assignment") or {}).get(p_) == "test" and p_ not in mem) for c in ("css", "no_css")}
+    return dict(policy=S.get("policy", "random"), fresh=fr, early_test=early, target=SP.FRESH_TARGET, policy_log=(S.get("policy_log") or [])[-5:],
+                confirm_dev_only=SP.CONFIRM_DEV_ONLY, confirm_fresh=SP.CONFIRM_FRESH, confirm_open=SP.CONFIRM_OPEN)
+
+
+def test_group_policy(policy, by, reason, confirm, target=None):
+    from uengine.percival import split as SP
+    try: S = SP.set_policy(P(), policy, by, reason, confirm, **({"target": int(target)} if target else {}))
+    except (SP.SplitError, PermissionError, ValueError) as e: return dict(ok=False, error=str(e))
+    _event("config_changed", by, split=S["version"], policy=policy); _LCACHE.clear()
+    return dict(ok=True, policy=S["policy"], version=S["version"])
+
+
+def test_group_open(by, reason, confirm):
+    from uengine.percival import split as SP
+    try: S = SP.open_final(P(), by, reason, confirm)
+    except (SP.SplitError, PermissionError) as e: return dict(ok=False, error=str(e))
+    _event("config_changed", by, split=S["version"], final_test_opened=True); _LCACHE.clear()
+    return dict(ok=True, opened=S["fresh"]["opened"])
 
 
 def test_group_balance(by, reason, confirm):
@@ -1301,7 +1340,10 @@ def _train(reason):
         dup = set(integ["duplicates"]) & set(sel); rows, exs = [], []
         log(f"cycle started ({reason}): {len(sel)} studies with eligible labels", 0.01)
         S = CTX["SET"]; ex = set(S.get("learner_exclude", [])); marks = []; cmarks = []
+        SEAL = _sealed(); n_seal = 0
         for k, c in enumerate(sel):
+            if str(IDS().patient(c) or "") in SEAL:                    # 2026-11-26: fresh test cohort, sealed until opened once
+                n_seal += 1; continue
             g = {r["cand_id"]: r for r in gather(c, labelled=False)}
             E = _examples(c, dict(excluded=c in ex, duplicate=c in dup), rows=g); exs += E
             cr = confirmed_mark_rows(c, E) if IDS().patient(c) else []
@@ -1320,6 +1362,7 @@ def _train(reason):
                     if not e["components"]["image"]: r["maps"] = None
                     rows.append(r)
             log(f"{CTX['label'](c)}: {sum(1 for e in E if e['components']['meta'])} eligible of {len(E)} called candidates", 0.01 + 0.06 * (k + 1) / len(sel))
+        if n_seal: log(f"{n_seal} studies of the sealed fresh test cohort left out (never trained on; evaluated only after the final test is opened)", 0.07)
         for s_ in SL:                                   # labelled studies that are left out: recorded in the manifest with their reasons
             if s_["code"] not in sel and (s_["n_labelled"] or s_.get("n_missed")):
                 exs += _examples(s_["code"], dict(excluded=s_["code"] in ex or bool(s_["excluded_why"]), archived_out="archived" in s_["excluded_why"]))
@@ -1611,6 +1654,7 @@ def _shadow(version):
         M = load(version); A = active(); learned = _learned(M)
         learned_a = _learned(A) if A and A["version"] != version else set()
         pats = [p["code"] for p in _study_list() if os.path.exists(os.path.join(B(), "review", f"{p['code']}_candidates.csv")) and may_read(p["code"])]
+        SEAL = _sealed(); pats = [c for c in pats if str(IDS().patient(c) or "") not in SEAL]        # 2026-11-26: the sealed final test
         ys, ps, pa, gs, agree, diffs, n = [], [], [], [], 0, [], 0; fair = []
         for k, sid in enumerate(pats):
             rows = gather(sid, labelled=False)
