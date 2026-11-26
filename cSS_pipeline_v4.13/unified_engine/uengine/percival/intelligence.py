@@ -24,16 +24,14 @@ from ..ml_component import PenalizedLogistic, sigmoid
 
 # measurement concepts per component (derived from the code, not assumed)
 PROVENANCE = {
-    "math": dict(source="scripts/detect_css.py score_v4 (deterministic product formula, untrained)",
+    "math": dict(source="ALBUS: scripts/detect_css.py score_v4 (deterministic product formula, untrained)",
                  concepts=["darkness", "pial_distance", "tubularity", "surface_alignment", "tram_track", "artifact_zone", "midline", "long_structure", "infratentorial"]),
-    "unified": dict(source="unified_score/uscore predictors x1-x5 (reliable values only)",
-                    concepts=["vessel_continuity", "core_contrast", "pial_distance", "surface_alignment", "extracranial_continuation"]),
-    "char": dict(source="detector characteristics (review/<study>_candidates.csv)",
-                 concepts=["darkness", "edge_contrast", "pial_distance", "cortex_fraction", "tram_track", "tubularity", "elongation", "volume", "vessel_continuity"]),
-    "image": dict(source="surface-aligned MRI patch pixels (minIP, mean, footprint maps)", concepts=["patch_pixels"]),
-    "fusion": dict(source="Characteristic ML inputs + Image ML output", concepts=None),
+    "char": dict(source="NOX: detector measurements (review/<study>_candidates.csv) + uScore x1 / x2 / x5 (uscore/features)",
+                 concepts=["darkness", "edge_contrast", "pial_distance", "cortex_fraction", "tram_track", "tubularity", "elongation", "volume",
+                           "vessel_continuity", "surface_contact", "sulcal_depth", "shape_3d", "thickness", "darkness_pattern", "regional_darkness",
+                           "vessel_into_white_matter", "branching", "position", "core_contrast", "extracranial_continuation"]),
+    "image": dict(source="LUMOS: surface-aligned MRI patch pixels (minIP, mean, footprint maps)", concepts=["patch_pixels"]),
 }
-PROVENANCE["fusion"]["concepts"] = sorted(set(PROVENANCE["char"]["concepts"]) | set(PROVENANCE["image"]["concepts"]))
 
 
 def overlap():

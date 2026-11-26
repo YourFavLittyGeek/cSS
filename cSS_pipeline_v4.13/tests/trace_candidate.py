@@ -99,9 +99,9 @@ def s13():
     PG._train("trace"); j = dict(PG.JOB)
     if j["state"] != "finished": raise RuntimeError(j.get("error"))
     M = PG.load(PG.versions()[-1]); fam = M["intelligence"]["families"]
-    return dict(version=M["version"], dataset=M["data"]["dataset"], chosen=dict(char=fam["char"]["chosen"], image=fam["image"]["chosen"], fusion=fam["fusion"]["chosen"],
+    return dict(version=M["version"], dataset=M["data"]["dataset"], chosen=dict(char=fam["char"]["chosen"], image=fam["image"]["chosen"],
                 meta=M["discovery"]["chosen"]), acceptance=M["acceptance"], test_auc=(M["test"].get("percival") or {}).get("auc"), math_auc=(M["test"].get("math") or {}).get("auc"))
-r13 = step(13, "Percival training cycle (char + image + fusion + meta + calibration + Intelligence)", s13)
+r13 = step(13, "Percival training cycle (NOX + LUMOS + PERCIVAL meta + calibration + Intelligence)", s13)
 def s12():
     from uengine.percival import datasets as DS
     m = DS.load(PG.P(), r13["dataset"]); e = next(x for x in m["examples"] if x["study"] == SID and x["cand_id"] == CID)

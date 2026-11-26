@@ -45,7 +45,7 @@ auc_img = cm["image"]["auc"]
 # control: the same rows, labels shuffled within the development cohort
 rows = [r_ for c in sorted({e["study"] for e in man["examples"] if e["partition"]}) for r_ in PG.gather(c)]
 dev = [r_ for r_ in rows if not r_["test"]]; rng = np.random.default_rng(7); ys = rng.permutation([r_["y"] for r_ in dev])
-Zs, _ = MT.component_oof([dict(r_, y=int(y_)) for r_, y_ in zip(dev, ys)], cnn_epochs=10, image_kinds=[fam["chosen"]], char_kinds=["logistic"], fusion_kinds=["late"])
+Zs, _ = MT.component_oof([dict(r_, y=int(y_)) for r_, y_ in zip(dev, ys)], cnn_epochs=10, image_kinds=[fam["chosen"]], char_kinds=["logistic"], )
 mk = np.isfinite(Zs["image"]); auc_shuf = MT.auc(np.asarray(ys)[mk], MT.sigmoid(Zs["image"][mk]))
 check(auc_img >= 0.7 and auc_shuf <= 0.65 and auc_img - auc_shuf >= 0.15,
       f"2 Image ML learns from the expert-labelled patches: out-of-fold AUC {auc_img:.3f} ({fam['chosen']}), shuffled-label control {auc_shuf:.3f}")
@@ -55,11 +55,11 @@ sid = man["examples"][0]["study"]; G = PG.gather(sid, labelled=False); r0 = next
 a = MT.score_rows(M, [dict(r0)])[0]
 alt = dict(r0, maps=np.flip(np.asarray(r0["maps"]), axis=-1).copy() * 0 + np.asarray(r0["maps"]).mean())     # flattened patch: same mean, no structure
 b = MT.score_rows(M, [alt])[0]
-same_other = all(a["components"][k] == b["components"][k] for k in ("math", "unified", "char"))
-check(a["components"]["image"] != b["components"]["image"] and a["components"]["fusion"] != b["components"]["fusion"] and same_other
+same_other = all(a["components"][k] == b["components"][k] for k in ("math", "char"))
+check(a["components"]["image"] != b["components"]["image"] and same_other
       and (a["percival_score"] != b["percival_score"] or M["discovery"]["chosen"] in ("math_only",)),
-      f"3 patch consumed: image {a['components']['image']} -> {b['components']['image']}, fusion {a['components']['fusion']} -> {b['components']['fusion']}, "
-      f"Percival {a['percival_score']} -> {b['percival_score']} (meta-model {M['discovery']['chosen']}); MATH / Unified / Characteristic unchanged")
+      f"3 patch consumed: LUMOS {a['components']['image']} -> {b['components']['image']}, "
+      f"Percival {a['percival_score']} -> {b['percival_score']} (meta-model {M['discovery']['chosen']}); ALBUS / NOX unchanged")
 # Stage 3 abstention policy: two or more triggers (here OOD + component disagreement) escalate "uncertain" to "review"
 check(b["status"] in ("uncertain", "review") and any("image out-of-distribution" in x for x in b["reasons"]) and a["image_ood_distance"] is not None
       and a["image_ood_distance"] <= a["image_ood_limit"] and not any("image out-of-distribution" in x for x in a["reasons"]),
@@ -70,7 +70,7 @@ check(c_["components"]["image"] is None and any("image" in x for x in c_.get("re
       f"4 no patch: Image ML not computed, flagged ({'; '.join(c_.get('reasons', []))}), score from the other sources {c_['percival_score']}")
 rec = PG.score_study(sid); L = PG.history_of(sid)
 led = [x for x in L if x.get("model") == PG.active_version()]
-check(led and all(k in rec["candidates"][0]["components"] for k in ("math", "unified", "char", "image", "fusion")) and rec["provenance"]["dataset"] == man["id"]
+check(led and all(k in rec["candidates"][0]["components"] for k in ("math", "char", "image")) and rec["provenance"]["dataset"] == man["id"]
       and "image_tta_spread" in rec["candidates"][0], "5 stored: ledger entry with model version, dataset and every component value; image TTA spread reported",
       json.dumps(rec.get("provenance"))[:200])
 shutil.rmtree(T, ignore_errors=True)

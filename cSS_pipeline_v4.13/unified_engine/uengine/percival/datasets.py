@@ -14,7 +14,7 @@ v5.24 learning engine (manifest schema percival-dataset/1.1):
   reproduce()         rebuilds a manifest's core from the current reviews and reports whether it is identical (same content hash)."""
 import glob, hashlib, json, os, time
 
-COMPONENTS = ("char", "image", "fusion", "meta", "predictor", "shadow", "detection", "segmentation")
+COMPONENTS = ("char", "image", "meta", "shadow", "detection", "segmentation")
 K_FOLDS, FOLD_SEED = 5, 0                      # = meta.component_oof defaults (patient-grouped CV used for model selection)
 
 

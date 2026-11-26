@@ -2,25 +2,22 @@
 // Standard View (clinical language) & Advanced Research View (technical algorithms)
 const PV={tab:"system",study:"",q:"",viewMode:localStorage.getItem("pv_view_mode")||"standard"};
 const PC={percival:"var(--lv-1)",dev:"var(--lv-2)",math:"var(--lv-math)"};
-const CN_STD={math:"ALBUS · Mathematical Detection",unified:"NOX · uScore x1–x5 predictors",char:"NOX · Quantitative measurements",image:"LUMOS · Visual Intelligence",fusion:"NOX × LUMOS fusion"};
-const CN_ADV={math:"ALBUS: score_v4 (Platt-recalibrated)",unified:"NOX: uScore x1–x5 (L2 logistic)",char:"NOX: 9 detector measurements (L2 logistic)",image:"LUMOS: SmallCNN on MRI patches",fusion:"PERCIVAL fusion: measurements + image logit"};
+// 2026-11-25 architecture: ALBUS (detects) -> NOX (measures) + LUMOS (sees the image) -> PERCIVAL (the only combiner). No Unified, no Fusion.
+const CN_STD={math:"ALBUS · Mathematical Detection",char:"NOX · Quantitative measurements",image:"LUMOS · Visual Intelligence"};
+const CN_ADV={math:"ALBUS: score_v4 (Platt-recalibrated)",char:"NOX: 30 measurements (logistic / trees / forest)",image:"LUMOS: image model on MRI patches"};
 const CN=new Proxy({},{get:(t,p)=>(PV.viewMode==="standard"?CN_STD[p]:CN_ADV[p])||p});
 
 const MN_STD={
   math_only:"Quantitative Detection Alone",
   equal_mean:"Balanced Multi-source Average",
-  fusion_only:"Integrated Evidence Alone",
   stack_logit:"Calibrated Model Adaptation",
-  stack_fusion:"Regularised Multi-evidence Stacking",
   stack_reg:"Model Adaptation with Disagreement Analysis",
   boosted:"Adaptive Gradient Decision Ensemble"
 };
 const MN_ADV={
-  math_only:"MATH alone (unweighted)",
+  math_only:"ALBUS alone (recalibrated)",
   equal_mean:"Equal-weight arithmetic mean",
-  fusion_only:"Multimodal Fusion alone",
   stack_logit:"Logistic regression stacking",
-  stack_fusion:"Ridge-regularised stacking (MATH+Unified+Fusion)",
   stack_reg:"Regularised stacking + disagreement interaction",
   boosted:"Gradient-boosted decision stumps"
 };
@@ -30,7 +27,7 @@ function pvCurve(H){if(!H.length)return '<p class="note">The learning curve appe
   const W=760,Hh=270,L=46,R=170,T=14,Bm=40,pw=W-L-R,ph=Hh-T-Bm,n=H.length,X=i=>L+(n===1?pw/2:pw*i/(n-1));
   const vals=H.flatMap(h=>[h.test_auc,h.test_math_auc,(h.dev||{})[h.chosen],...(h.test_ci||[])]).filter(v=>v!=null),lo=Math.max(0,Math.floor((Math.min(0.5,...vals)-0.02)*10)/10),Y=v=>T+ph*(1-(v-lo)/(1-lo));
   const grid=[];for(let v=lo;v<=1.0001;v+=0.1)grid.push(`<line x1="${L}" x2="${L+pw}" y1="${Y(v)}" y2="${Y(v)}" class="lv-grid"/><text x="${L-6}" y="${Y(v)+4}" class="lv-ax" text-anchor="end">${v.toFixed(1)}</text>`);
-  const ser=[["percival",h=>h.test_auc,"PERCIVAL score · locked test"],["dev",h=>(h.dev||{})[h.chosen],"chosen model · development CV"],["math",h=>h.test_math_auc,"MATH alone · locked test"]];
+  const ser=[["percival",h=>h.test_auc,"PERCIVAL score · locked test"],["dev",h=>(h.dev||{})[h.chosen],"chosen model · development CV"],["math",h=>h.test_math_auc,"ALBUS alone · locked test"]];
   const band=n>1&&H.every(h=>h.test_ci)?`<path class="lv-band" d="M${H.map((h,i)=>`${X(i)},${Y(h.test_ci[1])}`).join("L")}L${H.slice().reverse().map((h,i)=>`${X(n-1-i)},${Y(h.test_ci[0])}`).join("L")}Z"/>`:"";
   const line=([k,f,nm])=>{const pts=H.map((h,i)=>f(h)!=null?[X(i),Y(f(h)),f(h)]:null).filter(Boolean);if(!pts.length)return"";const l=pts[pts.length-1];
     return `<path d="M${pts.map(p=>p[0]+","+p[1]).join("L")}" class="lv-line ${k==="math"?"lv-dash":""}" style="stroke:${PC[k]}"/>${pts.map(p=>`<circle cx="${p[0]}" cy="${p[1]}" r="4" class="lv-dot" style="fill:${PC[k]}"/>`).join("")}<text x="${l[0]+8}" y="${l[1]+4}" class="lv-lab">${nm.split(" · ")[0]} ${g3(l[2])}</text>`};
@@ -39,7 +36,7 @@ function pvCurve(H){if(!H.length)return '<p class="note">The learning curve appe
    ${H.map((h,i)=>`<text x="${X(i)}" y="${Hh-22}" class="lv-ax" text-anchor="middle">${esc(h.version)}</text><text x="${X(i)}" y="${Hh-9}" class="lv-ax" text-anchor="middle">${h.studies} st.</text>`).join("")}
    ${H.map((h,i)=>`<rect x="${X(i)-12}" y="${T}" width="24" height="${ph}" class="lv-hit" data-pvi="${i}"/>`).join("")}</svg><div class="lv-tip hide" id="pvtip"></div></div>`}
 function pvTip(H){const tip=$("#pvtip");if(!tip)return;document.querySelectorAll("[data-pvi]").forEach(r=>{r.onmouseenter=()=>{const h=H[+r.dataset.pvi];
-  tip.innerHTML=`<b>${esc(h.version)}</b> · ${esc((h.at||"").replace("T"," "))}<br>${h.studies} studies · ${h.candidates} candidates<br>chosen: ${esc(MN[h.chosen]||h.chosen)}<br>locked test AUC <b>${g3(h.test_auc)}</b>${h.test_ci?` [${g3(h.test_ci[0])}–${g3(h.test_ci[1])}]`:""} · MATH ${g3(h.test_math_auc)}<br>${h.promoted?"promoted":h.passed?"passed":"not promoted"}`;
+  tip.innerHTML=`<b>${esc(h.version)}</b> · ${esc((h.at||"").replace("T"," "))}<br>${h.studies} studies · ${h.candidates} candidates<br>chosen: ${esc(MN[h.chosen]||h.chosen)}<br>locked test AUC <b>${g3(h.test_auc)}</b>${h.test_ci?` [${g3(h.test_ci[0])}–${g3(h.test_ci[1])}]`:""} · ALBUS ${g3(h.test_math_auc)}<br>${h.promoted?"promoted":h.passed?"passed":"not promoted"}`;
   tip.classList.remove("hide");const b=r.getBoundingClientRect(),p=r.closest("div").getBoundingClientRect();tip.style.left=Math.min(b.left-p.left+16,p.width-230)+"px";tip.style.top="8px"};r.onmouseleave=()=>tip.classList.add("hide")})}
 function pvMetricsRow(name,m,sw){m=m||{};return `<tr><td>${sw?`<i class="lv-sw" style="background:${sw}"></i>`:""}${name}</td><td class="mono">${g3(m.auc)}</td><td class="mono">${m.auc_ci?`${g3(m.auc_ci[0])}–${g3(m.auc_ci[1])}`:"—"}</td><td class="mono">${g3(m.pr_auc)}</td><td class="mono">${g3(m.brier)}</td><td class="mono">${g3(m.calib_slope)}</td><td>${m.n??"—"}</td></tr>`}
 const PVMH='<tr><th></th><th>AUC</th><th>95 % CI</th><th>PR-AUC</th><th>Brier</th><th>calibration slope</th><th>n</th></tr>';
@@ -61,18 +58,19 @@ async function intelView(v){{const hq=location.hash.match(/^#intel\?tab=(\w+)/);
     <div class="tile"><div class="n">${d?d.studies:0}</div><div class="t">studies learned</div></div>
     <div class="tile"><div class="n">${d?d.dev_candidates+d.test_candidates:0}</div><div class="t">candidates${d?` · ${d.css} cSS / ${d.not_css} not`:""}</div></div>
     <div class="tile"><div class="n">${g3((((M||Lt||{}).test||{}).percival||{}).auc)}</div><div class="t">PERCIVAL AUC · locked test${d?` (${d.test_patients} patients)`:""}</div></div>
-    <div class="tile"><div class="n">${g3((((M||Lt||{}).test||{}).math||{}).auc)}</div><div class="t">MATH alone · same test</div></div>
+    <div class="tile"><div class="n">${g3((((M||Lt||{}).test||{}).math||{}).auc)}</div><div class="t">ALBUS alone · same test</div></div>
     <div class="tile"><div class="n">${M?esc(M.version):"—"}</div><div class="t">active model${M?` · ${esc(MN[M.discovery.chosen]||M.discovery.chosen)}`:""}</div></div></div>
    <div class="subtabs" data-pv="tabs">${[["system","System","PERCIVAL · the integrated system: every component and its state"],["overview","Overview","learning curve and the locked-test evaluation"],["center",`Training Center (${s.n_selected})`,"eligible expert labels, readiness, training"],["models",`Model Center (${s.versions.length})`,"trained versions, acceptance, explicit approval"],["albus","ALBUS","ALBUS · Mathematical Detection: detector versions, sensitivity, false positives"],["pensieve","PENSIEVE","PENSIEVE · AI Memory and History"],["shadow","SHADOW","SHADOW · Experimental Discovery Lab"],["vault","Data Vault","storage"],["integrity","Integrity","data integrity"],["|","Advanced:"],["components","Components","Components & agreement"],["evidence","Evidence","Evidence & reliability"],["meta","Meta-model","PERCIVAL Decision Engine: meta-model and calibration"],["explore","Candidates","Candidate explorer: every component per candidate"]].map(([k,l,t])=>k==="|"?`<span class="note" style="margin:0 4px 0 14px;white-space:nowrap;align-self:center">${l}</span>`:`<button data-pvt="${k}" class="${PV.tab===k?"on":""}" title="${esc(t||l)}">${l}</button>`).join("")}</div><div id="pvb"></div>`;
   const el=$("#pvb"),X=M||Lt;
   if(PV.tab==="overview"){el.innerHTML=pvFlow(s,X)+`<div class="card"><h3 style="margin:0 0 4px">Learning curve</h3><p class="note" style="margin-top:0">One point per training cycle. The locked test cohort (${Math.round(100*s.test_fraction)} % of patients, assigned permanently) is never used for training or selection.</p>${pvCurve(H)}</div>
-    ${X?`<div class="card"><h3 style="margin:0 0 6px">Locked test cohort (${esc(X.version)})</h3><table data-pv="test">${PVMH}${pvMetricsRow("PERCIVAL score",(X.test||{}).percival,PC.percival)}${pvMetricsRow("MATH alone",(X.test||{}).math,PC.math)}</table>
+    ${X?`<div class="card"><h3 style="margin:0 0 6px">Locked test cohort (${esc(X.version)})</h3><table data-pv="test">${PVMH}${pvMetricsRow("PERCIVAL score",(X.test||{}).percival,PC.percival)}${pvMetricsRow("ALBUS alone",(X.test||{}).math,PC.math)}</table>
       <p class="note">${(X.test||{}).at_red?`At the red threshold: sensitivity ${g3(X.test.at_red.sensitivity)}, specificity ${g3(X.test.at_red.specificity)} · at the green threshold: sensitivity ${g3(X.test.at_green.sensitivity)}, specificity ${g3(X.test.at_green.specificity)}.`:""}
       ${X.acceptance?` Acceptance: <b>${X.acceptance.passed?"passed":"not passed"}</b>${X.acceptance.reasons.length?" - "+X.acceptance.reasons.map(esc).join("; "):""}.`:""}</p></div>`:""}
     ${(s.log||[]).length?`<details class="card"><summary>Last training log</summary><pre class="note" style="white-space:pre-wrap">${esc(s.log.join("\n"))}</pre></details>`:""}`;pvTip(H)}
-  if(PV.tab==="components"&&X){const A=X.agreement||[];const names=["math","unified","char","image","fusion"];
+  if(PV.tab==="components"&&X){const A=X.agreement||[];const names=["math","char","image"];
     el.innerHTML=`<div class="card"><h3 style="margin:0 0 4px">Independent assessment sources</h3><p class="note" style="margin-top:0">Out-of-fold performance on the development cohort (each candidate scored by models that never saw its patient).</p><table data-pv="components">${PVMH}${names.map(c=>pvMetricsRow(CN[c],(X.component_metrics||{})[c])).join("")}</table>
-      <p class="note">Fusion already contains the Characteristic and Image information, so no meta-model uses Fusion together with them.</p></div>
+      <p class="note">PERCIVAL is the only place where ALBUS, NOX and LUMOS are combined (no Fusion layer in between).</p></div>
+     ${pvModules(X)}
      <div class="card"><h3 style="margin:0 0 4px">Agreement and dependence</h3><p class="note" style="margin-top:0">Spearman correlation of the sources' log-odds (dependence) and how often their calls (≥ 50 %) agree. Agreement is not correctness; disagreement is tested for its predictive value in the meta-model comparison.</p>
       <table data-pv="agreement"><tr><th></th>${names.map(c=>`<th>${CN[c]}</th>`).join("")}</tr>${names.map(a=>`<tr><td><b>${CN[a]}</b></td>${names.map(b=>{if(a===b)return'<td class="mut">—</td>';const x=A.find(q=>(q.a===a&&q.b===b)||(q.a===b&&q.b===a));return x?`<td class="mono" style="background:color-mix(in srgb,var(--lv-1) ${Math.round(40*Math.max(0,x.spearman))}%,transparent)">ρ ${x.spearman.toFixed(2)}<div class="note">calls agree ${Math.round(100*x.call_agreement)} %</div></td>`:'<td class="mut">—</td>'}).join("")}</tr>`).join("")}</table></div>`}
   if(PV.tab==="meta"&&X){const D=X.discovery,co=X.meta&&X.meta.type==="logistic"?X.meta:null,th=X.thresholds,te=X.test||{};
@@ -89,8 +87,8 @@ async function intelView(v){{const hq=location.hash.match(/^#intel\?tab=(\w+)/);
      <div class="card"><h3 style="margin:0 0 4px">Robustness on the locked test cohort</h3><table data-pv="subgroups">${PVMH}${["complete_inputs","missing_inputs","low_disagreement","high_disagreement"].map(k=>pvMetricsRow(k.replace("_"," "),te["subgroup_"+k])).join("")}</table><p class="note">${te.insufficient||0} test candidates had insufficient evidence (no learned source).</p></div>`}
   if(PV.tab==="explore"){const st=(s.selection||[]);if(!PV.study&&st.length)PV.study=st[0].code;const sc=PV.study?await api(`/api/percival/score?code=${encodeURIComponent(PV.study)}`):null,hi=PV.study?await api(`/api/percival/history?code=${encodeURIComponent(PV.study)}`):{ledger:[]};
     el.innerHTML=`<div class="card"><div class="row"><span class="note">Study</span><select id="pv-st">${st.map(x=>`<option value="${esc(x.code)}" ${x.code===PV.study?"selected":""}>${esc(x.label)}</option>`).join("")}</select>${sc&&!sc.none?`<span class="note">model ${esc(sc.model)} · run ${esc(sc.run)}</span>`:""}${sc&&sc.hidden?`<span class="note" data-pv="hidden">hidden until the study's blind review is complete 🔒 (${esc(sc.reason||"")})</span>`:""}</div>
-      ${sc&&!sc.none?`<table data-pv="explore"><tr><th>#</th><th>Percival</th><th>status</th><th>± (bootstrap)</th>${["math","unified","char","image","fusion"].map(c=>`<th>${CN[c]}</th>`).join("")}<th>missing</th><th>disagreement</th><th>why uncertain</th></tr>
-       ${sc.candidates.map(c=>`<tr><td class="mono">${c.cand_id}</td><td>${c.percival_score==null?'<span class="mut">—</span>':`<span class="pvb ${c.band}"></span> <b>${pct(c.percival_score)}</b>`}</td><td class="note">${esc(c.status)}</td><td class="mono">${c.uncertainty_sd}</td>${["math","unified","char","image","fusion"].map(k=>`<td class="mono">${pct(c.components[k])}</td>`).join("")}<td class="note">${c.missing.map(m=>CN[m]).join(", ")||"—"}</td><td class="mono">${c.disagreement}</td><td class="note">${esc((c.reasons||[]).join("; "))||"—"}</td></tr>`).join("")}</table>
+      ${sc&&!sc.none?`<table data-pv="explore"><tr><th>#</th><th>Percival</th><th>status</th><th>± (bootstrap)</th>${["math","char","image"].map(c=>`<th>${CN[c]}</th>`).join("")}<th>missing</th><th>disagreement</th><th>why uncertain</th></tr>
+       ${sc.candidates.map(c=>`<tr><td class="mono">${c.cand_id}</td><td>${c.percival_score==null?'<span class="mut">—</span>':`<span class="pvb ${c.band}"></span> <b>${pct(c.percival_score)}</b>`}</td><td class="note">${esc(c.status)}</td><td class="mono">${c.uncertainty_sd}</td>${["math","char","image"].map(k=>`<td class="mono">${pct(c.components[k])}</td>`).join("")}<td class="note">${c.missing.map(m=>CN[m]).join(", ")||"—"}</td><td class="mono">${c.disagreement}</td><td class="note">${esc((c.reasons||[]).join("; "))||"—"}</td></tr>`).join("")}</table>
        <p class="note">Component columns: each source alone, in % (not the final score). AI predictions - never a human review.</p>`:'<p class="note">No Percival assessment for this study yet (no active model, or not processed).</p>'}
       ${(hi.ledger||[]).length>1?`<p class="note">Earlier assessments of this study are kept unchanged: ${hi.ledger.map(l=>`${esc(l.model)} (${esc(l.created)})`).join(" · ")}</p>`:""}</div>`;
     $("#pv-st")&&($("#pv-st").onchange=e=>{PV.study=e.target.value;intelView(v)})}
@@ -98,7 +96,7 @@ async function intelView(v){{const hq=location.hash.match(/^#intel\?tab=(\w+)/);
   if(PV.tab==="integrity"){await pvIntegrity(el,s,v)}
   if(PV.tab==="models")el.innerHTML=`<div class="card"><h3 style="margin:0 0 4px">Model Center</h3><p class="note" style="margin-top:0">Every model is kept with its data version, configuration, metrics and acceptance result. <b>No model becomes active by itself</b>: a new version is <i>experimental</i> (did not pass the acceptance criteria) or a <i>candidate</i> (passed, waiting for your approval). You make a version active; the one it replaces becomes <i>retired</i>; roll back returns to it. A <i>rejected</i> version cannot be made active until restored.</p>
     <div class="row"><button class="b" id="pv-rb">Roll back to the previous model</button></div>
-    <table data-pv="registry"><tr><th>Version</th><th>Trained</th><th>Studies</th><th>Dataset</th><th>Chosen meta-model</th><th>Locked-test AUC</th><th>MATH</th><th>Acceptance</th><th>Status</th><th></th></tr>
+    <table data-pv="registry"><tr><th>Version</th><th>Trained</th><th>Studies</th><th>Dataset</th><th>Chosen meta-model</th><th>Locked-test AUC</th><th>ALBUS</th><th>Acceptance</th><th>Status</th><th></th></tr>
     ${H.slice().reverse().map(h=>`<tr><td class="mono"><b>${esc(h.version)}</b></td><td class="note">${esc((h.at||"").replace("T"," "))} · ${esc(h.reason||"")}</td><td>${h.studies}</td><td class="mono">${h.dataset?`<a href="#" data-pvds="${esc(h.dataset)}">${esc(h.dataset)}</a>`:'<span class="mut" title="trained before v5.24">—</span>'}</td><td class="note">${esc(MN[h.chosen]||h.chosen)}</td><td class="mono">${g3(h.test_auc)}</td><td class="mono">${g3(h.test_math_auc)}</td><td>${h.passed?'<span class="ok">passed</span>':'<span class="warn">not passed</span>'}</td>
       <td>${pvStatus((s.status||{})[h.version])}</td><td>${M&&M.version===h.version?'':((s.status||{})[h.version]||{}).status==="rejected"?`<button class="b sm" data-pvst="${esc(h.version)}" data-st="restore">Restore</button>`:`<button class="b sm" data-pvp="${esc(h.version)}">Make active</button> <button class="b sm" data-pvsh="${esc(h.version)}" title="score every study with this version in shadow - reviewers never see it">Run in shadow</button> <button class="b sm" data-pvst="${esc(h.version)}" data-st="rejected">Reject</button>`}</td></tr>`).join("")||'<tr><td colspan="10" class="empty">No model yet.</td></tr>'}</table>
     ${(s.registry||[]).length?`<details data-pv="registry-detail"><summary>Registry details (identity, components, architecture, dataset, configuration, artifact)</summary><table><tr><th>Model</th><th>Status</th><th>Components (architecture chosen)</th><th>Dataset</th><th>Schemas</th><th>Run</th><th>Artifact</th></tr>
@@ -273,10 +271,13 @@ async function intelView(v){{const hq=location.hash.match(/^#intel\?tab=(\w+)/);
   v.querySelectorAll("[data-pvds]").forEach(a=>a.onclick=e=>{e.preventDefault();PV.tab="center";PV.ds=a.dataset.pvds;intelView(v)});
   if(job.state==="running")setTimeout(()=>V==="intel"&&intelView(v),2500)}
 
+// 2026-11-25 one learning loop per module: each module checked on its own against its previous version
+function pvModules(X){const Mo=(X||{}).modules;if(!Mo)return "";const v=r=>r.verdict==="improved"?'<span class="pill ok">improved</span>':r.verdict==="not improved"?'<span class="pill warn">not improved - previous version kept</span>':`<span class="pill">${esc(r.verdict||"")}</span>`;
+  return `<div class="card" data-pv="modules"><h3 style="margin:0 0 4px">Learning loop of every module</h3><p class="note" style="margin-top:0">Each module is checked on its own (development patients, out-of-fold) against the same module in the previous model. NOX and LUMOS are adopted (Freeze) only when they improved; ALBUS changes only through a new detector version that may not lose any cSS; PERCIVAL becomes active only after the locked test and your approval.</p>
+   <table><tr><th>Module</th><th>Model</th><th>AUC</th><th>log loss</th><th>previous</th><th>verdict</th><th>loop</th></tr>${["ALBUS","NOX","LUMOS","PERCIVAL"].filter(k=>Mo[k]).map(k=>{const r=Mo[k];return `<tr><td><b>${k}</b></td><td class="note">${esc(r.family||"")}</td><td class="mono">${g3(r.auc)}</td><td class="mono">${g3(r.logloss)}</td><td class="mono">${r.previous_model?`${esc(r.previous_model)} · ${g3(r.previous_logloss)}`:"—"}</td><td>${v(r)}</td><td class="note">${esc(r.loop||"")}</td></tr>`}).join("")}</table></div>`}
 // ------------------------------------------------------------------ v5.23 Evidence & reliability (PERCIVAL analyses of the model)
 const FAM={char:["NOX measurement model",{logistic:"Logistic regression (L2)",gbt:"Gradient-boosted trees (depth 2)",forest:"Random forest"}],
-  image:["LUMOS image network",{pixel_logistic:"Pixel logistic (3×7×5 block means) - baseline",cnn:"Convolutional network (SmallCNN)"}],
-  fusion:["Fusion",{late:"Late (decision-level)",feature:"Feature-level",hybrid:"Hybrid"}]};
+  image:["LUMOS image network",{pixel_logistic:"Pixel logistic (3×7×5 block means) - baseline",cnn:"Convolutional network (SmallCNN)",cnn_ensemble:"CNN seed ensemble"}]};
 function pvCal(R,Rt){if(!R||!R.length)return '<p class="note">Not enough candidates for a calibration table.</p>';
   const W=420,Hh=300,L=44,Bm=36,T=10,Rr=10,pw=W-L-Rr,ph=Hh-T-Bm,X=v=>L+pw*v,Y=v=>T+ph*(1-v);
   const g=[0,.25,.5,.75,1].map(v=>`<line x1="${X(0)}" x2="${X(1)}" y1="${Y(v)}" y2="${Y(v)}" class="lv-grid"/><text x="${L-6}" y="${Y(v)+4}" class="lv-ax" text-anchor="end">${v}</text><text x="${X(v)}" y="${Hh-18}" class="lv-ax" text-anchor="middle">${100*v}</text>`).join("");
@@ -285,14 +286,13 @@ function pvCal(R,Rt){if(!R||!R.length)return '<p class="note">Not enough candida
    <svg viewBox="0 0 ${W} ${Hh}" class="lv-svg" style="max-width:440px" role="img" aria-label="calibration">${g}<line x1="${X(0)}" y1="${Y(0)}" x2="${X(1)}" y2="${Y(1)}" class="lv-line lv-dash" style="stroke:var(--mut)"/>${pts(R,PC.dev)}${Rt?pts(Rt,PC.percival):""}
    <text x="${L+pw/2}" y="${Hh-3}" class="lv-ax" text-anchor="middle">PERCIVAL score</text><text x="12" y="${T+ph/2}" class="lv-ax" text-anchor="middle" transform="rotate(-90 12 ${T+ph/2})">observed cSS rate</text></svg>`}
 function pvEvidence(X,s){const I=X.intelligence;if(!I)return '<div class="card"><p class="note">This model was trained before v5.23 and has no evidence analysis. Start a training cycle.</p></div>';
-  const F=I.families||{},ab=I.ablation||{},fb=(F.fusion||{}).benefit;
+  const F=I.families||{},ab=I.ablation||{};
   const famCard=Object.keys(FAM).filter(k=>F[k]).map(k=>{const f=F[k],[t,nm]=FAM[k];return `<h4 style="margin:12px 0 4px">${t}</h4><table data-pv="family-${k}"><tr><th>Model</th><th>AUC</th><th>log loss</th><th>± SE</th><th>calibration slope</th><th>n</th></tr>
     ${Object.keys(nm).map(m=>{const r=(f.results||{})[m]||{};return `<tr class="${m===f.chosen?"pv-chosen":""}"><td>${esc(nm[m])}${m===f.chosen?' <span class="pill ok">chosen</span>':""}</td><td class="mono">${g3(r.auc)}</td><td class="mono">${g3(r.logloss)}</td><td class="mono">${g3(r.logloss_se)}</td><td class="mono">${g3(r.calib_slope)}</td><td class="mono">${r.n??"—"}</td></tr>`}).join("")}</table><p class="note">${esc(f.rule||"")}</p>`}).join("");
-  const fbHtml=fb?`<p data-pv="fusion-benefit"><b>Does fusion help?</b> ${esc(fb.verdict)} - log-loss change against ${fb.best_single==="char"?"NOX measurements":"LUMOS"} alone ${fb.delta_logloss>=0?"+":""}${fb.delta_logloss.toFixed(3)} (95 % CI ${fb.ci[0].toFixed(3)} to ${fb.ci[1].toFixed(3)}; negative = better).</p>`:'<p class="note">Fusion could not be compared (no image model output).</p>';
   const ov=(I.overlap||[]).filter(o=>o.shared.length).map(o=>`<tr><td><b>${CN[o.a]}</b> · <b>${CN[o.b]}</b></td><td class="mono">${o.jaccard}</td><td class="note">${o.shared.map(x=>esc(x.replace(/_/g," "))).join(", ")}</td></tr>`).join("");
   const abRows=Object.keys(ab.without||{}).map(c=>{const w=ab.without[c],a=(ab.alone||{})[c]||{};return `<tr><td><b>${CN[c]}</b></td><td class="mono">${g3(a.auc)}</td><td class="mono">${g3(w.auc)}</td><td class="mono">${w.delta_logloss>=0?"+":""}${w.delta_logloss.toFixed(3)}</td><td class="mono">${w.delta_ci[0].toFixed(3)} to ${w.delta_ci[1].toFixed(3)}</td><td>${w.verdict==="adds information"?'<span class="pill ok">adds information</span>':w.verdict==="uncertain"?'<span class="pill warn">uncertain</span>':'<span class="pill">redundant</span>'}</td></tr>`}).join("");
   const dis=(I.disagreement||[]).map(d=>{const P=d.patterns,cell=k=>{const x=P[k]||{};return `<td class="mono">${x.n||0}${x.n?` · ${Math.round(100*x.css_rate)} %`:""}</td>`};return `<tr><td><b>${CN[d.a]}</b> vs <b>${CN[d.b]}</b></td>${cell("both_high")}${cell("both_low")}${cell(d.a+"_only")}${cell(d.b+"_only")}<td class="mono">${d.n_disagree}</td><td class="note">${d.n_disagree?`${CN[d.a]} ${Math.round(100*d.a_right)} % · ${CN[d.b]} ${Math.round(100*d.b_right)} %`:"—"}</td></tr>`}).join("");
-  return `<div class="card"><h3 style="margin:0 0 4px">Which model family each source uses - compared, not assumed</h3><p class="note" style="margin-top:0">Patient-grouped cross-validation on the development cohort; the simplest model within one standard error of the best is used (a more complex model must earn its place).</p>${famCard}${fbHtml}</div>
+  return `<div class="card"><h3 style="margin:0 0 4px">Which model family each source uses - compared, not assumed</h3><p class="note" style="margin-top:0">Patient-grouped cross-validation on the development cohort; the simplest model within one standard error of the best is used (a more complex model must earn its place).</p>${famCard}</div>
    <div class="card"><h3 style="margin:0 0 4px">Shared inputs - the sources are not independent</h3><p class="note" style="margin-top:0">Measurements each source consumes (from the code). Sources that share measurements must not be counted as separate evidence; the meta-model learns their weights jointly.</p>
     <table data-pv="overlap"><tr><th>Pair</th><th>overlap (Jaccard)</th><th>shared measurements</th></tr>${ov||'<tr><td colspan="3" class="empty">none</td></tr>'}</table></div>
    <div class="card"><h3 style="margin:0 0 4px">Incremental value of each source</h3><p class="note" style="margin-top:0">${esc(ab.note||"")} A source with a high AUC on its own can still add nothing when the others already carry its information.</p>
@@ -311,12 +311,10 @@ function pvFlow(s,X){const I=s.inputs||{},n=I.studies||0,F=((X||{}).intelligence
  return `<div class="card" data-pv="flow"><h3 style="margin:0 0 4px">How Percival works - one pipeline, one score</h3>
   <p class="note" style="margin-top:0">Every part below is trained and switched on <b>automatically</b> in each training cycle when its input exists - there is no separate switch per model. The only switch is <b>local learning</b> (${on?'<span class="ok">on</span>':'<span class="bad">off</span>'}).</p>
   <table><tr><th>Part</th><th>What it receives</th><th>In this project</th></tr>
-  ${row("1 · MATH","the detector's rule score (score_v4) of every candidate",st(I.candidates>0,`${I.candidates||0} of ${n} learning studies`))}
-  ${row("2 · Unified Score","5 predictors per candidate (darkness, surface, vessel, …) - extracted automatically when missing",st(I.predictor_reliable>0,`${I.predictors||0} of ${n} studies extracted · ${I.predictor_reliable||0} of ${I.predictor_candidates||0} candidates with a reliable predictor${I.predictor_candidates&&!I.predictor_reliable?" - Percival treats this input as missing (anatomy / registration needed)":""}`))}
-  ${row("3 · NOX measurement model","the approved NOX measurements per candidate (built-in: 9); compares logistic / boosted trees / random forest",st(!!ch("char"),ch("char")?`chosen: ${esc(ch("char"))}`:"trained in the next cycle"))}
-  ${row("4 · LUMOS image network","the MRI patch around each candidate; compares a pixel baseline with a small CNN (CNN only if it wins)",st(I.image>0,`${I.image||0} of ${n} studies with image patches${ch("image")?` · chosen: ${esc(ch("image"))}`:""}`))}
-  ${row("5 · Fusion","NOX measurements + LUMOS together (late / feature / hybrid)",st(!!ch("fusion"),ch("fusion")?`chosen: ${esc(ch("fusion"))}`:"trained in the next cycle"))}
-  ${row("→ PERCIVAL score","1-5 combined by a meta-model learned from your expert calls, calibrated, red / yellow / green",st(!!s.active,s.active?`model ${esc(s.active.version)} in use`:"no model in use yet"))}
+  ${row("1 · ALBUS · detection","finds the candidates and gives each its detector score (score_v4)",st(I.candidates>0,`${I.candidates||0} of ${n} learning studies`))}
+  ${row("2 · NOX · measurements","30 measurements per candidate: 27 from the detector (surface, shape, darkness, vessel, position) + 3 extracted (vessel continuity, core contrast, extracranial continuation); compares logistic / boosted trees / random forest",st(!!ch("char")||I.predictor_candidates>0,ch("char")?`chosen: ${esc(ch("char"))}`:`${I.predictors||0} of ${n} studies with the 3 extracted measurements · trained in the next cycle`))}
+  ${row("3 · LUMOS · image","the MRI patch around each candidate; compares a pixel baseline with a small CNN (CNN only if it wins)",st(I.image>0,`${I.image||0} of ${n} studies with image patches${ch("image")?` · chosen: ${esc(ch("image"))}`:""}`))}
+  ${row("→ PERCIVAL score","1-3 combined by ONE meta-model learned from your expert calls (it also learns when they disagree), calibrated, red / yellow / green",st(!!s.active,s.active?`model ${esc(s.active.version)} in use`:"no model in use yet"))}
   </table>
   <p class="note">Labels: your expert calls in Review (cSS = 1; Vessel / Normal / Artifact / Microbleed = 0; Unsure and Near ICH are not used). The other screens under <i>Older prototypes</i> (Training, uScore scorer, Stage-1 shadow-mode prototype, Image ML prototype) are the separate research prototypes these parts were developed from; they do <b>not</b> feed the PERCIVAL score. <i>Stage-1 shadow-mode prototype</i> = the earlier Unified-Score engine run in "shadow mode": it computes its predictions next to the pipeline for comparison and never changes a result.</p></div>`}
 
@@ -324,7 +322,7 @@ function pvFlow(s,X){const I=s.inputs||{},n=I.studies||0,F=((X||{}).intelligence
 const PVR={NOT_REVIEWED:"not reviewed",UNCERTAIN:"Unsure",OUT_OF_SCOPE:"Near ICH (out of scope)",CONFLICT:"reviewers disagree",STUDY_EXCLUDED:"study left out",
   STUDY_ARCHIVED:"archived",DUPLICATE_STUDY:"duplicate examination",NOT_AUTHORIZED:"learning off",NO_IMAGE:"no MRI patch",NO_MEASUREMENTS:"no measurements",
   LOCKED_TEST:"locked test",HISTORICAL_LABEL:"earlier-version label",QC_LOW:"QC low",NO_PREDICTORS:"no reliable predictor",UNRECOGNISED_CALL:"call not recognised"};
-const PVCN={char:"NOX measurement model",image:"LUMOS image network",fusion:"Fusion",meta:"Meta-model",predictor:"Predictors",shadow:"Shadow",detection:"Candidate Detection (ALBUS)",segmentation:"Lesion Segmentation"};
+const PVCN={char:"NOX measurement model",image:"LUMOS image network",meta:"PERCIVAL meta-model",shadow:"Shadow",detection:"Candidate Detection (ALBUS)",segmentation:"Lesion Segmentation"};
 function pvStatus(e){e=e||{};const k=e.status||"—",c={active:"ok",candidate:"warn",experimental:"",retired:"",rejected:"bad"}[k]||"";return `<span class="pill ${c}" title="${esc((e.why||"")+(e.at?" · "+e.at:""))}">${esc(k)}</span>`}
 
 async function pvCenter(el,s,v){
@@ -344,9 +342,9 @@ async function pvCenter(el,s,v){
   const preflightPass=validMriOk && minReqsMet;
 
   // Component breakdown for Dataset Builder
-  const comp=last?["char","image","fusion","meta","predictor","shadow","detection","segmentation"].filter(k=>(last.components||{})[k]).map(k=>{
+  const comp=last?["char","image","meta","shadow","detection","segmentation"].filter(k=>(last.components||{})[k]).map(k=>{
     const c=(last.components||{})[k]||{},d=c.development||{},t=c.test||{};
-    const nameMap={char:"NOX measurement model",image:"LUMOS image network",fusion:"Fusion",meta:"PERCIVAL Decision Engine (meta-model)",predictor:"NOX · uScore x1–x5",shadow:"SHADOW evaluation",detection:"ALBUS Candidate Detection",segmentation:"cSS Lesion Segmentation"};
+    const nameMap={char:"NOX measurement model",image:"LUMOS image network",meta:"PERCIVAL Decision Engine (meta-model)",shadow:"SHADOW evaluation",detection:"ALBUS Candidate Detection",segmentation:"cSS Lesion Segmentation"};
     return `<tr><td><b>${nameMap[k]||k}</b></td><td class="mono">${d.n??0}</td><td class="mono">${d.css??0} / ${d.not_css??0}</td><td class="mono">${d.patients??0}</td><td class="mono">${t.n??0}</td><td class="mono">${t.css??0} / ${t.not_css??0}</td><td class="mono">${t.patients??0}</td></tr>`;
   }).join(""):"";
 
@@ -635,7 +633,7 @@ async function pvCenter(el,s,v){
       <button class="b sm" id="pvc-rollback">Roll Back to Previous Version</button>
     </div>
     <table style="margin-top:10px">
-      <tr><th>Version</th><th>Trained</th><th>Studies</th><th>Dataset</th><th>Meta-Architecture</th><th>Test AUC</th><th>MATH</th><th>Acceptance</th><th>Status</th><th>Actions</th></tr>
+      <tr><th>Version</th><th>Trained</th><th>Studies</th><th>Dataset</th><th>Meta-Architecture</th><th>Test AUC</th><th>ALBUS</th><th>Acceptance</th><th>Status</th><th>Actions</th></tr>
       ${H.slice().reverse().map(h=>`<tr>
         <td class="mono"><b>${esc(h.version)}</b></td>
         <td class="note">${esc((h.at||"").replace("T"," "))}</td>
@@ -785,13 +783,13 @@ async function pvCenter(el,s,v){
     const C=await api(`/api/percival/candidates?code=${encodeURIComponent(PV.open)}`),t=$("#pv-cands");
     if(t){
       t.innerHTML=`<table data-pv="candidates" style="margin:8px 0">
-        <tr><th>#</th><th>Call</th><th>Label Source</th><th>Status</th><th>Characteristic</th><th>Image</th><th>Fusion</th><th>Meta</th><th>Predictors</th><th>Missing</th><th>Reason</th></tr>
+        <tr><th>#</th><th>Call</th><th>Label Source</th><th>Status</th><th>NOX</th><th>LUMOS</th><th>PERCIVAL</th><th>Missing</th><th>Reason</th></tr>
         ${(C.candidates||[]).map(c=>`<tr>
           <td class="mono">${c.cand_id}</td>
           <td><b>${esc(c.call)}</b></td>
           <td class="note">${c.label_source==="historical"?"earlier version":"current review"}${c.reviewer?` · ${esc(c.reviewer)}`:""}</td>
           <td>${{eligible:'<span class="ok">Eligible</span>',needs_adjudication:'<span class="warn">Adjudication</span>',excluded:'<span class="mut">Excluded</span>'}[c.status]||esc(c.status)}</td>
-          ${["char","image","fusion","meta","predictor"].map(k=>`<td>${c.components[k]?'<span class="ok">✓</span>':`<span class="mut" title="${esc(((c.component_reasons_text||{})[k]||[]).join("; "))}">✗</span>`}</td>`).join("")}
+          ${["char","image","meta"].map(k=>`<td>${c.components[k]?'<span class="ok">✓</span>':`<span class="mut" title="${esc(((c.component_reasons_text||{})[k]||[]).join("; "))}">✗</span>`}</td>`).join("")}
           <td class="note">${esc((c.missing||[]).join("; "))||"—"}</td>
           <td class="note">${esc((c.reasons_text||[]).join("; "))||"—"}</td>
         </tr>`).join("")}

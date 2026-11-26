@@ -16,7 +16,7 @@ import json
 
 import numpy as np
 
-INDEP = ["math", "unified", "char", "image"]
+INDEP = ["math", "char", "image"]
 VOLATILE = ("created", "run_id", "reason", "integrity", "acceptance", "previous_active", "status", "model_hash", "model_hash_basis",
             "reproducibility", "component_versions", "cnn_epochs")
 HASHED = ("components", "meta", "meta_ensemble", "calibration", "thresholds", "features", "component_config", "discovery")

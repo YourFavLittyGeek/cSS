@@ -2,11 +2,11 @@
 
 Mapping (docs/engineering/ARCHITECTURE_RECONCILIATION.md; user-facing names in NAMES):
   ALBUS   Mathematical Detection        scripts/detect_css.py: candidate generation, rules E1-E30, score_v4 (Percival component 'math')
-  NOX     Quantitative MRI Analysis     detector measurements CHAR (component 'char') + uScore x1-x5 predictors (component 'unified')
+  NOX     Quantitative MRI Analysis     the candidate's measurements CHAR (component 'char'; incl. uScore x1 / x2 / x5)
   LUMOS   Visual Intelligence           the Percival SmallCNN on MRI patches (component 'image'); the SAME trained weights
   PERCIVAL Decision Engine              the trainable meta-model + calibration + OOD + thresholds (uengine/percival/meta.py)
   CORE    Fixed-Weight Baseline         uengine/percival_core.py - comparison only, never a PERCIVAL prediction
-  fusion  NOX x LUMOS fusion            an internal PERCIVAL input (characteristics + image logit)
+  (2026-11-25: the separate 'unified' component and the 'fusion' layer were removed - PERCIVAL is the only combiner)
 
 candidate_contract()  one record per candidate: identity, ALBUS / NOX / LUMOS evidence with an explicit state, the PERCIVAL decision,
                       pairwise disagreement of every available specialist pair, component versions, provenance. No patient identifier
@@ -22,10 +22,10 @@ NAMES = dict(PERCIVAL="PERCIVAL · Integrated cSS AI system", ALBUS="ALBUS · Ma
              LUMOS="LUMOS · Visual Intelligence", PENSIEVE="PENSIEVE · AI Memory and History", SHADOW="SHADOW · Experimental Discovery Lab",
              CORE="CORE · Fixed-Weight Baseline", ENGINE="PERCIVAL Decision Engine")
 # Percival engine component -> architecture component (the engine's internal names are kept: data contracts of saved models)
-OWNER = dict(math="ALBUS", char="NOX", unified="NOX", image="LUMOS", fusion="PERCIVAL")
-LABEL = dict(math="ALBUS · detector score (score_v4, recalibrated)", char="NOX · detector measurements", unified="NOX · uScore x1–x5 predictors",
-             image="LUMOS · MRI patch CNN", fusion="PERCIVAL · NOX × LUMOS fusion")
-SPECIALISTS = ("math", "char", "unified", "image")
+OWNER = dict(math="ALBUS", char="NOX", image="LUMOS")
+LABEL = dict(math="ALBUS · detector score (score_v4, recalibrated)", char="NOX · measurements", image="LUMOS · MRI patch model")
+SPECIALISTS = ("math", "char", "image")
+ENGINE_KEYS = ("math", "char", "image")
 STATES = ("valid", "missing", "untrained", "uncalibrated", "failed", "not_applicable")
 
 
@@ -47,9 +47,8 @@ def detector_version(base, sid):
 def component_versions(model):
     """content hashes of each trained engine component of a registry model (component-level version records)"""
     C = (model or {}).get("components") or {}; out = {}
-    for k in ("math", "unified", "char", "image", "fusion"):
-        if C.get(k) is not None: out[k] = dict(owner=OWNER[k], sha256=_h(C[k]), kind=((C.get("kinds") or {}).get(k) if k in ("char", "image", "fusion") else
-                                                                                     "platt" if k == "math" else "logistic"))
+    for k in ENGINE_KEYS:
+        if C.get(k) is not None: out[k] = dict(owner=OWNER[k], sha256=_h(C[k]), kind=((C.get("kinds") or {}).get(k) if k in ("char", "image") else "platt"))
     if (model or {}).get("meta"): out["meta"] = dict(owner="PERCIVAL", sha256=_h(model["meta"]), kind=model["meta"].get("kind"))
     if (model or {}).get("calibration"): out["calibration"] = dict(owner="PERCIVAL", sha256=_h(model["calibration"]), kind="platt")
     return out
@@ -72,7 +71,7 @@ def pairwise(model, comps_pct):
     table = ((model or {}).get("intelligence") or {}).get("disagreement") or []
     lg = {k: (None if v is None else math.log(max(1e-6, v / 100) / max(1e-6, 1 - v / 100))) for k, v in (comps_pct or {}).items()}
     out = []
-    keys = [k for k in ("math", "unified", "char", "image", "fusion") if k in lg]
+    keys = [k for k in ENGINE_KEYS if k in lg]
     for i, a in enumerate(keys):
         for b in keys[i + 1:]:
             if lg[a] is None or lg[b] is None: continue
@@ -88,28 +87,26 @@ def pairwise(model, comps_pct):
 def candidate_contract(sid, scored, row=None, model=None, albus=None, include_patient=False, review=None):
     """scored: one candidate of score_study (meta.score_rows output); row: its gathered row (char, pred, maps, math); albus: detector_version()"""
     row = row or {}; comps = scored.get("components") or {}
-    char = row.get("char") or {}; pred = row.get("pred") or {}
-    nchar = sum(v is not None for v in char.values()); npred = sum(v is not None for v in pred.values())
+    char = row.get("char") or {}
+    nchar = sum(v is not None for v in char.values())
     lst = lumos_state(model)
 
     def ev(k, state_if_present="valid"):
         v = comps.get(k)
         return v, (state_if_present if v is not None else "missing")
-    a_v, a_s = ev("math"); c_v, c_s = ev("char"); u_v, u_s = ev("unified"); i_v, i_s = ev("image")
+    a_v, a_s = ev("math"); c_v, c_s = ev("char"); i_v, i_s = ev("image")
     if lst["state"] != "valid": i_s, i_v = lst["state"], None
     rec = dict(schema=SCHEMA, identity=dict(study=sid, cand_id=scored.get("cand_id"), hemi=scored.get("hemi"),
                                             fingerprint=None if not row else {k: row.get(k) for k in ("vox_i", "vox_j", "vox_k", "volume_mm3") if k in row} or None),
                albus=dict(name=NAMES["ALBUS"], state=a_s if albus is None or albus.get("state") == "valid" else "failed",
                           score_v4=row.get("math"), recalibrated_pct=a_v, version=(albus or {}).get("version")),
                nox=dict(name=NAMES["NOX"], measurements=dict(state="valid" if nchar else "missing", n_available=nchar, n_total=len(char), values=char,
-                                                             component_pct=c_v),
-                        predictors_x1_x5=dict(state="valid" if npred else "missing", n_reliable=npred, values=pred, component_pct=u_v,
-                                              note="uScore x1–x5 feature values (reliable only); the separate uScore scorer is not used")),
+                                                             component_pct=c_v)),
                lumos=dict(name=NAMES["LUMOS"], state=i_s, component_pct=i_v, patch=("available" if row.get("maps") is not None else "missing") if row else None,
                           tta_spread=scored.get("image_tta_spread"), image_ood_distance=scored.get("image_ood_distance"), weights=lst),
                percival=dict(name=NAMES["ENGINE"], score=scored.get("percival_score"), band=scored.get("band"), status=scored.get("status"),
                              reasons=scored.get("reasons"), uncertainty_sd=scored.get("uncertainty_sd"), spread=scored.get("disagreement"),
-                             ood_distance=scored.get("ood_distance"), missing_inputs=scored.get("missing"), fusion_pct=comps.get("fusion"),
+                             ood_distance=scored.get("ood_distance"), missing_inputs=scored.get("missing"),
                              model=(model or {}).get("version"), pairwise=pairwise(model, comps)),
                provenance=dict(model=(model or {}).get("version"), dataset=((model or {}).get("data") or {}).get("dataset"),
                                component_versions=component_versions(model) if model else {}),
@@ -128,7 +125,7 @@ def component_report(model):
     cm = model.get("component_metrics") or {}; intel = model.get("intelligence") or {}; te = model.get("test") or {}
     abl = intel.get("ablation") or {}
     comp = {}
-    for k in ("math", "char", "unified", "image", "fusion"):
+    for k in ENGINE_KEYS:
         comp[k] = dict(owner=OWNER[k], label=LABEL[k], development_oof=cm.get(k), available=cm.get(k) is not None)
     owners = {}
     for k, v in comp.items(): owners.setdefault(v["owner"], []).append(k)

@@ -8,8 +8,7 @@ penalty choice, calibration and threshold selection when they are done once on a
 Procedure (for every outer fold; the outer folds partition PATIENTS, never candidates):
   1. the held-out patients are removed completely;
   2. on the remaining (outer-training) patients only: component families are compared and chosen (meta.component_oof with its own
-     inner patient-grouped folds), inner out-of-fold component log-odds are produced, Fusion is trained on inner out-of-fold inputs,
-     the meta-model is discovered (1-SE rule) on the inner table, Platt calibration is fitted on the meta-model's inner out-of-fold
+     inner patient-grouped folds), inner out-of-fold component log-odds are produced, the meta-model is discovered (1-SE rule) on the inner table, Platt calibration is fitted on the meta-model's inner out-of-fold
      log-odds, and the red / green thresholds are chosen on those inner calibrated scores;
   3. the components are refitted on the outer-training patients and applied ONCE to the held-out patients, then the meta-model, the
      calibration and the thresholds of step 2 are applied without refitting;
@@ -35,18 +34,13 @@ K_OUTER, K_INNER = 5, 3
 
 # subsets of the level-0 components compared in the ablation (names are the user-facing component names)
 ABLATIONS = {
-    "Characteristic ML alone": ["char"],
-    "Image ML alone": ["image"],
-    "Unified Score alone": ["unified"],
-    "MATH alone": ["math"],
-    "Characteristic + Image": ["char", "image"],
-    "Characteristic + Unified": ["char", "unified"],
-    "Image + Unified": ["image", "unified"],
-    "Fusion alone": ["fusion"],
-    "All components (stack)": ["math", "unified", "char", "image"],
-    "Without Unified Score": ["math", "char", "image"],
-    "Without Image ML": ["math", "unified", "char"],
-    "Without Characteristic ML": ["math", "unified", "image"],
+    "ALBUS alone": ["math"],
+    "NOX alone": ["char"],
+    "LUMOS alone": ["image"],
+    "NOX + LUMOS": ["char", "image"],
+    "ALBUS + NOX": ["math", "char"],
+    "ALBUS + LUMOS": ["math", "image"],
+    "All components (stack)": ["math", "char", "image"],
 }
 
 
@@ -123,8 +117,7 @@ def nested_crossfit(dev, k_outer=K_OUTER, k_inner=K_INNER, seed=0, cnn_epochs=30
         # step 2: the whole development procedure on the outer-training patients only
         Zin, fam = MT.component_oof(R, k=k_inner, seed=seed + 1000 * (i + 1), cnn_epochs=cnn_epochs, progress=lambda m, p: sub(m, 0.7 * p), char_cols=char_cols, **(kinds or {}))
         ytr, gtr, wtr = y[tr], g[tr], w[tr]
-        C = MT.Components(fam["char"]["chosen"], fam["image"]["chosen"], fam["fusion"]["chosen"], char_cols=char_cols).fit(
-            R, seed, image_logit_oof=Zin["image"], char_logit_oof=Zin["char"], cnn_epochs=cnn_epochs)
+        C = MT.Components(fam["char"]["chosen"], fam["image"]["chosen"], char_cols=char_cols).fit(R, seed, cnn_epochs=cnn_epochs)
         D, oofs_in = MT.discover(Zin, ytr, gtr, wtr, k=k_inner, seed=seed + 1000 * (i + 1))
         chosen = D["chosen"]; Mm = MT.Meta(chosen).fit(Zin, ytr, gtr, wtr)
         cb, _, _ = irls(np.nan_to_num(oofs_in[chosen])[:, None], ytr, MT.CAL_LAMBDA); cal = dict(a=float(cb[0]), b=float(cb[1]))
@@ -142,9 +135,9 @@ def nested_crossfit(dev, k_outer=K_OUTER, k_inner=K_INNER, seed=0, cnn_epochs=30
         used += int(len(np.unique(y[te])) == 2)
         prov.append(dict(fold=i, train_patients=len(set(gtr)), heldout_patients=sorted(set(g[te])), n_train=int(len(tr)), n_heldout=int(len(te)),
                          train_hash=hashlib.sha256(json.dumps(sorted(set(gtr))).encode()).hexdigest()[:12],
-                         families=dict(char=fam["char"]["chosen"], image=fam["image"]["chosen"], fusion=fam["fusion"]["chosen"]),
+                         families=dict(char=fam["char"]["chosen"], image=fam["image"]["chosen"]),
                          meta=chosen, calibration=cal, thresholds=dict(red_below=th["red_below"], green_from=th["green_from"]),
-                         fitted_on="outer-training patients only (families, penalties, imputation, scaling, fusion, meta-model, calibration, thresholds)"))
+                         fitted_on="outer-training patients only (families, penalties, imputation, scaling, meta-model, calibration, thresholds)"))
     fin = np.isfinite(p_out)
     sup = _support(y[fin], g[fin], used)
     pipe = MT.metrics(y[fin], p_out[fin], g[fin]) if fin.sum() >= 5 else dict(n=int(fin.sum()))

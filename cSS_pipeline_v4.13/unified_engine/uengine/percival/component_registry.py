@@ -13,10 +13,15 @@ import time
 COMPONENTS = ("ALBUS", "NOX", "LUMOS")
 CONFIRM = "APPROVE COMPONENT CHANGE"
 AUTOMATED = {"", "shadow", "percival", "system", "auto", "automatic", "albus", "nox", "lumos", "core", "pensieve"}
+def _nox_builtin():
+    from .meta import CHAR
+    return list(CHAR)
+
+
 BASELINES = dict(
-    NOX=dict(feature_set=["darkness_z", "edge_contrast", "pial_dist_mm", "cortex_frac", "tram_frac", "tube_ratio", "elongation_3d",
-                          "log_volume_mm3", "local_cont_max_mm"], predictors="uScore x1-x5 (reliable values)",
-             note="built-in: the 9 detector measurements of the PERCIVAL Decision Engine + uScore x1-x5"),
+    NOX=dict(feature_set=_nox_builtin(),
+             note="built-in (2026-11-25): 9 original detector measurements + 18 more detector measurements + uScore x1 / x2 / x5 "
+                  "(docs/percival_app/NOX_FEATURES.md)"),
     ALBUS=dict(detector="scripts/detect_css.py", note="built-in: the installed detector and its rule set (review/ID_manifest.json per study)"),
     LUMOS=dict(network="percival SmallCNN (registry image component)", note="built-in: the image network of the active PERCIVAL model"))
 

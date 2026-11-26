@@ -22,7 +22,7 @@ class TestComponentInterface(unittest.TestCase):
     def test_interface_features_and_reliability(self):
         R = FX.rows(4, 6, tier2=0.5, missing_char=0.3)
         self.assertEqual(CI.ALBUS.features(R)["math"].shape, (24,))
-        F = CI.NOX.features(R); self.assertEqual(F["char"].shape, (24, len(MT.CHAR))); self.assertEqual(F["unified"].shape, (24, 5))
+        F = CI.NOX.features(R); self.assertEqual(F["char"].shape, (24, len(MT.CHAR))); self.assertNotIn("unified", F)   # 2026-11-25: NOX is one module
         rel = CI.reliability_table(R)
         self.assertEqual(set(rel), set(CI.RELIABILITY))
         self.assertTrue(((rel["albus_tier2"] == 0) | (rel["albus_tier2"] == 1)).all())
@@ -30,22 +30,22 @@ class TestComponentInterface(unittest.TestCase):
         self.assertTrue(np.isnan(rel["lumos_spread"]).all())                 # no image output -> NaN, never a value
 
     def test_old_model_without_feature_list_loads_with_the_builtin_set(self):
-        M = MT.train_cycle(FX.rows(10, 10), "v001", cnn_epochs=0, mins=MINS, nested=False)
-        d = copy.deepcopy(M["components"]); d.pop("char_cols")                 # a model saved before Stage 2
-        C = MT.Components.from_json(d); self.assertEqual(C.char_cols, MT.CHAR)
+        M = MT.train_cycle(FX.rows(10, 10), "v001", cnn_epochs=0, mins=MINS, nested=False, features=dict(char=MT.NOX_V000))
+        d = copy.deepcopy(M["components"]); d.pop("char_cols")                 # a model saved before Stage 2 (trained on the original 9)
+        C = MT.Components.from_json(d); self.assertEqual(C.char_cols, MT.NOX_V000)
         Z = C.predict(FX.rows(2, 5, seed=3)); self.assertTrue(np.isfinite(Z["char"]).all())
 
     def test_feature_list_is_part_of_the_model_and_used_for_scoring(self):
-        cols = MT.CHAR + ["tortuosity"]
-        R = FX.rows(12, 12, extra=dict(tortuosity=2.5))
+        cols = MT.CHAR + ["cos_plane"]
+        R = FX.rows(12, 12, extra=dict(cos_plane=2.5))
         M = MT.train_cycle(R, "v001", cnn_epochs=0, mins=MINS, nested=False, features=dict(char=cols, nox_version="v001"))
         self.assertEqual(M["features"]["char"], cols); self.assertEqual(M["features"]["nox_version"], "v001")
         self.assertEqual(M["components"]["char_cols"], cols)
         self.assertEqual(M["component_config"]["NOX"]["feature_set"], cols)
         self.assertIn("NOX", M["component_interface"]); self.assertEqual(M["component_interface"]["NOX"]["columns"]["measurements"], cols)
-        s = MT.score_rows(json.loads(json.dumps(M)), FX.rows(2, 4, seed=9, extra=dict(tortuosity=0.0)))
+        s = MT.score_rows(json.loads(json.dumps(M)), FX.rows(2, 4, seed=9, extra=dict(cos_plane=0.0)))
         self.assertEqual(len(s), 8)
-        imp = M["intelligence"]["families"]["char"]["feature_auc"]; self.assertIn("tortuosity", imp)
+        imp = M["intelligence"]["families"]["char"]["feature_auc"]; self.assertIn("cos_plane", imp)
 
     def test_frozen_family_is_not_reselected(self):
         R = FX.rows(12, 10)
@@ -62,9 +62,9 @@ class TestRegistryDrivenTraining(unittest.TestCase):
     def test_active_nox_version_drives_the_feature_set_and_label_like_names_are_dropped(self):
         PG = self.PG
         self.assertEqual(PG.nox_feature_set(), (MT.CHAR, "v000")); self.assertEqual(PG.component_configs(), (None, None))
-        CR.approve(PG.P(), "NOX", dict(feature_set=MT.CHAR + ["tortuosity", "expert_call"]), "Dr Reviewer", "test", CR.CONFIRM, evidence={}, synthetic=True)
+        CR.approve(PG.P(), "NOX", dict(feature_set=MT.CHAR + ["cos_plane", "expert_call"]), "Dr Reviewer", "test", CR.CONFIRM, evidence={}, synthetic=True)
         cols, v = PG.nox_feature_set()
-        self.assertEqual(v, "v001"); self.assertIn("tortuosity", cols); self.assertNotIn("expert_call", cols)
+        self.assertEqual(v, "v001"); self.assertIn("cos_plane", cols); self.assertNotIn("expert_call", cols)
         feats, frozen = PG.component_configs(); self.assertEqual(feats["nox_version"], "v001"); self.assertIsNone(frozen)
         CR.rollback(PG.P(), "NOX", "Dr Reviewer", "undo", CR.CONFIRM); self.assertEqual(PG.nox_feature_set()[1], "v000")
 

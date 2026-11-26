@@ -124,7 +124,7 @@ SET["learner_exclude"] = ["SYNMIX"]; S2 = {s["code"]: s for s in PG.selection()}
 check(not S2["SYNMIX"]["included"] and S2["SYNMIX"]["excluded_why"] == "excluded by you", "C7 study left out by the user: not used, reason shown"); SET.pop("learner_exclude")
 from uengine.percival import eligibility as EL
 ev = EL.evaluate(dict(label_kind="css", has_image=False, n_char=0))
-check(ev["status"] == "eligible" and not ev["components"]["image"]["ok"] and not ev["components"]["char"]["ok"] and not ev["components"]["fusion"]["ok"]
+check(ev["status"] == "eligible" and not ev["components"]["image"]["ok"] and not ev["components"]["char"]["ok"] and "fusion" not in ev["components"]
       and ev["components"]["meta"]["ok"] and ev["components"]["image"]["reasons"] == ["NO_IMAGE"], "C8 missing image / measurements: excluded per component only", str(ev))
 check(EL.evaluate(dict(label_kind="css", duplicate=True))["reasons"][0] == "DUPLICATE_STUDY", "C9 duplicate examination contributes once (reason DUPLICATE_STUDY)")
 
@@ -216,9 +216,9 @@ check(lab["unrecognised"] == ["Calcification?"] and c6["status"] == "unrecognise
 E1 = EL2.evaluate(dict(label_kind="css", authorized=True, has_image=False, n_char=True, has_predictors=False, test=True))
 # Stage 7: reference updated - eligibility rules 1.3 (v5.25, commit 26568a1) added the 'detection' and 'segmentation' components (missed-cSS
 # support for detection learning; segmentation needs a 2D contour / 3D mask). The per-component semantics checked below are unchanged.
-check(set(EL2.COMPONENTS) == {"char", "image", "fusion", "meta", "predictor", "shadow", "detection", "segmentation"} and not E1["components"]["image"]["ok"] and E1["components"]["char"]["ok"]
-      and not E1["components"]["predictor"]["ok"] and E1["components"]["shadow"]["ok"] and E1["components"]["image"]["missing"] and E1["components"]["predictor"]["missing"],
-      "K14 eligibility per component incl. predictor + shadow; missing requirements in words; eligible for one, not another", json.dumps(E1)[:300])
+check(set(EL2.COMPONENTS) == {"char", "image", "meta", "shadow", "detection", "segmentation"} and not E1["components"]["image"]["ok"] and E1["components"]["char"]["ok"]
+      and E1["components"]["shadow"]["ok"] and E1["components"]["image"]["missing"],
+      "K14 eligibility per component (NOX / LUMOS / PERCIVAL + shadow); missing requirements in words; eligible for one, not another", json.dumps(E1)[:300])
 c1 = next(c for c in PG.candidates_of("SYNOLD")["candidates"] if c["cand_id"] == 1)
 check(c1["rules"] == EL2.RULES_VERSION and c1["evaluated"] and "missing" in c1, "K15 each candidate carries rules version and evaluation time")
 ER = PG.eligibility_record(); ERf = json.load(open(PG.P("eligibility", "current.json")))

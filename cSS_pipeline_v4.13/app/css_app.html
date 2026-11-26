@@ -550,7 +550,7 @@ document.addEventListener("change",e=>{if(e.target&&e.target.id==="xok")window._
 // ---------------- processing manager (v5.14-gui; sketch v2)
 let PMS={code:null,opt:null,from:"detect",timer:null};
 const cat=(st,lab)=>`<span class="cat ${esc(st)}">${esc(lab||String(st).replace(/_/g," "))}</span>`;
-const SN={anatomy:"Anatomy (FreeSurfer / SynthSeg)",registration:"Registration (SWI → T1)",align:"Labels on the SWI grid",detect:"cSS detection + morphology + features",unified:"Unified score + explanations"};
+const SN={anatomy:"Anatomy (FreeSurfer / SynthSeg)",registration:"Registration (SWI → T1)",align:"Labels on the SWI grid",detect:"cSS detection + morphology + features",unified:"NOX extra measurements (uScore x1 / x2 / x5)"};
 const tstamp=t=>t?new Date(t*1000).toLocaleString([], {dateStyle:"short",timeStyle:"short"}):"";
 async function procView(v){clearTimeout(PMS.timer);const L=await api("/api/proc/studies");const MS=(await api("/api/proc/models")).models||{};if(V!=="proc")return;
   const mrow=(n,m)=>`<tr><td class="mono">review/${esc(n)}</td><td>${m.present&&m.compatible&&m.verified_copy_of_production?cat("compatible","verified copy of production · compatible"):m.present?cat("incompatible","PRODUCTION PARITY NOT MET"):cat("missing","not present — production parity NOT met")}</td><td class="note">${esc([m.import_status,...(m.reasons||[]),...(m.notes||[])].filter(Boolean).join(" · "))}</td></tr>`;
@@ -820,7 +820,7 @@ function sheetSummary(b,x){const p=x.p||{},r=x.r||{};const warn=[];if(p.error)wa
     <div>Radiologist</div><div>${r.rad_R!==undefined&&r.rad_R!==""?`R ${r.rad_R} / L ${r.rad_L}${r.radiologist?` · ${esc(r.radiologist)}`:""}`:"—"}</div>
     <div>Image quality (QC)</div><div>${grade(r.qc_grade||p.qc,r.qc_tip||p.qc_tip)}${p.has_qc?` <button class="b sm" id="shqc" style="margin-left:8px">QC image</button>`:""} <button class="b sm" style="margin-left:4px" onclick="QCV.code='${esc(x.code)}';go('qc')" title="FreeSurfer / SynthSeg outputs, registration and QC metrics">Anatomy QC</button></div>
     <div>Anatomy method</div><div>${esc(PW()[p.pathway]||(x.d&&x.d.has_fs?"FreeSurfer (recon-all)":"—"))}</div>
-    ${r.unified_status&&r.unified_status!=="off"?`<div>Unified score</div><div>${esc(r.unified_status)}${r.unified_css_compatible!=null?` · ${r.unified_css_compatible} cSS-compatible / ${r.unified_uncertain} uncertain / ${r.unified_alternative} alternative`:""}</div>`:""}
+    ${r.unified_status&&r.unified_status!=="off"?`<div>NOX extra measurements</div><div>${esc(r.unified_status)}${r.unified_css_compatible!=null?` · ${r.unified_css_compatible} cSS-compatible / ${r.unified_uncertain} uncertain / ${r.unified_alternative} alternative`:""}</div>`:""}
     <div>Pipeline version</div><div class="mono">${esc(r.version||p.version||"—")}</div></div>`;
   $("#shqc")&&($("#shqc").onclick=()=>openWin("/qc?code="+encodeURIComponent(x.code),"cssqc"))}
 async function sheetProcessing(b,x){const p=x.p,code=x.code;let a=null;try{a=await api("/api/proc/audit?code="+encodeURIComponent(code))}catch(e){}
@@ -848,7 +848,7 @@ async function sheetProcessing(b,x){const p=x.p,code=x.code;let a=null;try{a=awa
 async function sheetTechnical(b,x){const a=await api("/api/proc/audit?code="+encodeURIComponent(x.code)).catch(()=>null);if(!a||!a.ok){b.innerHTML='<div class="empty">No technical record for this study yet.</div>';return}
   const I=a.identity||{},im=z=>z?`<span class="mono">${esc((z.sha256||"").slice(0,8))}… · ${(z.dims||[]).join("×")} · ${(z.voxel_mm||[]).join("×")} mm · ${esc(z.orientation||"?")}</span>`:'<span class="mut">not present</span>';
   b.innerHTML=`<h3>MRI identity</h3><div class="kv" style="margin-bottom:18px"><div>SWI</div><div>${im(I.swi)}</div><div>T1</div><div>${im(I.t1)}</div><div>FreeSurfer</div><div>${I.freesurfer?`${esc(I.freesurfer.version||"version not recorded")}${I.freesurfer.no_v8?" · -no-v8":""}`:'<span class="mut">none</span>'}</div><div>Previous detection</div><div>${I.detection?esc(I.detection.pipeline_version||"?"):'<span class="mut">none</span>'}</div></div>
-   <h3>Can earlier outputs be reused?</h3><table><tr><th>Stage</th><th>Status</th><th>Why</th></tr>${Object.values(a.stages).map(z=>`<tr><td>${esc({anatomy:"Brain anatomy",registration:"Registration (SWI → T1)",align:"Labels on the SWI",detect:"cSS detection",unified:"Unified score"}[z.stage]||z.stage)}</td><td>${cat(z.status,z.label)}</td><td class="note">${esc(z.why)}</td></tr>`).join("")}</table>`}
+   <h3>Can earlier outputs be reused?</h3><table><tr><th>Stage</th><th>Status</th><th>Why</th></tr>${Object.values(a.stages).map(z=>`<tr><td>${esc({anatomy:"Brain anatomy",registration:"Registration (SWI → T1)",align:"Labels on the SWI",detect:"cSS detection",unified:"NOX extra measurements"}[z.stage]||z.stage)}</td><td>${cat(z.status,z.label)}</td><td class="note">${esc(z.why)}</td></tr>`).join("")}</table>`}
 // shared queue actions (same API calls and confirmations as before the redesign)
 async function ctl(p,a){const c=p.code;
   if(a==="retry"&&["failed","stopped"].includes(p.status))return pathwayDialog(p,true);

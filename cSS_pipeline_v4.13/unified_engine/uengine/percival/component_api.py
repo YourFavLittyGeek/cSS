@@ -9,7 +9,9 @@ hard-coded columns:
   train(rows, y, g, w, seed)   fit the component's level-0 model with its configuration (frozen family / feature list)
   evaluate(z, y, g)            metrics of the component's log-odds (patient bootstrap CIs)
 
-Engine identifiers stay unchanged (data contracts of saved models): ALBUS -> 'math', NOX -> 'char' + 'unified', LUMOS -> 'image'.
+Engine identifiers stay unchanged (data contracts of saved models): ALBUS -> 'math', NOX -> 'char', LUMOS -> 'image'. 2026-11-25: NOX is ONE
+module - its measurement list includes the three uScore measurements x1 / x2 / x5 (gathered into the same per-candidate record); the separate
+'unified' input and the Fusion layer were removed (PERCIVAL is the only combiner).
 Configurations (frozen families, feature lists) come from the component registry (component_registry.py) and are recorded in every model,
 so one component can be frozen, retrained or rolled back while the meta-model is refitted on top (meta.train_cycle(frozen=...)).
 """
@@ -61,26 +63,26 @@ class Albus(Component):
 
 
 class Nox(Component):
-    """NOX - Quantitative MRI Analysis: the detector measurements (feature list = the active NOX version) + uScore x1-x5"""
-    name = "NOX"; engine_inputs = ("char", "unified")
+    """NOX - Quantitative MRI Analysis: the candidate's measurements (feature list = the active NOX version, built-in v001 = 9 original
+    detector measurements + 18 more detector measurements + uScore x1 / x2 / x5)"""
+    name = "NOX"; engine_inputs = ("char",)
 
     def columns(self, model=None, char_cols=None):
-        from .meta import CHAR, PREDICTORS
+        from .meta import CHAR
         cols = char_cols or ((model or {}).get("features") or {}).get("char") or (((model or {}).get("components") or {}).get("char_cols")) or CHAR
-        return list(cols), list(PREDICTORS)
+        return list(cols)
 
     def features(self, rows, model=None, char_cols=None):
         from .meta import X_of
-        cc, pc = self.columns(model, char_cols)
-        return dict(char=X_of(rows, cc, "char"), unified=X_of(rows, pc, "pred"))
+        return dict(char=X_of(rows, self.columns(model, char_cols), "char"))
 
     def reliability(self, rows, extras=None, char_cols=None):
-        F = self.features(rows, char_cols=char_cols); X = np.c_[F["char"], F["unified"]]
+        X = self.features(rows, char_cols=char_cols)["char"]
         return dict(nox_missing=(~np.isfinite(X)).mean(1) if X.size else np.zeros(len(rows)))
 
     def train(self, rows, y, g, w, seed=0, kind="logistic", char_cols=None, **cfg):
         from . import learners as LR
-        cc, _ = self.columns(char_cols=char_cols)
+        cc = self.columns(char_cols=char_cols)
         return LR.fit_tabular(kind, self.features(rows, char_cols=cc)["char"], y, g, w, cc, seed)
 
 
@@ -120,6 +122,6 @@ def describe(model=None):
     out = {}
     for n, c in INTERFACES.items():
         d = dict(engine_inputs=list(c.engine_inputs), version=c.version(model), config=c.config(model), interface=SCHEMA)
-        if n == "NOX": d["columns"] = dict(zip(("measurements", "predictors"), c.columns(model)))
+        if n == "NOX": d["columns"] = dict(measurements=c.columns(model))
         out[n] = d
     return out

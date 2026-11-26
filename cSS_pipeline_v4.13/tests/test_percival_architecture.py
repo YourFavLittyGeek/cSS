@@ -106,11 +106,11 @@ class TestLumos(unittest.TestCase):
 class TestContract(unittest.TestCase):
     def test_states_missing_never_negative_no_patient_core_separate(self):
         M = tiny_model()
-        scored = dict(cand_id=3, percival_score=72.0, band="green", status="reliable", components=dict(math=80.0, char=None, unified=None, image=70.0, fusion=None),
+        scored = dict(cand_id=3, percival_score=72.0, band="green", status="reliable", components=dict(math=80.0, char=None, image=70.0),
                       experimental_core=dict(score=40, band="Gray", status="ok"))
         row = dict(math=1.3, char={"darkness_z": -2.5, "tube_ratio": None}, pred={}, maps=np.zeros(2), patient="PATIENT-SECRET")
         c = AR.candidate_contract("S1", scored, row, M, dict(state="valid", version="albus:v4.18:x:y"))
-        self.assertEqual(c["nox"]["predictors_x1_x5"]["state"], "missing"); self.assertIsNone(c["nox"]["predictors_x1_x5"]["component_pct"])
+        self.assertNotIn("predictors_x1_x5", c["nox"])                     # 2026-11-25: x1 / x2 / x5 are NOX measurements, no separate block
         self.assertEqual(c["nox"]["measurements"]["n_available"], 1)
         self.assertEqual((c["lumos"]["state"], c["lumos"]["component_pct"]), ("valid", 70.0))
         self.assertNotIn("PATIENT-SECRET", json.dumps(c, default=str))
@@ -126,7 +126,7 @@ class TestContract(unittest.TestCase):
         M = tiny_model(); v1, v2 = AR.component_versions(M), AR.component_versions(json.loads(json.dumps(M)))
         self.assertEqual(v1, v2); self.assertEqual(v1["image"]["owner"], "LUMOS"); self.assertEqual(v1["math"]["owner"], "ALBUS")
         R = AR.component_report(M)
-        self.assertEqual(sorted(R["by_owner"]), ["ALBUS", "LUMOS", "NOX", "PERCIVAL"]); self.assertFalse(R["components"]["unified"]["available"])
+        self.assertEqual(sorted(R["by_owner"]), ["ALBUS", "LUMOS", "NOX"]); self.assertNotIn("unified", R["components"]); self.assertNotIn("fusion", R["components"])
         self.assertFalse(AR.component_report(None)["available"])
 
 

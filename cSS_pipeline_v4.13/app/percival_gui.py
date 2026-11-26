@@ -3,7 +3,8 @@ model or AI service is used (see docs/percival_app/LOCAL_AI_ARCHITECTURE.md).
 
   authorize()        the user's one-time switch for LOCAL learning on this project's MRI (app_data/ml_authorization.json, audited);
                      synthetic SYN studies of a synthetic project never need it
-  gather(sid)        candidate rows of one study: MATH (score_v4), the 5 Unified-Score predictors (uscore/features, extracted when
+  gather(sid)        candidate rows of one study: ALBUS (score_v4), the NOX measurements (detector columns + uScore x1 / x2 / x5 from
+                     uscore/features, extracted without perturbations when
                      missing), the 9 detector characteristics, the image maps of the candidate's MRI patch, the expert label (effective
                      reviewer call: definite cSS = 1, definite mimic = 0; indeterminate / out of scope are not used), the locked-test flag
   integrity()        data checks before a cycle: uncertain labels excluded, reviewer conflicts flagged, duplicate studies (same images)
@@ -439,8 +440,8 @@ def _predictors(sid):
             class _AppCohort:
                 synthetic = False
                 def role(self, s): raise CM.CohortError("application")
-            PL.extract_study(B(), sid, _AppCohort(), os.path.join(B(), "uscore"), application=True)
-        except Exception as e: log(f"{CTX['label'](sid)}: predictors not extracted ({type(e).__name__})")
+            PL.extract_study(B(), sid, _AppCohort(), os.path.join(B(), "uscore"), do_perturb=False, application=True)   # NOX: values only
+        except Exception as e: log(f"{CTX['label'](sid)}: NOX uScore measurements not extracted ({type(e).__name__})")
     d = _jl(p, None) or {}; from uengine.percival.meta import PREDICTORS; out = {}
     for r in d.get("records", []):
         F = r.get("F", {}); out[int(r["cand_id"])] = {k: (float(F[k]["value"]) if F.get(k, {}).get("status") == "reliable" and F[k].get("value") is not None else None) for k in PREDICTORS}
@@ -481,14 +482,14 @@ def nox_feature_set():
 
 def component_configs():
     """Stage 2: what the next training cycle uses from the component registry -> (features or None, frozen families or None).
-    NOX: feature_set (+ char_kind when frozen); LUMOS: image_kind when frozen; PERCIVAL fusion_kind when frozen. v000 = built-in, nothing frozen."""
+    NOX: feature_set (+ char_kind when frozen); LUMOS: image_kind when frozen. v000 = built-in, nothing frozen."""
     from uengine.percival import component_registry as CR
     try: A = {c: CR.active(P(), c) for c in CR.COMPONENTS}
     except Exception: return None, None
     cols, nxv = nox_feature_set()
     feats = dict(char=cols, nox_version=nxv, lumos_version=A["LUMOS"].get("version", "v000"), albus_version=A["ALBUS"].get("version", "v000"))
     nc, lc = A["NOX"].get("config") or {}, A["LUMOS"].get("config") or {}
-    frozen = {k: v for k, v in dict(char=nc.get("char_kind"), image=lc.get("image_kind"), fusion=lc.get("fusion_kind") or nc.get("fusion_kind")).items() if v}
+    frozen = {k: v for k, v in dict(char=nc.get("char_kind"), image=lc.get("image_kind")).items() if v}
     changed = any(feats[k] != "v000" for k in ("nox_version", "lumos_version", "albus_version"))
     return (feats if changed else None), (frozen or None)
 
@@ -502,6 +503,10 @@ def component_freeze(comp, by, reason, confirm):
     if not M or not M.get("component_config"): return dict(ok=False, error="no trained model with component configurations yet")
     comp = str(comp).upper()
     if comp not in ("NOX", "LUMOS"): return dict(ok=False, error="only NOX and LUMOS have trainable configurations (ALBUS changes go through SHADOW)")
+    mr = ((M.get("modules") or {}).get(comp) or {})                        # 2026-11-25 per-module loop: adopt only an improved version
+    if mr.get("verdict") == "not improved":
+        return dict(ok=False, error=f"{comp} in model {M.get('version')} did not improve on its previous version (log loss {mr.get('logloss'):.3f} vs "
+                                    f"{mr.get('previous_logloss'):.3f}) - not adopted; the active {comp} version stays")
     cc = M["component_config"][comp]; cur = dict(CR.active(P(), comp).get("config") or {})
     cfg = dict(cur, **({"char_kind": cc["char_kind"], "feature_set": cc["feature_set"]} if comp == "NOX" else {"image_kind": cc["image_kind"]}),
                frozen_from_model=M["version"], component_sha256=(M.get("component_versions") or {}).get("char" if comp == "NOX" else "image", {}).get("sha256"))
@@ -520,7 +525,7 @@ def component_rollback(comp, by, reason, confirm):
 
 def _gather(sid, labelled=True):
     import pandas as pd
-    from uengine.percival.meta import CHAR, test_assignment
+    from uengine.percival.meta import CHAR, PREDICTORS, test_assignment
     cp = os.path.join(B(), "review", f"{sid}_candidates.csv")
     if not os.path.exists(cp): return []
     deps = [cp, os.path.join(B(), "uscore", "features", f"{sid}.json")]
@@ -529,7 +534,12 @@ def _gather(sid, labelled=True):
     deps.append(os.path.join(B(), "review", f"{sid}_qc.json"))                 # Stage 3: calibration subgroups
     key = RCG.file_key(deps, B()) + [int(may_read(sid))] + ([["nox_extra"] + EXTRA] if EXTRA else [])   # Phase 3D review: content hashes
     cj, cz = P("cache", f"{sid}.json"), P("cache", f"{sid}.npz"); C = _jl(cj, {})
-    if C.get("key") != key or C.get("v") != 4 or not os.path.exists(cz):
+    if C.get("key") != key or C.get("v") != 5 or not os.path.exists(cz):        # v5 (2026-11-25): NOX set with uScore x1 / x2 / x5
+        if CTX.get("ensure_local"):                                         # images moved to Pensieve after the review: bring them back first
+            try:
+                el = CTX["ensure_local"](sid)
+                if el and not el.get("ok", True): log(f"{CTX['label'](sid)}: images not brought back from Pensieve ({el.get('error', '')[:80]})")
+            except Exception as e: log(f"{CTX['label'](sid)}: images not brought back from Pensieve ({type(e).__name__})")
         QC = _jl(os.path.join(B(), "review", f"{sid}_qc.json"), {}) or {}; AQ = QC.get("acquisition") or {}
         fs = AQ.get("field_T")
         sub = dict(field_strength=(None if fs in (None, "") else ("1.5T" if float(fs) < 2 else "3T")), sequence=AQ.get("sequence") or None,
@@ -541,7 +551,7 @@ def _gather(sid, labelled=True):
             _parts = [q for c_ in EXTRA if "*" in c_ for q in c_.split("*", 1)]
             for c in dict.fromkeys(list(CHAR) + [c_ for c_ in EXTRA if "*" not in c_] + _parts):
                 src = "volume_mm3" if c == "log_volume_mm3" else c
-                v = r.get(src) if src in cand.columns else None
+                v = r.get(src) if src in cand.columns else ((pred.get(cid) or {}).get(c) if c in PREDICTORS else None)
                 v = None if v is None or (isinstance(v, float) and np.isnan(v)) else float(v)
                 ch[c] = (float(np.log(max(v, 1.0))) if c == "log_volume_mm3" and v is not None else v)
             for c in [c_ for c_ in EXTRA if "*" in c_]:                     # Stage 4: approved interaction = product of two measurements
@@ -554,7 +564,7 @@ def _gather(sid, labelled=True):
         os.makedirs(os.path.dirname(cz), exist_ok=True)
         with open(cz + ".tmp", "wb") as f_: np.savez_compressed(f_, **{str(k): v for k, v in maps.items()})
         os.replace(cz + ".tmp", cz)                                               # atomic: a reader never sees a half-written cache
-        C = dict(key=key, v=4, rows=rows); _js(cj, C)
+        C = dict(key=key, v=5, rows=rows); _js(cj, C)
     with np.load(cz) as Zf: Z = {k: Zf[k] for k in Zf.files}
     rows = []; pat = IDS().patient(sid)
     test = bool(pat) and _partition(pat) == "test"                           # no patient: never trained on (eligibility); 3D split authority
@@ -599,11 +609,10 @@ def _examples(sid, meta, rows=None):
         r = cache.get(cid)
         has_img = None if r is None else bool(r.get("maps") is not None if rows is not None else r.get("has_maps"))
         n_char = None if r is None else sum(v is not None for v in (r.get("char") or {}).values())
-        has_pred = None if r is None else any(v is not None for v in (r.get("pred") or {}).values())
         ev = EL.evaluate(dict(label_kind=d["kind"], conflict=d["conflict"], gt_block=d.get("gt_block"),   # Phase 3A: unresolved never used
                               historical=d["source"] == "historical", study_excluded=meta.get("excluded"), study_archived=meta.get("archived_out"),
                               duplicate=meta.get("duplicate"), authorized=may_read(sid), has_image=has_img is not False, n_char=n_char is None or n_char > 0,
-                              has_predictors=has_pred is not False, test=test, qc=meta.get("qc"), identity=idn["status"]))
+                              test=test, qc=meta.get("qc"), identity=idn["status"]))
         out.append(dict(study=sid, cand_id=cid, patient=pat, identity=idn["status"], y=d["y"], call=d["call"], label_source=d["source"], reviewer=d.get("reviewer", ""),
                         gt_class=d.get("gt_class", ""), gt_status=d.get("gt_status", ""),
                         partition=ev["partition"], status=ev["status"], reasons=ev["reasons"], components={k: v["ok"] for k, v in ev["components"].items()},
@@ -617,9 +626,9 @@ def _examples(sid, meta, rows=None):
         out.append(dict(study=sid, cand_id=mid, patient=pat, identity=idn["status"], y=md.get("y"), call="cSS", label_source="expert_missed_lesion",
                         reviewer=md.get("reviewer", ""), partition=ev["partition"], status=ev["status"], gt_class=md.get("gt_class", ""), gt_status="expert_mark",
                         reasons=ev["reasons"],
-                        components=dict(char=False, image=True, fusion=False, meta=True, predictor=False, shadow=True,
+                        components=dict(char=False, image=True, meta=True, shadow=True,
                                         detection=True, segmentation=md.get("shape") in ("pen", "rect", "polygon")),
-                        component_reasons=dict(char=["NO_MEASUREMENTS"], fusion=["NO_MEASUREMENTS"]),
+                        component_reasons=dict(char=["NO_MEASUREMENTS"]),
                         missing=[], rules=EL.RULES_VERSION, evaluated=time.strftime("%Y-%m-%d %H:%M:%S"), checked=True,
                         albus_detected=False, coords_vox=md.get("vox"), coords_mm=md.get("mm"),
                         detector_fate=md.get("detector_fate"), comment=md.get("comment", "")))
@@ -794,7 +803,7 @@ def registry():
     for v in versions():
         M = load(v) or {}; D = M.get("data") or {}; fam = (M.get("intelligence") or {}).get("families") or {}; t = M.get("test") or {}
         comps = []
-        for k, name in (("char", "Characteristic ML"), ("image", "Image ML"), ("fusion", "Fusion")):
+        for k, name in (("char", "NOX · measurements"), ("image", "LUMOS · MRI patch")):
             f = fam.get(k) or {}
             comps.append(dict(component=k, name=name, architecture=f.get("chosen"), compared=sorted((f.get("results") or {}).keys()),
                               cv=(f.get("results") or {}).get(f.get("chosen")) if isinstance(f.get("results"), dict) else None))
@@ -1000,7 +1009,7 @@ def _train(reason):
         if feats: log(f"NOX feature set {feats['nox_version']}: {len(feats['char'])} measurements", 0.08)
         if frozen: log("frozen components (component registry): " + ", ".join(f"{k}={v}" for k, v in frozen.items()), 0.08)
         M = MT.train_cycle(rows, v, cnn_epochs=int(os.environ.get("CSS_PERCIVAL_EPOCHS", "30")), progress=lambda m, p: log(m, p), mins=_env_min(),
-                           features=feats, frozen=frozen)
+                           features=feats, frozen=frozen, previous=_model_any())
         M["data"].update(dataset=man["id"], dataset_hash_manifest=man["content_hash"], eligibility_rules=EL.RULES_VERSION,
                          split=man.get("split"), leakage_audit=dict(passed=audit["passed"], checks=audit["checks"]),
                          feature_schema=DS.FEATURE_SCHEMA, patch_spec=DS.PATCH_SPEC, code_version=_code_version())
@@ -1631,8 +1640,8 @@ def architecture_state():
                  state="active" if det else "awaiting_data", detail=f"{len(det)} studies with a candidate list; detector versions: {len(vers)}",
                  versions={k: len(v) for k, v in vers.items()}, registry=reg["ALBUS"]["active"]["version"],
                  validation="sensitivity / missed-lesion recall needs eligible expert reviews" ),
-            dict(key="NOX", name=AR.NAMES["NOX"], implementation="detector measurements (9) + uScore x1–x5 predictors",
-                 state="active" if det else "awaiting_data", detail=f"measurements for {len(det)} studies; x1–x5 extracted for {feats}",
+            dict(key="NOX", name=AR.NAMES["NOX"], implementation="the candidate's measurements: 27 detector measurements + uScore x1 / x2 / x5",
+                 state="active" if det else "awaiting_data", detail=f"measurements for {len(det)} studies; uScore x1 / x2 / x5 extracted for {feats}",
                  registry=reg["NOX"]["active"]["version"], feature_set=(reg["NOX"]["active"].get("config") or {}).get("feature_set"),
                  validation="trained inside PERCIVAL" if X else "untrained (no PERCIVAL model yet)"),
             dict(key="LUMOS", name=AR.NAMES["LUMOS"], implementation="PERCIVAL SmallCNN on MRI patches (the same trained weights)",

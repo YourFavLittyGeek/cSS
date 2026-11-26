@@ -3,23 +3,22 @@ whether it may be used for training, with reason codes. The training cycle, the 
 this module, so what the screen shows is exactly what training uses.
 
 Components and what each needs (besides a usable expert label):
-  char    Characteristic ML  at least one of the 9 detector measurements (missing ones are imputed with the training median, recorded)
-  image   Image ML           the MRI patch around the candidate (extractable from the study's SWI and candidate mask)
-  fusion  Fusion             both of the above
-  meta    Percival meta-model + calibration   the label alone (MATH is always present; other sources may be missing - modelled)
-  predictor  Unified Score predictor model    at least one RELIABLE Unified Score predictor (v1.1)
+  char    NOX                at least one NOX measurement (missing ones are imputed with the training median, recorded)
+  image   LUMOS              the MRI patch around the candidate (extractable from the study's SWI and candidate mask)
+  meta    PERCIVAL meta-model + calibration   the label alone (ALBUS is always present; other sources may be missing - modelled)
   shadow  Shadow evaluation of a candidate model   the label alone; locked-test patients INCLUDED (shadow only evaluates, never learns) (v1.1)
 Dataset membership: 'development' (used to learn) or 'locked test' (patients set aside permanently; used only to evaluate)."""
 
-RULES_VERSION = "percival-eligibility/1.4"     # 1.1 (v5.24): + predictor, shadow components; missing requirements in words
+RULES_VERSION = "percival-eligibility/1.5"     # 1.1 (v5.24): + predictor, shadow components; missing requirements in words
                                                # 1.2 (v5.25): patient identity must be verified (no study-code substitution)
                                                # 1.3 (v5.25): task-specific detection & segmentation learning with missed cSS support
                                                # 1.4 (Phase 3A): expert ground truth only - consensus of designated experts / adjudication,
                                                #     provenance class (blind post-3A, verified or adjudicated historical); missed cSS too
-COMPONENTS = ("char", "image", "fusion", "meta", "predictor", "shadow", "detection", "segmentation")
-LEARNING = ("char", "image", "fusion", "meta", "detection", "segmentation")   # the components trained by the Percival training cycle
-NAMES = dict(char="Imaging Features (Charact. ML)", image="MRI Patch (Image ML)", fusion="Integrated Model Evidence",
-             meta="Model Adaptation (Meta-model)", predictor="Unified Score predictors", shadow="Shadow evaluation",
+                                               # 1.5 (2026-11-25): ALBUS / NOX / LUMOS / PERCIVAL - the Fusion and Unified-predictor
+                                               #     components were removed (NOX includes the uScore measurements)
+COMPONENTS = ("char", "image", "meta", "shadow", "detection", "segmentation")
+LEARNING = ("char", "image", "meta", "detection", "segmentation")   # the components trained by the Percival training cycle
+NAMES = dict(char="NOX · measurements", image="LUMOS · MRI patch", meta="PERCIVAL · combined score", shadow="Shadow evaluation",
              detection="Quantitative Candidate Detection", segmentation="Lesion Segmentation Mask")
 
 REASONS = {
@@ -89,9 +88,8 @@ def evaluate(c):
     for k in COMPONENTS:
         r = [block] if block else []
         if not block:
-            if k in ("image", "fusion") and not c.get("has_image"): r.append("NO_IMAGE")
-            if k in ("char", "fusion") and not c.get("n_char"): r.append("NO_MEASUREMENTS")
-            if k == "predictor" and not c.get("has_predictors", True): r.append("NO_PREDICTORS")
+            if k == "image" and not c.get("has_image"): r.append("NO_IMAGE")
+            if k == "char" and not c.get("n_char"): r.append("NO_MEASUREMENTS")
             if k == "segmentation" and not c.get("has_mask", True): r.append("NO_MASK")
         comp[k] = dict(ok=not r, reasons=r, missing=[REQUIREMENTS[x] for x in r if x in REQUIREMENTS])
     status = ("not_reviewed" if block == "NOT_REVIEWED" else "needs_adjudication" if block == "CONFLICT" else

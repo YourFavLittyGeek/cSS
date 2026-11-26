@@ -1367,7 +1367,8 @@ def pg_init():
         import known_projects as KP
         return [dict(path=c["path"], kind=c["kind"], patients=KP._pats(c["path"])) for c in KP.candidates(B, SET, PM.studies_on_disk) if c["enabled"]]
     PG.init(B=B, SC=SC, SET=SET, patients=lambda: list(PAT), is_reviewed=reviewed, label=study_label, patient_of=patient_of, identity_of=identity_of, fingerprint_of=fingerprint_of,
-            save_settings=lambda: jsave("settings.json", SET), notify=lambda t, x: notify_c("done", "training", t, x), other_projects=other_projects)
+            save_settings=lambda: jsave("settings.json", SET), notify=lambda t, x: notify_c("done", "training", t, x), other_projects=other_projects,
+            ensure_local=ensure_local)                     # 2026-11-25: learning brings studies back from Pensieve before reading their images
 def pg_get(op, q):
     if op == "state": return PG.state()
     if op in ("score", "history", "contracts", "pensieve_history", "second_review"):          # Phase 3A.2: not before the blind review

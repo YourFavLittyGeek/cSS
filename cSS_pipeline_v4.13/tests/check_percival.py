@@ -57,7 +57,7 @@ if M:
     D = M["discovery"]
     check("meta-model discovery: every candidate evaluated (boosting skipped with its reason when the cohort is small)", set(D["results"]) == set(MT.SIMPLICITY) and (D["results"]["boosted"].get("auc") is not None or "skipped" in D["results"]["boosted"]), json.dumps({k: (v.get("auc") if isinstance(v, dict) else v) for k, v in D["results"].items()})[:300])
     check("selection by the documented 1-SE rule", D["chosen"] in MT.SIMPLICITY and "1-SE" in D["rule"], D["chosen"])
-    check("no meta-model combines fusion with its own inputs (double counting avoided)", all(not ({"fusion"} & set(MT.meta_columns(k)) and ({"char", "image"} & set(MT.meta_columns(k)))) for k in MT.SIMPLICITY))
+    check("no meta-model has a Fusion input (PERCIVAL is the only combiner: no double counting)", all("fusion" not in " ".join(MT.meta_columns(k)) for k in MT.SIMPLICITY))
     chosen_auc = D["results"][D["chosen"]]["auc"]; math_auc = D["results"]["math_only"]["auc"]
     check("the chosen assessment beats MATH alone (development CV)", chosen_auc > math_auc + 0.03, f"{chosen_auc:.3f} vs {math_auc:.3f}")
     th = M["thresholds"]
@@ -71,8 +71,12 @@ if M:
           and all(fam["char"]["results"][k].get("auc") is not None for k in fam["char"]["results"]), json.dumps({k: round(v.get("auc") or 0, 3) for k, v in fam["char"]["results"].items()}) + " -> " + fam["char"]["chosen"])
     check("v5.23 Image ML: pixel-logistic baseline vs CNN compared on the same candidates", set(fam["image"]["results"]) == {"pixel_logistic", "cnn"} and fam["image"]["chosen"] in ("pixel_logistic", "cnn"),
           json.dumps({k: round(v.get("auc") or 0, 3) for k, v in fam["image"]["results"].items()}) + " -> " + fam["image"]["chosen"])
-    check("v5.23 Fusion: late / feature / hybrid compared; benefit over the better single model tested", set(fam["fusion"]["results"]) == {"late", "feature", "hybrid"} and fam["fusion"]["benefit"] and "verdict" in fam["fusion"]["benefit"],
-          json.dumps(fam["fusion"]["benefit"])[:200])
+    check("2026-11-25 architecture: ALBUS + NOX + LUMOS -> PERCIVAL, no Fusion / Unified component",
+          "fusion" not in fam and MT.COMPONENTS == ["math", "char", "image"] and set(M["component_metrics"]) == {"math", "char", "image"}, ",".join(MT.COMPONENTS))
+    check("NOX includes the uScore measurements x1 / x2 / x5 (gathered into the measurement record)",
+          all(k in M["features"]["char"] for k in MT.PREDICTORS) and "x3_pial_distance_mm" not in M["features"]["char"], f"{len(M['features']['char'])} measurements")
+    check("one learning loop per module recorded (ALBUS / NOX / LUMOS / PERCIVAL)", set(M.get("modules") or {}) == {"ALBUS", "NOX", "LUMOS", "PERCIVAL"},
+          json.dumps({k: v.get("verdict") for k, v in (M.get("modules") or {}).items()}))
     I = M["intelligence"]; ov = {(o["a"], o["b"]): o for o in I["overlap"]}
     check("v5.23 provenance: MATH and Characteristic ML share measurements (not independent); Image ML shares none with MATH", {"darkness", "pial_distance", "tubularity"} <= set(ov[("math", "char")]["shared"]) and not ov[("math", "image")]["shared"])
     ab = I["ablation"]

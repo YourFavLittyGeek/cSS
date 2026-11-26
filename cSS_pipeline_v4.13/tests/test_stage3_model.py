@@ -30,12 +30,12 @@ class TestLearnedUncertainty(unittest.TestCase):
     def test_stack_unc_is_a_candidate_with_neutral_missing_fill(self):
         M = trained("miss", fx=dict(missing_char=0.3, tier2=0.3))
         self.assertIn("stack_unc", M["discovery"]["results"])
-        Z = dict(math=np.array([1.0, 1.0]), unified=np.array([np.nan, 2.0]), char=np.array([-3.0, np.nan]), image=np.array([np.nan, np.nan]),
+        Z = dict(math=np.array([1.0, 1.0]), char=np.array([-3.0, np.nan]), image=np.array([np.nan, 2.0]),
                  rel_albus_tier2=np.array([1.0, 0.0]), rel_nox_missing=np.array([0.5, 0.0]), rel_lumos_spread=np.array([np.nan, np.nan]))
         X = MT.meta_inputs(Z, "stack_unc"); cols = MT.meta_columns("stack_unc")
         self.assertEqual(X.shape, (2, len(cols)))
-        self.assertEqual(X[0, cols.index("unified")], 0.0)                 # missing -> neutral 0 (no evidence), not the median
-        self.assertEqual(X[0, cols.index("unified_missing")], 1.0)
+        self.assertEqual(X[0, cols.index("image")], 0.0)                   # missing -> neutral 0 (no evidence), not the median
+        self.assertEqual(X[0, cols.index("image_missing")], 1.0)
         self.assertEqual(X[0, cols.index("gap_math_char")], 4.0); self.assertEqual(X[1, cols.index("gap_math_char")], 0.0)
         self.assertTrue(np.isfinite(X).all())
 

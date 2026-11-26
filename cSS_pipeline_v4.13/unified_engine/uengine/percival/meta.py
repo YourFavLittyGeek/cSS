@@ -1,27 +1,26 @@
 """meta.py - PERCIVAL SCORE: components, meta-assessment discovery, calibration, thresholds, uncertainty, acceptance (v5.22; v5.23 additions
 below). Local, numpy.
-v5.23: Characteristic ML, Image ML and Fusion each choose their model FAMILY by patient-grouped CV (learners.py; fusion late / feature /
-hybrid, with a paired test of whether fusion beats the better single model); Percival Intelligence analyses (intelligence.py: input
+v5.23: NOX and LUMOS each choose their model FAMILY by patient-grouped CV (learners.py); Percival Intelligence analyses (intelligence.py: input
 provenance, ablation, disagreement patterns, out-of-distribution, reliability table); bootstrap-stable thresholds; per-candidate reasons.
 
-COMPONENTS (level 0; each an independent, traceable assessment of a candidate; trained with patient-grouped out-of-fold predictions):
-  math     MATH - the deterministic detector score (score_v4), Platt-recalibrated to log-odds (monotone: never changes the MATH order)
-  unified  Unified Score - the structured predictor model: L2 logistic on the 5 predictors x1-x5 (vessel continuity, core contrast,
-           pial distance, sulcal alignment, extracranial continuation)
-  char     Characteristic ML - L2 logistic on the detector's measured candidate characteristics (darkness, edge contrast, pial distance,
-           cortex fraction, tram fraction, tube ratio, elongation, volume, local continuity)
-  image    Image ML - a small convolutional network on the candidate's MRI patch pixels (cnn.py)
-  fusion   Fusion - feature-level fusion of characteristics + the image network's out-of-fold logit (L2 logistic)
-Fusion already contains Characteristic and Image information, so no meta-model uses fusion together with char or image (double counting).
+ARCHITECTURE (2026-11-25, user decision): MRI -> ALBUS (detects) -> NOX (measures) + LUMOS (sees the image) -> PERCIVAL (the ONLY place
+where evidence is combined). The former "Unified" component (uScore x1-x5 as a separate model) and the "Fusion" component (a second
+combiner of NOX + LUMOS below PERCIVAL) were removed: the three non-redundant uScore measurements became NOX measurements, and PERCIVAL's
+meta-model does the combining (with its disagreement terms), so no evidence is counted twice and no model sits between NOX/LUMOS and PERCIVAL.
 
-META-MODEL DISCOVERY (on the development cohort only; the locked test cohort is not touched until the final evaluation):
-  M0 math_only        MATH alone (the existing system; baseline)
-  M1 fusion_only      Fusion alone
-  M2 equal_mean       mean of the available component log-odds (math, unified, char, image) - a fixed, NOT learned, combination
-  M3 stack_logit      logistic stacking on math, unified, char, image log-odds + missing-input indicators (light penalty)
-  M4 stack_reg        regularised stacking (penalty by nested CV) + disagreement terms (spread and max pairwise gap of the log-odds)
-  M5 stack_fusion     regularised stacking on math, unified, fusion (the double-counting-free alternative to M4)
-  M6 boosted          gradient-boosted decision stumps on the M4 inputs (only when both classes have >= 50 candidates)
+COMPONENTS (level 0; each an independent, traceable assessment of a candidate; trained with patient-grouped out-of-fold predictions):
+  math     ALBUS - the deterministic detector score (score_v4), Platt-recalibrated to log-odds (monotone: never changes the ALBUS order)
+  char     NOX - the measurement model on the candidate's quantitative measurements (feature list CHAR = the built-in NOX set, or the
+           active approved NOX version): logistic / boosted trees / forest chosen by patient-grouped CV
+  image    LUMOS - the image model on the candidate's MRI patch pixels (pixel logistic / small CNN / CNN ensemble)
+
+META-MODEL DISCOVERY (PERCIVAL; on the development cohort only; the locked test cohort is not touched until the final evaluation):
+  M0 math_only        ALBUS alone (the existing system; baseline)
+  M1 equal_mean       mean of the available component log-odds (ALBUS, NOX, LUMOS) - a fixed, NOT learned, combination
+  M2 stack_logit      logistic stacking on the ALBUS, NOX, LUMOS log-odds + missing-input indicators (light penalty)
+  M3 stack_reg        regularised stacking (penalty by nested CV) + disagreement terms (spread and max pairwise gap of the log-odds)
+  M4 stack_unc        regularised stacking + reliability signals + the gap of every component pair (learned uncertainty)
+  M5 boosted          gradient-boosted decision stumps on the M3 inputs (only when both classes have >= 50 candidates)
   Each is evaluated by patient-grouped cross-validation on the out-of-fold component table (log loss, Brier, AUC, PR-AUC, calibration
   slope / intercept). Selection: the SIMPLEST model whose log loss is within one bootstrap standard error of the best (1-SE rule) - a
   more complex model must earn its place.
@@ -44,17 +43,28 @@ from . import learners as LR, intelligence as IN
 from .learners import PixelLogistic
 from . import component_api as CI          # Stage 2: the engine reads ALBUS / NOX / LUMOS evidence through one component interface
 
-PREDICTORS = ["x1_vessel_continuity_mm", "x2_core_contrast_nu", "x3_pial_distance_mm", "x4_sulcal_alignment", "x5_extracranial_mm"]
-CHAR = ["darkness_z", "edge_contrast", "pial_dist_mm", "cortex_frac", "tram_frac", "tube_ratio", "elongation_3d", "log_volume_mm3", "local_cont_max_mm"]
-COMPONENTS = ["math", "unified", "char", "image", "fusion"]
-INDEP = ["math", "unified", "char", "image"]
+# NOX built-in feature set (registry v000; contents of 2026-11-25). Chosen from what the detector already measures for every candidate (100 % coverage on the
+# user's 772 real candidates, continuous, not a rule decision, not a composite score, not a deprecated column) + the three uScore
+# measurements that do not repeat ALBUS inputs (uScore x3 pial distance and x4 surface conformity = ALBUS pdist / aln: left out).
+# Grouped by what they describe; docs/percival_app/NOX_FEATURES.md gives every definition and the reason it is in the set.
+NOX_V000 = ["darkness_z", "edge_contrast", "pial_dist_mm", "cortex_frac", "tram_frac", "tube_ratio", "elongation_3d", "log_volume_mm3", "local_cont_max_mm"]
+NOX_ADDED = ["bank_frac", "dual_contact_frac", "surface_contact_frac_1mm", "csf_adjacent_frac", "sulcal_depth_mm",       # relation to the brain surface
+             "flatness_3d", "sphericity", "tortuosity", "struct_thick_mm", "cand_radius_med_mm",                        # 3-D shape
+             "dark_frac_z3", "darkness_z_p10", "region_z", "dark_cv",                                                     # darkness pattern
+             "vessel_wm_mm", "local_branch_points",                                                                       # vessel behaviour
+             "rel_height", "skull_frac"]                                                                                  # position
+PREDICTORS = ["x1_vessel_continuity_mm", "x2_core_contrast_nu", "x5_extracranial_mm"]   # from uscore/features (reliable values only)
+CHAR = NOX_V000 + NOX_ADDED + PREDICTORS
+NOX_BUILTIN_VERSION = "v000"          # registry id of the built-in set (approved versions are v001, v002 ...)
+COMPONENTS = ["math", "char", "image"]
+INDEP = ["math", "char", "image"]
 LAMBDAS = np.logspace(-2, 3, 9)
-SIMPLICITY = ["math_only", "equal_mean", "fusion_only", "stack_logit", "stack_fusion", "stack_reg", "stack_unc", "boosted"]
+SIMPLICITY = ["math_only", "equal_mean", "stack_logit", "stack_reg", "stack_unc", "boosted"]
 # Stage 3: learned uncertainty + disagreement. stack_unc = regularised stacking (penalty by nested CV) on the component log-odds with NEUTRAL
 # filling of a missing component (log-odds 0 = no evidence, never a negative) + one missing indicator per component + the components'
 # reliability signals (ALBUS rule fate, NOX missing fraction, LUMOS test-time-augmentation spread) + the |gap| of every component pair.
 REL = ["rel_albus_tier2", "rel_nox_missing", "rel_lumos_spread"]
-PAIRS = [(a, b) for i, a in enumerate(["math", "unified", "char", "image"]) for b in ["math", "unified", "char", "image"][i + 1:]]
+PAIRS = [(a, b) for i, a in enumerate(INDEP) for b in INDEP[i + 1:]]
 MIN_STUDIES, MIN_CANDIDATES, MIN_PER_CLASS = 30, 100, 10
 SUBGROUPS = ("field_strength", "sequence", "anatomy", "qc")         # Stage 3 calibration subgroups (rows['subgroups'], from review/ID_qc.json)
 ABSTENTION_POLICY = ("PERCIVAL says 'review required' (no score) when >= 2 independent abstention triggers fire: measurements out of distribution, "
@@ -171,22 +181,6 @@ def _pl_fit(X, y, g, w, cols, nested=True):
 
 
 # ------------------------------------------------------------------ level-0 components
-FUSION_KINDS = ["late", "feature", "hybrid"]          # simplicity order
-FUSION_DOC = dict(late="decision-level: logistic on the Characteristic ML and Image ML log-odds",
-                  feature="feature-level: logistic on the measured characteristics + the Image ML log-odds",
-                  hybrid="hybrid: logistic on the characteristics + the Image ML log-odds + the Characteristic ML log-odds")
-
-
-def _fusion_X(kind, Xc, il, cl):
-    il = np.asarray(il, float)[:, None]; cl = np.asarray(cl, float)[:, None]
-    return np.c_[cl, il] if kind == "late" else np.c_[Xc, il] if kind == "feature" else np.c_[Xc, il, cl]
-
-
-def _fusion_cols(kind, cols=None):
-    cols = list(cols or CHAR)
-    return ["char_logit", "image_logit"] if kind == "late" else cols + ["image_logit"] if kind == "feature" else cols + ["image_logit", "char_logit"]
-
-
 def _fit_image(kind, M, y, g, seed, epochs):
     if kind == "pixel_logistic": return PixelLogistic(seed).fit(M, y, g)
     if kind == "cnn_ensemble":                                             # Stage 3: augmented, class-balanced seed ensemble (LUMOS registry)
@@ -196,29 +190,23 @@ def _fit_image(kind, M, y, g, seed, epochs):
 
 
 class Components:
-    """fit on rows -> predict log-odds of each component (NaN when the component has no input for a row).
-    v5.23: the model family of Characteristic ML (logistic / gbt / forest), Image ML (pixel_logistic / cnn) and Fusion (late / feature /
-    hybrid) is chosen by component_oof() on patient-grouped CV and passed in; the defaults reproduce v5.22."""
-    def __init__(self, char_kind="logistic", image_kind="cnn", fusion_kind="feature", char_cols=None):
-        self.char_kind, self.image_kind, self.fusion_kind = char_kind, image_kind, fusion_kind; self.ood = None; self.image_ood = None
-        self.char_cols = list(char_cols or CHAR)              # Stage 2: the NOX feature list is part of the model (default: the built-in 9)
+    """fit on rows -> predict log-odds of each component (NaN when the component has no input for a row): ALBUS (math), NOX (char), LUMOS
+    (image). The model family of NOX (logistic / gbt / forest) and LUMOS (pixel_logistic / cnn / cnn_ensemble) is chosen by component_oof()
+    on patient-grouped CV and passed in. fusion_kind is accepted and ignored (models before 2026-11-25)."""
+    def __init__(self, char_kind="logistic", image_kind="cnn", fusion_kind=None, char_cols=None):
+        self.char_kind, self.image_kind = char_kind, image_kind; self.ood = None; self.image_ood = None
+        self.char_cols = list(char_cols or CHAR)              # Stage 2: the NOX feature list is part of the model
 
     def fit(self, rows, seed=0, image_logit_oof=None, char_logit_oof=None, cnn_epochs=30):
         y = np.array([r["y"] for r in rows], float); g = [r["patient"] for r in rows]; w = patient_weights(rows)
         NF = CI.NOX.features(rows, char_cols=self.char_cols)
         self.math = MathRecalibration().fit(CI.ALBUS.features(rows)["math"], y, w)
-        self.unified = _pl_fit(NF["unified"], y, g, w, PREDICTORS)
         Xc = NF["char"]; self.char = LR.fit_tabular(self.char_kind, Xc, y, g, w, self.char_cols, seed)
         LF = CI.LUMOS.features(rows); M, have = LF["image"], LF["have"]; self.image = None
         if cnn_epochs and have.sum() >= 20 and len(np.unique(y[have])) == 2:
             try: self.image = _fit_image(self.image_kind, M[have], y[have], np.asarray(g)[have], seed, cnn_epochs)
             except ValueError: self.image = None
-        il = image_logit_oof if image_logit_oof is not None else self._img(rows)[0]
-        cl = char_logit_oof if char_logit_oof is not None else self._char(Xc)
-        self.fusion = None
-        if np.isfinite(il).sum() >= 10:
-            self.fusion = _pl_fit(_fusion_X(self.fusion_kind, Xc, il, cl), y, g, w, _fusion_cols(self.fusion_kind, self.char_cols))
-        self.ood = IN.OOD().fit(np.c_[Xc, NF["unified"]])
+        self.ood = IN.OOD().fit(Xc)
         self.image_ood = IN.OOD().fit(patch_stats(M[have])) if have.sum() >= 20 else None      # v5.24: patches unlike the training patches
         return self
 
@@ -239,20 +227,11 @@ class Components:
     def predict(self, rows, extras=False):
         NF = CI.NOX.features(rows, char_cols=self.char_cols)
         Z = dict(math=self.math.logit(CI.ALBUS.features(rows)["math"]))
-        X = NF["unified"]; out = np.full(len(rows), np.nan)
-        if self.unified is not None:
-            have = np.isfinite(X).any(1)
-            if have.any(): out[have] = self.unified.logit(X[have])
-        Z["unified"] = out; Xc = NF["char"]; Z["char"] = self._char(Xc)
+        Xc = NF["char"]; Z["char"] = self._char(Xc)
         Z["image"], spread = self._img(rows)
-        out = np.full(len(rows), np.nan)
-        if self.fusion is not None and self.image is not None:
-            have = np.isfinite(Z["image"])                                  # fusion is defined only where the image model has an output
-            if have.any(): out[have] = self.fusion.logit(_fusion_X(self.fusion_kind, Xc[have], Z["image"][have], Z["char"][have]))
-        Z["fusion"] = out
         for kk, vv in CI.reliability_table(rows, dict(image_spread=spread), char_cols=self.char_cols).items(): Z["rel_" + kk] = vv
         if not extras: return Z
-        ood = self.ood.distance(np.c_[Xc, X]) if self.ood is not None else np.full(len(rows), np.nan)
+        ood = self.ood.distance(Xc) if self.ood is not None else np.full(len(rows), np.nan)
         iood = np.full(len(rows), np.nan)
         if self.image_ood is not None:
             Mm, have = maps_of(rows)
@@ -261,21 +240,21 @@ class Components:
                        image_ood_limit=self.image_ood.limit if self.image_ood is not None else None)
 
     def to_json(self):
-        return dict(kinds=dict(char=self.char_kind, image=self.image_kind, fusion=self.fusion_kind), char_cols=list(self.char_cols),
-                    math=dict(a=self.math.a, b=self.math.b, eps=self.math.eps), unified=LR.tab_json(self.unified), char=LR.tab_json(self.char),
-                    image=None if self.image is None else self.image.to_json(), fusion=LR.tab_json(self.fusion),
+        return dict(kinds=dict(char=self.char_kind, image=self.image_kind), char_cols=list(self.char_cols),
+                    math=dict(a=self.math.a, b=self.math.b, eps=self.math.eps), char=LR.tab_json(self.char),
+                    image=None if self.image is None else self.image.to_json(),
                     ood=None if self.ood is None else self.ood.to_json(), image_ood=None if self.image_ood is None else self.image_ood.to_json())
 
     @classmethod
     def from_json(cls, d):
-        k = d.get("kinds") or dict(char="logistic", image="cnn", fusion="feature")          # v5.22 models: the old fixed families
-        c = cls(k["char"], k["image"], k["fusion"], char_cols=d.get("char_cols"))       # models before Stage 2: the built-in CHAR list
-        c.math = MathRecalibration(**d["math"]); c.unified = LR.tab_from(d["unified"])
-        c.char = LR.tab_from(d["char"]); c.image = LR.image_model_from(d.get("image"))
-        f = d.get("fusion"); c.fusion = c.char if f == "char" else LR.tab_from(f)
-        if f == "char": c.fusion = None                                       # v5.22 stored 'char' when no image model existed
+        """models written before 2026-11-25 (with 'unified' / 'fusion' parts) load: those parts are ignored; their OOD descriptor (NOX + x1-x5)
+        no longer matches the NOX columns and is dropped (no out-of-distribution flag for such a model)"""
+        k = d.get("kinds") or dict(char="logistic", image="cnn")
+        c = cls(k.get("char", "logistic"), k.get("image", "cnn"), char_cols=d.get("char_cols") or NOX_V000)
+        c.math = MathRecalibration(**d["math"]); c.char = LR.tab_from(d["char"]); c.image = LR.image_model_from(d.get("image"))
         c.ood = IN.OOD.from_json(d["ood"]) if d.get("ood") else None
-        c.image_ood = IN.OOD.from_json(d["image_ood"]) if d.get("image_ood") else None; return c          # models before v5.24: none
+        if c.ood is not None and (d.get("unified") is not None or "fusion" in (d.get("kinds") or {})): c.ood = None
+        c.image_ood = IN.OOD.from_json(d["image_ood"]) if d.get("image_ood") else None; return c
 
 
 def _select(oofs, y, g, order):
@@ -298,13 +277,13 @@ def _common(oofs):
 
 
 def component_oof(rows, k=5, seed=0, cnn_epochs=30, progress=None, char_kinds=None, image_kinds=None, fusion_kinds=None, char_cols=None):
-    """patient-grouped out-of-fold log-odds of every component for the given (development) rows, and the model-family comparisons
-    (Characteristic ML, Image ML, Fusion) on the SAME folds. -> Z, report"""
+    """patient-grouped out-of-fold log-odds of every component (ALBUS, NOX, LUMOS) for the given (development) rows, and the model-family
+    comparisons of NOX and LUMOS on the SAME folds. -> Z, report. fusion_kinds: accepted and ignored (Fusion removed 2026-11-25)."""
     say = progress or (lambda *a: None); CC = list(char_cols or CHAR)
-    char_kinds = char_kinds or LR.CHAR_KINDS; image_kinds = image_kinds or LR.IMAGE_KINDS; fusion_kinds = fusion_kinds or FUSION_KINDS
+    char_kinds = char_kinds or LR.CHAR_KINDS; image_kinds = image_kinds or LR.IMAGE_KINDS
     y = np.array([r["y"] for r in rows], float); g = np.array([r["patient"] for r in rows]); w = patient_weights(rows); F = folds(g, k, seed)
     Xc = X_of(rows, CC, "char"); M, have = maps_of(rows); rep = {}
-    # 1. Image ML families (their OOF logit is an input of Fusion)
+    # 1. LUMOS families
     img = {kd: np.full(len(rows), np.nan) for kd in image_kinds}; spr = {kd: np.full(len(rows), np.nan) for kd in image_kinds}
     for i, (tr, te) in enumerate(F):
         htr, hte = tr[have[tr]], te[have[te]]
@@ -314,12 +293,12 @@ def component_oof(rows, k=5, seed=0, cnn_epochs=30, progress=None, char_kinds=No
                     net = _fit_image(kd, M[htr], y[htr], g[htr], seed + i, cnn_epochs); lg, sp = net.logit_tta(M[hte]); img[kd][hte] = lg
                     spr[kd][hte] = sp
                 except ValueError: pass
-        say(f"image models fold {i + 1}/{len(F)}", 0.1 + 0.25 * (i + 1) / len(F))
+        say(f"LUMOS image models fold {i + 1}/{len(F)}", 0.1 + 0.3 * (i + 1) / len(F))
     m = _common(img); ik, ires = _select({kd: np.where(m, v, np.nan) for kd, v in img.items()}, y, g, LR.IMAGE_KINDS)
     ik = ik or image_kinds[-1]; img_oof = img[ik]; spread = spr[ik]
     rep["image"] = dict(chosen=ik, results=ires, n_with_image=int(have.sum()), tta_spread_median=float(np.nanmedian(spread)) if np.isfinite(spread).any() else None,
                         rule="simplest image model within one bootstrap SE of the lowest CV log loss (pixel_logistic < cnn)", compared_on=int(m.sum()))
-    # 2. Characteristic ML families
+    # 2. NOX families
     ch = {kd: np.full(len(rows), np.nan) for kd in char_kinds}
     for i, (tr, te) in enumerate(F):
         if len(np.unique(y[tr])) < 2: continue
@@ -328,62 +307,24 @@ def component_oof(rows, k=5, seed=0, cnn_epochs=30, progress=None, char_kinds=No
             if mdl is not None:
                 hv = np.isfinite(Xc[te]).any(1)
                 if hv.any(): ch[kd][te[hv]] = mdl.logit(Xc[te[hv]])
-        say(f"characteristic models fold {i + 1}/{len(F)}", 0.35 + 0.15 * (i + 1) / len(F))
+        say(f"NOX measurement models fold {i + 1}/{len(F)}", 0.4 + 0.15 * (i + 1) / len(F))
     ck, cres = _select(ch, y, g, LR.CHAR_KINDS); ck = ck or "logistic"
     final_char = LR.fit_tabular(ck, Xc, y, g, w, CC, seed)
     rep["char"] = dict(chosen=ck, results=cres, importance=LR.importance(final_char), rule="simplest model within one bootstrap SE of the lowest CV log loss (logistic < gbt < forest)",
-                       feature_auc={c: auc(y, (Xc[:, j] if np.isfinite(Xc[:, j]).sum() >= 5 else np.full(len(y), np.nan))) for j, c in enumerate(CC)})
-    # 3. every component out-of-fold + Fusion families. Fusion is a second-level model: it is trained on the Characteristic and Image
-    #    log-odds of the TRAINING rows, which must themselves be out-of-sample AND must never come from a model that saw the held-out
-    #    fold. v5.25 fix (indirect validation leakage): before, the training rows' image log-odds were img_oof[tr] - produced by image
-    #    models fitted on the other outer folds, i.e. INCLUDING the held-out fold te. Now both the Characteristic and the Image inputs of
-    #    the training rows come from an inner patient-grouped CV restricted to tr; the held-out rows get the outputs of models fitted on
-    #    tr only (char: the fold model; image: an image model refitted on tr). No row of te influences anything fitted for fold i.
-    Z = {c: np.full(len(rows), np.nan) for c in COMPONENTS}; fu = {kd: np.full(len(rows), np.nan) for kd in fusion_kinds}
-    fold_prov = []
+                       feature_auc={c: auc(y, (Xc[:, j] if np.isfinite(Xc[:, j]).sum() >= 5 else np.full(len(y), np.nan))) for j, c in enumerate(CC)},
+                       coverage={c: float(np.isfinite(Xc[:, j]).mean()) if len(Xc) else 0.0 for j, c in enumerate(CC)})
+    # 3. ALBUS + NOX out-of-fold with the chosen NOX family (fitted on the training fold only); LUMOS out-of-fold = step 1
+    Z = {c: np.full(len(rows), np.nan) for c in COMPONENTS}; fold_prov = []
     for i, (tr, te) in enumerate(F):
         assert not set(g[tr]) & set(g[te]), "patient in both the training and the held-out fold"
-        R = [rows[j] for j in tr]; T = [rows[j] for j in te]
         if len(np.unique(y[tr])) < 2: continue
-        c = Components(ck, ik, fusion_kinds[0], char_cols=CC).fit(R, seed, image_logit_oof=np.full(len(tr), np.nan), char_logit_oof=np.zeros(len(tr)), cnn_epochs=0)
-        P = c.predict(T)
-        for k_ in ("math", "unified", "char"): Z[k_][te] = P[k_]
-        inner = np.full(len(tr), np.nan); inner_img = np.full(len(tr), np.nan); htr_all = have[tr]
-        for itr, ite in folds(g[tr], 3, seed + 31 + i):
-            if len(np.unique(y[tr][itr])) < 2: continue
-            mi = LR.fit_tabular(ck, Xc[tr][itr], y[tr][itr], g[tr][itr], w[tr][itr], CC, seed)
-            if mi is not None: inner[ite] = mi.logit(Xc[tr][ite])
-            a, b = itr[htr_all[itr]], ite[htr_all[ite]]                  # inner image model: inner-training patients of tr only
-            if len(a) >= 20 and len(np.unique(y[tr][a])) == 2 and len(b):
-                try: inner_img[b] = _fit_image(ik, M[tr][a], y[tr][a], g[tr][a], seed + 31 + i, cnn_epochs).logit_tta(M[tr][b])[0]
-                except ValueError: pass
-        inner = np.where(np.isfinite(inner), inner, np.nanmedian(inner) if np.isfinite(inner).any() else 0.0)
-        hte = np.isfinite(img_oof[te])                                      # img_oof[te]: image model fitted on tr only (step 1)
-        if np.isfinite(inner_img).sum() >= 10 and hte.any():
-            fin = np.isfinite(inner_img)
-            for kd in fusion_kinds:
-                f = _pl_fit(_fusion_X(kd, Xc[tr][fin], inner_img[fin], inner[fin]), y[tr][fin], g[tr][fin], w[tr][fin], _fusion_cols(kd, CC))
-                if f is not None: fu[kd][te[hte]] = f.logit(_fusion_X(kd, Xc[te][hte], img_oof[te][hte], P["char"][hte]))
-        fold_prov.append(dict(fold=i, n_train=int(len(tr)), n_heldout=int(len(te)), train_patients=int(len(set(g[tr]))), heldout_patients=sorted(set(map(str, g[te]))),
-                              fusion_trained_on=int(np.isfinite(inner_img).sum()), fusion_inputs="inner patient-grouped CV within the training fold"))
-        say(f"components and fusion fold {i + 1}/{len(F)}", 0.5 + 0.12 * (i + 1) / len(F))
+        c = Components(ck, ik, char_cols=CC).fit([rows[j] for j in tr], seed, cnn_epochs=0)
+        P = c.predict([rows[j] for j in te])
+        for k_ in ("math", "char"): Z[k_][te] = P[k_]
+        fold_prov.append(dict(fold=i, n_train=int(len(tr)), n_heldout=int(len(te)), train_patients=int(len(set(g[tr]))), heldout_patients=sorted(set(map(str, g[te])))))
+        say(f"components fold {i + 1}/{len(F)}", 0.55 + 0.07 * (i + 1) / len(F))
     rep["folds"] = fold_prov
     Z["image"] = img_oof
-    mf = _common(fu) & np.isfinite(Z["char"]) & np.isfinite(img_oof)
-    fk, fres = _select({kd: np.where(mf, v, np.nan) for kd, v in fu.items()}, y, g, FUSION_KINDS)
-    fk = fk or "feature"; Z["fusion"] = fu[fk]
-    # does fusion earn its place? paired patient bootstrap of the log-loss difference against the better single model, same candidates
-    single = {"char": Z["char"], "image": img_oof}; sres = {kd: metrics(y[mf], sigmoid(v[mf]), g[mf]) for kd, v in single.items()} if mf.sum() >= 5 else {}
-    benefit = None
-    if mf.sum() >= 10 and all(r.get("logloss") is not None for r in sres.values()):
-        best_single = min(sres, key=lambda kd: sres[kd]["logloss"]); ll = lambda v: IN._ll(y[mf], sigmoid(v[mf]))
-        d = ll(Z["fusion"]) - ll(single[best_single]); gg = g[mf]; u = np.unique(gg); gi = {q: np.where(gg == q)[0] for q in u}; rr = np.random.default_rng(seed + 5)
-        bd = [float(d[np.concatenate([gi[q] for q in rr.choice(u, len(u))])].mean()) for _ in range(200)]
-        lo, hi = float(np.percentile(bd, 2.5)), float(np.percentile(bd, 97.5))
-        benefit = dict(best_single=best_single, delta_logloss=float(d.mean()), ci=[lo, hi],
-                       verdict="fusion improves on the better single model" if hi < 0 else ("fusion is worse than the better single model" if lo > 0 else "no demonstrated improvement"))
-    rep["fusion"] = dict(chosen=fk, results=fres, single=sres, benefit=benefit, compared_on=int(mf.sum()), doc=FUSION_DOC,
-                         rule="simplest fusion within one bootstrap SE of the lowest CV log loss (late < feature < hybrid)")
     for kk, vv in CI.reliability_table(rows, dict(image_spread=np.where(np.isfinite(img_oof), spread, np.nan)), char_cols=CC).items():
         Z["rel_" + kk] = vv                                              # Stage 3: reliability signals, out-of-fold where they are model outputs
     return Z, rep
@@ -391,7 +332,7 @@ def component_oof(rows, k=5, seed=0, cnn_epochs=30, progress=None, char_kinds=No
 
 # ------------------------------------------------------------------ meta-model candidates
 def meta_inputs(Z, kind):
-    L = np.c_[[Z[c] for c in INDEP]].T if kind != "stack_fusion" else np.c_[[Z[c] for c in ("math", "unified", "fusion")]].T
+    L = np.c_[[Z[c] for c in INDEP]].T
     miss = ~np.isfinite(L); Lf = np.where(miss, np.nan, L)
     if kind == "stack_unc":
         n = len(L); Ln = np.where(miss, 0.0, L)                          # neutral: a missing component is no evidence, never a negative
@@ -402,14 +343,14 @@ def meta_inputs(Z, kind):
         with np.errstate(all="ignore"):
             spread = np.nanstd(Lf, axis=1); gap = np.nanmax(Lf, axis=1) - np.nanmin(Lf, axis=1)
         return np.c_[Lf, miss[:, 1:].astype(float), np.nan_to_num(spread), np.nan_to_num(gap)]
-    if kind in ("stack_logit", "stack_fusion"): return np.c_[Lf, miss[:, 1:].astype(float)]
+    if kind == "stack_logit": return np.c_[Lf, miss[:, 1:].astype(float)]
     return Lf
 
 
 def meta_columns(kind):
     if kind == "stack_unc": return list(INDEP) + [f"{c}_missing" for c in INDEP[1:]] + list(REL) + [f"gap_{a}_{b}" for a, b in PAIRS]
-    base = INDEP if kind != "stack_fusion" else ["math", "unified", "fusion"]
-    cols = list(base) + ([f"{c}_missing" for c in base[1:]] if kind in ("stack_logit", "stack_fusion", "stack_reg", "boosted") else [])
+    base = INDEP
+    cols = list(base) + ([f"{c}_missing" for c in base[1:]] if kind in ("stack_logit", "stack_reg", "boosted") else [])
     return cols + (["disagreement_spread", "disagreement_gap"] if kind in ("stack_reg", "boosted") else [])
 
 
@@ -443,18 +384,17 @@ class Meta:
     def __init__(self, kind): self.kind = kind; self.model = None
     def fit(self, Z, y, g, w=None):
         X = meta_inputs(Z, self.kind); k = self.kind
-        if k == "math_only" or k == "fusion_only":
-            src = "math" if k == "math_only" else "fusion"; x = Z[src]; fin = np.isfinite(x)
-            b, _, _ = irls(np.nan_to_num(x)[:, None], y, 1e-6, None, w); self.model = dict(a=float(b[0]), b=float(b[1]), src=src)
+        if k == "math_only":
+            b, _, _ = irls(np.nan_to_num(Z["math"])[:, None], y, 1e-6, None, w); self.model = dict(a=float(b[0]), b=float(b[1]), src="math")
         elif k == "equal_mean": self.model = dict()
         elif k == "boosted": self.model = Stumps().fit(X, y, w)
         else:
             pl = PenalizedLogistic(meta_columns(k))
-            self.model = pl.fit_nested(X, y, g, w=w, lambdas=LAMBDAS) if k in ("stack_reg", "stack_fusion", "stack_unc") else pl.fit(X, y, 1e-2, w=w)
+            self.model = pl.fit_nested(X, y, g, w=w, lambdas=LAMBDAS) if k in ("stack_reg", "stack_unc") else pl.fit(X, y, 1e-2, w=w)
         return self
     def logit(self, Z):
         k = self.kind; X = meta_inputs(Z, k)
-        if k in ("math_only", "fusion_only"): return self.model["a"] + self.model["b"] * np.nan_to_num(Z[self.model["src"]], nan=0.0)
+        if k == "math_only": return self.model["a"] + self.model["b"] * np.nan_to_num(Z[self.model["src"]], nan=0.0)
         if k == "equal_mean":
             with np.errstate(all="ignore"): return np.nan_to_num(np.nanmean(X, axis=1))
         return self.model.logit(X)
@@ -536,7 +476,34 @@ def check_partitions(rows):
     if split: raise ValueError(f"patient(s) in both the development and the locked test cohort: {split[:5]} - refused")
 
 
-def train_cycle(rows, version, seed=0, cnn_epochs=30, progress=None, mins=None, nested=True, features=None, frozen=None):
+MODULE_OF = dict(math="ALBUS", char="NOX", image="LUMOS")
+
+
+def module_report(comp_metrics, families, previous=None):
+    """2026-11-25 one learning loop per module: every module is evaluated ON ITS OWN (development, patient-grouped out-of-fold) and compared with
+    the same module in the previous model. NOX and LUMOS: 'improved' when the cross-validated log loss is lower than the previous version's
+    (adopting a module version - component_freeze - requires it); ALBUS is not trained here (its loop = detector versions measured against
+    expert truth in albus_detection.py, sensitivity may never drop); PERCIVAL is judged on the locked test (acceptance())."""
+    prev = (previous or {}).get("component_metrics") or {}; out = {}
+    for k, mod in MODULE_OF.items():
+        cur = comp_metrics.get(k) or {}; old = prev.get(k) or {}
+        rec = dict(module=mod, logloss=cur.get("logloss"), auc=cur.get("auc"), n=cur.get("n"), previous_model=(previous or {}).get("version"),
+                   previous_logloss=old.get("logloss"), previous_auc=old.get("auc"),
+                   family=(families.get(k) or {}).get("chosen") if k != "math" else "platt recalibration of score_v4")
+        if k == "math": rec.update(verdict="not trained here", loop="detector versions are evaluated against expert truth (ALBUS evaluation); a version that loses a detected cSS is rejected")
+        elif cur.get("logloss") is None: rec.update(verdict="not evaluable", loop="retrained every cycle; adopted only when better than its previous version")
+        elif old.get("logloss") is None: rec.update(verdict="first version", loop="retrained every cycle; adopted only when better than its previous version")
+        else:
+            d = cur["logloss"] - old["logloss"]
+            rec.update(delta_logloss=round(float(d), 4), verdict="improved" if d < 0 else "not improved",
+                       loop="retrained every cycle; adopted only when better than its previous version")
+        out[mod] = rec
+    out["PERCIVAL"] = dict(module="PERCIVAL", verdict="see acceptance (locked test cohort)", loop="refitted on the module outputs every cycle; "
+                           "becomes active only after acceptance AND your approval")
+    return out
+
+
+def train_cycle(rows, version, seed=0, cnn_epochs=30, progress=None, mins=None, nested=True, features=None, frozen=None, previous=None):
     """one complete, reproducible training cycle -> model dict (components + meta + calibration + thresholds + full report)"""
     mins = mins or dict(studies=MIN_STUDIES, candidates=MIN_CANDIDATES, per_class=MIN_PER_CLASS)
     check_partitions(rows)
@@ -547,8 +514,7 @@ def train_cycle(rows, version, seed=0, cnn_epochs=30, progress=None, mins=None, 
     say = progress or (lambda *a: None); say("component out-of-fold predictions", 0.08)
     CC = list((features or {}).get("char") or CHAR)                # Stage 2: the approved NOX feature set (component registry), else built-in
     FZ = {k: v for k, v in (frozen or {}).items() if v}            # Stage 2: frozen component families (component registry) - no re-selection
-    kinds = dict(char_kinds=[FZ["char"]] if "char" in FZ else None, image_kinds=[FZ["image"]] if "image" in FZ else None,
-                 fusion_kinds=[FZ["fusion"]] if "fusion" in FZ else None)
+    kinds = dict(char_kinds=[FZ["char"]] if "char" in FZ else None, image_kinds=[FZ["image"]] if "image" in FZ else None)
     Z, fam = component_oof(dev, seed=seed, cnn_epochs=cnn_epochs, progress=say, char_cols=CC, **kinds)
     comp_metrics = {c: metrics(y, sigmoid(Z[c]), g) for c in COMPONENTS}
     say("meta-model discovery", 0.62); D, oofs = discover(Z, y, g, w, seed=seed)
@@ -562,7 +528,7 @@ def train_cycle(rows, version, seed=0, cnn_epochs=30, progress=None, mins=None, 
                  disagreement=IN.disagreement(Z, y, COMPONENTS), reliability=IN.reliability(y, p_dev), families=fam,
                  note="all analyses on the development cohort's patient-grouped out-of-fold predictions; the locked test cohort is not used")
     say("final fit on the development cohort", 0.7)
-    C = Components(fam["char"]["chosen"], fam["image"]["chosen"], fam["fusion"]["chosen"], char_cols=CC).fit(dev, seed, image_logit_oof=Z["image"], char_logit_oof=Z["char"], cnn_epochs=cnn_epochs)
+    C = Components(fam["char"]["chosen"], fam["image"]["chosen"], char_cols=CC).fit(dev, seed, cnn_epochs=cnn_epochs)
     M = Meta(chosen).fit(Z, y, g, w)
     ens = []
     rng = np.random.default_rng(seed + 99); u = np.unique(g)
@@ -582,15 +548,17 @@ def train_cycle(rows, version, seed=0, cnn_epochs=30, progress=None, mins=None, 
                  note="experimental assessment score - trained on this computer on this project's expert reviews; not clinically validated",
                  interpretation="PERCIVAL score = 100 x a CALIBRATED model output on the development cohort. It is a ranking / assessment score, "
                                 "not a validated probability of cSS: calibration is checked on the locked test cohort and only on this project's data.")
-    model["features"] = dict(char=CC, unified=list(PREDICTORS), nox_version=(features or {}).get("nox_version", "v000"),
-                             source="component registry NOX active version" if features else "built-in NOX baseline (v000)")
+    model["features"] = dict(char=CC, nox_version=(features or {}).get("nox_version", NOX_BUILTIN_VERSION),
+                             source="component registry NOX active version" if features else f"built-in NOX set ({NOX_BUILTIN_VERSION})")
+    model["architecture"] = "ALBUS + NOX + LUMOS -> PERCIVAL (2026-11-25: no Unified, no Fusion component)"
     model["component_config"] = dict(
         ALBUS=dict(input="score_v4 (Platt recalibration, monotone)", registry_version=(features or {}).get("albus_version", "v000")),
-        NOX=dict(char_kind=fam["char"]["chosen"], feature_set=CC, predictors=list(PREDICTORS), frozen="char" in FZ,
-                 registry_version=(features or {}).get("nox_version", "v000")),
+        NOX=dict(char_kind=fam["char"]["chosen"], feature_set=CC, frozen="char" in FZ,
+                 registry_version=(features or {}).get("nox_version", NOX_BUILTIN_VERSION)),
         LUMOS=dict(image_kind=fam["image"]["chosen"], epochs=cnn_epochs, frozen="image" in FZ, registry_version=(features or {}).get("lumos_version", "v000")),
-        PERCIVAL=dict(fusion_kind=fam["fusion"]["chosen"], meta=chosen, frozen_fusion="fusion" in FZ))
+        PERCIVAL=dict(meta=chosen))
     model["component_interface"] = CI.describe(model)
+    model["modules"] = module_report(comp_metrics, fam, previous)
     # Stage 3 small-data honesty (development cohort only; the locked test cohort is not used here)
     from . import analysis as AN
     model["missing_data"] = AN.by_availability(Z, y, p_dev, g)
@@ -708,7 +676,7 @@ def acceptance(model, active):
     if not model.get("ready"): reasons.append("below the minimum data")
     if pc.get("auc") is None: reasons.append("no locked-test evaluation possible yet (too few test candidates)")
     else:
-        if mt.get("auc") is not None and pc["auc"] + 1e-9 < mt["auc"]: reasons.append(f"test AUC {pc['auc']:.3f} below MATH alone {mt['auc']:.3f}")
+        if mt.get("auc") is not None and pc["auc"] + 1e-9 < mt["auc"]: reasons.append(f"test AUC {pc['auc']:.3f} below ALBUS alone {mt['auc']:.3f}")
         if active and (active.get("test", {}).get("percival", {}).get("auc") is not None) and pc["auc"] < active["test"]["percival"]["auc"] - 0.01:
             reasons.append(f"test AUC below the active model by more than 0.01")
         if active and active.get("test", {}).get("percival", {}).get("brier") is not None and pc.get("brier") is not None and pc["brier"] > active["test"]["percival"]["brier"] + 0.01:
@@ -725,15 +693,15 @@ def acceptance(model, active):
     else:
         sup = ns.get("support") or {}
         if (sup.get("evaluable_folds") or 0) < 3: reasons.append(f"nested evaluation: only {sup.get('evaluable_folds', 0)} evaluable outer folds")
-        np_ = (ns.get("percival") or {}).get("auc"); nm = ((ns.get("ablation") or {}).get("MATH alone") or {}).get("auc")
+        np_ = (ns.get("percival") or {}).get("auc"); A_ = ns.get("ablation") or {}; nm = ((A_.get("ALBUS alone") or A_.get("MATH alone")) or {}).get("auc")
         if np_ is None: reasons.append("nested evaluation produced no AUC")
-        elif nm is not None and np_ + 1e-9 < nm: reasons.append(f"nested development AUC {np_:.3f} below MATH alone {nm:.3f}")
+        elif nm is not None and np_ + 1e-9 < nm: reasons.append(f"nested development AUC {np_:.3f} below ALBUS alone {nm:.3f}")
     iden = (model.get("data") or {}).get("identity") or {}
     if iden.get("assumed"): reasons.append(f"patient identity is assumed (one patient per study, not verified) for {iden['assumed']} studies")
     return dict(passed=not reasons, reasons=reasons,
-                criteria=f"minimum data; locked test: >= {MIN_TEST_PATIENTS_PER_CLASS} patients per class, AUC >= MATH alone, AUC >= active - 0.01, "
+                criteria=f"minimum data; locked test: >= {MIN_TEST_PATIENTS_PER_CLASS} patients per class, AUC >= ALBUS alone, AUC >= active - 0.01, "
                          "Brier <= active + 0.01, calibration slope 0.6-1.6, patient-bootstrap CI available; nested development evaluation "
-                         ">= 3 evaluable folds and not below MATH alone; verified patient identity. Passing makes a model a CANDIDATE only - "
+                         ">= 3 evaluable folds and not below ALBUS alone; verified patient identity. Passing makes a model a CANDIDATE only - "
                          "activation always needs explicit human approval.")
 
 
