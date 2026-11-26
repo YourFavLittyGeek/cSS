@@ -82,6 +82,9 @@ try:
     check("PERCIVAL screen offers the switch", 'data-pv="switch-on"' in D and "<b>PERCIVAL</b>" in D)
     post("/api/percival/settings", dict(percival_test_fraction=0.35))    # the partition hashes random synthetic patient ids: a larger share keeps both classes in the locked test
     check("switch on", post("/api/percival/authorize", dict(on=True)).get("authorized") is True)
+    tg = get("/api/percival/test_group")                                 # 2026-11-26 balanced locked test group (preview only)
+    check("locked test group card: counts per class and a balance preview", set(tg.get("counts", {})) == {"css", "no_css"} and "plan" in tg
+          and tg.get("confirm") == "BALANCE TEST GROUP", json.dumps(tg)[:400])
     post("/api/percival/train", {}); s = wait_job(); L = s["latest"]
     check("a controlled training cycle ran from the app", s["job"]["state"] == "finished" and L and L["version"] == "v001", f"latest={None if not L else L.get('version')} versions={s.get('versions')} " + str(s["job"]) + " | " + " / ".join(s.get("log", [])[-4:]))
     if L:

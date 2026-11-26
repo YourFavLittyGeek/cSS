@@ -658,7 +658,7 @@ def module_report(comp_metrics, families, previous=None):
 
 
 def train_cycle(rows, version, seed=0, cnn_epochs=30, progress=None, mins=None, nested=True, features=None, frozen=None, previous=None, image_extra=None,
-                char_extra=None):
+                char_extra=None, test_css_patients=None):
     """one complete, reproducible training cycle -> model dict (components + meta + calibration + thresholds + full report)"""
     mins = mins or dict(studies=MIN_STUDIES, candidates=MIN_CANDIDATES, per_class=MIN_PER_CLASS)
     check_partitions(rows)
@@ -768,6 +768,13 @@ def train_cycle(rows, version, seed=0, cnn_epochs=30, progress=None, mins=None, 
     say("evaluation on the locked test cohort", 0.85)
     model["test"] = evaluate_test(model, test)
     model["test"]["missed_lesions"] = evaluate_marks(model, TM)
+    pc = model["test"].get("patient_classes")
+    if pc and test_css_patients:                                      # 2026-11-26: a test patient with an expert-marked missed cSS HAS cSS
+        tp = {str(r["patient"]) for r in test}; pos = {str(r["patient"]) for r in test if r["y"] == 1}
+        extra = (tp & {str(p) for p in test_css_patients}) - pos
+        if extra:
+            model["test"]["patient_classes"] = dict(with_css=len(pos | extra), without_css=len(tp - pos - extra), from_missed_marks=len(extra),
+                                                     note="patients with cSS = a detector candidate called cSS OR an expert-marked missed cSS")
     from . import second_look as SLK                                   # 2026-11-25 LUMOS second look: the activation gate for this model
     model["second_look"] = {k: v for k, v in SLK.status(model, {}).items() if k not in ("active", "switched_on")}
     model["model_hash"] = AN.model_hash(model)

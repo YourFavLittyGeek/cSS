@@ -92,6 +92,55 @@ def new_version(store, fraction, by, reason, confirm):
         return create(store, fraction, str(by).strip(), str(reason).strip(), patients=sorted(old["assignment"]), carry_test=keep)
 
 
+CONFIRM_BALANCE = "BALANCE TEST GROUP"
+BALANCE_SALT = "percival-test-balance-v1"
+MIN_DEV_PER_CLASS = 8          # a balance never leaves fewer development patients of a class than this
+
+
+def balance_plan(store, classes, frozen=(), min_per_class=5):
+    """2026-11-26: a BALANCED test group without hand-picking. classes: {patient: 'css' | 'no_css'} from finished expert reviews (patients
+    without a finished review are not moved); frozen: patients a registered model was trained on (never moved to test). Every current test
+    patient stays test. For each class short of min_per_class, development patients of that class are added in a fixed hash order
+    (salted SHA-256, not chosen by anyone) - never below MIN_DEV_PER_CLASS development patients of the class.
+    -> dict(add={patient: class}, before, after, short) - nothing is written"""
+    S = current(store) or dict(assignment={})
+    A = S["assignment"]; fz = {str(p) for p in frozen}
+    test = {p for p, part in A.items() if part == "test"}
+    out = dict(add={}, before={}, after={}, short={})
+    for c in ("css", "no_css"):
+        have = sorted(p for p in test if classes.get(p) == c)
+        pool = [p for p, k in classes.items() if k == c and p not in test]
+        movable = sorted((p for p in pool if p not in fz), key=lambda p: hashlib.sha256((BALANCE_SALT + p).encode()).hexdigest())
+        need = max(0, int(min_per_class) - len(have)); room = max(0, len(pool) - MIN_DEV_PER_CLASS)
+        pick = movable[:min(need, room)]
+        for p in pick: out["add"][p] = c
+        out["before"][c] = len(have); out["after"][c] = len(have) + len(pick)
+        if len(have) + len(pick) < min_per_class:
+            out["short"][c] = (f"{len(have) + len(pick)} of {min_per_class}: only {len(pool)} development patients of this class"
+                               + (f", {len(pool) - len(movable)} of them already used to train a model" if len(pool) != len(movable) else ""))
+    out["development_after"] = {c: sum(1 for p, k in classes.items() if k == c and p not in test and p not in out["add"]) for c in ("css", "no_css")}
+    return out
+
+
+def balance(store, classes, by, reason, confirm, frozen=(), min_per_class=5):
+    """write the balance as a NEW split version (typed confirmation, person, reason); the previous version is kept"""
+    if confirm != CONFIRM_BALANCE: raise PermissionError(f"refused: type exactly '{CONFIRM_BALANCE}' to confirm")
+    if not str(by or "").strip() or not str(reason or "").strip(): raise SplitError("refused: a name and a reason are required")
+    with _LOCK:
+        plan = balance_plan(store, classes, frozen, min_per_class)
+        if not plan["add"]: raise SplitError("nothing to balance: " + ("; ".join(f"{c}: {w}" for c, w in plan["short"].items()) or "every class already has enough test patients"))
+        old = current(store) or dict(assignment={}, test_fraction=0.2)
+        keep = [p for p, part in old["assignment"].items() if part == "test"] + list(plan["add"])
+        S = create(store, old.get("test_fraction", 0.2), str(by).strip(), str(reason).strip(), patients=sorted(old["assignment"]), carry_test=keep)
+        S.update(mode="balanced", balance=dict(added=plan["add"], before=plan["before"], after=plan["after"], short=plan["short"],
+                                              min_per_class=int(min_per_class), salt=BALANCE_SALT, frozen=len(set(frozen)),
+                                              rule="current test patients stay test; per class short of the minimum, development patients of that class "
+                                                   "with a finished expert review and never used for training are added in salted-SHA-256 order"))
+        S["assignment_sha256"] = digest(S)
+        _js(os.path.join(_dir(store), f"{S['version']}.json"), S)
+        return S
+
+
 def held_out_elsewhere(base):
     """studies other split tools hold out (study_meta.csv split 'test'; uscore study_split held-out roles) - never used for development"""
     out = set()

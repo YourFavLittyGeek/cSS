@@ -584,6 +584,53 @@ def _lumos_marks(sid, E):
     return [m for m in gather_marks(sid) if m["cand_id"] in ok and not m["test"]] if ok else []
 
 
+# ------------------------------------------------------------------ balanced locked test group (2026-11-26)
+def patient_classes():
+    """{patient: 'css' | 'no_css'} from FINISHED expert reviews: cSS = an expert cSS call or an eligible expert-marked missed cSS in any of the
+    patient's studies; no_css = finished review(s) without either. Patients without a finished review are not classified."""
+    out = {}
+    for p_ in _study_list():
+        c = p_["code"]; lab = label_summary(c)
+        if lab.get("state") != "reviewed": continue
+        pat = IDS().patient(c)
+        if not pat: continue
+        has = lab.get("css", 0) > 0 or any(m.get("y") == 1 for m in (lab.get("missed_detail") or {}).values())
+        out[str(pat)] = "css" if has or out.get(str(pat)) == "css" else "no_css"
+    return out
+
+
+def _trained_patients():
+    """patients whose studies any registered model was trained on (they can never become test patients)"""
+    pats = set()
+    for v in versions():
+        M = load(v) or {}
+        for st in (M.get("data") or {}).get("trained_on") or []:
+            p_ = IDS().patient(st)
+            if p_: pats.add(str(p_))
+    return pats
+
+
+def test_group_state():
+    from uengine.percival import split as SP, meta as MT
+    S = SP.current(P()) or {}; cl = patient_classes(); A = S.get("assignment") or {}
+    cnt = {c: dict(test=sum(1 for p_, k in cl.items() if k == c and A.get(p_) == "test"),
+                   development=sum(1 for p_, k in cl.items() if k == c and A.get(p_) == "development")) for c in ("css", "no_css")}
+    plan = SP.balance_plan(P(), cl, _trained_patients(), MT.MIN_TEST_PATIENTS_PER_CLASS)
+    return dict(version=S.get("version"), mode=S.get("mode", "hash"), counts=cnt, minimum=MT.MIN_TEST_PATIENTS_PER_CLASS,
+                plan=dict(add=len(plan["add"]), by_class={c: sum(1 for k in plan["add"].values() if k == c) for c in ("css", "no_css")},
+                          after=plan["after"], short=plan["short"], development_after=plan["development_after"]),
+                confirm=SP.CONFIRM_BALANCE, unclassified=sum(1 for p_ in A if p_ not in cl))
+
+
+def test_group_balance(by, reason, confirm):
+    from uengine.percival import split as SP, meta as MT
+    try:
+        S = SP.balance(P(), patient_classes(), by, reason, confirm, frozen=_trained_patients(), min_per_class=MT.MIN_TEST_PATIENTS_PER_CLASS)
+    except (SP.SplitError, PermissionError) as e: return dict(ok=False, error=str(e))
+    _event("config_changed", by, split=S["version"], balanced=len(S["balance"]["added"])); _LCACHE.clear()
+    return dict(ok=True, version=S["version"], added=len(S["balance"]["added"]), after=S["balance"]["after"], short=S["balance"]["short"])
+
+
 # ------------------------------------------------------------------ ALBUS re-detection of the expert-marked missed cSS (2026-11-25)
 AREDO = {"thread": None, "queue": []}
 
@@ -1275,7 +1322,8 @@ def _train(reason):
         if feats: log(f"NOX feature set {feats['nox_version']}: {len(feats['char'])} measurements", 0.08)
         if frozen: log("frozen components (component registry): " + ", ".join(f"{k}={v}" for k, v in frozen.items()), 0.08)
         M = MT.train_cycle(rows, v, cnn_epochs=int(os.environ.get("CSS_PERCIVAL_EPOCHS", "30")), progress=lambda m, p: log(m, p), mins=_env_min(),
-                           features=feats, frozen=frozen, previous=_model_any(), image_extra=marks, char_extra=cmarks)
+                           features=feats, frozen=frozen, previous=_model_any(), image_extra=marks, char_extra=cmarks,
+                           test_css_patients={p_ for p_, k in patient_classes().items() if k == "css"})
         M["data"].update(dataset=man["id"], dataset_hash_manifest=man["content_hash"], eligibility_rules=EL.RULES_VERSION,
                          split=man.get("split"), leakage_audit=dict(passed=audit["passed"], checks=audit["checks"]),
                          feature_schema=DS.FEATURE_SCHEMA, patch_spec=DS.PATCH_SPEC, code_version=_code_version())

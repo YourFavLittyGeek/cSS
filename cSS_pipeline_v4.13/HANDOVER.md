@@ -135,6 +135,9 @@ Read this first, then CLAUDE.md (project science + history). Do not trust older 
   counted as complete -> 13 patients showed grade 0 in Results / cSS_results.xlsx (startup repair rebuilds + re-scores, Pensieve studies
   brought back). Also: grade from the model's bands (total / total_upper, needs_review), one AI opinion (PERCIVAL, rule meter fallback),
   legacy albus.py bugs. vault.py / pensieve.py are LIVE - do not delete (audit A4 was wrong there).
+- Balanced locked test group (PERCIVAL > System > Locked test group; split.balance, new split version, hash order, never trained-on
+  patients, >= 8 dev per class) + test patients with expert missed marks count 'with cSS' (train_cycle test_css_patients). User's
+  project: 9 test = 5 with cSS (incl. 040 via marks) + 4 without -> balance adds 1 without cSS. User trains in batches of 50.
 
 ## 6. Open items / next steps (ask the user before starting)
 1. User reported the app WINDOW froze after "Use Percival_project" (server answered, page idle, no JS error in

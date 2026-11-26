@@ -1407,6 +1407,7 @@ def pg_get(op, q):
     if op == "eligibility": return PG._jl(PG.P("eligibility", "current.json"), dict(error="not evaluated yet"))
     if op == "readiness": return PG.readiness()                                              # 3D
     if op == "split": return PG.split_state()
+    if op == "test_group": return PG.test_group_state()                                       # 2026-11-26 balanced locked test group
     if op == "shadow": return PG.shadow_summaries()                                          # v5.24 Percival shadow mode                        # only on request: reads other projects' patients.json
     if op == "second_look": return PG.second_look_status()
     if op == "albus_misses": return PG.albus_miss_report()                                    # 2026-11-25 which rule / gate loses the marked cSS                                   # 2026-11-25 LUMOS second look gate
@@ -1496,6 +1497,7 @@ def pg_post(op, d):
         if op.startswith("shadow_gov_"): return PG.shadow_gov_post(op[len("shadow_gov_"):], d)
         if op == "shadow_run": return PG.shadow_run_trial(str(d.get("target", "ALBUS")), str(d.get("hypothesis", "")), d.get("config", {}))
         if op == "score_unified": return PG.score_study_unified(str(d.get("study_id", "")))
+        if op == "test_group_balance": return PG.test_group_balance(d.get("by", ""), d.get("reason", ""), d.get("confirm", ""))
         if op == "split_new_version": return PG.split_new_version(float(d.get("fraction", 0)), d.get("by", ""), d.get("reason", ""), d.get("confirm", ""))   # 3D
         if op == "dataset_export": return PG.export_dataset(str(d.get("id", "")))
         return dict(ok=False, error=f"unknown {op}")

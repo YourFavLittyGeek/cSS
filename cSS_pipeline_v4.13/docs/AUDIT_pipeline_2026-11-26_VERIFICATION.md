@@ -56,3 +56,26 @@ shared score of 1, where before both were 0.
 - one frozen rule set per release;
 - OOD from out-of-fold distances;
 - moving the retired modules to `legacy/`.
+
+## Recommendation 7 done (2026-11-26, user decision): balanced locked test group + missed marks count at patient level
+**Why.** The hash split (about 20 %, never by cSS status) gave 9 test patients for 51: 4 with cSS calls, 5 without. Acceptance needs
+5 + 5, which 9 patients cannot give. No model had been trained yet, so the test group had never been consulted.
+
+**Patient level** (`meta.train_cycle(test_css_patients=)`): a test patient with an eligible expert-marked missed cSS counts "with cSS".
+All 36 of the user's marks were drawn in the blind initial read, so all are eligible.
+- Study-040 (2 marks, no cSS candidate) is now a patient with cSS.
+- Test group: 5 with cSS, 4 without.
+
+**Balance** (`split.balance_plan` / `split.balance`; PERCIVAL › System › Locked test group). For each class short of 5, development
+patients of that class are added to the test group in a fixed salted-SHA-256 order. The rules:
+- every current test patient stays;
+- only patients with a finished expert review and never used to train a model are moved;
+- at least 8 development patients per class are kept;
+- a new split version is written with a typed confirmation, a person and a reason; the previous version is kept.
+
+For the user's project the plan adds 1 patient without cSS (5 + 5).
+
+The balance rule applies at every batch ("50 by 50"): before training a new batch, press Balance again. Patients of earlier batches
+that a model was trained on are never moved.
+
+Tests: `tests/test_balanced_test_group.py`; `check_app_percival` covers the app route.

@@ -869,13 +869,24 @@ async function pvSystem(el){const A=await api("/api/percival/architecture");if(A
      <tr><td><b>PERCIVAL</b></td><td>decision (${esc(MN[R.percival.chosen_meta_model]||R.percival.chosen_meta_model||"—")})</td><td class="mono">nested ${g3((R.percival.nested_development||{}).auc)} · locked test ${g3((R.percival.locked_test||{}).auc)}</td><td class="mono">${esc(((R.component_versions||{}).meta||{}).sha256||"—")}</td></tr></table>`}</div>
    <div id="pv-sys-ready"></div>
    <div class="card" data-pv="governance"><h3 style="margin:0 0 4px">Validation governance</h3><div id="pv-sys-plan"><p class="note">loading…</p></div></div>
+   <div class="card" data-pv="test-group"><h3 style="margin:0 0 4px">Locked test group</h3><div id="pv-sys-tg"><p class="note">loading…</p></div></div>
    <div class="card" data-pv="honesty"><h3 style="margin:0 0 4px">Small-data honesty (development cohort)</h3><div id="pv-sys-an"><p class="note">loading…</p></div></div>
    <div class="card" data-pv="provenance"><h3 style="margin:0 0 4px">Configuration and audit trail</h3>
      <p class="note" style="margin-top:0">Configuration <span class="mono">${esc((A.config||{}).sha256||"—")}</span> · engine ${esc((A.config||{}).engine||"")} · eligibility rules ${esc((A.config||{}).eligibility_rules||"")} · split ${esc((A.config||{}).split_version||"not created")} · automatic cycles ${((A.config||{}).settings||{}).percival_autocycle?'<span class="warn">on</span>':"off"}</p>
      <p class="note">Event log: ${esc(String((A.events||{}).events??"—"))} events · chain ${(A.events||{}).chain_ok?'<span class="ok">intact</span>':'<span class="bad">broken</span>'} · component registry ${(A.events||{}).registry_matches_events?'<span class="ok">matches the events</span>':'<span class="bad">differs from the events</span>'}</p>
      <details><summary class="note">Retired layers (${(A.retired||[]).length}) - docs/engineering/DEPRECATIONS.md</summary><table><tr><th>Item</th><th>Replacement</th><th>State</th></tr>
      ${(A.retired||[]).map(r=>`<tr><td>${esc(r.item)}</td><td class="note">${esc(r.replacement)}</td><td class="note">${esc(r.state)}</td></tr>`).join("")}</table></details></div>`;
-  pvReadiness($("#pv-sys-ready")); pvPlan($("#pv-sys-plan")); pvHonesty($("#pv-sys-an"))}
+  pvReadiness($("#pv-sys-ready")); pvPlan($("#pv-sys-plan")); pvTestGroup($("#pv-sys-tg")); pvHonesty($("#pv-sys-an"))}
+async function pvTestGroup(el){const T=await api("/api/percival/test_group"),C=T.counts||{},Pn=T.plan||{},a=Pn.by_class||{},n=T.minimum;
+  const row=(k,lab)=>`<tr><td>${lab}</td><td class="mono">${(C[k]||{}).test??0}</td><td class="mono">${(C[k]||{}).development??0}</td><td class="mono">${(Pn.after||{})[k]??"—"}${a[k]?` <span class="note">(+${a[k]})</span>`:""}</td></tr>`;
+  el.innerHTML=`<p class="note" style="margin-top:0">Patients are put in the locked test group by a fixed hash of their id (about 20 %), never by hand and never by cSS status - so a small project can end up with too few test patients with or without cSS. Acceptance needs at least ${n} of each.
+    <b>Balance</b> adds development patients of the short class in a fixed hash order: only patients whose expert review is finished and that no model was ever trained on; the current test patients stay; at least 8 per class stay for training. A new split version is written (the old one is kept).</p>
+   <table><tr><th>Patients</th><th>test</th><th>development</th><th>test after balancing</th></tr>${row("css","with cSS")}${row("no_css","without cSS")}</table>
+   <p class="note">Split ${esc(T.version||"—")} (${esc(T.mode||"hash")})${T.unclassified?` · ${T.unclassified} patient(s) without a finished review are not counted`:""}${Object.keys(Pn.short||{}).length?" · still short: "+Object.entries(Pn.short).map(([k,v])=>`${k==="css"?"with cSS":"without cSS"} ${esc(v)}`).join("; "):""}</p>
+   <div class="row"><button class="btn" id="pv-tg-bal" ${Pn.add?"":"disabled"}>Balance the test group (+${Pn.add||0} patient${Pn.add===1?"":"s"})…</button></div>`;
+  const b=document.getElementById("pv-tg-bal");if(b)b.onclick=async()=>{const by=prompt("Your name (recorded):",arWho()||"");if(!by)return;const why=prompt("Reason:");if(!why)return;
+    const c=prompt(`Type ${T.confirm} to write the balanced split:`);const r=await api("/api/percival/test_group_balance",{by,reason:why,confirm:c});
+    r.ok?toast(`split ${esc(r.version)}: ${r.added} patient(s) added to the test group`):toast(esc(r.error),1);pvTestGroup(el)}}
 async function pvPlan(el){const E=await api("/api/percival/evaluation_plan");const P=E.plan,C=E.consultations||[];
   el.innerHTML=`<p class="note" style="margin-top:0">The locked test cohort supports acceptance <b>once per pre-registered milestone</b>; every consultation is recorded.
    Automatic training cycles are off by default for the pilot.</p>
