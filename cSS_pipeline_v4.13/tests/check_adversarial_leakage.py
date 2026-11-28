@@ -59,7 +59,7 @@ def run_adversarial_leakage_test():
     # In v5.25: component_oof runs inner CV on development rows
     # Let's test the inner fold fitting within tr
     Z_clean, rep_clean = MT.component_oof(R_clean, k=3, seed=77, cnn_epochs=2)
-    meta_clean, _ = MT.discover(Z_clean, [r["y"] for r in R_clean], [r["patient"] for r in R_clean], seed=88)
+    meta_clean, _, _ = MT.discover(Z_clean, [r["y"] for r in R_clean], [r["patient"] for r in R_clean], seed=88)
 
     print(f"Baseline fit completed on training fold (n={len(R_clean)}).")
     print(f"  Chosen meta-model: {meta_clean['chosen']}")
@@ -80,7 +80,7 @@ def run_adversarial_leakage_test():
     # Extract training fold from the perturbed dataset
     R_adv_tr = [copy.deepcopy(rows_adv[j]) for j in tr]
     Z_adv, rep_adv = MT.component_oof(R_adv_tr, k=3, seed=77, cnn_epochs=2)
-    meta_adv, _ = MT.discover(Z_adv, [r["y"] for r in R_adv_tr], [r["patient"] for r in R_adv_tr], seed=88)
+    meta_adv, _, _ = MT.discover(Z_adv, [r["y"] for r in R_adv_tr], [r["patient"] for r in R_adv_tr], seed=88)
 
     # 5. Assert BIT-EXACT INVARIANCE of the training pipeline
     print("Verifying invariance under adversarial validation perturbations...")

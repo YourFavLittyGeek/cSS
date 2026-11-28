@@ -547,20 +547,18 @@ class StartupHealthCheck:
 
     def _chk_15_identity_vault_status(self) -> Dict[str, Any]:
         vpath = os.path.join(self.base_dir, "private", "identity_vault.enc")
+        vlocal = os.path.join(self.base_dir, "private", "identity_vault.local.enc")
         vjson = os.path.join(self.base_dir, "private", "identity_vault.json")
-        app_lock = self.settings.get("app_lock_enabled", False)
-        if os.path.exists(vpath):
-            desc = "Encrypted identity vault present (App lock active)"
-        elif os.path.exists(vjson):
-            desc = "Standard local identity storage (Password-free mode)"
+        st = HEALTHY
+        if os.path.exists(vjson):                               # 2026-11-28: a plaintext vault is a finding, never "healthy"
+            desc = "UNENCRYPTED identity vault (private/identity_vault.json): it is encrypted automatically at the next app start"; st = HEALTHY_WITH_WARNINGS
+        elif os.path.exists(vpath):
+            desc = "Identity vault encrypted with your passphrase (app lock)"
+        elif os.path.exists(vlocal):
+            desc = "Identity vault encrypted at rest (AES-256-GCM, device key in the macOS Keychain)"
         else:
-            desc = "Fresh identity registry (Default password-free mode)"
-        return {
-            "id": 15,
-            "name": "Identity Registry and Vault Status",
-            "status": HEALTHY,
-            "details": desc,
-        }
+            desc = "No identities stored yet (the vault is created encrypted)"
+        return {"id": 15, "name": "Identity Registry and Vault Status", "status": st, "details": desc}
 
     def _chk_16_backup_recency(self) -> Dict[str, Any]:
         bdir = self.settings.get("backup_dir") or os.path.join(self.base_dir, "backups")

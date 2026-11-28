@@ -139,6 +139,28 @@ Read this first, then CLAUDE.md (project science + history). Do not trust older 
   patients, >= 8 dev per class) + test patients with expert missed marks count 'with cSS' (train_cycle test_css_patients). User's
   project: 9 test = 5 with cSS (incl. 040 via marks) + 4 without -> balance adds 1 without cSS. User trains in batches of 50.
 
+## 5c. Session 2026-11-28: audit (2026-11-27) + post-audit implementation
+- Audit (read-only): ~/PERCIVAL_audit_2026-11-27/ (00 summary + 7 documents; outside the repo). Implementation reports (committed):
+  docs/implementation_2026-11-28/ (IMPLEMENTATION_REPORT = tracking table of every finding, SCIENTIFIC_VALIDATION_REPORT, ARCHITECTURE_REPORT,
+  TRAINING_READINESS_REPORT).
+- v001 root cause (reproduced on the cached scores): the meta level re-split the OOF table into new random folds and pooled five fold models
+  (per-fold slopes all > 0, pooled AUC 0.508, random predictor 0.42); 773e08b's clamp only hid it. Now uengine/percival/validation.py:
+  stratified patient folds SHARED by components and meta level, fold-stratified AUC, paired-bootstrap model choice (simplest only within one
+  PAIRED SE) + 'informative' flag, within-fold calibration (one intercept per fold, common slope), like-for-like acceptance (ALBUS on the same
+  candidates), patient- and lesion-level test metrics; nested uses the same. Every test consultation uses the milestone (M1 is used by v001).
+- Training gate: readiness() stages BLOCK train_async (override CSS_TRAIN_GATE=off only when every study is synthetic - tests).
+- app/safe_json.py: jload/jsave never replace an unreadable patients.json/settings.json (backup, preserved original in app_data/corrupt/,
+  blocked writes, banner). app/keystore.py + identity.py: vault encrypted at rest (AES-256-GCM, device key in the macOS login Keychain;
+  tests use a file store in the temp HOME); the plaintext private/identity_vault.json is migrated at the next app start (round-trip verified,
+  moved to the Trash); recovery key via identity vault op recovery_key (typed SHOW RECOVERY KEY).
+- Missed marks: pen fate from the enclosed area (reviewer) and recomputed from current detector outputs (patches.mark_fate_now); marks grown
+  through the slices inside the drawn footprint (patches.mark_prism, +-12 mm); gather cache v7, albus-redetect 1.1 (rebuilt once).
+- ALBUS outline refinement uengine/imaging/refine.py (score_css grading rule for every candidate) -> reviewer dashed cyan extent
+  (/api/labels?kind=extent; menu 'Show the full extent'); extent_* measures to SHADOW only; seg_metrics.py (no expert masks yet).
+- File Manager buttons wired (delete -> Trash, typed TRASH); Settings placeholders/fake values replaced; SHADOW gets real rows
+  (components.shadow); uScore prototype notices only with prototypes on.
+- Detector (detect_css.py) NOT changed: its audit items wait for an ALBUS version with a non-inferiority comparison.
+
 ## 6. Open items / next steps (ask the user before starting)
 1. User reported the app WINDOW froze after "Use Percival_project" (server answered, page idle, no JS error in
    Chrome or JavaScriptCore). Not reproduced; ask what the screen shows on the 0cb269d build. Idea: a page

@@ -279,7 +279,26 @@ def readiness():
                dict(name="automatic training cycles off for the pilot", category="setting", ok=not CTX["SET"].get("percival_autocycle", False),
                     detail="on - switch off in Training Center" if CTX["SET"].get("percival_autocycle", False) else "off")]
     missing = {k: [c["name"] for c in checks if not c["ok"] and c["category"] == k] for k in ("real_data", "expert", "approval", "setting")}
-    return dict(ready=all(c["ok"] for c in checks), checks=checks, missing=missing, policy="expert consensus of completed reviews; eligible provenance: "
+    # 2026-11-28 (mission 3.4): the training-readiness GATE. These checks BLOCK a training cycle (train_async); the others (evaluation plan,
+    # milestone, locked split / dataset created at first use, auto-cycle setting) are needed for acceptance or are created by the first cycle.
+    by = {c["name"]: c for c in checks}
+    def ok(n): return bool((by.get(n) or {}).get("ok"))
+    tp = len([1 for v in ((SPV or {}).get("assignment") or {}).values() if v == "test"])
+    stages = [dict(stage="data imported", ok=ok("real MRI studies with a candidate list"), detail=by["real MRI studies with a candidate list"]["detail"], blocks=True),
+              dict(stage="expert review completed", ok=ok("completed blind expert reads") and ok("designated experts"),
+                   detail=by["completed blind expert reads"]["detail"] + "; experts: " + by["designated experts"]["detail"], blocks=True),
+              dict(stage="ground truth available", ok=ok("eligible expert labels (development: >= 3 cSS, >= 3 not-cSS, >= 10 in all)"),
+                   detail=by["eligible expert labels (development: >= 3 cSS, >= 3 not-cSS, >= 10 in all)"]["detail"], blocks=True),
+              dict(stage="training dataset eligible", ok=ok("eligible expert labels (development: >= 3 cSS, >= 3 not-cSS, >= 10 in all)")
+                   and ok("patient identities verified for every included study"), detail=by["patient identities verified for every included study"]["detail"] + " identities verified", blocks=True),
+              dict(stage="validation dataset eligible", ok=bool(SPV) and tp > 0,
+                   detail=(f"{tp} locked-test patients" if SPV else "the locked split is created at the first cycle") +
+                          " - acceptance additionally needs >= 5 test patients with and without cSS", blocks=False),
+              dict(stage="model training permitted", ok=False, detail="", blocks=True)]
+    gate_ok = all(st["ok"] for st in stages[:4]) and ok("local learning switched on")
+    stages[-1].update(ok=gate_ok, detail="all blocking stages passed and local learning is switched on" if gate_ok else
+                      "blocked: " + "; ".join([st["stage"] for st in stages[:4] if not st["ok"]] + ([] if ok("local learning switched on") else ["local learning is off"])))
+    return dict(ready=all(c["ok"] for c in checks), training_permitted=gate_ok, stages=stages, checks=checks, missing=missing, policy="expert consensus of completed reviews; eligible provenance: "
                 "verified_blind_post_3A, historical_blinding_verified; patient-level locked split; leakage audit before training")
 
 
@@ -576,7 +595,7 @@ def _gather(sid, labelled=True):
     key = RCG.file_key(deps, B()) + [int(may_read(sid))] + ([["nox_extra"] + EXTRA] if EXTRA else []) \
           + [["envelope", _G.MAX_INPLANE_MM, _G.MAX_SLICE_MM, _G.VOXEL_TOL_MM]]                  # a new voxel-size limit re-extracts the patches
     cj, cz = P("cache", f"{sid}.json"), P("cache", f"{sid}.npz"); C = _jl(cj, {})
-    if C.get("key") != key or C.get("v") != 6 or not os.path.exists(cz):        # v5: NOX set with x1 / x2 / x5; v6: missed-mark patches (LUMOS)
+    if C.get("key") != key or C.get("v") != 7 or not os.path.exists(cz):        # v5: NOX set with x1 / x2 / x5; v6: missed-mark patches (LUMOS); v7 (2026-11-28): marks grown to their 3-D extent + current fate
         if CTX.get("ensure_local"):                                         # images moved to Pensieve after the review: bring them back first
             try:
                 el = CTX["ensure_local"](sid)
@@ -607,7 +626,7 @@ def _gather(sid, labelled=True):
         os.makedirs(os.path.dirname(cz), exist_ok=True)
         with open(cz + ".tmp", "wb") as f_: np.savez_compressed(f_, **{str(k): v for k, v in maps.items()}, **mk_maps)
         os.replace(cz + ".tmp", cz)                                               # atomic: a reader never sees a half-written cache
-        C = dict(key=key, v=6, rows=rows, marks=marks); _js(cj, C)
+        C = dict(key=key, v=7, rows=rows, marks=marks); _js(cj, C)
     with np.load(cz) as Zf: Z = {k: Zf[k] for k in Zf.files}
     rows = []; pat = IDS().patient(sid)
     test = bool(pat) and _partition(pat) == "test"                           # no patient: never trained on (eligibility); 3D split authority
@@ -621,9 +640,13 @@ def _gather(sid, labelled=True):
 def _lumos_marks(sid, E):
     """the missed-cSS marks of one study that LUMOS learns from: eligible expert truth (cSS), development partition, with an image patch,
     and not lying on a candidate the detector showed (that candidate has its own call)"""
-    ok = {e["cand_id"] for e in E if str(e["cand_id"]).startswith("missed_") and e["status"] == "eligible" and e["partition"] == "development"
-          and e.get("y") == 1 and not str(e.get("detector_fate") or "").startswith("overlaps shown candidate")}
-    return [m for m in gather_marks(sid) if m["cand_id"] in ok and not m["test"]] if ok else []
+    # 2026-11-28: the fate is the CURRENT detector output against the enclosed area (fate_now, computed at gathering); the fate stored when
+    # the mark was drawn (from the drawn line, at that detector version) is only the fallback for marks gathered before this build
+    ok = {e["cand_id"] for e in E if str(e["cand_id"]).startswith("missed_") and e["status"] == "eligible" and e["partition"] == "development" and e.get("y") == 1}
+    if not ok: return []
+    fate0 = {e["cand_id"]: str(e.get("detector_fate") or "") for e in E}
+    return [m for m in gather_marks(sid) if m["cand_id"] in ok and not m["test"]
+            and not str(m.get("fate_now") or fate0.get(m["cand_id"], "")).startswith("overlaps shown candidate")]
 
 
 # ------------------------------------------------------------------ balanced locked test group (2026-11-26)
@@ -795,9 +818,11 @@ def confirmed_mark_rows(sid, E=None):
     confirmed object)."""
     A = albus_marks(sid, start=False)
     if A.get("state") != "done": return []
-    ok = None if E is None else {e["cand_id"] for e in E if str(e["cand_id"]).startswith("missed_") and e["status"] == "eligible" and e.get("y") == 1
-                                 and not str(e.get("detector_fate") or "").startswith("overlaps shown candidate")}
-    keys = [k for k, r in A["marks"].items() if _confirmed(r, A["confirmations"].get(k)) and (ok is None or k in ok)]
+    ok = None if E is None else {e["cand_id"] for e in E if str(e["cand_id"]).startswith("missed_") and e["status"] == "eligible" and e.get("y") == 1}
+    f0 = {e["cand_id"]: str(e.get("detector_fate") or "") for e in (E or [])}
+    # 2026-11-28: a mark whose enclosed area lies on a SHOWN candidate is that candidate (it has its own call): current fate first
+    keys = [k for k, r in A["marks"].items() if _confirmed(r, A["confirmations"].get(k)) and (ok is None or k in ok)
+            and not str(r.get("fate_now") or f0.get(k, "")).startswith("overlaps shown candidate")]
     if not keys: return []
     zp = P("albus_redetect", f"{sid}.npz")
     if not os.path.exists(zp): return []
@@ -935,7 +960,8 @@ def _mark_maps(sid):
     for k in marks:
         m = patch_maps(E["patches"][k]) if k in E["patches"] else None
         if m is not None: out[k] = m
-        recs.append(dict(cand_id=k, has_maps=m is not None, how=E["how"].get(k, ""), skip=E["skipped"].get(k, "" if m is not None else "no valid SWI in the patch")))
+        recs.append(dict(cand_id=k, has_maps=m is not None, how=E["how"].get(k, ""), skip=E["skipped"].get(k, "" if m is not None else "no valid SWI in the patch"),
+                         fate_now=(E.get("fates") or {}).get(k)))
     return recs, out
 
 
@@ -947,7 +973,7 @@ def gather_marks(sid):
     if not C.get("marks") or not os.path.exists(cz): return []
     pat = IDS().patient(sid); test = bool(pat) and _partition(pat) == "test"
     with np.load(cz) as Zf: Z = {k: Zf[k] for k in Zf.files if k.startswith("missed_")}
-    return [dict(study=sid, cand_id=m["cand_id"], patient=pat, test=test, maps=Z[m["cand_id"]], y=1, how=m.get("how", ""))
+    return [dict(study=sid, cand_id=m["cand_id"], patient=pat, test=test, maps=Z[m["cand_id"]], y=1, how=m.get("how", ""), fate_now=m.get("fate_now"))
             for m in C["marks"] if m.get("has_maps") and m["cand_id"] in Z]
 
 
@@ -1236,6 +1262,18 @@ def _env_min():
 def train_async(reason="manual"):
     with LOCK:
         if JOB["state"] in ACTIVE_STATES: return dict(ok=True, already_running=True)
+    # 2026-11-28 (mission 3.4): the readiness gate BLOCKS training - missing data, reviews or ground truth are never treated as negatives and
+    # a cycle cannot start on them. CSS_TRAIN_GATE=off (tests) is honoured only when EVERY study of the project is synthetic.
+    def _all_synthetic():
+        try: codes = [p["code"] for p in CTX["patients"]()]
+        except Exception: return False
+        return bool(codes) and all(synthetic(c) for c in codes)
+    if not (os.environ.get("CSS_TRAIN_GATE") == "off" and _all_synthetic()):
+        try: R = readiness()
+        except Exception as e: R = dict(training_permitted=False, stages=[dict(stage="readiness check", ok=False, detail=f"{type(e).__name__}: {e}")])
+        if not R.get("training_permitted"):
+            why = "; ".join(f"{st['stage']}: {st.get('detail', '')}" for st in R.get("stages", []) if not st.get("ok") and st.get("blocks", True))
+            return dict(ok=False, error="training is not permitted yet - " + (why or "readiness check failed"), stage="readiness_gate", readiness=R.get("stages"))
         for k in ("cancel", "cancel_by", "cancel_at", "stall", "ended", "resources_peak", "resources_last", "samples", "transitions"): JOB.pop(k, None)
     _transition("preparing", log=[], progress=0.0, error="", reason=reason, started=time.time(), heartbeat=time.time(), stage="preparing",
                 stage_times=dict(preparing=time.time()))
@@ -1247,12 +1285,21 @@ def train_async(reason="manual"):
 def _code_version():
     """the engine code that trained a model: BUILD stamp of the installed pipeline + sha256 of the Percival engine sources"""
     d = os.path.join(ROOT, "unified_engine", "uengine", "percival"); h = hashlib.sha256()
-    for f in sorted(glob.glob(os.path.join(d, "*.py"))):
+    # 2026-11-28 (audit S18): also the calibration / logistic code, the image patch extractor and the detector + call ledger, and the
+    # library versions - a model must be traceable to every piece of code that produced its inputs and its fit
+    extra = [os.path.join(ROOT, "unified_engine", "uengine", "ml_component.py")] + sorted(glob.glob(os.path.join(ROOT, "unified_engine", "uengine", "imaging", "*.py"))) \
+        + [os.path.join(ROOT, "scripts", n) for n in ("detect_css.py", "call_ledger.py", "surface_aligned_patch.py")]
+    files = sorted(glob.glob(os.path.join(d, "*.py"))) + [f for f in extra if os.path.exists(f)]
+    for f in files:
+        h.update(os.path.relpath(f, ROOT).encode())
         with open(f, "rb") as fh: h.update(fh.read())
     b = ""
     for p in (os.path.join(B(), "scripts", "BUILD"), os.path.join(ROOT, "scripts", "BUILD")):
         if os.path.exists(p): b = open(p).read().strip()[:80]; break
-    return dict(build=b, engine_sha256=h.hexdigest()[:16])
+    import platform, numpy as _np
+    try: import scipy as _sp; spv = _sp.__version__
+    except Exception: spv = None
+    return dict(build=b, engine_sha256=h.hexdigest()[:16], hashed_files=len(files), python=platform.python_version(), numpy=_np.__version__, scipy=spv)
 
 
 RUN = {}
@@ -2181,6 +2228,20 @@ def pensieve_history(sid, cand_id):
     return PI.history(B(), sid, cand_id)
 
 
+_EXT_CACHE = {}
+def _extent_measures(sid):
+    """{cand_id: measures} of the CURRENT candidate extent (uengine/imaging/refine.py), {} when not made yet or stale. Read only: the extent is
+    made by the reviewer when a study is opened (or refine.run). These are SHADOW candidate variables - NOX uses them only after a SHADOW
+    hypothesis is confirmed and approved (no silent change of the NOX feature set)."""
+    from uengine.imaging import refine as RF
+    try: rec = RF.current(B(), sid)
+    except Exception: rec = None
+    if not rec: return {}
+    k = (sid, json.dumps(rec.get("inputs"), sort_keys=True))
+    if k not in _EXT_CACHE: _EXT_CACHE[k] = {int(c): v for c, v in (rec.get("measures") or {}).items()}
+    return _EXT_CACHE[k]
+
+
 def _shadow_rows():
     """SHADOW's data: eligible expert labels of DEVELOPMENT patients from the latest dataset manifest + every recorded numeric measurement
     of the candidate (review/ID_candidates.csv). Locked-test patients are never included."""
@@ -2190,7 +2251,10 @@ def _shadow_rows():
     if not L: return [], "no dataset yet - train PERCIVAL once (the dataset records the eligible labels)"
     man = DS.load(P(), L[-1]["id"]); rows = []; cache = {}
     for e in man["examples"]:
-        if e.get("partition") != "development" or e.get("status") != "eligible" or e.get("y") not in (0, 1) or str(e["cand_id"]).startswith("missed"): continue
+        # 2026-11-28 (audit S15): the dataset manifest has no 'status' key, so the old filter (status == "eligible") returned ZERO rows on
+        # every real project. Eligibility is recorded per component: components.shadow (eligibility.py)
+        if e.get("partition") != "development" or not (e.get("components") or {}).get("shadow") or e.get("status", "eligible") != "eligible" \
+                or e.get("y") not in (0, 1) or str(e["cand_id"]).startswith("missed"): continue
         sid = e["study"]
         if sid not in cache:
             cp = os.path.join(B(), "review", f"{sid}_candidates.csv")
@@ -2201,6 +2265,8 @@ def _shadow_rows():
         feats = {k: (float(r[k]) if isinstance(r[k], (int, float, np.integer, np.floating)) and np.isfinite(r[k]) else None) for k in t.columns
                  if pd.api.types.is_numeric_dtype(t[k])}
         if "volume_mm3" in feats and feats["volume_mm3"]: feats["log_volume_mm3"] = float(np.log(max(feats["volume_mm3"], 1e-3)))
+        ex_ = _extent_measures(sid).get(int(e["cand_id"]))                  # 2026-11-28: ALBUS outline refinement measures (when current)
+        if ex_: feats.update({f"extent_{k}": (float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None) for k, v in ex_.items() if k != "leak_warning"})
         rows.append(dict(study=sid, cand_id=e["cand_id"], patient=e.get("patient"), partition="development", y=int(e["y"]), features=feats))
     bad = {b_["study"] for b_ in IDS().check_rows(rows)}                       # Stage 5: a stale manifest identity is never used by SHADOW
     rows = [r for r in rows if r["study"] not in bad and IDS().partition(r["patient"]) == "development"]
@@ -2372,14 +2438,18 @@ def test_reuse_gate(M, acc, test_patients):
     if not test_patients or not (M.get("test") or {}).get("n"): return acc
     dig = hashlib.sha256(json.dumps(test_patients).encode()).hexdigest()[:16]; Pl = evaluation_plan()
     ms = (Pl or {}).get("milestones") or []; cur = ms[-1]["id"] if ms else None
-    used = [c for c in test_consultations() if c.get("milestone") == cur and c.get("test_digest") == dig and c.get("used_for_acceptance")]
+    # 2026-11-28 (audit S5): EVERY consultation uses the milestone - pass or fail. Before, a failing model left the milestone unused, so the
+    # same test patients could be looked at again and again (and code changed in between) before one model passed.
+    used = [c for c in test_consultations() if c.get("milestone") == cur and c.get("test_digest") == dig]
     if not Pl: acc["reasons"].append("no pre-registered evaluation plan: the locked test result is reported but cannot support acceptance")
     elif not cur: acc["reasons"].append("no evaluation milestone declared: declare one before the locked test cohort can support acceptance")
-    elif used: acc["reasons"].append(f"the locked test cohort was already used for acceptance at milestone {cur} (model {used[0]['version']}): "
-                                     "declare the next milestone or add a fresh test cohort - test-set reuse is refused")
+    elif used: acc["reasons"].append(f"the locked test cohort was already consulted at milestone {cur} (model {used[0]['version']}): every "
+                                     "consultation uses the milestone, whether the model passed or not - declare the next milestone (with what "
+                                     "changed) or open the fresh test cohort; test-set reuse is refused")
     use = bool(Pl and cur and not used and not acc["reasons"])
     rec = dict(version=M.get("version"), at=time.strftime("%Y-%m-%d %H:%M:%S"), milestone=cur, test_digest=dig, n_patients=len(test_patients),
-               used_for_acceptance=use, auc=((M.get("test") or {}).get("percival") or {}).get("auc"))
+               used_for_acceptance=use, consumed=True, rule="every consultation uses the milestone (2026-11-28)",
+               auc=((M.get("test") or {}).get("percival") or {}).get("auc"))
     os.makedirs(P("split"), exist_ok=True)
     with open(P("split", "test_consultations.jsonl"), "a") as f: f.write(json.dumps(rec, default=str) + "\n")
     acc["passed"] = not acc["reasons"]; acc["test_consultation"] = rec

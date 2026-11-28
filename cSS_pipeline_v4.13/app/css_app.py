@@ -101,12 +101,11 @@ DEFAULT_MIN = {"synthseg": dict(import_=2, anatomy=12, align=1, detect=6, qc=1),
 PIPE_ENV = dict(CSS_V53="1", CSS_ZONE2="1", CSS_CONF="1", NOVIEW="1")          # the flags the current production lists use
 
 # ------------------------------------------------------------------ persistence
+import safe_json as SJ                                   # 2026-11-28: an unreadable state file is never replaced by an empty default
 def jload(name, default):
-    p = f"{AD}/{name}"
-    try: return json.load(open(p))
-    except Exception: return default
+    return SJ.load(AD, name, default)
 def jsave(name, obj):
-    p = f"{AD}/{name}"; json.dump(obj, open(p + ".tmp", "w"), indent=1, default=str); os.replace(p + ".tmp", p)
+    SJ.save(AD, name, obj)
 SET = dict(dict(awake=True, theme="dark", backup_dir="", freesurfer_home=os.environ.get("FREESURFER_HOME", ""), threads=4, parallel=1, auto_path=True, auto_retry=True, rerun_mode="choose",
                 features=dict(unified_score=False, shadow_engine=False, duplicate_check=True, preflight=True, qc_snapshot=True, notify=True, version_stamp=True, share=True, backup=True,
                               name_warning=False)), **jload("settings.json", {}))
@@ -516,7 +515,10 @@ def watcher():
         try: pensieve_low_space()
         except Exception as e: print(f"low-space check: {e}", flush=True)
         try:
-            st = SS.status(B, sel_studies()); live = set()
+            # 2026-11-28 (audit C3): the uScore selection / job notifications belong to the RETIRED uScore prototype - shown only when the
+            # older prototypes are switched on (Settings); before, they asked to "Retrain" a hidden model and opened a hidden screen
+            proto = bool(SET["features"].get("show_prototypes"))
+            st = SS.status(B, sel_studies()) if proto else dict(rows=[]); live = set()      # off: open uScore notices are resolved below
             for r in st["rows"]:
                 for lb in r["labels"]:
                     if lb["kind"] in ("stale", "conflict"):
@@ -528,7 +530,7 @@ def watcher():
                 if it.get("key") and it["key"].split(":")[0] in ("stale", "conflict") and it["key"] not in live and not it.get("resolved"): NC.resolve(B, it["key"])
             try:
                 import unified_gui as UG
-                for n, j in list(UG.JOBS.items()):
+                for n, j in (list(UG.JOBS.items()) if proto else []):
                     cur = j.get("status"); tag = j.get("started")
                     if cur in ("completed", "failed", "stopped") and WATCH["jobs"].get(n) != tag:   # every finished run, however short
                         WATCH["jobs"][n] = tag
@@ -540,8 +542,8 @@ def watcher():
                             notify_c("action", "training", "Trained model ready", txt, actions=["open_train"])
                         elif cur == "failed":
                             err = [l.strip() for l in (j.get("error") or "").splitlines() if l.strip()]
-                            notify_c("action", "training", f"Unified {n} failed", (err[-1] if err else "see the job log")[:240], actions=["open_unified"])
-                        else: notify_c("done", "training", f"Unified {n} {cur}")
+                            notify_c("action", "training", f"uScore prototype {n} failed", (err[-1] if err else "see the job log")[:240], actions=["open_unified"])
+                        else: notify_c("done", "training", f"uScore prototype {n} {cur}")
             except Exception: pass
             A = SET["autotrain"]
             if A.get("on") and SS.gate(B).get("open") and UG_job("train").get("status") != "running" and time.time() - WATCH["autotrain_last"] > float(os.environ.get("CSS_AUTOTRAIN_GAP_S", "300")):
@@ -3264,7 +3266,7 @@ def state():
     rem = sum(x["remaining"] for x in q) / min(par, max(1, len([x for x in q if not x["solo"]]) or 1))
     return dict(patients=out, queue=dict(n=len(q), remaining=rem, running=",".join(RUNNING), hold=CUR["hold"], mem_wait=CUR["mem_wait"], disk_wait=CUR.get("disk_wait", "")),
                 sys=si, rec=rec, rec_why=rec_why, pw_time=PW_TIME, pw_mem=PW_MEM, pathways=PATHWAYS, mem_zones=[MEM_YELLOW, MEM_RED],
-                settings=SET, version=version(), project=dict(name=os.path.basename(os.path.normpath(B)), path=B), cohorts=sorted(set(jload("cohorts.json", [])) | {p.get("cohort", "") for p in PAT} - {""}), steps=STEPS)
+                settings=SET, version=version(), state_problems=SJ.PROBLEMS, project=dict(name=os.path.basename(os.path.normpath(B)), path=B), cohorts=sorted(set(jload("cohorts.json", [])) | {p.get("cohort", "") for p in PAT} - {""}), steps=STEPS)
 
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass

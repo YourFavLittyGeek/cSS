@@ -156,7 +156,7 @@ table.svt td.sv{text-align:center}table.svt img.th,table.svt .th0{display:block;
 <main><header id="hdr"><div><h1 id="ttl">Studies</h1><div class="sub" id="ttls"></div></div><span class="sp"></span><span id="idmode" style="display:flex;gap:6px;align-items:center;margin-right:8px"></span><span id="ver" class="hide"></span>
 <span class="ibtn" id="bell" title="Notifications (hover = preview, click = keep open)"><svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg><b id="bb"></b></span>
 <span class="seg ico" id="theme"><button data-t="light" title="Light theme">☀</button><button data-t="dark" title="Dark theme">☾</button></span></header>
-<div class="wrap" id="view"></div></main></div>
+<div id="stateprob" style="display:none"></div><div class="wrap" id="view"></div></main></div>
 <div id="sheet"></div>
 <div id="log"><div class="h"><b>Log</b><select id="logcode"></select><span class="sp"></span><button class="b" id="logcopy">Copy log</button><button class="b" id="logclose">Close</button></div><pre id="logtext"></pre></div>
 <div id="drawer"><div class="dh"><b style="font-size:15px">Notifications</b><span class="sp"></span><button class="b" id="nread" style="font-size:11px;padding:3px 8px">mark all read</button><button class="b" id="nclose" style="font-size:11px;padding:3px 8px">✕</button></div><div class="db" id="nbody"></div></div>
@@ -218,7 +218,8 @@ const TITLES={
   set: ["Settings & System Control Centre", "Storage overview, File Manager, Data Vault, transfers, cleanups, processing, and system administration"]
 };
 const VMAP={home:"studies",pts:"act",res:"studies",proc:"studies"};
-async function refresh(){S=await api("/api/state");$("#ver").textContent=`pipeline ${S.version}`;{const sp=!!((S.settings||{}).features||{}).show_prototypes;document.querySelectorAll("[data-proto]").forEach(e=>e.style.display=sp?"":"none")}
+async function refresh(){S=await api("/api/state");$("#ver").textContent=`pipeline ${S.version}`;
+  {const P=S.state_problems||{},k=Object.keys(P),el=$("#stateprob");if(el){el.style.display=k.length?"":"none";el.innerHTML=k.length?`<div class="card" style="border:1px solid var(--bad,#c33);margin:8px"><b>Project file problem</b> - nothing was lost: ${k.map(n=>`<div><b>${esc(n)}</b>: ${esc(P[n].action)} (${esc(P[n].error||"")})${P[n].preserved?` · original kept as ${esc(P[n].preserved)}`:""}</div>`).join("")}</div>`:""}}{const sp=!!((S.settings||{}).features||{}).show_prototypes;document.querySelectorAll("[data-proto]").forEach(e=>e.style.display=sp?"":"none")}
   document.documentElement.dataset.theme=S.settings.theme||"dark";{const ic=`/icon_${S.settings.theme==="light"?"light":"dark"}.png`;if(!$("#logo").src.endsWith(ic)){$("#logo").src=ic;$("#fav").href=ic}}document.querySelectorAll("#theme button").forEach(b=>b.classList.toggle("on",b.dataset.t===(S.settings.theme||"dark")));
   $("#projname").textContent=(S.project||{}).name||"—";$("#projname").title=(S.project||{}).path||"";
   $("#awakebox").innerHTML=`<label style="display:flex;gap:7px;align-items:center;cursor:pointer" title="Keep the Mac awake while studies are processing"><input type="checkbox" id="awk" ${S.settings.awake?"checked":""}> Keep Mac awake</label>`;
@@ -637,7 +638,7 @@ function procHistory(el,c,a){const R=(a.runs||[]).slice().reverse();
 
 // ---------------- notification centre (v5.14.2-rc4): bell + side curtain; hover = preview, click = keep open
 const NS={open:false,pinned:false,data:null,hoverT:null};
-const NACT={open_selection:["Open study selection",()=>{U.step="selection";go("uni")}],open_train:["Review results",()=>{U.step="train";go("uni")}],open_processing:["Open processing",()=>go("proc")],open_unified:["Open Unified",()=>go("uni")],open_activity:["Open Activity",()=>go("act")],open_add:["Open Add studies",()=>go("add")],open_settings:["Open Settings",()=>go("set")]};
+const NACT={open_selection:["Open study selection",()=>{U.step="selection";go("uni")}],open_train:["Review results",()=>{U.step="train";go("uni")}],open_processing:["Open processing",()=>go("proc")],open_unified:["Open the uScore prototype",()=>go("uni")],open_activity:["Open Activity",()=>go("act")],open_add:["Open Add studies",()=>go("add")],open_settings:["Open Settings",()=>go("set")]};
 async function nLoad(){try{const r=await api("/api/notif/list");NS.data=r;$("#bb").textContent=r.badge?String(r.badge):"";$("#bell").classList.toggle("urg",!!r.urgent);if(NS.open)nRender()}catch(e){}}
 function nLbl(i,t){return i.study?esc(t).split(esc(i.study)).join(sidH(i.study)):esc(t)}   // stored with the internal key; shown with the mode's identifier
 function nRender(){const r=NS.data;if(!r)return;const snz=r.settings.snooze_min||5;

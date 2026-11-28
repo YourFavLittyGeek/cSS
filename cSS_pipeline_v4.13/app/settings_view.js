@@ -1327,7 +1327,6 @@ async function renderSectionPipeline(el) {
     <div class="card" style="padding:18px">
       <b>Pipeline Scientific Verification Guards</b>
       <div class="row" style="margin-top:8px"><label><input type="checkbox" data-pf="duplicate_check" ${F.duplicate_check?'checked':''}> Check for duplicate examination series</label></div>
-      <div class="row"><label><input type="checkbox" data-pf="preflight" ${F.preflight?'checked':''}> Run pre-flight integrity check before processing</label></div>
       <div class="row"><label><input type="checkbox" data-pf="qc_snapshot" ${F.qc_snapshot?'checked':''}> Generate QC slice snapshot per study</label></div>
       <div class="row"><label><input type="checkbox" data-pf="version_stamp" ${F.version_stamp?'checked':''}> Embed cryptographic version stamp on outputs</label></div>
     </div>
@@ -1346,64 +1345,79 @@ async function renderSectionPipeline(el) {
   });
 }
 
+// 2026-11-28 (audit: placeholder sections and a fake "Operational / 0 / 0 / 0" card): every value below comes from the server; when it cannot
+// be read the card says "unavailable" - never a zero or "operational" that was not measured.
+const svUnavail = (what, why) => `<div class="kv"><div>${esc(what)}</div><div><span class="pill">unavailable</span> <span class="note">${esc(why || "")}</span></div></div>`;
 async function renderSectionArchive(el) {
+  let st = null; try { st = await api("/api/state"); } catch (e) {}
+  const P = (st && st.patients) || [];
+  const n = (k) => P.filter(p => p.pensieve === k).length;                       // pv_state: on_mac / in_pensieve / copied / moving / restoring / failed
   el.innerHTML = `
     <div class="card" style="padding:18px">
       <b>Archiving &amp; Research Preservation</b>
-      <p class="note">Archived studies are kept safe in cold storage and remain accessible for machine learning datasets.</p>
-    </div>
-  `;
+      <p class="note">Reviewed studies are moved to the Pensieve drive after the final review (verified SHA-256 copy; the Mac copy is removed only after verification) and brought back automatically when needed. Settings: <b>Pensieve · after the review</b>.</p>
+      ${st ? `<div class="kv"><div>Studies in the project</div><div><b>${P.length}</b></div>
+        <div>Archived on the Pensieve drive</div><div><b>${n("in_pensieve")}</b></div>
+        <div>Copied (kept on the Mac too)</div><div><b>${n("copied")}</b></div>
+        <div>Only on this Mac</div><div><b>${n("on_mac")}</b></div>
+        <div>Moving / restoring / failed</div><div><b>${n("moving")} / ${n("restoring")} / ${n("failed")}</b></div></div>` : svUnavail("Archive state", "the project state could not be read")}
+    </div>`;
 }
 
 async function renderSectionBackup(el) {
   el.innerHTML = `
     <div class="card" style="padding:18px">
-      <b>Pensieve Memory Backup &amp; Integrity</b>
-      <p class="note">Creates atomic SQLite snapshots of pensieve_core.db and audit ledgers.</p>
-      <div class="row">
-        <button class="b sm pri" id="sb-create">Create Instant Pensieve Backup</button>
-      </div>
-    </div>
-  `;
+      <b>Data Vault backup (verified)</b>
+      <p class="note">Copies the Data Vault's PENSIEVE folder, models, manifests and reports to <span class="mono">app_data/pensieve_snapshots</span> on this Mac. Every file is read back and compared by SHA-256; the backup gets its final name only when every file matched (backup_manifest.json lists them). MRI studies are not part of this backup.</p>
+      <div class="row"><button class="b sm pri" id="sb-create">Back up the Data Vault index now</button></div>
+    </div>`;
   $("#sb-create").onclick = async () => {
-    toast("Creating backup…");
+    toast("Creating the verified backup…");
     const r = await api("/api/percival/vault_backup", { destination: S.project.path + "/app_data/pensieve_snapshots" });
-    toast(r.ok ? "Backup complete" : esc(r.message), !r.ok);
+    toast(r.ok ? "Backup complete and verified" : esc(r.message || r.error || "backup failed"), !r.ok);
   };
 }
 
 async function renderSectionPensieve(el) {
-  const p = await api("/api/percival/pensieve");
+  let p = null, err = ""; try { p = await api("/api/percival/pensieve_index"); } catch (e) { err = e.message; }
+  const C = (p && p.counts) || {};
   el.innerHTML = `
     <div class="card" style="padding:18px">
-      <b>Pensieve Core Memory (Unified SQLite Memory)</b>
+      <b>PENSIEVE · research memory of this project</b>
+      <p class="note">A per-project index rebuilt from the study files: studies, candidates, expert calls, consensus, missed lesions, model predictions and corrections. Expert calls and AI predictions are kept in separate tables.</p>
+      ${!p ? svUnavail("Index", err) : !p.built ? `<div class="kv"><div>Index</div><div><span class="pill warn">not built yet</span></div></div><button class="b sm" id="sp-rebuild">Build the index now</button>` : `
       <div class="kv" style="margin-top:10px">
-        <div>Database Status</div><div><span class="pill ok">${esc(p.status || "Operational")}</span></div>
-        <div>Total Known Candidates</div><div><b>${p.total_candidates || 0}</b></div>
-        <div>Expert Confirmed Decisions</div><div><b>${p.expert_confirmed || 0}</b></div>
-        <div>Recorded Missed Lesions</div><div><b>${p.missed_lesions_count || 0}</b></div>
-      </div>
-    </div>
-  `;
+        <div>Index</div><div><span class="pill ${p.separation_ok ? "ok" : "bad"}">${p.separation_ok ? "built · expert and AI records separate" : "SEPARATION CHECK FAILED"}</span></div>
+        ${Object.keys(C).map(k => `<div>${esc(k.replace(/_/g, " "))}</div><div><b>${C[k]}</b></div>`).join("")}
+        <div>Digest</div><div class="mono">${esc(p.digest || "—")}</div>
+        <div>Last rebuilt</div><div>${esc((p.status || {}).at || (p.status || {}).built_at || "—")}</div>
+      </div><button class="b sm" id="sp-rebuild">Rebuild the index</button>`}
+      <p class="note">The former global "Pensieve Core Memory" database is retired: it mixed AI scores with candidate identities.</p>
+    </div>`;
+  const rb = $("#sp-rebuild"); if (rb) rb.onclick = async () => { rb.disabled = true; const r = await api("/api/percival/pensieve_rebuild", {}); toast(r && r.digest ? "PENSIEVE index rebuilt" : esc((r && r.error) || "not rebuilt"), !(r && r.digest)); renderSectionPensieve(el); };
 }
 
 async function renderSectionTraining(el) {
+  let R = null; try { R = await api("/api/percival/readiness"); } catch (e) {}
   el.innerHTML = `
     <div class="card" style="padding:18px">
-      <b>Training &amp; Dataset Management</b>
-      <p class="note">Direct route to the 14-section modular Training Center in PERCIVAL.</p>
-      <button class="b pri" onclick="go('intel')">Open Training Centre ▸</button>
-    </div>
-  `;
+      <b>Training readiness</b>
+      ${R && R.stages ? `<p class="note" style="margin:4px 0">${R.training_permitted ? '<span class="pill ok">training permitted</span>' : '<span class="pill bad">training blocked</span>'}</p>
+        <div class="kv">${R.stages.map(st => `<div>${st.ok ? "✓" : "✗"} ${esc(st.stage)}</div><div class="note">${esc(st.detail || "")}</div>`).join("")}</div>` : svUnavail("Readiness", "the PERCIVAL engine did not answer")}
+      <button class="b pri" style="margin-top:8px" onclick="go('intel')">Open PERCIVAL › Training Center ▸</button>
+    </div>`;
 }
 
 async function renderSectionModels(el) {
+  let st = null; try { st = await api("/api/percival/state"); } catch (e) {}
+  const V = (st && st.versions) || [];
   el.innerHTML = `
     <div class="card" style="padding:18px">
-      <b>Models &amp; Calibrated Weights</b>
-      <p class="note">Inspect the PERCIVAL components: ALBUS detection, NOX measurements, the LUMOS network and the CORE fixed-weight baseline.</p>
-    </div>
-  `;
+      <b>Model registry</b>
+      ${!st ? svUnavail("Registry", "the PERCIVAL engine did not answer") : !V.length ? `<p class="note">No model trained yet in this project.</p>` : `
+      <table><tr><th>Version</th><th>Status</th></tr>${V.slice().reverse().slice(0, 12).map(v => {const x = ((st.status || {})[v]) || {}; return `<tr><td class="mono">${esc(v)}</td><td>${esc(x.status || "—")}</td></tr>`}).join("")}</table>`}
+      <p class="note">Active model: <b>${esc((st && st.active && st.active.version) || "none")}</b>. A model scores studies only after you approve it in PERCIVAL › Model Center.</p>
+    </div>`;
 }
 
 async function renderSectionAdvanced(el) {
@@ -1462,13 +1476,15 @@ async function renderSectionHealth(el) {
 }
 
 async function renderSectionActivity(el) {
+  let E = null; try { E = await api("/api/percival/events"); } catch (e) {}
+  const R = (E && E.recent) || [];
   el.innerHTML = `
     <div class="card" style="padding:18px">
-      <b>Activity &amp; Operation History</b>
-      <p class="note">Audit logs and transactional history records.</p>
-      <button class="b" onclick="go('act')">Open Pipeline Activity Monitor ▸</button>
-    </div>
-  `;
+      <b>Activity &amp; provenance</b>
+      ${!E ? svUnavail("Event log", "the PERCIVAL engine did not answer") : `<p class="note">PERCIVAL event log: ${(E.verify || {}).events ?? "—"} events, hash chain ${((E.verify || {}).chain || {}).ok ? '<span class="ok">intact</span>' : '<span class="bad">BROKEN</span>'}.</p>
+      ${R.length ? `<table><tr><th>When</th><th>Event</th><th>By</th></tr>${R.slice().reverse().slice(0, 15).map(x => `<tr><td class="note">${esc(x.at || x.time || "")}</td><td>${esc(x.type || x.event || "")}</td><td class="note">${esc(x.by || "")}</td></tr>`).join("")}</table>` : `<p class="note">No events recorded yet.</p>`}`}
+      <button class="b" onclick="go('act')">Open Activity ▸</button>
+    </div>`;
 }
 
 

@@ -160,7 +160,7 @@ class TestLearning(unittest.TestCase):
         rows, marks, cm = self.marks(); dev = [r for r in rows if not r["test"]]
         seen = []; real = MT.LR.fit_tabular
         def spy(kind, X, y, g, w, cols, seed): seen.append((len(X), set(map(str, g)))); return real(kind, X, y, g, w, cols, seed)
-        F = MT.folds(np.array([r["patient"] for r in dev]), 5, 0)
+        F = MT.folds(np.array([r["patient"] for r in dev]), 5, 0, np.array([r["y"] for r in dev], float))   # 2026-11-28: stratified folds
         with mock.patch.object(MT.LR, "fit_tabular", side_effect=spy):
             MT.component_oof(dev, k=5, seed=0, cnn_epochs=0, image_kinds=["pixel_logistic"], char_kinds=["logistic"], char_extra=cm, compare_marks=False)
         for (n, pats), (tr, te) in zip(seen[:len(F)], F):

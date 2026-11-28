@@ -16,7 +16,7 @@ import nibabel as nib
 import pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
-VERSION = "albus-redetect/1.0"
+VERSION = "albus-redetect/1.1"           # 1.1 (2026-11-28): marks grown through the slices of the drawn footprint; current fate recorded
 MIN_VOX = 5                                         # the detector drops objects of < 5 voxels (gate G0) even with soft gates
 
 
@@ -57,20 +57,22 @@ def build_objects(base, sid, marks):
     lab = np.zeros(A.shape[:3], np.int16); info, skipped = {}, {}
     for key, mk in marks.items():
         try:
-            Rc = PT._mark_region(mk, can.shape); ijk = np.argwhere(Rc)
-            nat = np.round((c2n[:3, :3] @ ijk.T).T + c2n[:3, 3]).astype(int)
-            nat = nat[np.all((nat >= 0) & (nat < np.array(A.shape[:3])), axis=1)]
-            Rn = np.zeros(A.shape[:3], bool); Rn[tuple(nat.T)] = True
+            # 2026-11-28: drawn region = enclosed area (filled outline) on its slice +-1; the lesion may extend through the slices inside the
+            # drawn footprint (prism) - it is no longer cut to 3 slices; the current fate of the enclosed area is recorded (fate_now).
+            Rc, Pc = PT.mark_prism(mk, can.shape, can.header.get_zooms()[:3])
+            Rn = PT.to_native(Rc, c2n, A.shape); Pn = PT.to_native(Pc, c2n, A.shape)
+            fate_now = PT.mark_fate_now(base, sid, Rn)                   # recorded; learning leaves out marks on a shown candidate
             obj, src = None, ""
             for rel, what in (("review/{sid}_excluded.nii.gz", "ALBUS's own object, excluded by a rule"),
                               ("work/{sid}_dropped.nii.gz", "ALBUS's own object, below a generation gate")):
                 o = _overlap_object(base, sid, rel, Rn)
                 if o is not None and o.sum() >= MIN_VOX: obj, src = o, what; break
             if obj is None:
-                obj, how = PT.mark_object(A, brain, Rn, dark=dark, min_vox=MIN_VOX); src = "new object: " + how
+                obj, how = PT.mark_object(A, brain, Rn, dark=dark, min_vox=MIN_VOX, prism_native=Pn); src = "new object: " + how
             obj = obj & (lab == 0)                                        # two marks on one lesion: the first keeps the voxels
             if obj.sum() < MIN_VOX: skipped[key] = "the same lesion as another mark"; continue
-            oid = len(info) + 1; lab[obj] = oid; info[key] = dict(obj_id=oid, source=src, n_vox=int(obj.sum()))
+            oid = len(info) + 1; lab[obj] = oid
+            info[key] = dict(obj_id=oid, source=src, n_vox=int(obj.sum()), n_slices=int(len(np.unique(np.argwhere(obj)[:, 2]))), fate_now=fate_now)
         except (ValueError, IndexError) as e: skipped[key] = str(e)[:120]
     return lab, info, skipped, swi.affine
 
@@ -162,7 +164,8 @@ def fate_report(base, studies, results):
         except Exception: continue
         R = (results.get(sid) or {}).get("marks") or {}
         for _, m in d.iterrows():
-            k = f"missed_{m['missed_id']}"; r = R.get(k) or {}; fate = str(m.get("detector_fate", ""))
+            k = f"missed_{m['missed_id']}"; r = R.get(k) or {}
+            fate = str(r.get("fate_now") or m.get("detector_fate", ""))                # 2026-11-28: current fate of the enclosed area first
             if fate.startswith("overlaps shown candidate"): cat, what = "shown", "already a candidate"
             elif fate.startswith("excluded object"): cat, what = "excluded", (fate.split(":", 1)[1].strip() or "rule") if ":" in fate else "rule"
             elif fate.startswith("below a generation gate"): cat, what = "gate", r.get("gate") or "generation gate"

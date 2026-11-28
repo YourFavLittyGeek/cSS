@@ -102,7 +102,7 @@ def nested_crossfit(dev, k_outer=K_OUTER, k_inner=K_INNER, seed=0, cnn_epochs=30
     """-> report dict (JSON-serialisable) and arrays dict (held-out predictions, for tests)"""
     say = progress or (lambda *a: None)
     y = np.array([r["y"] for r in dev], float); g = np.array([str(r["patient"]) for r in dev]); w = MT.patient_weights(dev)
-    F = MT.folds(g, k_outer, seed + 101)
+    F = MT.folds(g, k_outer, seed + 101, y)                              # 2026-11-28: stratified by patient cSS status
     Zout = {c: np.full(len(dev), np.nan) for c in MT.COMPONENTS}
     lg_out = np.full(len(dev), np.nan); p_out = np.full(len(dev), np.nan); band = np.array([None] * len(dev), dtype=object)
     abl_out = {name: np.full(len(dev), np.nan) for name in ABLATIONS} if ablations else {}
@@ -117,12 +117,12 @@ def nested_crossfit(dev, k_outer=K_OUTER, k_inner=K_INNER, seed=0, cnn_epochs=30
         sub = lambda m, p: say(f"nested fold {i + 1}/{len(F)}: {m}", (i + p) / len(F))
         # step 2: the whole development procedure on the outer-training patients only
         Zin, fam = MT.component_oof(R, k=k_inner, seed=seed + 1000 * (i + 1), cnn_epochs=cnn_epochs, progress=lambda m, p: sub(m, 0.7 * p), char_cols=char_cols, image_extra=image_extra, compare_marks=False,
-                                    char_extra=char_extra, **(kinds or {})); fam.pop("_mark_oof", None)
+                                    char_extra=char_extra, **(kinds or {})); fam.pop("_mark_oof", None); fid_in = fam.pop("_fid", None)
         ytr, gtr, wtr = y[tr], g[tr], w[tr]
         C = MT.Components(fam["char"]["chosen"], fam["image"]["chosen"], char_cols=char_cols).fit(R, seed, cnn_epochs=cnn_epochs, image_extra=image_extra, char_extra=char_extra)   # marks of outer-training patients only
-        D, oofs_in = MT.discover(Zin, ytr, gtr, wtr, k=k_inner, seed=seed + 1000 * (i + 1))
+        D, oofs_in, mfid = MT.discover(Zin, ytr, gtr, wtr, k=k_inner, seed=seed + 1000 * (i + 1), fid=fid_in)
         chosen = D["chosen"]; Mm = MT.Meta(chosen).fit(Zin, ytr, gtr, wtr)
-        ca_, cb_, _ = MT.monotone_irls(oofs_in[chosen], ytr, MT.CAL_LAMBDA); cal = dict(a=ca_, b=cb_)     # never reverses the order
+        cv_ = MT.V.calibrate(oofs_in[chosen], ytr, mfid, None, MT.CAL_LAMBDA); cal = dict(a=cv_["a"], b=cv_["b"], clamped=cv_["clamped"])   # within-fold slope, never reversed
         p_in = sigmoid(cal["a"] + cal["b"] * oofs_in[chosen]); th = MT.thresholds(ytr, p_in)
         sub("held-out scoring", 0.9)
         # step 3: apply once to the held-out patients - nothing is refitted here
@@ -138,11 +138,13 @@ def nested_crossfit(dev, k_outer=K_OUTER, k_inner=K_INNER, seed=0, cnn_epochs=30
         prov.append(dict(fold=i, train_patients=len(set(gtr)), heldout_patients=sorted(set(g[te])), n_train=int(len(tr)), n_heldout=int(len(te)),
                          train_hash=hashlib.sha256(json.dumps(sorted(set(gtr))).encode()).hexdigest()[:12],
                          families=dict(char=fam["char"]["chosen"], image=fam["image"]["chosen"]),
-                         meta=chosen, calibration=cal, thresholds=dict(red_below=th["red_below"], green_from=th["green_from"]),
+                         meta=chosen, informative=bool(D.get("informative")), calibration=cal, thresholds=dict(red_below=th["red_below"], green_from=th["green_from"]),
                          fitted_on="outer-training patients only (families, penalties, imputation, scaling, meta-model, calibration, thresholds)"))
     fin = np.isfinite(p_out)
     sup = _support(y[fin], g[fin], used)
     pipe = MT.metrics(y[fin], p_out[fin], g[fin]) if fin.sum() >= 5 else dict(n=int(fin.sum()))
+    OFID = MT.V.fold_ids(len(dev), F)                                    # 2026-11-28: AUC within each outer fold (pooled AUC mixes 5 models)
+    if fin.sum() >= 5: pipe["fold_auc"] = MT.V.fold_auc(y[fin], p_out[fin], OFID[fin])
     if fin.sum() >= 5 and len(np.unique(y[fin])) == 2:
         yy, bb = y[fin], band[fin]
         red, green = bb == "red", bb == "green"
@@ -156,11 +158,15 @@ def nested_crossfit(dev, k_outer=K_OUTER, k_inner=K_INNER, seed=0, cnn_epochs=30
         pipe["calibration_curve"] = IN.reliability(yy, p_out[fin])
     comps = {c: (MT.metrics(y[np.isfinite(Zout[c])], sigmoid(Zout[c][np.isfinite(Zout[c])]), g[np.isfinite(Zout[c])])
                  if np.isfinite(Zout[c]).sum() >= 5 else dict(n=int(np.isfinite(Zout[c]).sum()))) for c in MT.COMPONENTS}
+    for c in MT.COMPONENTS:
+        mc = np.isfinite(Zout[c])
+        if mc.sum() >= 5: comps[c]["fold_auc"] = MT.V.fold_auc(y[mc], Zout[c][mc], OFID[mc])
     abl = {}
     for name, v in abl_out.items():
         m = np.isfinite(v)
         e = MT.metrics(y[m], sigmoid(v[m]), g[m]) if m.sum() >= 5 else dict(n=int(m.sum()))
         e["inputs"] = ABLATIONS[name]; e["vs_percival"] = _paired_auc_delta(y, lg_out, v, g, seed=seed)
+        if m.sum() >= 5: e["fold_auc"] = MT.V.fold_auc(y[m], v[m], OFID[m])
         abl[name] = e
     rep = dict(engine=ENGINE, k_outer=k_outer, k_inner=k_inner, seed=seed, support=sup, stability_warnings=_stability(sup),
                percival=pipe, components=comps, ablation=abl, folds=prov,

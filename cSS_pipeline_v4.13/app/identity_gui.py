@@ -62,6 +62,9 @@ def state(SET, PAT):
     I = ID(); ex = [ident(p["code"], SET) for p in PAT]
     return dict(mode=mode(SET), vault_exists=I.vault_exists(), unlocked=I.unlocked(), revealing=reveal(SET),
                 app_lock_enabled=SET.get("app_lock_enabled", False), n_studies=len(I.R["studies"]),
+                encryption=("passphrase" if I.vault_exists() else "device_key" if os.path.exists(I.vlocal_path) else
+                            "none (plaintext)" if os.path.exists(I.vjson_path) else "not created yet"),
+                vault_problem=I.problem, migrated=getattr(I, "migrated", None),
                 n_patients=len(I.R["patients"]), accession_missing=sum(1 for v in ex if v.get("accession_missing")),
                 template_columns=MF.COLUMNS)
 
@@ -101,6 +104,10 @@ def vault(op, d, SET, names=None, verify_dest=None):
         ok, why = verify_dest(d.get("dest", "")) if verify_dest else (True, "")
         if not ok: return dict(ok=False, error=f"backup refused: {why}")
         return dict(ok=True, path=I.backup_vault(os.path.realpath(os.path.expanduser(d["dest"]))), note="the backup stays encrypted; keep the passphrase separately")
+    if op == "recovery_key":                       # 2026-11-28: shown on request only, typed confirmation, never logged
+        if str(d.get("confirm", "")) != "SHOW RECOVERY KEY": return dict(ok=False, error="type SHOW RECOVERY KEY to show it")
+        return dict(ok=True, **I.recovery_key(), note="write it down or keep it in a password manager - OFFLINE; it opens the identity vault on any Mac")
+    if op == "restore_recovery_key": return dict(ok=True, **I.restore_recovery_key(str(d.get("recovery_key", ""))))
     if op == "validate": return I.validate_vault_file(d["path"], str(d.get("passphrase", "")))
     if op == "restore": return dict(ok=True, **I.restore_vault(d["path"], str(d.get("passphrase", ""))))
     raise ValueError(f"unknown vault operation {op}")

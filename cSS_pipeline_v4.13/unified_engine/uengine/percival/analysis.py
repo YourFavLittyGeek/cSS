@@ -67,12 +67,16 @@ def learning_curve(Z, y, g, kind, fractions=(0.25, 0.5, 0.75, 1.0), reps=5, seed
             sel = set(r.choice(u, k, replace=False)) if f < 1.0 else set(u); m = np.isin(g, list(sel))
             if len(np.unique(y[m])) < 2: continue
             Zs = {c: np.asarray(v)[m] for c, v in Z.items()}; ys, gs = y[m], g[m]; oof = np.full(m.sum(), np.nan)
-            for tr, te in folds(gs, 5, seed + rep):
+            Fl = folds(gs, 5, seed + rep, ys); fid = np.full(m.sum(), -1)                  # 2026-11-28: stratified, AUC within folds
+            for i_, (_, te_) in enumerate(Fl): fid[te_] = i_
+            for tr, te in Fl:
                 if len(np.unique(ys[tr])) < 2: continue
                 try: oof[te] = Meta(kind).fit({c: v[tr] for c, v in Zs.items()}, ys[tr], gs[tr]).logit({c: v[te] for c, v in Zs.items()})
                 except Exception: pass
             fin = np.isfinite(oof)
-            if fin.sum() >= 5 and len(np.unique(ys[fin])) == 2: vals.append(auc(ys[fin], sigmoid(oof[fin])))
+            if fin.sum() >= 5 and len(np.unique(ys[fin])) == 2:
+                from .validation import fold_auc
+                vals.append(fold_auc(ys[fin], oof[fin], fid[fin]))
         vals = [v for v in vals if v is not None and np.isfinite(v)]
         pts.append(dict(patients=int(k), auc_mean=float(np.mean(vals)) if vals else None, auc_sd=float(np.std(vals)) if len(vals) > 1 else None, reps=len(vals)))
     a = [p_["auc_mean"] for p_ in pts if p_["auc_mean"] is not None]

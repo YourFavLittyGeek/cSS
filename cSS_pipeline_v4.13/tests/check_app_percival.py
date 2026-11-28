@@ -39,7 +39,7 @@ shutil.copytree(os.path.join(ROOT, "scripts"), os.path.join(B, "scripts"), ignor
 def free_port():
     s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close(); return p
 port = free_port(); U = f"http://127.0.0.1:{port}"
-env = dict(os.environ, HOME=HOME, CSS_BASE=B, CSS_EXPERIMENTAL="1", CSS_WATCH_S="2", CSS_LEARN_MIN="8,40,6", CSS_PERCIVAL_EPOCHS="12",
+env = dict(os.environ, HOME=HOME, CSS_BASE=B, CSS_EXPERIMENTAL="1", CSS_WATCH_S="2", CSS_TRAIN_GATE="off",   # synthetic SYN studies only (gate override is refused otherwise) CSS_LEARN_MIN="8,40,6", CSS_PERCIVAL_EPOCHS="12",
            PYTHONPATH=os.pathsep.join([os.path.join(ROOT, "app", "guard")] + ([os.environ["PYTHONPATH"]] if os.environ.get("PYTHONPATH") else [])),
            CSS_PROTECTED_PATHS=":".join([os.path.expanduser("~/css_project"), os.path.expanduser("~/cSS_experimental"), os.path.expanduser("~/Projects/cSS")]))
 app = subprocess.Popen([PY, os.path.join(ROOT, "app", "css_app.py"), "--port", str(port), "--no-window"], env=env, stdout=open(os.path.join(T, "app.log"), "w"), stderr=subprocess.STDOUT)
@@ -96,7 +96,7 @@ try:
         st = json.load(open(os.path.join(B, "percival", "STORE.json")))
         check("v5.24 Percival store in the project folder (not in the engine code folder), schema recorded",
               st.get("schema") == 4 and os.path.exists(os.path.join(B, "percival", "registry", "v001", "model.json")) and not os.path.exists(os.path.join(B, "unified_engine", "percival", "registry")), str(st))
-        check("meta-model chosen by the documented rule", L["discovery"]["chosen"] in L["discovery"]["results"] and "1-SE" in L["discovery"]["rule"], L["discovery"]["chosen"])
+        check("meta-model chosen by the documented rule", L["discovery"]["chosen"] in L["discovery"]["results"] and "PAIRED standard error" in L["discovery"]["rule"], L["discovery"]["chosen"])
         acc = L["acceptance"]
         check("v5.24 never made active automatically: v001 registered as candidate / experimental, waiting for approval",
               not s["active"] and s["status"]["v001"]["status"] == ("candidate" if acc["passed"] else "experimental"), json.dumps(s.get("status")))

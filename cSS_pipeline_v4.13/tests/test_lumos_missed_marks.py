@@ -109,7 +109,7 @@ class TestTraining(unittest.TestCase):
         rows, marks = rows_and_marks(); dev = [r for r in rows if not r["test"]]
         seen = []; real = MT._fit_image
         def spy(kind, M, y, g, seed, epochs): seen.append((len(M), set(map(str, g)))); return real(kind, M, y, g, seed, epochs)
-        F = MT.folds(np.array([r["patient"] for r in dev]), 5, 0)
+        F = MT.folds(np.array([r["patient"] for r in dev]), 5, 0, np.array([r["y"] for r in dev], float))   # 2026-11-28: stratified folds
         with mock.patch.object(MT, "_fit_image", side_effect=spy):
             Z, rep = MT.component_oof(dev, k=5, seed=0, cnn_epochs=0, image_kinds=["pixel_logistic"], char_kinds=["logistic"], image_extra=marks)
         self.assertEqual(len(Z["image"]), len(dev))                                        # predictions only for candidates

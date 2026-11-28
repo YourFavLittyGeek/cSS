@@ -159,8 +159,12 @@ class TestNeverReversed(unittest.TestCase):
     def test_clamped_calibration_blocks_acceptance(self):
         from uengine.percival import meta as MT
         src = open(os.path.join(ROOT, "unified_engine", "uengine", "percival", "meta.py")).read()
-        self.assertIn("monotone_irls(meta_oof, y, CAL_LAMBDA)", src)
-        self.assertIn("MT.monotone_irls(", open(os.path.join(ROOT, "unified_engine", "uengine", "percival", "nested.py")).read())
+        self.assertIn("V.calibrate(meta_oof, y, MFID", src)                                   # 2026-11-28: within-fold calibration
+        self.assertIn("MT.V.calibrate(", open(os.path.join(ROOT, "unified_engine", "uengine", "percival", "nested.py")).read())
+        import numpy as np
+        from uengine.percival import validation as V
+        rng = np.random.default_rng(3); z = rng.normal(size=400); y = (rng.random(400) < 1 / (1 + np.exp(2 * z))).astype(float)
+        c = V.calibrate(z, y, np.arange(400) % 4); self.assertTrue(c["clamped"]); self.assertGreater(c["b"], 0)    # inverse data: never reversed
         r = MT.acceptance(dict(calibration=dict(a=0, b=1e-3, clamped=True), test={}, data={}), None)
         self.assertTrue(any("negative slope" in x for x in r["reasons"]))
 

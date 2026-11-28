@@ -770,11 +770,12 @@ class FileManager:
         try:
             if os.path.islink(link):
                 os.remove(link)                                   # a link is removed, never what it points to
-            elif os.path.isdir(target):
-                shutil.rmtree(target)
-            else:
-                os.remove(target)
-            return {"ok": True, "deleted_path": link}
+                return {"ok": True, "deleted_path": link}
+            # 2026-11-28 (user's rule: prefer the Trash over deleting): the item goes to the Trash of this user - recoverable until emptied
+            trash = os.path.join(os.path.expanduser("~"), ".Trash"); os.makedirs(trash, exist_ok=True)
+            stamp = time.strftime("%Y%m%d_%H%M%S"); dst = os.path.join(trash, f"{os.path.basename(target)} (Percival {stamp})")
+            shutil.move(target, dst)
+            return {"ok": True, "deleted_path": link, "moved_to_trash": dst}
         except Exception as e:
             return {"ok": False, "error": f"Delete failed: {str(e)}"}
 

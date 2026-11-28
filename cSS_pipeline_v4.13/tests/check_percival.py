@@ -56,7 +56,8 @@ if M:
     check("Image ML read the MRI patches (image component better than chance)", cm["image"]["auc"] > 0.6 and d["with_image"] > 50, f"{cm['image']['auc']:.3f}")
     D = M["discovery"]
     check("meta-model discovery: every candidate evaluated (boosting skipped with its reason when the cohort is small)", set(D["results"]) == set(MT.SIMPLICITY) and (D["results"]["boosted"].get("auc") is not None or "skipped" in D["results"]["boosted"]), json.dumps({k: (v.get("auc") if isinstance(v, dict) else v) for k, v in D["results"].items()})[:300])
-    check("selection by the documented 1-SE rule", D["chosen"] in MT.SIMPLICITY and "1-SE" in D["rule"], D["chosen"])
+    check("selection by the documented rule (2026-11-28: fold-stratified AUC, simplest within one PAIRED SE; informative flag)",
+          D["chosen"] in MT.SIMPLICITY and "PAIRED standard error" in D["rule"] and isinstance(D.get("informative"), bool), D["chosen"])
     check("no meta-model has a Fusion input (PERCIVAL is the only combiner: no double counting)", all("fusion" not in " ".join(MT.meta_columns(k)) for k in MT.SIMPLICITY))
     chosen_auc = D["results"][D["chosen"]]["auc"]; math_auc = D["results"]["math_only"]["auc"]
     check("the chosen assessment beats MATH alone (development CV)", chosen_auc > math_auc + 0.03, f"{chosen_auc:.3f} vs {math_auc:.3f}")

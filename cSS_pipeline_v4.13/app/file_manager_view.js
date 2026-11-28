@@ -57,6 +57,7 @@ async function renderFileManager(v) {
       });
       data = await api("/api/files/browse?" + q.toString());
       FM.items = (data && data.ok && data.items) ? data.items : [];
+      FM.currentPath = (data && data.ok && data.current_path) || "";
     } catch (e) {
       data = { ok: false, error: e.message };
       FM.items = [];
@@ -452,6 +453,39 @@ function bindFileManagerEvents(v, data) {
       else toast(`Error: ${res.error}`, true);
     };
   }
+
+  // 2026-11-28 (audit: the file buttons had no handlers): every action calls the guarded backend (/api/files/*: safety policy, transfer
+  // guard, SHA-256 verified copies); the server refuses what is protected and the reason is shown. Delete moves to the Trash.
+  const sel = () => [...v.querySelectorAll(".fm-chk:checked")].map(c => c.dataset.path);
+  const selCount = () => {const n = sel().length, el = $("#fm-sel-count"); if (el) el.textContent = `${n} selected`;
+    ["fm-copy","fm-move","fm-archive","fm-del"].forEach(id => {const b = $("#"+id); if (b) b.disabled = !n});
+    const r = $("#fm-restore"); if (r) r.disabled = !(n && FM.currentCategory && /vault|pensieve|archive/i.test(FM.currentCategory))};
+  v.querySelectorAll(".fm-chk").forEach(c => c.onchange = selCount);
+  const all = $("#fm-sel-all"); if (all) all.onchange = () => {v.querySelectorAll(".fm-chk").forEach(c => c.checked = all.checked); selCount()};
+  selCount();
+  const report = async (label, paths, call) => {let ok = 0, bad = [];
+    for (const p of paths) {const r = await call(p); if (r && r.ok) ok++; else bad.push(`${p.split("/").pop()}: ${(r && (r.error || r.message)) || "failed"}`)}
+    toast(`${label}: ${ok} done${bad.length ? ` · ${bad.length} refused - ${bad.slice(0, 3).join("; ")}` : ""}`, bad.length > 0); await renderFileManager(v)};
+  const askDest = (what) => prompt(`${what} - destination folder (full path inside this project or the Data Vault):`, FM.currentPath || "");
+  const mk = $("#fm-mkdir"); if (mk) mk.onclick = async () => {const n = prompt("New folder name:"); if (!n) return;
+    const r = await api("/api/files/mkdir", {parent_dir: FM.currentPath, dir_name: n}); toast(r.ok ? `Folder '${esc(n)}' created` : esc(r.error || "refused"), !r.ok); if (r.ok) renderFileManager(v)};
+  const cp = $("#fm-copy"); if (cp) cp.onclick = async () => {const d = askDest("Copy"); if (!d) return;
+    await report("Copy (verified)", sel(), p => api("/api/files/copy", {src: p, dst_dir: d, conflict_mode: "keep_both"}))};
+  const mv = $("#fm-move"); if (mv) mv.onclick = async () => {const d = askDest("Move"); if (!d) return;
+    if (!confirm(`Move ${sel().length} item(s) to\n${d}?\n\nEach copy is verified before the original is removed.`)) return;
+    await report("Move (verified)", sel(), p => api("/api/files/move", {src: p, dst_dir: d, conflict_mode: "keep_both"}))};
+  const ar = $("#fm-archive"); if (ar) ar.onclick = async () => {if (!confirm(`Archive ${sel().length} item(s) to the Data Vault (verified copy; the originals stay)?`)) return;
+    await report("Archive to the Data Vault", sel(), p => api("/api/files/archive", {src: p, vault_category: "archive"}))};
+  const rs = $("#fm-restore"); if (rs) rs.onclick = async () => {const d = askDest("Restore to the Mac"); if (!d) return;
+    await report("Restore (verified)", sel(), p => api("/api/files/restore", {vault_path: p, dst_dir: d}))};
+  const del = async (paths) => {if (!paths.length) return; const t = prompt(`Move ${paths.length} item(s) to the Trash?\n${paths.slice(0, 5).map(p => p.split("/").pop()).join("\n")}\n\nProtected files (MRI, reviews, databases, identities) are refused by the app.\nType TRASH to confirm:`);
+    if (t !== "TRASH") return; await report("Moved to the Trash", paths, p => api("/api/files/delete", {path: p, confirm: true}))};
+  const db = $("#fm-del"); if (db) db.onclick = () => del(sel());
+  v.querySelectorAll("[data-del]").forEach(b => b.onclick = () => del([b.dataset.del]));
+  v.querySelectorAll("[data-rename]").forEach(b => b.onclick = async () => {const n = prompt("New name:", b.dataset.name); if (!n || n === b.dataset.name) return;
+    const r = await api("/api/files/rename", {path: b.dataset.rename, new_name: n}); toast(r.ok ? "Renamed" : esc(r.error || "refused"), !r.ok); if (r.ok) renderFileManager(v)});
+  v.querySelectorAll("[data-verify]").forEach(b => b.onclick = async () => {b.disabled = true; const r = await api("/api/files/verify", {path: b.dataset.verify}); b.disabled = false;
+    toast(r.ok ? `SHA-256 ${r.sha256.slice(0, 16)}… (${esc(b.dataset.verify.split("/").pop())})` : esc(r.error || "refused"), !r.ok)});
 
   // Study actions (Stage, Archive, Clean)
   if (typeof pvBind === "function") pvBind(v, () => filesView(v));

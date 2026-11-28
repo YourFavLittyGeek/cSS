@@ -51,7 +51,9 @@ class Identity:
         self.B = base
         self.dir = os.path.join(base, "app_data", "identity")
         self.vpath = os.path.join(base, "private", "identity_vault.enc")
-        self.vjson_path = os.path.join(base, "private", "identity_vault.json")
+        self.vjson_path = os.path.join(base, "private", "identity_vault.json")            # legacy PLAINTEXT store (migrated, see _init_vault_storage)
+        self.vlocal_path = os.path.join(base, "private", "identity_vault.local.enc")      # 2026-11-28 default: encrypted with the device key
+        self.problem = None
         os.makedirs(self.dir, exist_ok=True)
         os.makedirs(os.path.dirname(self.vpath), exist_ok=True)
         self.rpath = os.path.join(self.dir, "registry.json")
@@ -72,28 +74,118 @@ class Identity:
         self._init_vault_storage()
 
     def _init_vault_storage(self):
-        """Initialize vault storage. If app lock is disabled, load direct local identity storage."""
-        if not self.app_lock_enabled:
-            # Default mode: No mandatory password or encryption layer
-            if os.path.exists(self.vjson_path):
-                try:
-                    with open(self.vjson_path) as f:
-                        self._vault = json.load(f)
-                except Exception:
-                    self._vault = dict(created=_now(), patients={}, studies={}, history=[])
-            else:
-                self._vault = dict(created=_now(), patients={}, studies={}, history=[])
-            self._key = b"__local_unlocked_default__"
-        else:
-            self._key = None
-            self._vault = None
+        """Default mode (no passphrase). 2026-11-28 (audit: plaintext identity vault): the vault is ENCRYPTED AT REST with a random device key
+        kept in the macOS Keychain (keystore.py) - private/identity_vault.local.enc. An existing plaintext private/identity_vault.json is
+        migrated once: encrypted, decrypted again and compared, and only then moved to the Trash. A vault file that exists but cannot be read
+        is NEVER replaced by an empty vault (the old code did exactly that): self.problem is set and every identity read/write refuses."""
+        if self.app_lock_enabled:
+            self._key = None; self._vault = None; return
+        self._key = b"__local_unlocked_default__"; self.problem = None
+        if os.path.exists(self.vlocal_path):
+            try: self._vault = self._read_local()
+            except Exception as e:
+                self._vault = None; self.problem = f"the encrypted identity vault cannot be opened on this Mac ({type(e).__name__}: {e}) - use the recovery key"
+            return
+        if os.path.exists(self.vjson_path):
+            try:
+                with open(self.vjson_path, "rb") as f: raw = f.read()
+                if not raw.strip(): raise ValueError("empty file")
+                self._vault = json.loads(raw)
+            except Exception as e:
+                self._vault = None; self.problem = f"private/identity_vault.json cannot be read ({type(e).__name__}) - it was NOT replaced; repair or restore it"
+                return
+            self._migrate_plain()
+            return
+        self._vault = dict(created=_now(), patients={}, studies={}, history=[])
+
+    # ---- device-key encryption (default mode)
+    def _local_header(self):
+        with open(self.vlocal_path, "rb") as f: return json.loads(f.read())
+
+    def _read_local(self):
+        import keystore as KS
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        h = self._local_header()
+        if h.get("schema") != VAULT_SCHEMA or (h.get("kdf") or {}).get("name") != "device_key": raise IdentityError("not a device-key identity vault")
+        st = KS.store()
+        if st is None: raise IdentityError("no key store on this computer")
+        key = st.get(h["kdf"]["key_id"])
+        if key is None: raise VaultLocked("the device key is not in this computer's key store")
+        return json.loads(AESGCM(key).decrypt(base64.b64decode(h["nonce"]), base64.b64decode(h["data"]), VAULT_SCHEMA.encode()))
+
+    def _device_key(self, create=True):
+        import keystore as KS
+        st = KS.store()
+        if st is None: raise IdentityError("no key store on this computer - the identity vault cannot be encrypted without a passphrase; enable the app lock")
+        if os.path.exists(self.vlocal_path):
+            kid = self._local_header()["kdf"]["key_id"]; key = st.get(kid)
+            if key is None: raise VaultLocked("the device key is not in this computer's key store")
+            return kid, key
+        if not create: raise IdentityError("no device key yet")
+        kid = "pcv-" + secrets.token_hex(16); key = secrets.token_bytes(32); st.put(kid, key)
+        if st.get(kid) != key: raise IdentityError("the key store did not return the stored key - nothing was encrypted")
+        return kid, key
+
+    def _blob_local(self, obj, kid, key):
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        nonce = secrets.token_bytes(12); ct = AESGCM(key).encrypt(nonce, json.dumps(obj).encode(), VAULT_SCHEMA.encode())
+        return json.dumps(dict(schema=VAULT_SCHEMA, kdf=dict(name="device_key", key_id=kid, store=getattr(__import__("keystore").store(), "kind", "")),
+                               cipher="AES-256-GCM", nonce=base64.b64encode(nonce).decode(), data=base64.b64encode(ct).decode())).encode()
+
+    def _write_local(self, obj):
+        kid, key = self._device_key()
+        if os.path.exists(self.vlocal_path):                         # versioned (encrypted) backup before every write
+            bd = os.path.join(os.path.dirname(self.vpath), "vault_backups"); os.makedirs(bd, exist_ok=True)
+            shutil.copy2(self.vlocal_path, os.path.join(bd, f"identity_vault.local.{datetime.datetime.now():%Y%m%d_%H%M%S_%f}.enc"))
+            for f in sorted(x for x in os.listdir(bd) if x.startswith("identity_vault.local."))[:-MAX_VAULT_BACKUPS]: os.remove(os.path.join(bd, f))
+        tmp = f"{self.vlocal_path}.tmp.{os.getpid()}"
+        with open(tmp, "wb") as f: f.write(self._blob_local(obj, kid, key)); f.flush(); os.fsync(f.fileno())
+        os.chmod(tmp, 0o600); os.replace(tmp, self.vlocal_path)
+
+    def _migrate_plain(self):
+        """plaintext -> encrypted, verified before the plaintext leaves the project; on any failure the plaintext stays and self.problem says why"""
+        try:
+            self._write_local(self._vault)
+            if self._read_local() != self._vault: raise IdentityError("verification failed: the decrypted vault differs")
+        except Exception as e:
+            if os.path.exists(self.vlocal_path):                      # created by this attempt (migration only runs without one)
+                try: os.remove(self.vlocal_path)
+                except OSError: pass
+            self.problem = f"identity vault NOT encrypted yet ({type(e).__name__}: {e}) - the plaintext file was kept"; return
+        trash = os.path.join(os.path.expanduser("~"), ".Trash"); os.makedirs(trash, exist_ok=True)
+        dst = os.path.join(trash, f"identity_vault_plaintext_{datetime.datetime.now():%Y%m%d_%H%M%S}.json")
+        shutil.move(self.vjson_path, dst)
+        self.migrated = dict(at=_now(), plaintext_moved_to=dst, note="empty the Trash to remove the old unencrypted copy")
+        self.R.setdefault("history", []).append(dict(at=_now(), op="identity_vault_encrypted", detail="plaintext vault encrypted with the device key (Keychain); verified; plaintext moved to the Trash"))
+        self._save_registry()
+
+    def recovery_key(self):
+        """the device key as text, to keep OFFLINE (paper / password manager): opens the vault on another Mac"""
+        if self.app_lock_enabled: raise IdentityError("the vault is protected by your passphrase - no device key")
+        kid, key = self._device_key(create=False)
+        return dict(key_id=kid, recovery_key=base64.b32encode(key).decode().rstrip("="))
+
+    def restore_recovery_key(self, text):
+        import keystore as KS
+        if not os.path.exists(self.vlocal_path): raise IdentityError("no encrypted identity vault in this project")
+        k = re.sub(r"[^A-Z2-7]", "", str(text or "").upper()); k += "=" * (-len(k) % 8)
+        try: key = base64.b32decode(k)
+        except Exception: raise IdentityError("not a recovery key")
+        if len(key) != 32: raise IdentityError("not a recovery key")
+        kid = self._local_header()["kdf"]["key_id"]; st = KS.store()
+        if st is None: raise IdentityError("no key store on this computer")
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        from cryptography.exceptions import InvalidTag
+        h = self._local_header()
+        try: AESGCM(key).decrypt(base64.b64decode(h["nonce"]), base64.b64decode(h["data"]), VAULT_SCHEMA.encode())
+        except InvalidTag: raise VaultLocked("this recovery key does not open the vault")
+        st.put(kid, key); self._init_vault_storage(); return dict(ok=self.problem is None, problem=self.problem)
 
     def _write_plain_vault(self):
-        tmp = self.vjson_path + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(self._vault, f, indent=1)
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, self.vjson_path)
+        """default-mode write: ENCRYPTED with the device key (name kept for the callers). Without any key store (not macOS) the vault
+        cannot be written unencrypted - the app lock (passphrase) must be used instead."""
+        if self.problem: raise IdentityError(self.problem)
+        self._write_local(self._vault)
 
     # ------------------------------------------------------------------ registry (no direct identifiers)
     def _load_registry(self):
@@ -167,9 +259,10 @@ class Identity:
         self._salt = secrets.token_bytes(16)
         self._key = self._derive(passphrase, self._salt)
         self._write_vault()
-        if os.path.exists(self.vjson_path):
-            try: os.remove(self.vjson_path)
-            except Exception: pass
+        for p_ in (self.vjson_path, self.vlocal_path):              # the passphrase vault replaces the device-key / plaintext copies
+            if os.path.exists(p_):
+                try: os.remove(p_)
+                except Exception: pass
         return True
 
     def disable_app_lock(self, passphrase=""):
@@ -198,6 +291,7 @@ class Identity:
         if not self.app_lock_enabled:
             if self._vault is None:
                 self._init_vault_storage()
+            if self._vault is None: raise VaultLocked(self.problem or "the identity vault is not available")
             return self._vault
         if self._key is None: raise VaultLocked("the identity vault is locked")
         return self._vault

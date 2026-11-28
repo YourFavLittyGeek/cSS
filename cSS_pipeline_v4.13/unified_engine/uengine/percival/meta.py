@@ -41,6 +41,7 @@ from ..ml_component import PenalizedLogistic, MathRecalibration, sigmoid, irls, 
 from .cnn import SmallCNN
 from . import learners as LR, intelligence as IN
 from .learners import PixelLogistic
+from . import validation as V             # 2026-11-28 audit S1/S2: stratified folds, fold-stratified AUC, paired selection, within-fold calibration
 from . import component_api as CI          # Stage 2: the engine reads ALBUS / NOX / LUMOS evidence through one component interface
 
 # NOX built-in feature set (registry v000; contents of 2026-11-25). Chosen from what the detector already measures for every candidate (100 % coverage on the
@@ -129,10 +130,9 @@ def sens_spec(y, p, t):
 ENGINE = "percival-engine/5.25"
 
 
-def folds(groups, k=5, seed=0):
-    g = np.asarray(groups).astype(str); u = np.unique(g); r = np.random.default_rng(seed); u = u[r.permutation(len(u))]
-    k = max(2, min(k, len(u))); parts = [u[i::k] for i in range(k)]
-    return [(np.where(~np.isin(g, p))[0], np.where(np.isin(g, p))[0]) for p in parts]
+def folds(groups, k=5, seed=0, y=None):
+    """patient-grouped folds; with y stratified by patient cSS status (validation.folds)"""
+    return V.folds(groups, k, seed, y)
 
 
 def test_assignment(patient, fraction=TEST_FRACTION, salt="percival-test-cohort-v1"):
@@ -332,17 +332,17 @@ class Components:
         c.image_ood = IN.OOD.from_json(d["image_ood"]) if d.get("image_ood") else None; return c
 
 
-def _select(oofs, y, g, order):
-    """1-SE rule over candidate OOF predictions (log-odds) -> chosen kind, metrics per kind"""
+def _select(oofs, y, g, order, fid=None):
+    """2026-11-28: model-family choice by the fold-stratified AUC with a PAIRED patient bootstrap (validation.select_kind) - discrimination
+    only, so class weighting (balanced logistic / CNN vs unweighted trees) cannot bias the comparison as log loss did -> chosen kind, report"""
     res = {k: metrics(y[np.isfinite(v)], sigmoid(v[np.isfinite(v)]), np.asarray(g)[np.isfinite(v)]) if np.isfinite(v).sum() >= 5 else dict(n=int(np.isfinite(v).sum()))
            for k, v in oofs.items()}
-    ok = {k: r for k, r in res.items() if r.get("logloss") is not None}
-    if not ok: return None, res
-    best = min(ok, key=lambda k: ok[k]["logloss"])
-    se = ok[best].get("logloss_se")
-    has_se = se is not None and np.isfinite(se) and se > 0
-    lim = ok[best]["logloss"] + (se if has_se else 0.0)
-    return next(k for k in order if k in ok and ok[k]["logloss"] <= lim), res
+    if fid is None: fid = np.zeros(len(y), int)
+    sc = {k: v for k, v in oofs.items() if np.isfinite(v).sum() >= 5}
+    chosen, sel, informative = V.select_kind(sc, y, fid, g, order)
+    for k in res:
+        if k in sel: res[k].update({("selection_" + a): b for a, b in sel[k].items()})
+    return chosen, res
 
 
 def _common(oofs):
@@ -358,7 +358,8 @@ def component_oof(rows, k=5, seed=0, cnn_epochs=30, progress=None, char_kinds=No
     training patients only; every out-of-fold prediction and metric stays on candidates."""
     say = progress or (lambda *a: None); CC = list(char_cols or CHAR)
     char_kinds = char_kinds or LR.CHAR_KINDS; image_kinds = image_kinds or LR.IMAGE_KINDS
-    y = np.array([r["y"] for r in rows], float); g = np.array([r["patient"] for r in rows]); w = patient_weights(rows); F = folds(g, k, seed)
+    y = np.array([r["y"] for r in rows], float); g = np.array([r["patient"] for r in rows]); w = patient_weights(rows); F = folds(g, k, seed, y)
+    FID = V.fold_ids(len(rows), F)
     Xc = X_of(rows, CC, "char"); M, have = maps_of(rows); rep = {}
     # 1. LUMOS families (with the expert-marked missed cSS: compared on the SAME folds with and without them, used only when they do not
     #    make LUMOS worse on the candidates - a drawn mark gives a patch that only partly resembles a detector candidate's)
@@ -382,7 +383,7 @@ def component_oof(rows, k=5, seed=0, cnn_epochs=30, progress=None, char_kinds=No
                             for r, v in zip(Rh, lh): hk[kd][(str(r["study"]), str(r["cand_id"]))] = float(v)
                     except ValueError: pass
             say(f"LUMOS image models{' with the missed-cSS marks' if extra else ''} fold {i + 1}/{len(F)}", 0.1 + 0.3 * (i + 1) / len(F))
-        m = _common(img); ik, ires = _select({kd: np.where(m, v, np.nan) for kd, v in img.items()}, y, g, LR.IMAGE_KINDS)
+        m = _common(img); ik, ires = _select({kd: np.where(m, v, np.nan) for kd, v in img.items()}, y, g, LR.IMAGE_KINDS, FID)
         ik = ik or image_kinds[-1]
         return img, spr, n_mk, m, ik, ires, hm[ik], hk[ik]
     pats = set(map(str, g)); avail = [r for r in (image_extra or []) if r.get("maps") is not None and str(r["patient"]) in pats]
@@ -410,7 +411,7 @@ def component_oof(rows, k=5, seed=0, cnn_epochs=30, progress=None, char_kinds=No
     mk["note"] = "expert-marked missed cSS: extra cSS image examples in LUMOS training folds (training patients only); evaluation on candidates only"
     img_oof = img[ik]; spread = spr[ik]
     rep["image"] = dict(chosen=ik, results=ires, n_with_image=int(have.sum()), tta_spread_median=float(np.nanmedian(spread)) if np.isfinite(spread).any() else None,
-                        rule="simplest image model within one bootstrap SE of the lowest CV log loss (pixel_logistic < cnn)", compared_on=int(m.sum()),
+                        rule="simplest image model within one PAIRED bootstrap SE of the best fold-stratified AUC (pixel_logistic < cnn)", compared_on=int(m.sum()),
                         missed_marks=mk)
     # 2. NOX families (+ the CONFIRMED ALBUS re-detections of expert-marked missed cSS: used only when their measurements do not reveal
     #    their origin (origin AUC <= ORIGIN_AUC_MAX) and NOX predicts the candidates no worse with them - compared on the same folds)
@@ -429,7 +430,7 @@ def component_oof(rows, k=5, seed=0, cnn_epochs=30, progress=None, char_kinds=No
                     ho = np.isin(gm, list(map(str, g[te])))
                     if ho.any(): zm[kd][ho] = mdl.logit(Xm[ho])
             say(f"NOX measurement models{' with the re-detected marks' if use else ''} fold {i + 1}/{len(F)}", 0.4 + 0.15 * (i + 1) / len(F))
-        ck, cres = _select(ch, y, g, LR.CHAR_KINDS); ck = ck or "logistic"
+        ck, cres = _select(ch, y, g, LR.CHAR_KINDS, FID); ck = ck or "logistic"
         return ch, ck, cres, zm[ck]
     nm = dict(available=len(cm), used=False)
     if cm and compare_marks:
@@ -454,7 +455,7 @@ def component_oof(rows, k=5, seed=0, cnn_epochs=30, progress=None, char_kinds=No
     CMU = cm if nm["used"] else []
     Xf, yf, gf, wf, _ = _with_char_marks(Xc, y, g, w, CMU, set(map(str, g)), CC)
     final_char = LR.fit_tabular(ck, Xf, yf, gf, wf, CC, seed)
-    rep["char"] = dict(chosen=ck, results=cres, importance=LR.importance(final_char), rule="simplest model within one bootstrap SE of the lowest CV log loss (logistic < gbt < forest)",
+    rep["char"] = dict(chosen=ck, results=cres, importance=LR.importance(final_char), rule="simplest model within one PAIRED bootstrap SE of the best fold-stratified AUC (logistic < gbt < forest)",
                        feature_auc={c: auc(y, (Xc[:, j] if np.isfinite(Xc[:, j]).sum() >= 5 else np.full(len(y), np.nan))) for j, c in enumerate(CC)},
                        coverage={c: float(np.isfinite(Xc[:, j]).mean()) if len(Xc) else 0.0 for j, c in enumerate(CC)}, missed_marks=nm)
     rep["_mark_oof"] = dict(keys=[(str(r["study"]), str(r["cand_id"])) for r in cm], char=zmark, image_by_key=hkey)
@@ -468,7 +469,7 @@ def component_oof(rows, k=5, seed=0, cnn_epochs=30, progress=None, char_kinds=No
         for k_ in ("math", "char"): Z[k_][te] = P[k_]
         fold_prov.append(dict(fold=i, n_train=int(len(tr)), n_heldout=int(len(te)), train_patients=int(len(set(g[tr]))), heldout_patients=sorted(set(map(str, g[te])))))
         say(f"components fold {i + 1}/{len(F)}", 0.55 + 0.07 * (i + 1) / len(F))
-    rep["folds"] = fold_prov
+    rep["folds"] = fold_prov; rep["_fid"] = FID
     Z["image"] = img_oof
     for kk, vv in CI.reliability_table(rows, dict(image_spread=np.where(np.isfinite(img_oof), spread, np.nan)), char_cols=CC).items():
         Z["rel_" + kk] = vv                                              # Stage 3: reliability signals, out-of-fold where they are model outputs
@@ -561,32 +562,42 @@ class Meta:
         return x
 
 
-def discover(Z, y, g, w=None, k=5, seed=0):
-    """compare the meta-model candidates by patient-grouped CV on the out-of-fold component table; select by the 1-SE rule"""
-    y = np.asarray(y, float); n_pos, n_neg = int(y.sum()), int((1 - y).sum()); res = {}
+def discover(Z, y, g, w=None, k=5, seed=0, fid=None):
+    """compare the meta-model candidates on the development out-of-fold component table -> (report, {kind: oof log-odds}, fold ids).
+    2026-11-28 (audit S1/S2): the meta level uses the SAME stratified patient folds as the components (fid from component_oof), so a held-out
+    fold's meta prediction is built from component predictions of that fold's own models - the v001 procedure re-split the table into new
+    random folds and mixed predictions of five different component models (pooled AUC 0.508 while every fold ranked correctly). The choice is
+    validation.select_kind: fold-stratified AUC, paired patient bootstrap, simplest within one PAIRED SE of the best, 'informative' only when
+    the chosen model's lower 95 % bound is above 0.5. Log loss and the prevalence-only baseline are reported, not used for the choice."""
+    y = np.asarray(y, float); g = np.asarray(g); n_pos, n_neg = int(y.sum()), int((1 - y).sum()); res = {}
     pos_pts = len({p for p, t in zip(g, y) if t == 1})
     neg_pts = len({p for p, t in zip(g, y) if t == 0})
     kinds = [s for s in SIMPLICITY if s != "boosted" or (min(n_pos, n_neg) >= 50 and min(pos_pts, neg_pts) >= 8)]
     if not all(k_ in Z for k_ in REL): kinds = [s for s in kinds if s != "stack_unc"]          # tables without reliability signals
+    F = folds(g, k, seed + 7, y) if fid is None else [(np.where(fid != f)[0], np.where(fid == f)[0]) for f in sorted(set(int(v) for v in fid if v >= 0))]
+    fid = V.fold_ids(len(y), F); null = np.full(len(y), np.nan)
+    for tr, te in F:
+        null[te] = float(np.clip(np.average(y[tr], weights=None if w is None else w[tr]), 1e-4, 1 - 1e-4))
     for kind in kinds:
         oof = np.full(len(y), np.nan)
-        for tr, te in folds(g, k, seed + 7):
+        for tr, te in F:
             if len(np.unique(y[tr])) < 2: continue
             Ztr = {c: v[tr] for c, v in Z.items()}; Zte = {c: v[te] for c, v in Z.items()}
-            try: oof[te] = Meta(kind).fit(Ztr, y[tr], np.asarray(g)[tr], None if w is None else w[tr]).logit(Zte)
+            try: oof[te] = Meta(kind).fit(Ztr, y[tr], g[tr], None if w is None else w[tr]).logit(Zte)
             except Exception: pass
         res[kind] = dict(metrics=metrics(y, sigmoid(oof), g), oof=oof)
     if "boosted" not in kinds:
         res["boosted"] = dict(metrics=dict(skipped=f"needs >= 50 candidates and >= 8 patients per class (cSS {n_pos} in {pos_pts} pts, not cSS {n_neg} in {neg_pts} pts)"), oof=None)
-    ok = {k_: v for k_, v in res.items() if v["oof"] is not None and v["metrics"].get("logloss") is not None}
-    best = min(ok, key=lambda k_: ok[k_]["metrics"]["logloss"])
-    se = ok[best]["metrics"].get("logloss_se")
-    has_se = se is not None and np.isfinite(se) and se > 0
-    lim = ok[best]["metrics"]["logloss"] + (se if has_se else 0.0)
-    chosen = next(k_ for k_ in SIMPLICITY if k_ in ok and ok[k_]["metrics"]["logloss"] <= lim)
-    rule_desc = "simplest model within one bootstrap SE of the lowest cross-validated log loss (1-SE rule)" if has_se else "lowest cross-validated log loss (bootstrap SE unavailable)"
-    return dict(results={k_: v["metrics"] for k_, v in res.items()}, best_logloss=best, chosen=chosen,
-                rule=rule_desc), {k_: v["oof"] for k_, v in res.items()}
+    sc = {k_: v["oof"] for k_, v in res.items() if v["oof"] is not None and np.isfinite(v["oof"]).sum() >= 5}
+    chosen, sel, informative = V.select_kind(sc, y, fid, g, SIMPLICITY, seed=seed)
+    for k_, v in res.items():
+        if k_ in sel: v["metrics"].update({("selection_" + a): b for a, b in sel[k_].items()})
+    if chosen is None: chosen = next(k_ for k_ in SIMPLICITY if k_ in sc)
+    pn = np.clip(null, 1e-6, 1 - 1e-6); null_ll = float(-np.mean(y * np.log(pn) + (1 - y) * np.log(1 - pn)))
+    return dict(results={k_: v["metrics"] for k_, v in res.items()}, best=sel.get("_best"), best_logloss=sel.get("_best"), chosen=chosen,
+                informative=informative, prevalence_baseline_logloss=null_ll, method=V.METHOD_VERSION,
+                folds=dict(k=len(F), shared_with_components=True, stratified=True),
+                rule=V.SELECTION_RULE), {k_: v["oof"] for k_, v in res.items()}, fid
 
 
 def thresholds(y, p):
@@ -679,15 +690,17 @@ def train_cycle(rows, version, seed=0, cnn_epochs=30, progress=None, mins=None, 
     if not ((fam.get("image") or {}).get("missed_marks") or {}).get("used"): XI = []      # the marks did not help LUMOS this cycle
     if not ((fam.get("char") or {}).get("missed_marks") or {}).get("used"): XC = []       # ... NOX
     comp_metrics = {c: metrics(y, sigmoid(Z[c]), g) for c in COMPONENTS}
-    say("meta-model discovery", 0.62); D, oofs = discover(Z, y, g, w, seed=seed)
+    FID = fam.pop("_fid", None)
+    say("meta-model discovery", 0.62); D, oofs, MFID = discover(Z, y, g, w, seed=seed, fid=FID)
     chosen = D["chosen"]; meta_oof = oofs[chosen]
     # Platt calibration with a mild ridge on the slope (CAL_LAMBDA): without it, separable development data drive the slope to
-    # infinity and every score to 0 or 100 (seen in v5.22: calibration slope 7.9 on the test cohort)
-    ca_, cb_, ccl_ = monotone_irls(meta_oof, y, CAL_LAMBDA); cal = dict(a=ca_, b=cb_, ridge=CAL_LAMBDA, clamped=ccl_)   # never reverses the order
-    if ccl_: say("calibration: the development data gave a negative slope - held at the minimum (order kept); the model is flagged", 0.7)
+    # infinity and every score to 0 or 100 (seen in v5.22: calibration slope 7.9 on the test cohort).
+    # 2026-11-28: the slope is estimated WITHIN the held-out folds (one intercept per fold) - validation.calibrate; never reverses the order
+    cal = V.calibrate(meta_oof, y, MFID, None, CAL_LAMBDA)
+    if cal["clamped"]: say("calibration: no positive slope within the folds - held at the minimum (order kept); the model is flagged", 0.7)
     p_dev = sigmoid(cal["a"] + cal["b"] * meta_oof); th = IN.stable_thresholds(y, p_dev, g, sens_spec, seed=seed)
     say("PERCIVAL analyses: ablation, disagreement, reliability", 0.66)
-    intel = dict(provenance=IN.PROVENANCE, overlap=IN.overlap(), ablation=IN.ablation(Z, y, g, INDEP, folds(g, 5, seed + 7), auc, seed=seed),
+    intel = dict(provenance=IN.PROVENANCE, overlap=IN.overlap(), ablation=IN.ablation(Z, y, g, INDEP, [(np.where(MFID != f)[0], np.where(MFID == f)[0]) for f in sorted(set(MFID.tolist()))], auc, seed=seed),
                  disagreement=IN.disagreement(Z, y, COMPONENTS), reliability=IN.reliability(y, p_dev), families=fam,
                  note="all analyses on the development cohort's patient-grouped out-of-fold predictions; the locked test cohort is not used")
     say("final fit on the development cohort", 0.7)
@@ -767,7 +780,9 @@ def train_cycle(rows, version, seed=0, cnn_epochs=30, progress=None, mins=None, 
         model["nested"], _ = NS.nested_crossfit(dev, seed=seed, cnn_epochs=cnn_epochs, progress=lambda m, p: say(m, 0.72 + 0.12 * p), char_cols=CC, kinds=kinds,
                                                 image_extra=XI, char_extra=XC)
     say("evaluation on the locked test cohort", 0.85)
-    model["test"] = evaluate_test(model, test)
+    model["informative"] = bool(D.get("informative"))
+    model["validation_method"] = V.METHOD_VERSION
+    model["test"] = evaluate_test(model, test, n_missed=len(TM), extra_pos=test_css_patients or ())
     model["test"]["missed_lesions"] = evaluate_marks(model, TM)
     pc = model["test"].get("patient_classes")
     if pc and test_css_patients:                                      # 2026-11-26: a test patient with an expert-marked missed cSS HAS cSS
@@ -867,7 +882,10 @@ def evaluate_marks(model, marks):
                 basis="locked test patients' expert-marked missed cSS, re-detected by ALBUS and confirmed; PERCIVAL without ALBUS (NOX + LUMOS)")
 
 
-def evaluate_test(model, test):
+def evaluate_test(model, test, n_missed=0, extra_pos=()):
+    """locked test cohort. 2026-11-28 (audit S3/S4): ALBUS is ALSO evaluated on exactly the candidates PERCIVAL scored ('math_same', used by
+    acceptance; abstention is reported as coverage), plus patient-level (highest candidate score per patient; expert-marked missed cSS make a
+    patient positive) and lesion-level (sensitivity at fixed false positives per study, missed lesions in the denominator) metrics."""
     if not test: return dict(n=0, note="no candidate in the locked test cohort yet")
     S = score_rows(model, test); y = np.array([r["y"] for r in test], float); g = [r["patient"] for r in test]
     p = np.array([np.nan if s["percival_score"] is None else s["percival_score"] / 100 for s in S])
@@ -876,6 +894,8 @@ def evaluate_test(model, test):
     pos = {str(q) for q, t in zip(g, y) if t == 1}
     out = dict(percival=metrics(y[m], p[m], np.asarray(g)[m]) if m.sum() >= 5 else dict(n=int(m.sum())),
                math=metrics(y, sigmoid(Z["math"]), g), insufficient=int((~m).sum()), n=len(test), components=out_ext,
+               math_same=metrics(y[m], sigmoid(Z["math"])[m], np.asarray(g)[m]) if m.sum() >= 5 else dict(n=int(m.sum())),
+               coverage=float(m.mean()), candidate_css_patients=len(pos),
                patients=len(set(g)), patient_classes=dict(with_css=len(pos), without_css=len(set(map(str, g)) - pos)),
                reliability=IN.reliability(y[m], p[m]) if m.sum() >= 10 else None,
                basis="locked test cohort: patients assigned permanently by a hash of the patient id, never used for fitting, selection, "
@@ -887,6 +907,13 @@ def evaluate_test(model, test):
             out[f"subgroup_{name}"] = metrics(y[mask], p[mask], None) if mask.sum() >= 5 else dict(n=int(mask.sum()))
         from . import analysis as AN
         out["by_availability"] = AN.by_availability(Z, y, p, g)
+    st = [r["study"] for r in test]; ex = [x for x in (extra_pos or ())]
+    out["patient_level"] = dict(percival=V.patient_level(y[m], p[m], np.asarray(g)[m], ex) if m.sum() else None,
+                                albus=V.patient_level(y, sigmoid(Z["math"]), g, ex))
+    if m.sum() and "green_from" in th:
+        out["patient_level"]["percival_at_green"] = V.at_threshold_patients(y[m], p[m], np.asarray(g)[m], th["green_from"], ex)
+        out["patient_level"]["percival_at_red"] = V.at_threshold_patients(y[m], p[m], np.asarray(g)[m], th["red_below"], ex)
+    out["lesion_level"] = dict(percival=V.lesion_level(y, np.where(m, p, np.nan), st, n_missed), albus=V.lesion_level(y, sigmoid(Z["math"]), st, n_missed))
     return out
 
 
@@ -895,7 +922,8 @@ def acceptance(model, active):
     if not model.get("ready"): reasons.append("below the minimum data")
     if pc.get("auc") is None: reasons.append("no locked-test evaluation possible yet (too few test candidates)")
     else:
-        if mt.get("auc") is not None and pc["auc"] + 1e-9 < mt["auc"]: reasons.append(f"test AUC {pc['auc']:.3f} below ALBUS alone {mt['auc']:.3f}")
+        ms_ = t.get("math_same") or mt                                   # 2026-11-28: ALBUS on the SAME candidates PERCIVAL scored
+        if ms_.get("auc") is not None and pc["auc"] + 1e-9 < ms_["auc"]: reasons.append(f"test AUC {pc['auc']:.3f} below ALBUS alone {ms_['auc']:.3f} (same candidates)")
         if active and (active.get("test", {}).get("percival", {}).get("auc") is not None) and pc["auc"] < active["test"]["percival"]["auc"] - 0.01:
             reasons.append(f"test AUC below the active model by more than 0.01")
         if active and active.get("test", {}).get("percival", {}).get("brier") is not None and pc.get("brier") is not None and pc["brier"] > active["test"]["percival"]["brier"] + 0.01:
@@ -912,16 +940,27 @@ def acceptance(model, active):
     else:
         sup = ns.get("support") or {}
         if (sup.get("evaluable_folds") or 0) < 3: reasons.append(f"nested evaluation: only {sup.get('evaluable_folds', 0)} evaluable outer folds")
-        np_ = (ns.get("percival") or {}).get("auc"); A_ = ns.get("ablation") or {}; nm = ((A_.get("ALBUS alone") or A_.get("MATH alone")) or {}).get("auc")
+        _pn = ns.get("percival") or {}; A_ = ns.get("ablation") or {}; _am = (A_.get("ALBUS alone") or A_.get("MATH alone")) or {}
+        np_ = _pn.get("fold_auc", _pn.get("auc")); nm = _am.get("fold_auc", _am.get("auc"))     # 2026-11-28: within-outer-fold AUC when recorded
         if np_ is None: reasons.append("nested evaluation produced no AUC")
         elif nm is not None and np_ + 1e-9 < nm: reasons.append(f"nested development AUC {np_:.3f} below ALBUS alone {nm:.3f}")
+    if model.get("informative") is False:
+        reasons.append("not informative: on the development folds PERCIVAL's discrimination cannot be told apart from chance (fold-stratified AUC, "
+                       "lower 95 % bound <= 0.5) - the score must not be presented as meaningful")
+    cpos = t.get("candidate_css_patients")
+    if cpos is not None and cpos < MIN_TEST_PATIENTS_PER_CLASS and pc.get("auc") is not None:
+        reasons.append(f"the candidate-level test AUC rests on {cpos} patients with a cSS candidate (at least {MIN_TEST_PATIENTS_PER_CLASS} are required)")
+    cal_ = model.get("calibration") or {}
+    warnings = []
+    if cal_.get("fold_slopes") and cal_.get("sign_consistent") is False and not cal_.get("clamped"):
+        warnings.append("calibration slope differs in sign between development folds (few patients per fold): calibrated values are approximate")
     if (model.get("calibration") or {}).get("clamped"):
         reasons.append("calibration: the development data gave a negative slope (held at the minimum so the order is not reversed) - "
                        "the scores are not calibrated")
     iden = (model.get("data") or {}).get("identity") or {}
     if iden.get("assumed"): reasons.append(f"patient identity is assumed (one patient per study, not verified) for {iden['assumed']} studies")
-    return dict(passed=not reasons, reasons=reasons,
-                criteria=f"minimum data; locked test: >= {MIN_TEST_PATIENTS_PER_CLASS} patients per class, AUC >= ALBUS alone, AUC >= active - 0.01, "
+    return dict(passed=not reasons, reasons=reasons, warnings=warnings,
+                criteria=f"minimum data; informative on the development folds; locked test: >= {MIN_TEST_PATIENTS_PER_CLASS} patients per class and with a cSS candidate, AUC >= ALBUS alone on the same candidates, AUC >= active - 0.01, "
                          "Brier <= active + 0.01, calibration slope 0.6-1.6, patient-bootstrap CI available; nested development evaluation "
                          ">= 3 evaluable folds and not below ALBUS alone; verified patient identity. Passing makes a model a CANDIDATE only - "
                          "activation always needs explicit human approval.")
