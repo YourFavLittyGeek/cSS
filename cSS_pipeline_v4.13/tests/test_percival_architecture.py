@@ -106,15 +106,14 @@ class TestLumos(unittest.TestCase):
 class TestContract(unittest.TestCase):
     def test_states_missing_never_negative_no_patient_core_separate(self):
         M = tiny_model()
-        scored = dict(cand_id=3, percival_score=72.0, band="green", status="reliable", components=dict(math=80.0, char=None, image=70.0),
-                      experimental_core=dict(score=40, band="Gray", status="ok"))
+        scored = dict(cand_id=3, percival_score=72.0, band="green", status="reliable", components=dict(math=80.0, char=None, image=70.0))
         row = dict(math=1.3, char={"darkness_z": -2.5, "tube_ratio": None}, pred={}, maps=np.zeros(2), patient="PATIENT-SECRET")
         c = AR.candidate_contract("S1", scored, row, M, dict(state="valid", version="albus:v4.18:x:y"))
         self.assertNotIn("predictors_x1_x5", c["nox"])                     # 2026-11-25: x1 / x2 / x5 are NOX measurements, no separate block
         self.assertEqual(c["nox"]["measurements"]["n_available"], 1)
         self.assertEqual((c["lumos"]["state"], c["lumos"]["component_pct"]), ("valid", 70.0))
         self.assertNotIn("PATIENT-SECRET", json.dumps(c, default=str))
-        self.assertEqual(c["core"]["role"], "comparison only - never the PERCIVAL prediction"); self.assertEqual(c["percival"]["score"], 72.0)
+        self.assertNotIn("core", c); self.assertEqual(c["percival"]["score"], 72.0)                   # 2026-11-28: CORE removed
         pw = {p["pair"]: p for p in c["percival"]["pairwise"]}
         self.assertEqual(len(pw), 1); p = list(pw.values())[0]
         self.assertEqual((p["pattern"], p["css_rate"], p["agree"]), ("both_high", 0.8, True))
@@ -277,9 +276,9 @@ class TestAppRoutes(unittest.TestCase):
     def test_architecture_endpoints(self):
         import css_app; css_app.pg_init()
         A = css_app.pg_get("architecture", {})
-        self.assertEqual([c["key"] for c in A["components"]], ["ALBUS", "NOX", "LUMOS", "PERCIVAL", "CORE", "PENSIEVE", "SHADOW"])
+        self.assertEqual([c["key"] for c in A["components"]], ["ALBUS", "NOX", "LUMOS", "PERCIVAL", "PENSIEVE", "SHADOW"])   # 2026-11-28: CORE removed
         st = {c["key"]: c["state"] for c in A["components"]}
-        self.assertEqual(st["LUMOS"], "untrained"); self.assertEqual(st["PERCIVAL"], "untrained"); self.assertEqual(st["CORE"], "off")
+        self.assertEqual(st["LUMOS"], "untrained"); self.assertEqual(st["PERCIVAL"], "untrained"); self.assertNotIn("CORE", st)
         self.assertFalse(css_app.pg_get("components_report", {})["available"])
         self.assertIn("legacy_note", css_app.pg_get("shadow_gov", {}))
         self.assertFalse(css_app.pg_post("shadow_gov_approve", dict(id="H999", by="SHADOW"))["ok"])

@@ -41,8 +41,6 @@ from uengine.pensieve import PensieveCoreMemory, DurableLocalJournal
 from uengine.nox import NoxCharacteristicsEngine
 from uengine.lumos import LumosImageIntelligence
 from uengine.albus import AlbusDiscoveryEngine
-from uengine.percival_core import PercivalCoreIntelligence
-from uengine.shadow_lab import ShadowMLLaboratory
 from uengine.governance import PercivalGovernance
 from uengine.contracts import NoxMeasurements, LumosInference, AlbusCandidate
 
@@ -107,44 +105,8 @@ class TestTwentyFailureScenarios(unittest.TestCase):
         self.assertAlmostEqual(meas.morphology["raw_lambda3_mm2"], 0.0, delta=1e-5)
         self.assertTrue(np.isfinite(meas.morphology["elongation"]))
 
-    def test_06_missing_lumos_evidence(self):
-        """Scenario 6: Missing LUMOS visual evidence suppresses score and yields maximum uncertainty in Core."""
-        core = PercivalCoreIntelligence(pensieve=self.pensieve, vault=self.vault)
-        cand_a = AlbusCandidate(6, "S_M6", "L", (10, 10, 10), (5, 5, 5), 20, 10.0, (8,8,8,12,12,12), 0.70, "v5.25", "v4")
-        meas_n = NoxMeasurements(6, "S_M6", morphology={"volume_mm3": 10.0, "elongation": 1.2},
-                                 signal={"darkness_z": -2.0, "edge_contrast": 0.5},
-                                 anatomy={"pial_distance_mm": 0.5, "cortex_fraction": 0.7})
-        inf_missing = LumosInference(6, "S_M6", None, None, 1.0, (0,0,0), "v5.25", has_visual_evidence=False, status="unavailable")
-        asmt = core.evaluate_candidate(cand_a, inf_missing, meas_n)
-        self.assertEqual(asmt.status, "incomplete_visual_data")
-        self.assertEqual(asmt.band, "unavailable")
-        self.assertIsNone(asmt.percival_score)
-        self.assertIsNone(asmt.calibrated_prob)
-        self.assertEqual(asmt.uncertainty, 1.0)
-        self.assertEqual(asmt.confidence, 0.0)
 
-    def test_07_missing_nox_features(self):
-        """Scenario 7: Missing NOX features suppresses score and sets explicit unavailable status."""
-        core = PercivalCoreIntelligence(pensieve=self.pensieve, vault=self.vault)
-        cand_a = AlbusCandidate(7, "S_M7", "R", (10, 10, 10), (5, 5, 5), 20, 10.0, (8,8,8,12,12,12), 0.70, "v5.25", "v4")
-        inf_l = LumosInference(7, "S_M7", 0.85, 1.73, 0.1, (49, 25, 16), "v5.25", has_visual_evidence=True, depth_gradient=0.5, status="ok")
-        # Missing NOX
-        asmt = core.evaluate_candidate(cand_a, inf_l, nox_meas=None)
-        self.assertIsNone(asmt.percival_score)
-        self.assertIsNone(asmt.calibrated_prob)
-        self.assertEqual(asmt.band, "unavailable")
-        self.assertEqual(asmt.status, "incomplete_geometry_data")
 
-    def test_08_core_convergence_failure(self):
-        """Scenario 8: Singular or ill-conditioned feature matrix does not crash IRLS fit."""
-        core = PercivalCoreIntelligence(pensieve=self.pensieve, vault=self.vault)
-        # All identical rows -> singular matrix
-        N = 20
-        X_singular = np.ones((N, 5))
-        y = np.ones(N)
-        # Should gracefully terminate within iterations without raising exception
-        core.fit(X_singular, y, l2_penalty=0.0)
-        self.assertTrue(np.isfinite(core.weights["bias"]))
 
     def test_09_pensieve_database_unavailable(self):
         """Scenario 9: Unconnected Pensieve returns safe fallbacks rather than crashing."""
@@ -171,13 +133,6 @@ class TestTwentyFailureScenarios(unittest.TestCase):
         stats = self.vault.get_storage_stats()
         self.assertIn("warning", stats)
 
-    def test_13_interrupted_training(self):
-        """Scenario 13: Interrupted training returns cleanly with valid state."""
-        shadow = ShadowMLLaboratory(pensieve=self.pensieve, vault=self.vault)
-        exp = shadow.formulate_hypothesis("ALBUS", "Test interruption", {"formula": "formula_v4_baseline"})
-        ok, prop = shadow.run_experiment(exp)
-        self.assertTrue(ok)
-        self.assertEqual(exp.status, "completed")
 
     def test_14_interrupted_model_promotion_rollback(self):
         """Scenario 14: Failed or unapproved model promotion rolls back cleanly."""

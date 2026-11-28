@@ -208,10 +208,17 @@ def job_state():
                  retry_note="retry restarts the cycle from the beginning (no partial-result resume: a cycle is a single reproducible computation)",
                  active=JOB.get("state") in ACTIVE_STATES, stages=_stages(now), n_stages=len(STAGES))
         j["stages_left"] = sum(1 for x in j["stages"] if x["status"] == "left")
+        j["stages_done"] = sum(1 for x in j["stages"] if x["status"] in ("done", "skipped"))
+        if end: j["finished_at"] = time.strftime("%Y-%m-%d %H:%M", time.localtime(end))         # 2026-11-28: shown on the card
         j["stage_label"] = next((x["label"] for x in j["stages"] if x["key"] == JOB.get("stage")), JOB.get("stage") or "")
         j.pop("stage_times", None)
         if JOB.get("state") in ACTIVE_STATES: j.update(eta=_eta(now))
     j["resources"] = _proc_resources() if j.get("state") in ACTIVE_STATES else JOB.get("resources_last")
+    try:                                                                     # 2026-11-28: the last cycle, also after an app restart
+        rs = sorted(glob.glob(P("runs", "run*.json")))
+        if rs:
+            R_ = _jl(rs[-1], {}); j["last_run"] = {k: R_.get(k) for k in ("id", "state", "started", "finished", "version", "error")}
+    except Exception: pass
     if j.get("state") in ACTIVE_STATES:
         with LOCK:
             JOB["resources_last"] = j["resources"]; pk = JOB.setdefault("resources_peak", {})
@@ -1502,71 +1509,7 @@ def _run_id(sid):
     a = _jl(os.path.join(B(), "runs", sid, "active.json"), {}); return a.get("run_id") or "initial"
 
 
-EXPERIMENTAL_LABEL = "EXPERIMENTAL · CORE Fixed-Weight Baseline (comparison only, not validated) - never the PERCIVAL prediction"
-
-
-def experimental_core_enabled():
-    """Phase 0: the ALBUS / LUMOS / NOX / CORE layer runs only when explicitly switched on (default off)"""
-    try: return bool(((CTX.get("SET") or {}).get("features") or {}).get("experimental_core", False))
-    except Exception: return False
-
-
-# Stage 1 (retirement): the legacy ALBUS / NOX engines are thin adapters over the REAL detector measurements of the candidate (the NOX
-# CHAR columns gathered for the PERCIVAL engine). Before, missing measurements were replaced by invented defaults (darkness -1.5, tube 1.5,
-# cortex 0.5 ...) so CORE produced a number for a candidate with no evidence. Now a candidate without the measurements is 'unavailable'.
-# The comparison never writes the legacy PENSIEVE and never touches the external Data Vault (legacy_guard null objects).
-CORE_INPUTS = dict(pial_distance="pial_dist_mm", darkness_z="darkness_z", tube_ratio="tube_ratio", cortex_frac="cortex_frac", tram_frac="tram_frac")
-
-
-def _core_inputs(r):
-    ch = r.get("char") or {}; out = {}; missing = []
-    for k, c in CORE_INPUTS.items():
-        v = ch.get(c)
-        try: v = float(v)
-        except (TypeError, ValueError): v = float("nan")
-        if np.isfinite(v): out[k] = v
-        else: missing.append(c)
-    return (None if missing else out), missing
-
-
-def _core_engines():
-    from uengine.percival_core import PercivalCoreIntelligence
-    from uengine.albus import AlbusDiscoveryEngine
-    from uengine.lumos import LumosImageIntelligence
-    from uengine.nox import NoxCharacteristicsEngine
-    from uengine.legacy_guard import NullPensieve, NullVault
-    _p, _v = NullPensieve(), NullVault()
-    return (PercivalCoreIntelligence(pensieve=_p, vault=_v), AlbusDiscoveryEngine(pensieve=_p),
-            LumosImageIntelligence.from_percival_model(active(), pensieve=_p, vault=_v), NoxCharacteristicsEngine(pensieve=_p))
-
-
-def _core_assess(sid, r, engines):
-    """one candidate through the CORE comparison baseline -> dict (score None + reason when its real inputs are missing)"""
-    _core, _albus, _lumos, _nox = engines
-    raw, missing = _core_inputs(r)
-    if raw is None:
-        return dict(label=EXPERIMENTAL_LABEL, score=None, band=None, status="unavailable", reason="missing NOX measurements: " + ", ".join(missing))
-    cid = int(r.get("cand_id", 0)); h = str(r.get("hemi", "U") or "U")
-    cand_a = _albus.discover_candidate(sid, cid, h, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 0, 0.0, (0, 0, 0, 0, 0, 0), raw)
-    cand_n = _nox.measure_candidate(sid, cid, raw)
-    cand_l = _lumos.analyze_patch(sid, cid, r.get("patch") if isinstance(r.get("patch"), dict) else None)
-    asmt = _core.evaluate_candidate(cand_a, cand_l, cand_n)
-    return dict(label=EXPERIMENTAL_LABEL, score=asmt.percival_score, band=asmt.band,
-                status=asmt.status if asmt.percival_score is not None else "unavailable", uncertainty=asmt.uncertainty, inputs=raw,
-                lumos="trained" if getattr(_lumos, "trained", False) else "untrained")
-
-
-def _experimental_core(sid, S, rows):
-    """evaluate the experimental layer for each scored candidate; results go to s['experimental_core'] only"""
-    try:
-        engines = _core_engines(); by = {int(r.get("cand_id", 0)): r for r in rows}
-        for s in S:
-            try: s["experimental_core"] = _core_assess(sid, by.get(int(s.get("cand_id", 0)), {}), engines)
-            except Exception as e:
-                s["experimental_core"] = dict(label=EXPERIMENTAL_LABEL, score=None, band=None, status="unavailable", error=type(e).__name__)
-    except Exception as e:
-        log(f"[experimental core] {sid}: not evaluated ({type(e).__name__}: {e})")
-
+# 2026-11-28 (user request): the CORE fixed-weight baseline (uengine/percival_core.py, hand-set weights, comparison only) was REMOVED.
 
 
 def score_study(sid, M=None):
@@ -1577,13 +1520,6 @@ def score_study(sid, M=None):
     if not rows: return None
     S = MT.score_rows(M, rows); hemi = {r["cand_id"]: r.get("hemi", "") for r in rows}
     for s in S: s["hemi"] = hemi.get(s["cand_id"], "")
-
-    # Phase 0 (scientific integrity): the ALBUS / LUMOS / NOX / CORE layer is an unvalidated EXPERIMENTAL research layer.
-    # It runs only when Settings features.experimental_core is on (default off), and its output is stored ONLY under
-    # s["experimental_core"] - it never writes percival_score / band / status, so a missing CORE result can never
-    # replace the trained Percival Score.
-    if experimental_core_enabled():
-        _experimental_core(sid, S, rows)
 
     # Study score with the reader's own scoring method, on the candidates Percival calls. 2026-11-26 (audit A1): the candidates are chosen
     # with the MODEL'S OWN calibrated cuts (its bands), not a fixed 50: 'total' = green candidates (likely cSS, specificity-first cut),
@@ -1652,23 +1588,6 @@ def history_of(sid):
         L["status"] = ("earlier processing" if L.get("run") and L.get("run") != run else "current" if L.get("model") == a else "historical")
         out.append(L)
     return out
-
-
-def score_study_unified(sid):
-    """v5.25: Evaluate candidate rows using the reconstructed PercivalCoreIntelligence pipeline.
-    Phase 0: EXPERIMENTAL and off by default (Settings features.experimental_core); read-only, never a Percival Score."""
-    if not experimental_core_enabled():
-        return dict(ok=False, experimental=True, error="The CORE fixed-weight baseline is experimental and switched off "
-                                                       "(Settings › features.experimental_core). It is never the PERCIVAL score.")
-    rows = gather(sid, labelled=False)
-    if not rows:
-        return dict(ok=False, error=f"No candidates found for study {sid}")
-    engines = _core_engines(); assessments = []
-    for r in rows:
-        try: a = _core_assess(sid, r, engines)
-        except Exception as e: a = dict(label=EXPERIMENTAL_LABEL, score=None, status="unavailable", error=type(e).__name__)
-        assessments.append(dict(a, cand_id=int(r.get("cand_id", 0))))
-    return dict(ok=True, study=sid, count=len(assessments), assessments=assessments, experimental=True, label=EXPERIMENTAL_LABEL)
 
 
 # ------------------------------------------------------------------ v5.24 shadow mode (controlled experimental environment)
@@ -2014,70 +1933,10 @@ def vault_backup(destination, root=None):
     return {"ok": ok, "message": msg}
 
 
-SHADOW_DEMO_LABEL = ("SYNTHETIC DEMONSTRATION (retired Shadow Lab fixed trials): synthetic benchmark only, never evidence, never "
-                     "promoted, never written to project memory. Governed discovery: SHADOW tab.")
+# 2026-11-28: the retired Shadow Lab fixed-trial demonstration (uengine/shadow_lab.py, built on CORE) was removed with CORE.
 
 
-def _legacy_lab():
-    from uengine.shadow_lab import ShadowMLLaboratory
-    from uengine.governance import PercivalGovernance
-    from uengine.legacy_guard import NullPensieve, NullVault
-    _p, _v = NullPensieve(), NullVault()
-    return ShadowMLLaboratory(pensieve=_p, vault=_v), PercivalGovernance(pensieve=_p, vault=_v)
-
-
-def shadow_lab_state():
-    lab, gov = _legacy_lab()
-    return {"label": SHADOW_DEMO_LABEL, "retired": True,
-        "experiments": [
-            {
-                "id": e.experiment_id,
-                "hypothesis": e.hypothesis,
-                "target_component": e.target_component,
-                "status": e.status,
-                "baseline": e.metrics_baseline,
-                "experimental": e.metrics_experimental,
-                "runtime_s": e.runtime_s,
-                "artifact": e.data_vault_artifact_path
-            }
-            for e in lab.list_experiments()
-        ],
-        "proposals": [
-            {
-                "proposal_id": p.proposal_id,
-                "experiment_id": p.experiment_id,
-                "target_component": p.target_component,
-                "hypothesis": p.hypothesis,
-                "rationale": p.rationale,
-                "verdict": p.verdict,
-                "sensitivity_loss": p.sensitivity_loss,
-                "false_positive_reduction": p.false_positive_reduction,
-                "promoted_version": p.promoted_version
-            }
-            for p in lab.list_proposals()
-        ],
-        "audit_trail": gov.get_audit_trail()
-    }
-
-
-def shadow_run_trial(target, hypothesis, config):
-    lab, gov = _legacy_lab()
-    exp = lab.formulate_hypothesis(target, hypothesis, config or {})
-    ok, prop = lab.run_experiment(exp)
-    eval_res = gov.evaluate_proposal(prop) if prop else {}
-    return {
-        "ok": ok,
-        "experiment_id": exp.experiment_id,
-        "metrics_baseline": exp.metrics_baseline,
-        "metrics_experimental": exp.metrics_experimental,
-        "proposal": prop.__dict__ if prop else None,
-        "governance_evaluation": eval_res,
-        "label": SHADOW_DEMO_LABEL, "synthetic": True, "promoted": False
-    }
-
-
-
-# ------------------------------------------------------------------ PERCIVAL architecture (ALBUS / NOX / LUMOS / PERCIVAL / CORE / PENSIEVE / SHADOW)
+# ------------------------------------------------------------------ PERCIVAL architecture (ALBUS / NOX / LUMOS / PERCIVAL / PENSIEVE / SHADOW)
 def _model_any():
     """the active model, else the latest trained version (for reports); None when nothing was trained"""
     M = active()
@@ -2113,9 +1972,6 @@ def architecture_state():
                  accepted=((M or X or {}).get("acceptance") or {}).get("passed"), ready=(M or X or {}).get("ready"),
                  detail="no model trained yet" if not X else ("active model " + M["version"] if M else f"{X['version']} trained, not made active (Model Center)"),
                  validation="locked-test evaluation once per model; acceptance needs approval in Model Center"),
-            dict(key="CORE", name=AR.NAMES["CORE"], implementation="uengine/percival_core.py (fixed weights)",
-                 state="enabled_comparison" if experimental_core_enabled() else "off", detail="comparison only - never the PERCIVAL prediction",
-                 validation="not validated (fixed hand-set weights)"),
             dict(key="PENSIEVE", name=AR.NAMES["PENSIEVE"], implementation="per-project index rebuilt from journals, call ledger, missed marks, prediction ledger",
                  state="built" if ps.get("built") else "not_built", detail=(f"{ps['counts']['studies']} studies, {ps['counts']['expert_calls']} expert calls, "
                                                                            f"{ps['counts']['predictions']} predictions") if ps.get("built") else "press Rebuild",
@@ -2144,7 +2000,6 @@ COMPONENT_INFO = dict(
                outputs="image log-odds + test-time-augmentation spread (uncertainty)"),
     PERCIVAL=dict(purpose="combine ALBUS, NOX and LUMOS into one calibrated PERCIVAL score with reliability, disagreement and abstention",
                   inputs="component log-odds, missing indicators, reliability signals, pairwise disagreement", outputs="PERCIVAL score 0–100, band, status, reasons"),
-    CORE=dict(purpose="fixed-weight comparison baseline", inputs="real NOX measurements of the candidate", outputs="comparison score (never the PERCIVAL prediction)"),
     PENSIEVE=dict(purpose="per-project memory of expert decisions, missed lesions and predictions (derived, rebuildable)",
                   inputs="reviewer journals, call ledger, missed-cSS marks, prediction ledger", outputs="history per candidate, attribution of errors to detector versions"),
     SHADOW=dict(purpose="test proposed improvements on discovery patients; PERCIVAL confirms on unseen patients; a person approves",

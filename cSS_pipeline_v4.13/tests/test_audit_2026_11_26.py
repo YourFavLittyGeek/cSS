@@ -55,7 +55,7 @@ class TestStudyGrade(unittest.TestCase):
         T = tempfile.mkdtemp(prefix="grade_")
         with mock.patch.object(PG, "B", return_value=T), mock.patch.object(PG, "P", side_effect=lambda *a: os.path.join(T, "percival", *a)), \
              mock.patch.object(PG, "_js", side_effect=lambda p, d: None), mock.patch.object(PG, "gather", return_value=[dict(cand_id=s["cand_id"]) for s in S]), mock.patch.object(MT, "score_rows", return_value=S), \
-             mock.patch.object(PG.subprocess, "run", side_effect=fake_run), mock.patch.object(PG, "experimental_core_enabled", return_value=False), \
+             mock.patch.object(PG.subprocess, "run", side_effect=fake_run), \
              mock.patch.object(PG, "confirmed_mark_rows", return_value=[]), mock.patch.dict(PG.CTX, {"SC": os.path.join(ROOT, "scripts")}), \
              mock.patch.object(PG, "_run_id", return_value="r1"):
             rec = PG.score_study("SG1", M)

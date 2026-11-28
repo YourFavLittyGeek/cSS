@@ -495,7 +495,7 @@ class TestScientificIntegrity(unittest.TestCase):
     def setUp(self):
         self.base = tempfile.mkdtemp(prefix="p0sci_")
         os.makedirs(os.path.join(self.base, "review"))
-        self.set = {"features": {"experimental_core": False}, "percival_use_historical": False}
+        self.set = {"features": {}, "percival_use_historical": False}
         self.ctx = mock.patch.dict(self.PG.CTX, {"B": self.base, "SC": os.path.join(ROOT, "scripts"), "SET": self.set}, clear=False)
         self.ctx.start()
         self.store = mock.patch.dict(self.PG.STORE, {"ok": True, "error": ""})
@@ -521,10 +521,6 @@ class TestScientificIntegrity(unittest.TestCase):
         patches = [mock.patch.object(self.PG, "gather", return_value=self.rows),
                    mock.patch("uengine.percival.meta.score_rows", return_value=[dict(s) for s in scored]),
                    mock.patch.object(self.PG.subprocess, "run", side_effect=fake_run)]
-        if core_none:
-            patches.append(mock.patch("uengine.percival_core.PercivalCoreIntelligence.evaluate_candidate",
-                                      return_value=types.SimpleNamespace(percival_score=None, band="insufficient",
-                                                                         status="incomplete_visual_data", uncertainty=None)))
         for p in patches:
             p.start()
         try:
@@ -537,21 +533,6 @@ class TestScientificIntegrity(unittest.TestCase):
     SCORED = [dict(cand_id=1, percival_score=72.0, band="green", status="reliable"),      # the bands score_rows writes (red / yellow / green)
               dict(cand_id=2, percival_score=30.0, band="red", status="reliable")]
 
-    def test_s11_missing_core_output_never_overwrites_the_trained_score(self):
-        self.set["features"]["experimental_core"] = True          # even with the experimental layer ON
-        rec, runs = self._score(self.SCORED)
-        c = {s["cand_id"]: s for s in rec["candidates"]}
-        self.assertEqual(c[1]["percival_score"], 72.0)
-        self.assertEqual(c[1]["band"], "green")
-        self.assertEqual(c[1]["status"], "reliable")
-        self.assertEqual(c[2]["percival_score"], 30.0)
-        self.assertIn("EXPERIMENTAL", c[1]["experimental_core"]["label"])
-        self.assertIsNone(c[1]["experimental_core"]["score"])
-        self.assertEqual(c[1]["experimental_core"]["status"], "unavailable")
-        self.assertEqual(rec["study_score"]["status"], "scored")
-        self.assertEqual(rec["study_score"]["called_ids"], [1])
-        self.assertEqual(len(runs), 1)
-        self.assertIn("1", runs[0][runs[0].index("--accept-ids") + 1].split(","))
 
     def test_s12_unassessable_study_is_never_recorded_as_zero(self):
         rec, runs = self._score([dict(cand_id=1, percival_score=None, band="insufficient", status="insufficient"),
@@ -572,16 +553,6 @@ class TestScientificIntegrity(unittest.TestCase):
         self.assertEqual(rec["study_score"]["status"], "scored")
         self.assertEqual(len(runs), 1)
 
-    def test_s14_experimental_layer_is_off_by_default(self):
-        self.assertFalse(self.PG.experimental_core_enabled())
-        with mock.patch.object(self.PG, "_experimental_core", side_effect=AssertionError("must not run")):
-            rec, _ = self._score(self.SCORED, core_none=False)
-        self.assertTrue(all("experimental_core" not in s for s in rec["candidates"]))
-        r = self.PG.score_study_unified("SYN1")
-        self.assertFalse(r["ok"])
-        self.assertTrue(r["experimental"])
-        import css_app
-        self.assertIs(css_app.SET["features"]["experimental_core"], False)
 
     def test_s13_unreviewed_unsure_or_failed_labels_never_become_negatives(self):
         import pandas as pd

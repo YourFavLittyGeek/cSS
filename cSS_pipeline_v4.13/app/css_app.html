@@ -139,9 +139,9 @@ table.svt td.sv{text-align:center}table.svt img.th,table.svt .th0{display:block;
   <div style="display:flex;gap:4px">
     <button id="side-vault-eject" class="b sm" style="flex:1;padding:2px 4px;font-size:10px" title="Safely unmount external drive">Eject ⏏</button>
     <button id="side-vault-reconnect" class="b sm pri" style="flex:1;padding:2px 4px;font-size:10px;display:none" title="The drive is plugged in but not mounted: mount it again">Mount ⏏</button>
-    <button id="side-vault-emergency" class="b sm bad" style="padding:2px 6px;font-size:10px" title="Controlled emergency unmount">⚠</button>
     <button id="side-vault-view" class="b sm" style="padding:2px 6px;font-size:10px" title="Open File Manager &amp; Storage">⚙</button>
   </div>
+  <button id="side-vault-emergency" class="b danger" data-emergency-eject="1" style="width:100%;margin-top:6px;padding:6px 8px;font-size:12px;font-weight:700;border-radius:6px;background:#c62828;color:#fff;border-color:#c62828" title="Stops every transfer at a safe point, then unmounts the Pensieve drive">⏏ Emergency eject</button>
 </div>
 <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--bd)">
   <button id="side-quit" class="b danger" style="width:100%;display:flex;align-items:center;justify-content:center;gap:7px;padding:7px 10px;font-size:12px;font-weight:600;border-radius:6px;cursor:pointer" title="Safely shutdown Percival (Cmd+Q)">
@@ -305,26 +305,21 @@ $("#side-vault-eject")&&($("#side-vault-eject").onclick=async()=>{
   }catch(e){toast("Eject failed: "+e.message,1);}
 });
 $("#side-vault-emergency")&&($("#side-vault-emergency").onclick=async()=>{
-  if(!confirm("CONTROLLED EMERGENCY EJECT:\n\nThis will pause active transfers and attempt to close the volume.\nIf normal unmount fails, you will be prompted before a forced unmount.\n\nProceed with emergency ejection?"))return;
-  toast("Initiating emergency unmount…");
+  /* 2026-11-28: one button on every screen - stops ALL transfers at a safe point (journal pause), holds new drive work, unmounts */
+  if(!confirm("EMERGENCY EJECT\n\n1. Every transfer is paused at its next safe point (nothing is cut in the middle of a file).\n2. No new drive work starts (automatic Pensieve moves stop).\n3. The Pensieve drive is unmounted.\n\nPaused transfers can be resumed later in Transfer Center.\n\nEject now?"))return;
+  const btn=$("#side-vault-emergency");btn.disabled=true;btn.textContent="⏏ Stopping transfers…";
   try{
-    const r=await api("/api/storage/eject",{emergency:true,force:false});
-    if(r.ok){toast(r.message||"Drive unmounted.");await refresh();}
+    const r=await api("/api/storage/emergency_eject",{});
+    const steps=(r.steps||[]).join(" · ");
+    if(r.ok){toast(`${r.message||"Drive unmounted - you may unplug it."}${steps?" ("+steps+")":""}`);}
     else if(r.needs_force_confirmation&&r.force_token){
-      /* Phase 0: the server authorises a force unmount only with its single-use token AND the volume name typed here */
       const vn=r.volume_name||"";
-      const typed=prompt(`macOS refused standard unmount.\n\nWARNING: Forcing unmount may corrupt unfinished transfers or data on the external disk.\n\nTo FORCE the unmount anyway, type the volume name exactly:\n${vn}`,"");
-      if(typed!==null&&typed!==""){
-        toast("Executing forced unmount…");
-        const r2=await api("/api/storage/eject",{emergency:true,force:true,force_token:r.force_token,confirm_volume_name:typed});
-        if(r2.ok)toast(r2.message);
-        else toast(r2.error,1);
-        await refresh();
-      }
-    } else {
-      toast(r.error||"Emergency eject failed.",1);
-    }
-  }catch(e){toast("Emergency eject error: "+e.message,1);}
+      const typed=prompt(`${steps}\n\nmacOS refused to unmount (another program still has files open).\n\nWARNING: a forced unmount can damage files that are open on the drive.\n\nTo FORCE it, type the volume name exactly:\n${vn}`,"");
+      if(typed!==null&&typed!==""){const r2=await api("/api/storage/emergency_eject",{force:true,force_token:r.force_token,confirm_volume_name:typed,wait_s:0});toast(r2.ok?r2.message:esc(r2.error||"not unmounted"),!r2.ok)}
+      else toast("Not unmounted. Transfers stay paused; press Mount to continue working.",1);
+    } else toast(`${esc(r.error||"Emergency eject failed")}${steps?" ("+steps+")":""}`,1);
+  }catch(e){toast("Emergency eject error: "+e.message,1)}
+  btn.disabled=false;btn.textContent="⏏ Emergency eject";await refresh();updateSidebarVaultStatus();
 });
 $("#side-vault-view")&&($("#side-vault-view").onclick=()=>{nav("files");});
 document.addEventListener("keydown",e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="q"){e.preventDefault();handleQuitApplication()}});

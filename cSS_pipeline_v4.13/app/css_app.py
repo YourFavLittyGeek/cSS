@@ -112,7 +112,7 @@ SET = dict(dict(awake=True, theme="dark", backup_dir="", freesurfer_home=os.envi
 import notify_centre as NC, study_split as SS      # v5.14.2-rc4: notification centre + user study selection / training gate
 SET.setdefault("notif", dict(NC.DEFAULTS)); [SET["notif"].setdefault(k, v) for k, v in NC.DEFAULTS.items()]
 SET.setdefault("autotrain", dict(on=False, threshold=3))
-SET["features"].setdefault("experimental_core", False)   # Phase 0: ALBUS/LUMOS/NOX/CORE research layer off by default
+SET["features"].pop("experimental_core", None)            # 2026-11-28: the CORE fixed-weight baseline was removed (setting retired)
 SET["features"].setdefault("train_include_archived", True); SET["features"].setdefault("show_prototypes", False)   # v5.24: older ML prototypes hidden from the menu by default      # v5.20: archived studies stay in model training unless switched off
 PAT = jload("patients.json", [])
 for p in PAT:                                            # resume after a restart: interrupted runs go back to the queue
@@ -1436,7 +1436,6 @@ def pg_get(op, q):
     if op == "analysis": return PG.analysis_state()                                            # Stage 3: small-data honesty analyses
     if op == "study_level": return PG.study_level_state()                                      # Stage 3: study-level 0-4 vs expert grades
     if op == "second_review": return PG.second_review(q.get("code", ""))                       # Stage 3: active learning (after the blind read)
-    if op == "shadow_lab": return PG.shadow_lab_state()                                      # v5.25 SHADOW ML Research Lab
     if op == "dataset":
         from uengine.percival import datasets as DS
         return DS.load(PG.P(), q.get("id", "")) or dict(error="unknown dataset")
@@ -1471,7 +1470,7 @@ def pg_post(op, d):
             if "percival_conflicts" in d: SET["percival_conflicts"] = "effective" if d["percival_conflicts"] == "effective" else "exclude"
             if "percival_use_historical" in d: SET["percival_use_historical"] = bool(d["percival_use_historical"])
             jsave("settings.json", SET); return dict(ok=True)
-        if op in ("score", "score_unified"):                                                  # Phase 3A.2: not before the blind review
+        if op == "score":                                                                       # Phase 3A.2: not before the blind review
             bs = BG.state(B, str(d.get("code") or d.get("study_id") or ""))
             if bs["pending"]: return dict(ok=False, hidden=True, error=BG.HIDDEN + ": " + bs["reason"])
         if op == "score": return PG.score_study(str(d.get("code", ""))) or dict(ok=False, error="no active model or no candidates")
@@ -1497,8 +1496,6 @@ def pg_post(op, d):
         if op == "milestone": return PG.milestone_declare(d.get("name", ""), d.get("by", ""), d.get("reason", ""), d.get("confirm", ""), bool(d.get("fresh_test_cohort")))
         if op == "pensieve_rebuild": return PG.pensieve_index_rebuild()
         if op.startswith("shadow_gov_"): return PG.shadow_gov_post(op[len("shadow_gov_"):], d)
-        if op == "shadow_run": return PG.shadow_run_trial(str(d.get("target", "ALBUS")), str(d.get("hypothesis", "")), d.get("config", {}))
-        if op == "score_unified": return PG.score_study_unified(str(d.get("study_id", "")))
         if op == "test_group_balance": return PG.test_group_balance(d.get("by", ""), d.get("reason", ""), d.get("confirm", ""))
         if op == "test_group_policy": return PG.test_group_policy(str(d.get("policy", "")), d.get("by", ""), d.get("reason", ""), d.get("confirm", ""), d.get("target"))
         if op == "test_group_open": return PG.test_group_open(d.get("by", ""), d.get("reason", ""), d.get("confirm", ""))
@@ -1703,6 +1700,7 @@ def storage_post(op, d):
                                 force_token=str(d.get("force_token", "") or ""), confirm_volume_name=str(d.get("confirm_volume_name", "") or ""))
             if r_.get("ok"): DRIVE["ejected"] = True                  # stay unmounted (the user may unplug) until Reconnect / next start
             return r_
+        if op == "emergency_eject": return emergency_eject(d)
         if op == "reconnect":
             DRIVE["ejected"] = False
             r_ = drive_reconnect(force=True)
@@ -1916,8 +1914,42 @@ def pv_state(code):
     except Exception:
         return "on_mac"
 
+def emergency_eject(d):
+    """2026-11-28 (user request): one button on every screen. 1) hold: no new drive work starts (automatic Pensieve moves, auto-remount);
+    2) every running / queued transfer is asked to pause at its next safe boundary (journal; a transfer is never cut in the middle of a
+    file commit); 3) wait up to 30 s for them; 4) unmount the drive (EjectManager emergency mode). If macOS still refuses, the existing
+    force flow applies (single-use server token + the volume name typed by the user). Nothing is deleted; paused transfers resume after
+    the drive is back (Transfer Center)."""
+    from uengine.transfer.models import JobState as JS, NON_TERMINAL_JOB_STATES
+    DRIVE["ejected"] = True; steps = []                                  # 1) hold (pensieve_tick + drive_reconnect respect it)
+    paused, failed = [], []
+    try:
+        pool = transfer_pool()
+        for j in pool._svc.journal.list_jobs([s_ for s_ in NON_TERMINAL_JOB_STATES if s_ != JS.PAUSED], limit=10000):
+            try: pool.pause(j["job_id"]); paused.append(j["job_id"])
+            except Exception as e: failed.append(f"{j['job_id']}: {type(e).__name__}")
+    except Exception as e: failed.append(f"transfer journal: {type(e).__name__}: {e}")
+    steps.append(f"paused {len(paused)} transfer(s)" + (f", {len(failed)} could not be asked: {'; '.join(failed[:3])}" if failed else ""))
+    deadline = time.time() + float(d.get("wait_s", 30)); still = []
+    while time.time() < deadline:                                          # 3) wait for the safe boundary
+        try: still = [j["job_id"] for j in transfer_pool()._svc.journal.list_jobs([s_ for s_ in NON_TERMINAL_JOB_STATES if s_ not in (JS.PAUSED, JS.QUEUED)], limit=10000)]
+        except Exception: still = []
+        if not still: break
+        time.sleep(0.5)
+    t = PENSIEVE_RUN.get("thread")
+    if t is not None and t.is_alive(): steps.append("a Pensieve move is finishing its current file (it is verified and resumable)")
+    steps.append("all transfers stopped at a safe point" if not still else f"{len(still)} transfer(s) still finishing: {', '.join(still[:3])}")
+    from uengine.storage import StoragePathsService, EjectManager
+    em = EjectManager(StoragePathsService(B, SET.get("vault_mount")))
+    r = em.eject_vault(emergency=True, force=d.get("force") is True, force_token=str(d.get("force_token", "") or ""),
+                       confirm_volume_name=str(d.get("confirm_volume_name", "") or ""))
+    return dict(r, steps=steps, paused_jobs=paused, held=True,
+                note="new drive work is on hold until you press Mount (sidebar) or restart Percival; paused transfers resume in Transfer Center")
+
+
 def pensieve_tick():
     """every 30 s: move ONE reviewed study (final review older than the grace time) to the Pensieve drive in the background"""
+    if DRIVE.get("ejected"): return                                        # 2026-11-28: ejected / emergency hold - no new drive work
     pol = SET.get("pensieve_after_review", "move")
     if PENSIEVE_RUN.get("free"): pol = "move"                             # the user asked to free Mac space: move every reviewed study
     if pol not in ("move", "copy"): return

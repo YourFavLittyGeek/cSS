@@ -21,7 +21,7 @@ class _NoGlobal:
         self.mods = [(PE, "get_pensieve", PE.get_pensieve), (VA, "get_vault", VA.get_vault)]
         def boom(*a, **k): raise AssertionError("global legacy PENSIEVE / external Vault used by a retired default path")
         for m, n, _ in self.mods: setattr(m, n, boom)
-        for mod in ("uengine.albus", "uengine.nox", "uengine.lumos", "uengine.percival_core", "uengine.shadow_lab", "uengine.governance"):
+        for mod in ("uengine.albus", "uengine.nox", "uengine.lumos", "uengine.governance"):
             M = sys.modules.get(mod)
             if M is not None:
                 for n in ("get_pensieve", "get_vault"):
@@ -47,54 +47,9 @@ class TestRetiredLayers(unittest.TestCase):
             self.assertFalse(gov.rollback("ALBUS")[0])
             self.assertEqual(gov.get_audit_trail()[-1]["status"], "refused_retired")
 
-    def test_legacy_engines_never_use_global_memory_or_the_vault_by_default(self):
-        with _NoGlobal():
-            from uengine.albus import AlbusDiscoveryEngine
-            from uengine.nox import NoxCharacteristicsEngine
-            from uengine.lumos import LumosImageIntelligence
-            from uengine.percival_core import PercivalCoreIntelligence
-            from uengine.shadow_lab import ShadowMLLaboratory
-            a = AlbusDiscoveryEngine(); n = NoxCharacteristicsEngine(); l = LumosImageIntelligence(); c = PercivalCoreIntelligence(); s = ShadowMLLaboratory()
-            self.assertFalse(l.trained)                                     # no Vault loader -> untrained, not a silent checkpoint
-            for o in (a, n, l, c, s): self.assertTrue(getattr(o.pensieve, "retired", False))
-            for o in (l, c, s): self.assertFalse(o.vault.is_connected())
-            raw = dict(pial_distance=0.5, darkness_z=-3.0, tube_ratio=1.2, cortex_frac=0.7, tram_frac=0.1)
-            ca = a.discover_candidate("S1", 1, "L", (0, 0, 0), (0, 0, 0), 0, 0.0, (0,) * 6, raw)
-            asmt = c.evaluate_candidate(ca, l.analyze_patch("S1", 1, None), n.measure_candidate("S1", 1, raw))
-            self.assertIsNotNone(asmt)
 
-    def test_shadow_lab_trials_are_synthetic_only(self):
-        from uengine.shadow_lab import ShadowMLLaboratory
-        class Rich:                                                          # a memory full of (unverified) development rows
-            retired = False
-            def get_training_dataset(self, part): return [dict(call="cSS" if i % 2 else "Unsure", nox_measurements="{}", patient_pseudo_id=i) for i in range(40)]
-            def __getattr__(self, n): return lambda *a, **k: None
-        lab = ShadowMLLaboratory(pensieve=Rich(), vault=__import__("uengine.legacy_guard", fromlist=["NullVault"]).NullVault())
-        lab._get_benchmark_cohort()
-        self.assertTrue(lab.last_cohort.startswith("SYNTHETIC"))
 
-    def test_core_uses_real_measurements_and_reports_missing(self):
-        import percival_gui as PG
-        r_ok = dict(cand_id=1, hemi="L", char=dict(pial_dist_mm=0.4, darkness_z=-3.1, tube_ratio=1.1, cortex_frac=0.8, tram_frac=0.2))
-        raw, miss = PG._core_inputs(r_ok); self.assertEqual(miss, []); self.assertEqual(raw["darkness_z"], -3.1)
-        r_miss = dict(cand_id=2, hemi="L", char=dict(pial_dist_mm=0.4, darkness_z=None))
-        raw, miss = PG._core_inputs(r_miss); self.assertIsNone(raw); self.assertIn("tube_ratio", miss)
-        import css_app; css_app.pg_init()                                    # initialises percival_gui's context on the isolated project
-        with _NoGlobal():
-            eng = PG._core_engines()
-            out = PG._core_assess("S1", r_miss, eng)
-            self.assertIsNone(out["score"]); self.assertEqual(out["status"], "unavailable"); self.assertIn("missing NOX", out["reason"])
-            out = PG._core_assess("S1", r_ok, eng)
-            self.assertIn("EXPERIMENTAL", out["label"]); self.assertEqual(out["inputs"]["darkness_z"], -3.1)
 
-    def test_legacy_routes_and_uscore_app_actions_are_retired(self):
-        import css_app; css_app.pg_init()
-        self.assertTrue(css_app.pg_get("pensieve", {})["retired"])
-        self.assertTrue(css_app.pg_get("pensieve_query", dict(component="albus"))["retired"])
-        st = css_app.pg_get("shadow_lab", {}); self.assertTrue(st["retired"]); self.assertIn("SYNTHETIC DEMONSTRATION", st["label"])
-        import unified_gui as UG
-        self.assertTrue(UG.freeze("FREEZE")["retired"]); self.assertTrue(UG.score_all()["retired"])
-        self.assertFalse(os.path.exists(os.path.join(UG.OUT, "model_frozen.json")))
 
     def test_frozen_bundles_removed_and_register_complete(self):
         tracked = subprocess.run(["git", "ls-files", "app/mac", "docs/gui_v514"], cwd=ROOT, capture_output=True, text=True).stdout.splitlines()
@@ -108,6 +63,31 @@ class TestRetiredLayers(unittest.TestCase):
             rows = [l for l in open(reg) if l.startswith("| ") and l[2:3].isdigit()]
             self.assertEqual(len(rows), 7)
 
+
+
+class TestCoreRemoved(unittest.TestCase):
+    """2026-11-28 (user request): the CORE fixed-weight baseline and the Shadow Lab demonstration built on it are removed - module,
+    app wiring, API routes, setting and screen text"""
+    def test_removed_everywhere(self):
+        import importlib
+        for mod in ("uengine.percival_core", "uengine.shadow_lab"):
+            with self.assertRaises(ImportError): importlib.import_module(mod)
+        import percival_gui as PG
+        for name in ("experimental_core_enabled", "_core_engines", "_core_assess", "score_study_unified", "shadow_lab_state", "shadow_run_trial"):
+            self.assertFalse(hasattr(PG, name), name)
+        app = open(os.path.join(ROOT, "app", "css_app.py")).read(); js = open(os.path.join(ROOT, "app", "percival_view.js")).read()
+        for t in ('op == "score_unified"', 'op == "shadow_lab"', 'op == "shadow_run"', 'setdefault("experimental_core"'): self.assertNotIn(t, app)
+        self.assertNotIn("CORE fixed-weight", js); self.assertNotIn("shd-run", js)
+        from uengine.percival import architecture as AR
+        self.assertNotIn("CORE", AR.NAMES)
+
+    def test_other_legacy_routes_still_retired(self):
+        import css_app; css_app.pg_init()
+        self.assertTrue(css_app.pg_get("pensieve", {})["retired"])
+        self.assertTrue(css_app.pg_get("pensieve_query", dict(component="albus"))["retired"])
+        import unified_gui as UG
+        self.assertTrue(UG.freeze("FREEZE")["retired"]); self.assertTrue(UG.score_all()["retired"])
+        self.assertFalse(os.path.exists(os.path.join(UG.OUT, "model_frozen.json")))
 
 if __name__ == "__main__":
     unittest.main()

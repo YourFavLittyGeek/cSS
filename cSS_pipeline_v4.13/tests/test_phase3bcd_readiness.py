@@ -170,12 +170,6 @@ class TestLegacyPathsAndFlags(unittest.TestCase):
             r = subprocess.run([sys.executable, os.path.join(S, cmd[0])] + cmd[1:], capture_output=True, text=True, env=dict(os.environ, CSS_BASE=b))
             self.assertNotEqual(r.returncode, 0, cmd); self.assertIn("refused", r.stdout + r.stderr, cmd)
 
-    def test_shadow_lab_never_claims_a_leakage_audit_and_labels_synthetic(self):
-        from uengine.shadow_lab import ShadowMLLaboratory
-        import inspect
-        src = inspect.getsource(ShadowMLLaboratory)
-        self.assertIn("leakage_audit_passed=False", src); self.assertNotIn("leakage_audit_passed=True", src)
-        self.assertIn('self.last_cohort = "SYNTHETIC', src)
 
     def test_insufficient_data_is_a_valid_training_end_state(self):
         import percival_gui as PG

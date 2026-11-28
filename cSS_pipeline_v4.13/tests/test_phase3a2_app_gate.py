@@ -76,7 +76,7 @@ class TestAppBlindGate(unittest.TestCase):
         self.assertNotIn("3.25", json.dumps(mine)); self.assertNotIn("1.25", json.dumps(mine))
         sc = json.loads(self.http(f"/api/percival/score?code={self.code}")); self.assertTrue(sc.get("hidden")); self.assertNotIn(SENT_MODEL, json.dumps(sc))
         self.assertTrue(json.loads(self.http(f"/api/percival/history?code={self.code}")).get("hidden"))
-        for op, key in (("score", "code"), ("score_unified", "study_id")):
+        for op, key in (("score", "code"),):
             r2 = json.loads(self.http(f"/api/percival/{op}", {key: self.code})); self.assertTrue(r2.get("hidden"), (op, r2))
 
     def assert_visible(self):

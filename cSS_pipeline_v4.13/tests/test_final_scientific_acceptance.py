@@ -25,7 +25,6 @@ from uengine.pensieve import PensieveCoreMemory, DurableLocalJournal
 from uengine.nox import NoxCharacteristicsEngine
 from uengine.lumos import LumosImageIntelligence
 from uengine.albus import AlbusDiscoveryEngine
-from uengine.percival_core import PercivalCoreIntelligence
 from uengine.contracts import NoxMeasurements, LumosInference, AlbusCandidate
 
 class TestFinalScientificAcceptance(unittest.TestCase):
@@ -189,29 +188,6 @@ class TestFinalScientificAcceptance(unittest.TestCase):
     # =========================================================================
     # MISSION E: PERCIVAL CORE IRLS INTERCEPT & FEATURE EXTRACTION IDENTITY
     # =========================================================================
-    def test_percival_core_irls_unpenalized_intercept_and_feature_identity(self):
-        """Verify IRLS does not penalize bias, and feature vector extraction is identical across pipeline."""
-        core = PercivalCoreIntelligence(pensieve=self.pensieve, vault=self.vault)
-
-        # 1. Feature extraction identity
-        cand_a = AlbusCandidate(1, "S1", "L", (10,10,10), (5,5,5), 20, 10.0, (8,8,8,12,12,12), 0.70, "v5.25", "v4")
-        inf_l = LumosInference(1, "S1", 0.85, 1.73, 0.08, (49, 25, 16), "v5.25", has_visual_evidence=True, depth_gradient=0.75)
-        meas_n = NoxMeasurements(1, "S1", morphology={"volume_mm3": 10.0, "elongation": 1.2},
-                                 signal={"darkness_z": -2.5, "edge_contrast": 0.6},
-                                 anatomy={"pial_distance_mm": 0.4, "cortex_fraction": 0.8})
-
-        vec, avail = core.extract_feature_vector(cand_a, inf_l, meas_n)
-        self.assertEqual(len(vec), 5)
-        self.assertTrue(all(avail.values()))
-
-        # 2. IRLS fitting: verify bias update is responsive and unpenalized
-        rng = np.random.default_rng(77)
-        N = 50
-        y = np.ones(N) # All positive targets -> bias must shift strongly positive
-        X = rng.normal(0, 1, (N, 5))
-        core.fit(X, y, l2_penalty=5.0)
-        # With all positive labels, unpenalized bias should be strongly positive
-        self.assertGreater(core.weights["bias"], 1.5)
 
 if __name__ == "__main__":
     unittest.main()

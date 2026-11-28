@@ -5,7 +5,6 @@ Mapping (docs/engineering/ARCHITECTURE_RECONCILIATION.md; user-facing names in N
   NOX     Quantitative MRI Analysis     the candidate's measurements CHAR (component 'char'; incl. uScore x1 / x2 / x5)
   LUMOS   Visual Intelligence           the Percival SmallCNN on MRI patches (component 'image'); the SAME trained weights
   PERCIVAL Decision Engine              the trainable meta-model + calibration + OOD + thresholds (uengine/percival/meta.py)
-  CORE    Fixed-Weight Baseline         uengine/percival_core.py - comparison only, never a PERCIVAL prediction
   (2026-11-25: the separate 'unified' component and the 'fusion' layer were removed - PERCIVAL is the only combiner)
 
 candidate_contract()  one record per candidate: identity, ALBUS / NOX / LUMOS evidence with an explicit state, the PERCIVAL decision,
@@ -20,7 +19,7 @@ import os
 SCHEMA = "percival-candidate-contract/1.0"
 NAMES = dict(PERCIVAL="PERCIVAL · Integrated cSS AI system", ALBUS="ALBUS · Mathematical Detection", NOX="NOX · Quantitative MRI Analysis",
              LUMOS="LUMOS · Visual Intelligence", PENSIEVE="PENSIEVE · AI Memory and History", SHADOW="SHADOW · Experimental Discovery Lab",
-             CORE="CORE · Fixed-Weight Baseline", ENGINE="PERCIVAL Decision Engine")
+             ENGINE="PERCIVAL Decision Engine")
 # Percival engine component -> architecture component (the engine's internal names are kept: data contracts of saved models)
 OWNER = dict(math="ALBUS", char="NOX", image="LUMOS")
 LABEL = dict(math="ALBUS · detector score (score_v4, recalibrated)", char="NOX · measurements", image="LUMOS · MRI patch model")
@@ -111,8 +110,6 @@ def candidate_contract(sid, scored, row=None, model=None, albus=None, include_pa
                provenance=dict(model=(model or {}).get("version"), dataset=((model or {}).get("data") or {}).get("dataset"),
                                component_versions=component_versions(model) if model else {}),
                kind="AI prediction - not an expert label")
-    if scored.get("experimental_core") is not None:
-        rec["core"] = dict(name=NAMES["CORE"], role="comparison only - never the PERCIVAL prediction", **scored["experimental_core"])
     if review is not None: rec["expert_review"] = review                      # reference only (ledger status), never merged into the prediction
     if include_patient: rec["identity"]["patient"] = row.get("patient")
     return rec

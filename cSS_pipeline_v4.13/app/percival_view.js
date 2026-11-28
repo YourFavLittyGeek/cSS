@@ -45,6 +45,13 @@ const PV_ACTIVE=j=>!!j&&(j.active||j.state==="preparing"||j.state==="running");
 function pvDur(x){if(x==null||!isFinite(x))return "—";x=Math.max(0,Math.round(x));const h=Math.floor(x/3600),m=Math.floor(x%3600/60),sec=x%60;return h?`${h} h ${m} min`:m?`${m} min ${sec} s`:`${sec} s`}
 function pvTrainBtn(j,id,idle){const on=PV_ACTIVE(j);return `<button class="b pri" id="${id}" data-pv="train-btn" ${on?'disabled aria-disabled="true" title="a training cycle is running - this unlocks when it finishes"':""}>${on?"Training…":idle}</button>`}
 function pvJobCard(j,full){j=j||{};const on=PV_ACTIVE(j),st=j.stages||[];if(!on&&!full&&!["finished","failed","cancelled","insufficient_data","interrupted"].includes(j.state))return "";
+  const LR=j.last_run;   // 2026-11-28: after an app restart the job is idle - show the last cycle instead of an empty 0 / 7
+  if(!on&&(j.state||"idle")==="idle"){return LR?`<div class="card" data-pv="job-card" style="margin:10px 0"><b>Last training cycle</b> · ${LR.state==="finished"?'<span class="ok">✓ complete</span>':esc(LR.state||"")} · started ${esc(LR.started||"—")}${LR.finished?` · finished <b>${esc(LR.finished)}</b>`:""}${LR.version?` · model <b>${esc(LR.version)}</b> (Model Center)`:""}${LR.error?` <span class="note">${esc(LR.error)}</span>`:""}</div>`:""}
+  if(j.state==="finished"){const v=(LR&&LR.version)||"";return `<div class="card" data-pv="job-card" style="margin:10px 0;border-left:4px solid var(--ok,#2a2)">
+   <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><span><b class="ok">✓ Training complete</b> · all ${st.length||7} of ${st.length||7} stages done</span><span class="mono">100 %</span></div>
+   <div style="background:var(--border);height:10px;border-radius:5px;overflow:hidden;margin:6px 0"><div style="background:var(--ok,#2a2);height:100%;width:100%"></div></div>
+   <div class="row" style="gap:18px;flex-wrap:wrap"><span class="note">Finished <b>${esc(j.finished_at||(LR&&LR.finished)||"—")}</b></span><span class="note">Took <b>${pvDur(j.elapsed_s)}</b></span>${v?`<span class="note">New model <b>${esc(v)}</b> - see Model Center</span>`:""}</div>
+   <ol style="margin:8px 0 4px;padding-left:20px">${st.map(x=>`<li style="margin:2px 0">${x.status==="skipped"?'<span class="note">–</span>':'<span class="ok">✓</span>'} ${esc(x.label)}${x.duration_s!=null?` <span class="note">· ${pvDur(x.duration_s)}</span>`:""}${x.status==="skipped"?' <span class="note">· not run</span>':""}</li>`).join("")}</ol></div>`}
   const pc=Math.round(100*(j.progress||0)),E=j.eta||{},done=st.filter(x=>x.status==="done"||x.status==="skipped").length,cur=st.find(x=>x.status==="current");
   const rem=on?(E.eta_s!=null?`${pvDur(E.eta_s)}${E.eta_range_s&&E.eta_range_s[0]!=null&&E.eta_range_s[1]!=null?` (range ${pvDur(E.eta_range_s[0])} – ${pvDur(E.eta_range_s[1])})`:""}${E.reliable?"":" · early estimate"}`:"estimating…"):"—";
   const icon=x=>x.status==="done"?'<span class="ok">✓</span>':x.status==="current"?'<span class="pulse">●</span>':x.status==="skipped"?'<span class="note">–</span>':x.status==="stopped"?'<span class="bad">✗</span>':'<span class="note">○</span>';
@@ -226,7 +233,7 @@ async function intelView(v){{const hq=location.hash.match(/^#intel\?tab=(\w+)/);
       <tr><td><b>original_mri</b></td><td>Raw DICOM and NIfTI acquisitions</td><td class="mono">${fmtGb(cats.original_mri||0)}</td></tr>
       <tr><td><b>processed_mri</b></td><td>Resampled volumes &amp; masks</td><td class="mono">${fmtGb(cats.processed_mri||0)}</td></tr>
       <tr><td><b>PENSIEVE</b></td><td>Persistent memory database &amp; snapshots</td><td class="mono">${fmtGb(cats.PENSIEVE||0)}</td></tr>
-      <tr><td><b>models</b></td><td>LUMOS image-network weights; CORE fixed-weight baseline</td><td class="mono">${fmtGb(cats.models||0)}</td></tr>
+      <tr><td><b>models</b></td><td>LUMOS image-network weights</td><td class="mono">${fmtGb(cats.models||0)}</td></tr>
       <tr><td><b>backups</b></td><td>Independent recovery archives</td><td class="mono">${fmtGb(cats.backups||0)}</td></tr></table>
 
       <div class="row" style="gap:10px;margin-top:16px">
@@ -1000,9 +1007,7 @@ async function pvShadow(el,v){const S=await api("/api/percival/shadow_gov"),H=S.
       <td>${h.status==="registered"?`<button class="b sm" data-shg="discovery" data-id="${esc(h.id)}">Run discovery</button>`:h.status==="discovery_done"?`<button class="b sm" data-shg="confirm" data-id="${esc(h.id)}">PERCIVAL confirmation</button>`:(h.status==="confirmed"||h.status==="not_confirmed")?`<button class="b sm" data-shg="approve" data-id="${esc(h.id)}" data-pass="${h.status==="confirmed"?1:0}">Approve…</button>`:""}</td></tr>`}).join("")||'<tr><td colspan="7" class="empty">No hypothesis registered.</td></tr>'}</table>
    ${(S.nox||{}).version&&(S.nox||{}).version!=="v000"?`<p class="note">Active NOX configuration ${esc(S.nox.version)} (parent ${esc(S.nox.parent)}) <button class="b sm" id="shg-rb">Roll back…</button></p>`:""}
    <p class="note">Approved NOX configurations are versioned and reversible. The PERCIVAL Decision Engine still trains on its built-in measurement set; reading the
-   approved configuration during training is the next integration step (not yet active).</p>
-   <details style="margin-top:10px"><summary class="note">Older demonstration trials (SYNTHETIC random cohort - never evidence)</summary><p class="note">${esc(S.legacy_note)}</p>
-    <button class="b sm" id="shd-run">Run a synthetic demonstration trial</button></details></div>`;
+   approved configuration during training is the next integration step (not yet active).</p></div>`;
   $("#shg-reg").onclick=async()=>{const r=await api("/api/percival/shadow_gov_register",{target:"NOX",kind:"nox_measurement",variables:[$("#shg-var").value],rationale:$("#shg-why").value,by:arWho()});toast(r.ok?`registered ${esc(r.hypothesis.id)}`:esc(r.error),!r.ok);pvShadow(el,v)};
   el.querySelectorAll("[data-shg]").forEach(b=>b.onclick=async()=>{const op=b.dataset.shg,id=b.dataset.id;let body={id};
     if(op==="approve"){const by=(prompt("Approve "+id+" - your name (the approver):",arWho())||"").trim();if(!by)return;const why=(prompt("Reason:")||"").trim();if(!why)return;
@@ -1010,5 +1015,4 @@ async function pvShadow(el,v){const S=await api("/api/percival/shadow_gov"),H=S.
     b.disabled=true;const r=await api("/api/percival/shadow_gov_"+op,body);toast(r.ok?`${id}: ${esc(op)} done`:esc(r.error),!r.ok);pvShadow(el,v)});
   $("#shg-rb")&&($("#shg-rb").onclick=async()=>{const by=(prompt("Roll back NOX - your name:",arWho())||"").trim();if(!by)return;const why=(prompt("Reason:")||"").trim();if(!why)return;
     const c=prompt("Type exactly: APPROVE COMPONENT CHANGE");if(c===null)return;const r=await api("/api/percival/shadow_gov_rollback",{component:"NOX",by,reason:why,confirm:c.trim()});toast(r.ok?"rolled back":esc(r.error),!r.ok);pvShadow(el,v)});
-  $("#shd-run").onclick=async()=>{const r=await api("/api/percival/shadow_run",{target:"ALBUS",hypothesis:"synthetic demonstration",config:{formula:"formula_adaptive_subpial",threshold:0.45}});
-    toast(r.ok?`Synthetic demonstration finished (not evidence): AUC ${g3((r.metrics_experimental||{}).auc)}`:esc(r.error),!r.ok)}}
+}
