@@ -151,7 +151,7 @@ async function intelView(v){{const hq=location.hash.match(/^#intel\?tab=(\w+)/);
     <p class="note">AUC shadow: on expert calls this version never learned from. Head-to-head: only calls that <b>neither</b> model learned from (otherwise the active model would be judged on its own training data). Synthetic or small projects give unstable numbers; these are not clinical results.</p></div>`);
     clearTimeout(PV.sht);if(j.state==="running")PV.sht=setTimeout(()=>V==="intel"&&PV.tab==="models"&&intelView(v),5000)}
   if(PV.tab==="system"){await pvSystem(el)}
-  if(PV.tab==="albus"){await pvAlbus(el)}
+  if(PV.tab==="albus"){await pvAlbus(el);pvOutlineQ(el)}
   if(PV.tab==="pensieve"){await pvPensieve(el)}
   if(PV.tab==="shadow"){await pvShadow(el,v)}
   if(PV.tab==="vault"){
@@ -967,6 +967,12 @@ async function pvHonesty(el){const A=await api("/api/percival/analysis");
    <p class="note"><b>Learning curve</b> (${esc((A.learning_curve||{}).basis||"")}): ${pts.map(p=>`${p.patients} patients → ${g3(p.auc_mean)}`).join(" · ")||"—"}${(A.learning_curve||{}).still_improving?' · <span class="warn">still improving with more patients</span>':""}</p>
    <p class="note"><b>Abstention</b>: ${esc((A.abstention||{}).policy||"")}<br>${ab.map(p=>`coverage ${Math.round(p.coverage*100)} % → accuracy ${g3(p.accuracy)}`).join(" · ")}</p>
    <p class="note"><b>Subgroup calibration</b>: ${Object.entries(((A.subgroup_calibration||{}).subgroups)||{}).map(([k,lv])=>`${esc(k)}: ${Object.entries(lv).map(([l,e])=>`${esc(l)} (n ${e.n}, ${esc(e.recalibration)})`).join(", ")}`).join(" · ")} - never recalibrated automatically.</p>`}
+// 2026-11-28 Stage 1a: the reviewers' ratings of the full-extent outline (outline quality only - never a label)
+async function pvOutlineQ(el){let Q;try{Q=await api("/api/percival/outline_quality")}catch(e){return}const C=Q.counts||{};
+  el.insertAdjacentHTML("beforeend",`<div class="card" data-pv="outline-quality"><h3 style="margin:0 0 4px">Outline quality (full extent)</h3>
+   <p class="note" style="margin-top:0">The reviewer shows each candidate as one unit: the full extent (the detector's dark voxels connected to its core within 5 mm). Rate it in the reviewer under "Your call": OK / Too small / Too large / Wrong shape. ${esc(Q.note||"")}.</p>
+   ${Q.n?`<table><tr><th>Rated outlines</th><th>Studies</th><th>OK</th><th>Too small</th><th>Too large</th><th>Wrong shape</th><th>OK %</th></tr><tr><td>${Q.n}</td><td>${Q.studies}</td><td>${C.ok||0}</td><td>${C.too_small||0}</td><td>${C.too_large||0}</td><td>${C.wrong||0}</td><td class="mono"><b>${Q.ok_pct??"—"} %</b></td></tr></table>
+   <p class="note">Of the outlines with a leak warning (reached the 5 mm limit): ${Object.entries(Q.with_leak_warning||{}).map(([k,v])=>`${esc(k.replace("_"," "))} ${v}`).join(" · ")||"none rated"}. ${Q.ready_for_stage2?'<span class="ok">Enough rated studies for Stage 2.</span>':`${Q.studies} of ~20 studies rated for Stage 2.`}</p>`:'<p class="note">No outline rated yet.</p>'}</div>`)}
 async function pvAlbus(el){const A=await api("/api/percival/albus");const E=Object.entries(A.evaluation||{}).filter(([k])=>k!=="unreadable");
   el.innerHTML=`<div class="card" data-pv="albus"><h3 style="margin:0 0 4px">ALBUS · Mathematical Detection</h3>
    <p class="note" style="margin-top:0">The detector (scripts/detect_css.py: candidate generation, rules E1–E30, score_v4) measured per detector version against

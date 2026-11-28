@@ -1419,6 +1419,7 @@ def pg_get(op, q):
     if op == "pensieve_index": return PG.pensieve_index_state()                                 # PENSIEVE (derived per-project index)
     if op == "pensieve_history": return PG.pensieve_history(q.get("code", ""), q.get("cand", "0"))
     if op == "shadow_gov": return PG.shadow_gov_state()                                         # SHADOW governed discovery
+    if op == "outline_quality": return PG.outline_quality()                                     # 2026-11-28 Stage 1a outline ratings
     if op == "albus": return PG.albus_state()                                                   # ALBUS detector evaluation + registry
     if op == "pensieve": return PG.pensieve_state()                                          # v5.25 PENSIEVE Core Memory
     if op == "pensieve_query": return PG.pensieve_query(q.get("component", "albus"))

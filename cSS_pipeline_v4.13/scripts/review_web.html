@@ -146,6 +146,8 @@ table.cmp tr.r{cursor:pointer}table.cmp tr.r:hover{background:var(--bg)}table.cm
    <!-- 2026-11-25: the experimental Unified-score card was removed (not part of ALBUS -> NOX + LUMOS -> PERCIVAL); its 3 useful measurements are NOX inputs -->
    <div class="card" id="deccard"><div class="h"><span title="Your call as the human reviewer. AI values are shown separately and never become your call.">Your call (human reviewer)</span><span class="mut sm" id="curcall"></span></div>
     <div class="dec" id="dec"></div>
+    <div id="orate" class="mut sm" style="display:none;margin:6px 0 2px" title="How well does the outline (the full extent) follow the lesion border? This rates the OUTLINE only - it never changes your call.">Outline:
+     <button class="btn" data-orate="ok">OK</button><button class="btn" data-orate="too_small">Too small</button><button class="btn" data-orate="too_large">Too large</button><button class="btn" data-orate="wrong">Wrong shape</button></div>
     <input type="text" id="comment" placeholder="Add a comment…  (C)" maxlength="500" autocomplete="off">
     <div class="saved" id="saved"></div></div>
    <div class="card"><div class="h">Image</div>
@@ -307,7 +309,7 @@ const PLN=["Axial","Coronal","Sagittal"];
 const VIEWS=[{h:0,v:1,s:2},{h:0,v:2,s:1},{h:1,v:2,s:0}];
 const ORI=[["R","L","A","P"],["R","L","S","I"],["A","P","S","I"]];
 const DEFPL=[0,1,2,0];
-let M=null, LAB=null, EXT=null, vols={}, seqmeta={}, WLs={}, luts={};
+let M=null, LAB=null, EXT=null, OUT={}, vols={}, seqmeta={}, WLs={}, luts={};
 let nx,ny,nz,vox, cur=[0,0,0], ctr=[0,0,0], zoom=1;
 let layout=LS("layout","1"), panes=[], act=0;
 let ci=0, calls={}, undo=[], tool=LS("tool","pan"), ruler=null, probe=null, missed=[], draft=null, shape="rect", onlyDiffer=false;
@@ -315,7 +317,7 @@ let autoPt=LS("autopt",true),autoSec=LS("autosec",10),nxTimer=null;   // after t
 const clampSec=v=>Math.max(0,Math.min(600,Math.round(Number(v)||0)));   // seconds before the next patient; 0 = immediately
 const afMode=()=>!autoPt?"manual":clampSec(autoSec)===0?"now":"after";
 let compareOn=LS("compare",true), revoteMode=false, readerScore=null, finalRec=null;
-let showMark=LS("mark",true), showExt=LS("ext",true), showOther=LS("other",true), autoNext=LS("auto",true), showAI=LS("ai",true), showText=LS("text",true), showCross=LS("cross2",false), mag=false, mouse=null;
+let showMark=LS("mark",true), showExt=LS("ext",true), showCore=LS("core",true), showOther=LS("other",true), autoNext=LS("auto",true), showAI=LS("ai",true), showText=LS("text",true), showCross=LS("cross2",false), mag=false, mouse=null;
 let mir=false, showRL=LS("rl",true), ltah=LS("ltah",false), ltopen=false, sideChk=null;
 let ph=LS("ph",false), ah=LS("ah",false), pw=LS("pw",372), peek=false, leaveT=0, resizing=false, lastTab=LS("tab","viewer");
 let snap=Object.assign({mode:"view",text:true,scale:true,outline:true,cross:false,arrow:false,fmt:"png",res:2,folder:"",ask:false,parts:{study:1,cand:1,xyz:1,plane:1,slice:0,time:0},side:true,clip:false},LS("snap",{}));
@@ -356,9 +358,12 @@ function gotoCandidate(){const c=cand();if(!c)return;cur=c.centre.slice();if(zoo
 function resetView(){const p=panes[act];delete WLs[p.seq];delete luts[p.seq];fitView()}
 
 // ---------- drawing ----------
-// E[0] this candidate's core (red), E[1] other candidates (yellow), E[2] this candidate's full EXTENT (2026-11-28; dashed cyan): the outline of
-// the detector's dark voxels connected to the core within 5 mm - the same rule as the grading mask. The core is the darkest ridge only.
-function strokeEdges(x,g,E,scale){for(const [q,L] of E.entries()){if(!L.length)continue;x.strokeStyle=q===2?"rgba(90,220,255,.95)":q?"rgba(255,200,60,.85)":"#ff4646";x.lineWidth=(q===2?1.2:q?1.2:1.8)/scale;x.setLineDash(q===2?[4/scale,3/scale]:[]);x.lineJoin="round";x.beginPath();
+// 2026-11-28 Stage 1a ("one unit"): the main outline is the candidate's full EXTENT (the detector's dark voxels connected to its core within
+// 5 mm - the rule of the grading mask; uengine/imaging/refine.py) when it exists: E[0] this candidate (red), E[1] the others (yellow);
+// E[2] = this candidate's ridge CORE (the detector's own object: its number, fingerprint and measurements), a thin dotted line inside.
+// Without an extent (or switched off) the core is the outline, as before. The core files are never changed.
+const extMain=()=>!!(EXT&&showExt);
+function strokeEdges(x,g,E,scale){for(const [q,L] of E.entries()){if(!L.length)continue;x.strokeStyle=q===2?"rgba(255,150,150,.9)":q?"rgba(255,200,60,.85)":"#ff4646";x.lineWidth=(q===2?1.0:q?1.2:1.8)/scale;x.setLineDash(q===2?[2/scale,2/scale]:[]);x.lineJoin="round";x.beginPath();
     for(let n=0;n<L.length;n+=4){x.moveTo(g.ox+L[n]*g.sx,g.oy+L[n+1]*g.sy);x.lineTo(g.ox+L[n+2]*g.sx,g.oy+L[n+3]*g.sy)}x.stroke()}x.setLineDash([])}
 function drawShape(x,g,type,strokes,label,dash){x.strokeStyle="#35d0ff";x.fillStyle="rgba(53,208,255,.12)";x.lineWidth=2.2;x.setLineDash(dash?[7,4]:[]);
   let lx=null,ly=0;
@@ -368,19 +373,19 @@ function drawShape(x,g,type,strokes,label,dash){x.strokeStyle="#35d0ff";x.fillSt
 function buildSlice(p){ // the slice image + outlines of the pane (offscreen), recomputed on every render
   const VOL=vols[p.seq]; if(!VOL){p.ready=false;return} p.ready=true;
   const V=VIEWS[p.plane],d=[nx,ny,nz],nh=d[V.h],nv=d[V.v],off=p.off; if(off.width!==nh||off.height!==nv){off.width=nh;off.height=nv}
-  const octx=off.getContext("2d"),img=octx.createImageData(nh,nv),D=new Uint32Array(img.data.buffer),E=[[],[],[]],lut=lutFor(p.seq);
+  const octx=off.getContext("2d"),img=octx.createImageData(nh,nv),D=new Uint32Array(img.data.buffer),E=[[],[],[]],lut=lutFor(p.seq),PR=extMain()?EXT:LAB;
   const gd=(mir&&V.h===0)?-1:1,st=[1,nx,nx*ny],sh=st[V.h],sv=st[V.v],ss=st[V.s],s0=cur[V.s]*ss,c=cand(),curId=c?c.id:-1;
   const slab=(p.mip&&p.plane===0&&p.seq!=="phase")?Math.max(1,Math.round(4/vox[2])):0; let x0=1e9,x1=-1,y0=1e9,y1=-1;
   for(let y=0;y<nv;y++){const vv=(nv-1-y)*sv;for(let x=0;x<nh;x++){const b=(gd>0?nh-1-x:x)*sh+vv,q=b+s0;let val=VOL[q];
       if(slab){for(let k=Math.max(0,cur[2]-slab);k<=Math.min(nz-1,cur[2]+slab);k++){const w=VOL[b+k*ss];if(w<val&&w>0)val=w}}
       const gv=lut[val];D[y*nh+x]=0xff000000|(gv<<16)|(gv<<8)|gv;
-      if(LAB){const l=LAB[q];if(l){const mine=l===curId; if(mine){if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y}
+      if(PR){const l=PR[q];if(l){const mine=l===curId; if(mine){if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y}
         if((mine&&showMark)||(!mine&&showOther)){const L=E[mine?0:1];
+          if(x===0||PR[q+gd*sh]!==l)L.push(x,y,x,y+1);if(x===nh-1||PR[q-gd*sh]!==l)L.push(x+1,y,x+1,y+1);
+          if(y===0||PR[q+sv]!==l)L.push(x,y,x+1,y);if(y===nv-1||PR[q-sv]!==l)L.push(x,y+1,x+1,y+1)}}}
+      if(PR===EXT&&LAB&&showCore&&showMark&&LAB[q]===curId&&curId>0){const l=curId,L=E[2];
           if(x===0||LAB[q+gd*sh]!==l)L.push(x,y,x,y+1);if(x===nh-1||LAB[q-gd*sh]!==l)L.push(x+1,y,x+1,y+1);
           if(y===0||LAB[q+sv]!==l)L.push(x,y,x+1,y);if(y===nv-1||LAB[q-sv]!==l)L.push(x,y+1,x+1,y+1)}}}
-      if(EXT&&showExt&&showMark&&EXT[q]===curId&&curId>0){const l=curId,L=E[2];
-          if(x===0||EXT[q+gd*sh]!==l)L.push(x,y,x,y+1);if(x===nh-1||EXT[q-gd*sh]!==l)L.push(x+1,y,x+1,y+1);
-          if(y===0||EXT[q+sv]!==l)L.push(x,y,x+1,y);if(y===nv-1||EXT[q-sv]!==l)L.push(x,y+1,x+1,y+1)}}}
   octx.putImageData(img,0,0);p.E=E;p.box=x1>=0?{x0,x1,y0,y1}:null}
 function niceBar(pxPerMm,maxPx){for(const mm of [100,50,20,10,5,2]){if(mm*pxPerMm<=maxPx)return mm}return 2}
 function drawPane(p,x,W,H,o){
@@ -499,10 +504,10 @@ async function loadStudy(sid){if(draftOk(draft))flushDraft();status("loading stu
      for(let i=M.cands.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[M.cands[i],M.cands[j]]=[M.cands[j],M.cands[i]]}
      M.cands.forEach((c,i)=>c.disp=i+1)}
    paintMode()}
-  mir=LS("mir_"+M.study,false);sideChk=M.side_check||null;calls=M.calls||{};undo=[];draft=null;revoteMode=false;readerScore=M.reader_score||null;finalRec=M.final||null;
+  mir=LS("mir_"+M.study,false);sideChk=M.side_check||null;calls=M.calls||{};OUT=M.outline||{};undo=[];draft=null;revoteMode=false;readerScore=M.reader_score||null;finalRec=M.final||null;
   const b=$("#banner"),msg=[M.qc,M.note,sideChk&&sideChk.bad?sideMsg():""].filter(Boolean).join("  ·  ");$("#seqnote").textContent=M.missing_seqs.length?("Not imported for this patient: "+M.missing_seqs.join(", ")):"";b.textContent=msg;b.style.display=msg?"block":"none";
   const lr=await fetch(`/api/labels?study=${M.study}&reviewer=${encodeURIComponent(reviewer())}&mode=${WSM?"wholestudy":vmode?"validation":""}`);const LB=new Uint16Array(await lr.arrayBuffer());if(stale())return;LAB=LB;EXT=null;
-  if(!WSM)fetch(`/api/labels?study=${M.study}&reviewer=${encodeURIComponent(reviewer())}&mode=${vmode?"validation":""}&kind=extent`).then(async r=>{if(stale()||!(r.headers.get("content-type")||"").startsWith("application/octet-stream"))return;EXT=new Uint16Array(await r.arrayBuffer());draw()}).catch(()=>{});
+  if(!WSM)fetch(`/api/labels?study=${M.study}&reviewer=${encodeURIComponent(reviewer())}&mode=${vmode?"validation":""}&kind=extent`).then(async r=>{if(stale()||!(r.headers.get("content-type")||"").startsWith("application/octet-stream"))return;EXT=new Uint16Array(await r.arrayBuffer());draw();paintOutline();paintLists()}).catch(()=>{});
   await loadVol("swi");if(stale())return;panes.forEach(p=>{p.seq="swi";p.mip=false});fitView();
   buildStrip();setMissed(M.missed);const first=M.cands.findIndex(c=>!isDone(c));go(first<0?0:first);status("");fetchSecondLook(M.study);fetchAlbusMarks(M.study);
   if(!reviewer())status("Enter your name (upper right) before the first decision.",true)}
@@ -556,7 +561,7 @@ function paintLists(){let n=0;$$("#strip .chip").forEach((e,i)=>{const c=M.cands
   $("#progbar").style.width=(M.cands.length?100*n/M.cands.length:0)+"%";$("#progtxt").textContent=n+" of "+M.cands.length+" read";
   const e=$("#strip .cur");if(e)e.scrollIntoView({block:"nearest",inline:"nearest"});
   $("#candtable").innerHTML="<tr><th>#</th><th>Side · region</th><th>mm³</th><th>Your call</th></tr>"+M.cands.map((c,i)=>{const call=callOf(c),cm=(calls[c.id]||{}).comment;
-    return `<tr class="r ${i===ci?"cur":""}" data-i="${i}"><td><b>${did(c)}</b></td><td>${c.hemi} · ${esc(c.region)}${cm?` <span class="mut" title="${esc(cm)}">✎</span>`:""}</td><td>${Math.round(c.volume)}</td><td>${call?pill(CALLLBL[call],CALLCOL[call]):'<span class="mut">—</span>'}</td></tr>`}).join("");
+    return `<tr class="r ${i===ci?"cur":""}" data-i="${i}"><td><b>${did(c)}</b></td><td>${c.hemi} · ${esc(c.region)}${cm?` <span class="mut" title="${esc(cm)}">✎</span>`:""}</td><td title="${c.ext_volume!=null?`full extent ${Math.round(c.ext_volume)} mm³ · ridge core ${Math.round(c.volume)} mm³`:"ridge core"}">${Math.round(extMain()&&c.ext_volume!=null?c.ext_volume:c.volume)}${c.ext_leak&&extMain()?' <span class="warn" title="the extent reached the 5 mm limit - it may include a neighbouring vessel">⚠</span>':""}</td><td>${call?pill(CALLLBL[call],CALLCOL[call]):'<span class="mut">—</span>'}</td></tr>`}).join("");
   const T={};["cSS","not cSS","unsure","not read"].forEach(r=>T[r]={green:0,yellow:0,red:0});let ag=0,df=0;
   const rows=M.cands.map((c,i)=>{const call=callOf(c),v=verdict(c),row=!call?"not read":call==="cSS"?"cSS":call==="Unsure"?"unsure":"not cSS";T[row][c.ai.band]++;if(v==="agree")ag++;if(v==="differ")df++;
     if(onlyDiffer&&v!=="differ")return "";const sus=c.ai.band==="green"?"cSS":c.ai.band==="yellow"?"uncertain":c.ai.suspect.replace(/^I suspect /,"").replace(/^Probably not cSS.*/,"not cSS");
@@ -610,7 +615,13 @@ function go(i,keepView){if(!M.cands.length){paintLists();draw();return}ci=Math.m
   $("#candinfo").textContent=(c.audit&&c.rule?`EXCLUDED OBJECT (rule: ${c.rule}) · `:"")+`Candidate ${ci+1} of ${M.cands.length} · #${did(c)} · ${c.hemi==="L"?"left":"right"} ${c.region} · ${Math.round(c.volume)} mm³`;
   gauge(c.ai);pCard(c);$("#aiconf").innerHTML=(c.conf===null||c.conf===undefined)?"":`<b>Confidence model: ${Math.round(c.conf)} %</b>${c.conf_why?" · "+esc(c.conf_why):""} · fitted on 10 patients, not a validated probability`;
   paintDecision();paintLists();draw();s3Bind();s3Load()}
-function paintDecision(){const c=cand();if(!c)return;const st=calls[c.id]||{};$$("#dec .b.qa").forEach(b=>{const on=b.dataset.call===st.call;b.classList.toggle("on",on);b.style.borderColor=on?CALLCOL[st.call]:"";b.style.background=on?CALLCOL[st.call]+"33":""});
+function paintOutline(){const c=cand(),el=$("#orate");if(!el)return;const on=!!(c&&!c.audit&&EXT&&extMain()&&c.ext_volume!=null);el.style.display=on?"":"none";if(!on)return;
+  $$("#orate [data-orate]").forEach(b=>{const sel=OUT[c.id]===b.dataset.orate;b.classList.toggle("on",sel);b.style.borderColor=sel?"#35d0ff":"";b.style.background=sel?"#35d0ff33":""})}
+async function rateOutline(r){const c=cand();if(!c)return;if(!reviewer()){status("Enter your name (upper right) first.",true);return}
+  const val=OUT[c.id]===r?"":r;   // pressing the same rating again clears it
+  try{const x=await api("/api/outline",{study:M.study,reviewer:reviewer(),cand_id:c.id,rating:val,mode:vmode?"validation":""});OUT=x.outline||{};paintOutline();status("✓ Outline rating saved · "+x.saved.slice(11))}
+  catch(e){status("Outline rating NOT saved: "+e.message,true)}}
+function paintDecision(){const c=cand();if(!c)return;paintOutline();const st=calls[c.id]||{};$$("#dec .b.qa").forEach(b=>{const on=b.dataset.call===st.call;b.classList.toggle("on",on);b.style.borderColor=on?CALLCOL[st.call]:"";b.style.background=on?CALLCOL[st.call]+"33":""});
   $$("#dec .chip").forEach(b=>{const on=b.dataset.call===st.call&&b.dataset.fine===st.fine;b.classList.toggle("on",on);b.style.display=b.dataset.call===st.call||!st.call?"":"none"});
   $("#qaWho").textContent=reviewer()?`human reviewer: ${reviewer()}`:"enter your name to call";
   $("#curcall").textContent=st.call?("your call: "+CALLLBL[st.call]+(st.fine&&FINELBL[st.fine]?" · "+FINELBL[st.fine]:"")):"not read yet";if(document.activeElement!==$("#comment"))$("#comment").value=st.comment||""}
@@ -866,7 +877,7 @@ function saveSnapSettings(){snap=Object.assign({},snap,{mode:$('input[name=smode
 function openSnapFolder(){const f=snap.folder||(M&&M.snapdir)||"";api("/api/openfolder",{study:M.study,path:f}).catch(e=>toast("Could not open the folder: "+esc(e.message),true))}
 
 // ---------- actions, menu bar, right-click menu ----------
-function tog(){$("#aibody").style.display=showAI&&!vmode?"":"none";LSS("mark",showMark);LSS("ext",showExt);LSS("other",showOther);LSS("auto",autoNext);LSS("ai",showAI);LSS("text",showText);LSS("cross2",showCross);draw()}
+function tog(){$("#aibody").style.display=showAI&&!vmode?"":"none";LSS("mark",showMark);LSS("ext",showExt);LSS("core",showCore);LSS("other",showOther);LSS("auto",autoNext);LSS("ai",showAI);LSS("text",showText);LSS("cross2",showCross);draw()}
 const A={m3d:{l:"3-D analysis of the candidate…",ic:"cube",f:()=>m3Open()},savefinal:{l:"Save final",k:MOD+(MAC?"":"+")+"↩",ic:"disk",f:()=>saveFinal()},
  ws:{l:"Whole-study search for missed cSS (no candidates shown)",ic:"eye",f:()=>{location.search="?wholestudy=1"}},
  blind:{l:"Blind read (no AI, audit objects)",ic:"eye",f:()=>{const v=!LS("blind",false);LSS("blind",v);setVmode(v)},on:()=>vmode},
@@ -874,7 +885,8 @@ const A={m3d:{l:"3-D analysis of the candidate…",ic:"cube",f:()=>m3Open()},sav
  screencap:{l:"Screenshot",ic:"cam",f:()=>screenCap()},
  summary:{l:"Summary and score",k:"Q",ic:"summary",f:summary},exportcsv:{l:"Export AI vs reviewer (CSV)",k:"E",ic:"export",f:exportCsv},
  undo:{l:"Undo last decision",k:"Z",ic:"undo",f:doUndo},clear:{l:"Clear this decision",k:"⌫",ic:"clear",f:()=>decide("")},comment:{l:"Add a comment",k:"C",ic:"comment",f:()=>{if(!panelVisible())openTab("viewer");setTab("viewer");setTimeout(()=>$("#comment").focus(),60)}},
- ext:{l:"Show the full extent (dashed)",ic:"eye",f:()=>{showExt=!showExt;tog()},on:()=>showExt},
+ ext:{l:"Outline = full extent (one unit)",ic:"eye",f:()=>{showExt=!showExt;tog()},on:()=>showExt},
+ core:{l:"Show the ridge core inside (dotted)",ic:"eye",f:()=>{showCore=!showCore;tog()},on:()=>showCore},
  mark:{l:"Show this marking",k:"M",ic:"eye",f:()=>{showMark=!showMark;tog()},on:()=>showMark},other:{l:"Show other markings",k:"O",ic:"layers",f:()=>{showOther=!showOther;tog()},on:()=>showOther},
  mag:{l:"Magnifier",k:"W",ic:"lens",f:()=>{mag=!mag;tog()},on:()=>mag},mip:{l:"minIP slab",k:"I",ic:"slab",f:()=>{const p=panes[act];p.mip=!p.mip;tog()},on:()=>panes[act]&&panes[act].mip},
  ai:{l:"Show the AI meter",k:"K",ic:"gauge",f:()=>{if(vmode){status("The AI meter is locked during a validation read (Settings > Validation read).",true);return}showAI=!showAI;tog()},on:()=>showAI&&!vmode,dis:()=>vmode},mirror:{l:"Mirror left–right",k:"⇧H",ic:"mirror",f:()=>setMirror(!mir),on:()=>mir},rl:{l:"Show R badge",ic:"flag",f:()=>{showRL=!showRL;LSS("rl",showRL);draw()},on:()=>showRL},side:{l:"Side check…",ic:"flag",f:()=>toast(esc(sideMsg()),sideChk&&sideChk.bad,12000)},
@@ -910,7 +922,7 @@ const MENUS={file:()=>[{sub:"Open patient",ic:"folder",items:studyItems},"savefi
  tools:()=>["pan","zoomtool","wl","scroll","-","ruler","dark","side","-","screencap","snap","snapas","-","help"],
  settings:()=>["openset"],help:()=>["help"]};
 const MENUS_OLD={file:()=>[],edit:()=>["undo","clear","comment"],
- view:()=>[{sub:"Layout",ic:"l4",k:"\\",items:()=>["lay1","lay2","lay4"]},{sub:"Plane",ic:"cube",k:"Tab",items:planeItems},{sub:"Sequence",ic:"seq",items:seqItems},"-","mark","ext","other","mag","mip","text","cross","ai","-","mirror","rl","side","-","zin","zout","fit","actual","reset","centre","-","tviewer","tcands","tcalls","hidepanel","autohide","-",{sub:"Theme",ic:"moon",items:themeItems}],
+ view:()=>[{sub:"Layout",ic:"l4",k:"\\",items:()=>["lay1","lay2","lay4"]},{sub:"Plane",ic:"cube",k:"Tab",items:planeItems},{sub:"Sequence",ic:"seq",items:seqItems},"-","mark","ext","core","other","mag","mip","text","cross","ai","-","mirror","rl","side","-","zin","zout","fit","actual","reset","centre","-","tviewer","tcands","tcalls","hidepanel","autohide","-",{sub:"Theme",ic:"moon",items:themeItems}],
  cand:()=>["prev","next","unread","audit","-","call_y","call_v","call_n","call_a","call_u","call_h","-","auto"],
  tools:()=>["pan","zoomtool","wl","scroll","-","mag","dark","ruler","miss","-","snap","snapas","snapfolder"],
  settings:()=>["vmode","primary","-","autohide","text","rl","mirror","compare","ai","auto","-",{sub:"Next patient after the final save",ic:"next",items:()=>[{l:"Immediately",ic:"next",f:()=>setAfter("now"),on:()=>afMode()==="now"},
@@ -1069,6 +1081,7 @@ $("#dec").innerHTML=["cSS","Mimic","Other"].map(g=>`<div class="qag"><div class=
   `<div class="qaf"><button class="b sm" id="qaUndo" title="undo the last change (Z)">↶ Undo</button><button class="b sm" id="qaClear" title="remove your call (Delete)">Clear</button><span class="mut sm" id="qaWho"></span></div>`;
 $("#dec").addEventListener("click",e=>{const ch=e.target.closest(".chip");if(ch){decide(ch.dataset.call,false,ch.dataset.fine);return}const b=e.target.closest(".b.qa");if(b)decide(b.dataset.call)});
 $("#qaUndo").onclick=()=>doUndo();$("#qaClear").onclick=()=>decide("");
+$("#orate").addEventListener("click",e=>{const b=e.target.closest("[data-orate]");if(b)rateOutline(b.dataset.orate)});
 function pickFine(n){const c=cand();if(!c)return;const st=calls[c.id]||{};const g=QA.find(x=>x[1]===st.call);if(!g||!g[2][n-1]){status("Choose a call with subtypes first (V, N or A).",true);return}decide(st.call,false,g[2][n-1])}
 $("#strip").addEventListener("click",e=>{const d=e.target.dataset.i;if(d!==undefined)go(+d)});
 for(const id of ["#candtable","#cmptable"])$(id).addEventListener("click",e=>{const r=e.target.closest("tr.r");if(r)go(+r.dataset.i)});

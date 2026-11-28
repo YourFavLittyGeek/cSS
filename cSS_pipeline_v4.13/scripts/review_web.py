@@ -418,10 +418,41 @@ class Study:
             if ue not in sys.path: sys.path.insert(0, ue)
             from uengine.imaging import refine as RF
             rec = RF.current(B, self.sid) or RF.run(B, self.sid)
-            self._ext = self._grid(rec["path"], order=0).astype(np.uint16)
+            self._ext = self._grid(rec["path"], order=0).astype(np.uint16); self._ext_rec = rec
         except Exception as e:
             print(f"[{self.sid}] extent outline not available: {type(e).__name__}: {str(e)[:120]}", file=sys.stderr); self._ext = None
         return self._ext
+
+    def ext_measures(self):
+        """{cand_id: extent measures} of the current extent (empty when it cannot be made)"""
+        if self.extent() is None: return {}
+        return {int(k): v for k, v in ((getattr(self, "_ext_rec", None) or {}).get("measures") or {}).items()}
+
+    # 2026-11-28 Stage 1a: the reviewer's rating of the extent outline (OK / too small / too large / wrong) - an outline-QUALITY annotation,
+    # stored apart from the calls (it never changes a cSS label), append-only per reviewer, with the extent version + input hashes it rated
+    OUTLINE_RATINGS = ("ok", "too_small", "too_large", "wrong")
+    def opath(self, reviewer): return f"{B}/review/{self.sid}_outline_by_{slug(reviewer)}.jsonl"
+
+    def outline_ratings(self, reviewer):
+        p = self.opath(reviewer); out = {}
+        if not reviewer or not os.path.exists(p): return out
+        for line in open(p, encoding="utf-8"):
+            try: e = json.loads(line)
+            except ValueError: continue
+            out[int(e["cand_id"])] = e.get("rating", "")
+        return {k: v for k, v in out.items() if v}
+
+    def rate_outline(self, reviewer, cand_id, rating, **info):
+        if rating not in self.OUTLINE_RATINGS + ("",): raise RB.BlindError("unknown outline rating", 400)
+        cid = int(cand_id)
+        if cid not in set(int(x) for x in self.df.cand_id): raise RB.BlindError("unknown candidate", 400)
+        ext = self.extent(); rec = getattr(self, "_ext_rec", None) or {}
+        m = (rec.get("measures") or {}).get(str(cid)) or {}
+        e = dict(time=now(), reviewer=reviewer, study=self.sid, cand_id=cid, rating=rating, extent_version=rec.get("version"),
+                 extent_inputs=rec.get("inputs"), extent_mm3=m.get("extent_mm3"), core_mm3=m.get("core_mm3"), leak_warning=m.get("leak_warning"),
+                 extent_available=ext is not None, read_phase=str(info.get("read_phase", "")), ai_visible=str(info.get("ai_visible", "")))
+        with RIO.study_lock(B, self.sid): RIO.append_line(self.opath(reviewer), json.dumps(e, default=str))
+        return self.outline_ratings(reviewer)
 
     def apath(self, reviewer): return f"{B}/review/{self.sid}_excluded_audit_{slug(reviewer)}.csv"
 
@@ -948,6 +979,9 @@ def meta(sid, reviewer, mode=""):
     if mode == "wholestudy": return _meta_wholestudy(sid, reviewer)
     s = study(sid); ctx = s.ctx(reviewer); d = _meta_full(sid, reviewer, mode, s, blind=ctx.blind)
     d.update(blind=ctx.blind, read_phase=dict(ctx.ph))
+    try: orat = s.outline_ratings(reviewer)                                   # 2026-11-28: this reviewer's own outline ratings
+    except Exception: orat = {}
+    d["outline"] = {(ctx.to_blind(k) if ctx.blind else k): v for k, v in orat.items() if not ctx.blind or ctx.to_blind(k)}
     if not ctx.blind: return d
     d["cands"] = sorted((RB.redact_cand(c, ctx) for c in d["cands"]), key=lambda c: c["id"])
     d.update(calls=RB.redact_calls(d["calls"], ctx), percival=None, ai_score=None, calls_rule="", import_sources=[],
@@ -969,11 +1003,12 @@ def _meta_full(sid, reviewer, mode, s, blind=False):
     calls, note = s.load_calls(reviewer) if reviewer else ({}, "")
     audit = (mode == "validation" or SHOW_EXCL) and bool(reviewer)
     if audit: calls.update(s.load_audit(reviewer))
-    cands = []
+    cands = []; EXM = s.ext_measures()                                       # 2026-11-28: extent volume per candidate (one unit)
     for _, r in s.df.iterrows():
         i = int(r.cand_id); g = lambda k: (None if pd.isna(r[k]) else (float(r[k]) if not isinstance(r[k], str) else r[k])) if k in r else None
         cands.append(dict(id=i, hemi=r.hemi, region=str(r.region).replace("ctx-lh-", "").replace("ctx-rh-", ""),
-                          volume=float(r.volume_mm3), centre=s.centre.get(i, [v // 2 for v in s.shape]), vox=s.centre.get(i, [v // 2 for v in s.shape]), ai=ai_opinion(r),
+                          volume=float(r.volume_mm3), ext_volume=(EXM.get(i) or {}).get("extent_mm3"), ext_leak=bool((EXM.get(i) or {}).get("leak_warning")),
+                          centre=s.centre.get(i, [v // 2 for v in s.shape]), vox=s.centre.get(i, [v // 2 for v in s.shape]), ai=ai_opinion(r),
                           conf=g("confidence_pct"), conf_why=g("confidence_why") or "",
                           feat={k: g(k) for k in ("darkness_z", "pial_dist_mm", "tube_ratio", "tram_frac", "extent_mm", "n_slices",
                                                   "css_evidence", "vein_evidence", "score")}))
@@ -1090,7 +1125,7 @@ ROUTES = {("GET", "/"): "static", ("GET", "/morph3d.js"): "static", ("GET", "/ap
           ("POST", "/api/call"): "write", ("POST", "/api/missed"): "write", ("POST", "/api/finish"): "write", ("POST", "/api/unblind"): "write",
           ("POST", "/api/wholestudy"): "write", ("GET", "/api/pensieve"): "settings", ("POST", "/api/pensieve_restore"): "settings",
           ("GET", "/api/ident"): "settings", ("GET", "/api/second_look"): "refused", ("POST", "/api/lumos_reject"): "refused",
-          ("GET", "/api/albus_marks"): "refused", ("POST", "/api/albus_confirm"): "refused"}
+          ("GET", "/api/albus_marks"): "refused", ("POST", "/api/albus_confirm"): "refused", ("POST", "/api/outline"): "write"}
 SAFE_ERRORS = (RIO.RecoveryError, RIO.LockTimeout)
 
 
@@ -1241,6 +1276,10 @@ class H(BaseHTTPRequestHandler):
                     CL.set_policy(B, "study", s.sid, dict(mode="reviewer", reviewer=name, fallback="newest"), by=rev or name)
                     CL.materialize(B, s.sid, by=rev or name, rescore=True)
                 return self._send(dict(ok=True, primary=pr))
+            if u.path == "/api/outline":                                       # 2026-11-28: outline-quality rating (never a call)
+                if not rev: return self._send(dict(error="enter your name first"), code=400)
+                cid = ctx.to_true(d.get("cand_id", 0)); r_ = s.rate_outline(rev, cid, str(d.get("rating", "")), **jinfo)
+                return self._send(dict(ok=True, outline={(ctx.to_blind(k) if blind else k): v for k, v in r_.items()}, saved=now()))
             if u.path == "/api/call":
                 d["cand_id"] = ctx.to_true(d.get("cand_id", 0))                   # blinded id -> candidate (unknown id refused)
             if u.path == "/api/call" and int(d.get("cand_id", 0)) >= AUDIT_OFFSET:      # v5.7 excluded-object audit call

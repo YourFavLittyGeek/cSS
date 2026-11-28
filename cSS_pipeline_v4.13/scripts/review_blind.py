@@ -138,6 +138,7 @@ class Ctx:
 # ------------------------------------------------------------------ redaction (applied only when ctx.blind)
 def redact_cand(c, ctx):
     out = dict(id=ctx.to_blind(c["id"]), hemi=c.get("hemi", ""), region=c.get("region", ""), volume=c.get("volume"), centre=c.get("centre"),
+               ext_volume=c.get("ext_volume"), ext_leak=c.get("ext_leak", False),            # 2026-11-28: detector geometry (extent), not an AI opinion
                vox=c.get("vox"), ai=dict(BLIND_AI), conf=None, conf_why="", feat={k: (c.get("feat") or {}).get(k) for k in VISIBLE_FEAT})
     return out
 

@@ -2083,6 +2083,27 @@ def pensieve_history(sid, cand_id):
     return PI.history(B(), sid, cand_id)
 
 
+def outline_quality():
+    """2026-11-28 Stage 1a: how well the full-extent outline follows the lesion - the reviewers' own ratings (review/ID_outline_by_*.jsonl,
+    the latest rating per reviewer and candidate). Outline QUALITY only: never a label, never used for training or scoring."""
+    import collections
+    C = collections.Counter(); per = collections.Counter(); leak = collections.Counter(); studies = set(); rated = {}
+    for f in glob.glob(os.path.join(B(), "review", "*_outline_by_*.jsonl")):
+        for line in open(f, encoding="utf-8"):
+            try: e = json.loads(line)
+            except ValueError: continue
+            rated[(e.get("study"), e.get("reviewer"), int(e.get("cand_id", 0)))] = e
+    for (st, rv, cid), e in rated.items():
+        r = e.get("rating") or ""
+        if not r: continue
+        C[r] += 1; studies.add(st); per[rv] += 1
+        if e.get("leak_warning"): leak[r] += 1
+    n = sum(C.values())
+    return dict(n=n, studies=len(studies), counts=dict(C), ok_pct=(round(100 * C["ok"] / n) if n else None), by_reviewer=dict(per),
+                with_leak_warning=dict(leak), basis="reviewers' outline ratings of the full extent (latest per reviewer and candidate)",
+                ready_for_stage2=bool(len(studies) >= 20), note="Stage 2 (NOX / LUMOS learning from the extent) needs about 20-30 rated studies")
+
+
 _EXT_CACHE = {}
 def _extent_measures(sid):
     """{cand_id: measures} of the CURRENT candidate extent (uengine/imaging/refine.py), {} when not made yet or stale. Read only: the extent is
