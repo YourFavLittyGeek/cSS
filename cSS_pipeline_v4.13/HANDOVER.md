@@ -160,6 +160,10 @@ Read this first, then CLAUDE.md (project science + history). Do not trust older 
 - File Manager buttons wired (delete -> Trash, typed TRASH); Settings placeholders/fake values replaced; SHADOW gets real rows
   (components.shadow); uScore prototype notices only with prototypes on.
 - Detector (detect_css.py) NOT changed: its audit items wait for an ALBUS version with a non-inferiority comparison.
+- Zip: Percival_v5.25-dev_53e106b.zip (sha256 489ff40552891dc84d6ba8c7260b8b1d0f3e8c53ff379d5f3332bd4176370be6), not yet installed.
+- 2026-11-28 ~01:00: the external drive's /Volumes/Percival/PERCIVAL_VAULT stopped answering (lstat hangs in the kernel; lsof hung; the
+  user's app on 8830 was stuck in it). Drive-bound test files were NOT verified (list in IMPLEMENTATION_REPORT §5) - re-run the isolated
+  suite after the drive is reconnected / the Mac restarted.
 
 ## 6. Open items / next steps (ask the user before starting)
 1. User reported the app WINDOW froze after "Use Percival_project" (server answered, page idle, no JS error in
