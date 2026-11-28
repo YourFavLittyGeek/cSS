@@ -160,6 +160,14 @@ Read this first, then CLAUDE.md (project science + history). Do not trust older 
 - File Manager buttons wired (delete -> Trash, typed TRASH); Settings placeholders/fake values replaced; SHADOW gets real rows
   (components.shadow); uScore prototype notices only with prototypes on.
 - Detector (detect_css.py) NOT changed: its audit items wait for an ALBUS version with a non-inferiority comparison.
+- 0283000 (user requests): CORE fixed-weight baseline + Shadow Lab demo REMOVED (module, routes, setting, GUI); training card
+  "Training complete" + finish time + last cycle after restart; red "Emergency eject" button in the sidebar
+  (/api/storage/emergency_eject: hold new drive work, pause all transfers at a safe boundary, unmount). Zip
+  Percival_v5.25-dev_0283000.zip (sha256 125c3815aea3743e18869e9e74da90161305b4e1782fa69e93498c86d5b0a441). Suite 625 / 0 (Mac restarted,
+  drive OK). User's v002 (validation 2.0): informative, dev fold AUC 0.88, nested 0.83, test candidate AUC 0.96 vs ALBUS 0.87; not
+  accepted (test calibration slope 2.31); patient-level AUC 0.52 (8 vs 6 patients, unreliable). Pending user decision: extent outline as
+  the "one unit" (plan: stage 1 display + 'outline OK' rating keeping the core fingerprint; stage 2 NOX/LUMOS on the extent via paired
+  comparison; stage 3 grading by extent vs expert grades). Never overwrite candidates.nii.gz (calls re-attach by core volume).
 - Zip: Percival_v5.25-dev_53e106b.zip (sha256 489ff40552891dc84d6ba8c7260b8b1d0f3e8c53ff379d5f3332bd4176370be6), not yet installed.
 - 2026-11-28 ~01:00: the external drive's /Volumes/Percival/PERCIVAL_VAULT stopped answering (lstat hangs in the kernel; lsof hung; the
   user's app on 8830 was stuck in it). Drive-bound test files were NOT verified (list in IMPLEMENTATION_REPORT §5) - re-run the isolated
