@@ -160,6 +160,11 @@ Read this first, then CLAUDE.md (project science + history). Do not trust older 
 - File Manager buttons wired (delete -> Trash, typed TRASH); Settings placeholders/fake values replaced; SHADOW gets real rows
   (components.shadow); uScore prototype notices only with prototypes on.
 - Detector (detect_css.py) NOT changed: its audit items wait for an ALBUS version with a non-inferiority comparison.
+- 68dedbe Stage 1a (user approved): reviewer outline = full extent ("one unit"), ridge core dotted inside; outline rating OK / too small /
+  too large / wrong -> review/ID_outline_by_<reviewer>.jsonl (never a call); PERCIVAL > ALBUS "Outline quality" card. Zip
+  Percival_v5.25-dev_68dedbe.zip (sha256 b66e0d272ad25d43e07532d337fa7c365744c40445b84f87cdf99756dd5b901a). NEXT (not built): Stage 1b
+  hand-correction of the outline (reference masks for Dice/HD95); Stage 2 NOX/LUMOS on the extent (paired comparison, after ~20 rated
+  studies); Stage 3 grading by extent vs expert grades. 3-D view still uses the core.
 - 0283000 (user requests): CORE fixed-weight baseline + Shadow Lab demo REMOVED (module, routes, setting, GUI); training card
   "Training complete" + finish time + last cycle after restart; red "Emergency eject" button in the sidebar
   (/api/storage/emergency_eject: hold new drive work, pause all transfers at a safe boundary, unmount). Zip
